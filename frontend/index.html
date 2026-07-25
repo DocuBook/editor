@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en" x-data="editorApp()" :class="theme">
+<head>
+	<meta charset="UTF-8"/>
+	<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+	<title>Editor</title>
+	<meta name="color-scheme" content="dark">
+	<script src="https://unpkg.com/htmx.org@2.0.10"></script>
+	<script src="https://d3js.org/d3.v7.min.js"></script>
+	<script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+	<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+	<script defer src="/preview.js"></script>
+	<link href="./src/style.css" rel="stylesheet"/>
+	<script src="./src/main.js" type="module"></script>
+</head>
+<body class="bg-zinc-950 text-zinc-100 overflow-hidden select-none"
+	@keydown.escape.window="cmdPaletteOpen = false"
+	@keydown.ctrl.k.window.prevent="toggleCmdPalette()"
+	@keydown.ctrl.p.window.prevent="toggleCmdPalette()">
+
+	<!-- Title bar (Wails drag) -->
+	<header class="h-8 bg-zinc-900 flex items-center justify-between px-3 border-b border-zinc-800" data-wails-drag>
+		<div class="flex items-center gap-2 text-xs font-medium text-zinc-400">
+			<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+				<path d="M15 14s1 0 2-1 5-4 5-6-2-4-5-4-5 3-5 6 3 5 3 5"/>
+				<path d="M7.5 8.5c0-.5.5-1 1-1s1 .5 1 1-.5 1-1 1-1-.5-1-1Z"/>
+				<circle cx="10" cy="10" r="6.5"/>
+				<path d="M4.5 19.5 10 14"/>
+			</svg>
+			Editor
+		</div>
+		<div class="flex items-center gap-2">
+			<button @click="toggleTheme()"
+				class="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded">
+				<template x-if="theme === 'dark'">
+					<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+					</svg>
+				</template>
+				<template x-if="theme === 'light'">
+					<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<circle cx="12" cy="12" r="5"/>
+						<path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+					</svg>
+				</template>
+			</button>
+		</div>
+	</header>
+
+	<!-- Main layout -->
+	<div class="flex h-[calc(100vh-2rem)]">
+		<!-- Sidebar -->
+		<aside class="w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0">
+			<div class="flex-1 overflow-y-auto">
+				<div hx-get="/api/layout/sidebar" hx-trigger="load" hx-swap="innerHTML">
+					<div class="p-4 text-sm text-zinc-500">Loading...</div>
+				</div>
+			</div>
+			<!-- Backlinks panel -->
+			<div x-show="backlinks.length > 0 || unlinked.length > 0" class="border-t border-zinc-800 max-h-40 overflow-y-auto">
+				<template x-if="backlinks.length > 0">
+					<div class="p-2">
+						<div class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Linked to this note (<span x-text="backlinks.length"></span>)</div>
+						<template x-for="bl in backlinks" :key="bl.path">
+							<div @click="window.openFileInEditor({path: bl.path, name: bl.name})" class="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer py-0.5 truncate">
+								<span class="text-blue-400" x-text="bl.name"></span>
+							</div>
+						</template>
+					</div>
+				</template>
+				<template x-if="unlinked.length > 0">
+					<div class="p-2 border-t border-zinc-800">
+						<div class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-1">Unlinked mentions (<span x-text="unlinked.length"></span>)</div>
+						<template x-for="ul in unlinked" :key="ul.path">
+							<div @click="window.openFileInEditor({path: ul.path, name: ul.name})" class="text-xs text-zinc-400 hover:text-zinc-200 cursor-pointer py-0.5 truncate">
+								<span class="text-yellow-400" x-text="ul.name"></span>
+							</div>
+						</template>
+					</div>
+				</template>
+			</div>
+		</aside>
+
+		<!-- Editor pane -->
+		<main class="flex-1 flex flex-col min-w-0">
+			<!-- Tab bar -->
+			<div class="h-9 bg-zinc-900 border-b border-zinc-800 flex items-stretch text-xs overflow-x-auto overflow-y-hidden scrollbar-none" id="tab-bar">
+				<template x-for="tab in tabs" :key="tab.path">
+					<div @click="switchTab(tab.path)" :class="activeTab === tab.path ? 'bg-zinc-950 text-zinc-100 border-b-2 border-b-blue-500' : 'text-zinc-400 hover:bg-zinc-800'"
+						class="flex items-center gap-1 px-3 cursor-pointer border-r border-zinc-800 whitespace-nowrap shrink-0">
+						<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+							<polyline points="14 2 14 8 20 8"/>
+						</svg>
+						<span x-text="tab.name"></span>
+						<button @click="closeTab(tab.path, $event)" class="ml-1 rounded hover:bg-zinc-700 p-0.5">
+							<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path d="M18 6 6 18M6 6l12 12"/>
+							</svg>
+						</button>
+					</div>
+				</template>
+				<template x-if="tabs.length === 0">
+					<span class="text-zinc-500 italic px-3 self-center">No file open</span>
+				</template>
+				<div class="ml-auto flex items-center px-2 gap-1">
+					<button @click="togglePreviewMode()" class="text-zinc-500 hover:text-zinc-300 transition-colors p-1 rounded" title="Toggle Preview Mode">
+						<template x-if="previewMode === 'split'">
+							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path d="M9 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h4"/>
+								<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+							</svg>
+						</template>
+						<template x-if="previewMode === 'editor-only'">
+							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+								<polyline points="14 2 14 8 20 8"/>
+								<line x1="16" y1="13" x2="8" y2="13"/>
+								<line x1="16" y1="17" x2="8" y2="17"/>
+							</svg>
+						</template>
+						<template x-if="previewMode === 'preview-only'">
+							<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+								<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+								<circle cx="12" cy="12" r="3"/>
+							</svg>
+						</template>
+					</button>
+				</div>
+			</div>
+
+			<!-- Editor + Preview -->
+			<div class="flex-1 flex">
+				<div class="bg-zinc-950" id="editor-pane"
+					:class="previewMode === 'preview-only' ? 'hidden' : previewMode === 'split' ? 'flex-1' : 'flex-1'">
+					<div id="cm-container" class="h-full">
+						<div class="flex items-center justify-center h-full">
+							<div class="text-center">
+								<svg class="w-12 h-12 mx-auto mb-3 text-zinc-800" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+									<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+									<polyline points="14 2 14 8 20 8"/>
+									<line x1="12" y1="18" x2="12" y2="12"/>
+									<line x1="9" y1="15" x2="15" y2="15"/>
+								</svg>
+								<p class="text-zinc-600 text-sm">Open a file to start editing</p>
+								<p class="text-zinc-700 text-xs mt-1">Ctrl+P to open command palette</p>
+							</div>
+						</div>
+					</div>
+				</div>
+				<!-- Preview pane -->
+				<div class="border-l border-zinc-800 bg-white dark:bg-zinc-950 overflow-y-auto" id="preview-pane"
+					:class="previewMode === 'editor-only' ? 'hidden' : previewMode === 'split' ? 'flex-1' : 'flex-1'">
+					<div class="flex items-center justify-center h-full text-zinc-500 text-sm italic">
+						Open a file to preview
+					</div>
+				</div>
+			</div>
+		</main>
+	</div>
+
+	<!-- Status bar -->
+	<footer class="h-6 bg-zinc-900 border-t border-zinc-800"
+		hx-get="/api/layout/status" hx-trigger="load, every 30s" hx-swap="innerHTML">
+	</footer>
+
+	<!-- Command Palette Overlay -->
+	<template x-teleport="body">
+		<div x-show="cmdPaletteOpen" class="fixed inset-0 z-50 flex items-start justify-center pt-24"
+			@click.self="cmdPaletteOpen = false">
+			<div class="bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl w-96 max-h-72 overflow-hidden">
+				<div class="flex items-center px-3 border-b border-zinc-700">
+					<svg class="w-4 h-4 text-zinc-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+						<circle cx="11" cy="11" r="8"/>
+						<path d="m21 21-4.3-4.3"/>
+					</svg>
+					<input id="cmd-input" type="text" x-model="cmdQuery"
+						class="w-full bg-transparent text-sm text-zinc-100 px-2 py-2.5 outline-none"
+						placeholder="Search commands...">
+				</div>
+				<div class="overflow-y-auto max-h-56">
+					<template x-for="item in filteredCmds" :key="item.id">
+						<div @click="execCmd(item.id)"
+							class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-zinc-800 text-sm">
+							<span x-text="item.label" class="text-zinc-200"></span>
+							<span x-text="item.shortcut" class="text-xs text-zinc-500"></span>
+						</div>
+					</template>
+					<template x-if="filteredCmds.length === 0">
+						<div class="px-3 py-4 text-sm text-zinc-500 text-center">No matching commands</div>
+					</template>
+				</div>
+			</div>
+		</div>
+	</template>
+
+	<!-- AI Chat Overlay -->
+	<template x-teleport="body">
+		<div x-show="aiOpen" class="fixed inset-0 z-40 flex items-end justify-center pb-24" @click.self="closeAI()">
+			<div class="bg-zinc-900 border border-zinc-700 rounded-lg shadow-2xl w-[600px] max-h-96 overflow-hidden flex flex-col">
+				<div class="flex items-center justify-between px-3 py-2 border-b border-zinc-700">
+					<span class="text-xs font-semibold text-zinc-400">AI Assistant</span>
+					<button @click="closeAI()" class="text-zinc-500 hover:text-zinc-300">
+						<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+							<path d="M18 6 6 18M6 6l12 12"/>
+						</svg>
+					</button>
+				</div>
+				<div class="flex-1 overflow-y-auto p-3 text-sm text-zinc-200 whitespace-pre-wrap" x-text="aiResponse || 'Waiting for response...'">
+				</div>
+				<template x-if="aiStreaming">
+					<div class="px-3 pb-2">
+						<span class="inline-block w-2 h-4 bg-blue-500 animate-pulse"></span>
+					</div>
+				</template>
+			</div>
+		</div>
+	</template>
+
+	<script>
+		// Bridge: sidebar onclick → Alpine.js
+		window.openFileInEditor = function(file) {
+			const el = document.querySelector('[x-data]');
+			if (!el) return;
+			const app = el.__x?.$data;
+			if (app) app.openFile(file);
+		};
+
+		// Bridge: open vault via prompt fallback
+		window.promptOpenVault = function() {
+			const path = prompt('Enter vault path:');
+			if (path) {
+				fetch(htmx.config.baseUrl + '/api/vault/open?path=' + encodeURIComponent(path), { method: 'POST' })
+					.then(() => { htmx.trigger('#file-list', 'load'); });
+			}
+		};
+
+		// HTMX base URL config
+		window.editorApp = function () {
+			return {
+				theme: 'dark',
+				init() {
+					if (window.go?.main?.App?.ServerPort) {
+						window.go.main.App.ServerPort().then(port => {
+							htmx.config.defaultSwapStyle = 'innerHTML';
+							htmx.config.baseUrl = 'http://127.0.0.1:' + port;
+							document.querySelectorAll('[hx-get],[hx-post]').forEach(el => {
+								if (el.getAttribute('hx-trigger') === 'load') htmx.process(el);
+							});
+						});
+					}
+				}
+			}
+		}
+	</script>
+</body>
+</html>
