@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLORS: always
+  NODE_VERSION: '22'
+
+jobs:
+  lint:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Oxlint
+        run: npx oxlint src/
+      - name: TypeScript type check
+        run: npx tsc -b
+      - name: Frontend tests
+        run: npx vitest run
+
+  test:
+    runs-on: macos-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cargo test
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Cargo clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+  build:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: [test]
+    strategy:
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+        include:
+          - target: aarch64-apple-darwin
+            arch: arm64
+          - target: x86_64-apple-darwin
+            arch: amd64
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Build frontend
+        run: npm run build
+      - name: Build Tauri (${{ matrix.arch }})
+        run: npx tauri build --target ${{ matrix.target }}
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: DocuBook-${{ matrix.arch }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
+          if-no-files-found: warn
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: DocuBook-*
+          merge-multiple: true
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          # Extract changelog section matching the tag version
+          awk -v tag="$TAG" '
+            BEGIN { flag=0 }
+            index($0, "## "tag) == 1 && flag==0 { flag=1; next }
+            /^## / && flag==1 { exit }
+            flag { print }
+          ' CHANGELOG.md > /tmp/release-notes.md
+          gh release create "$TAG" \
+            DocuBook-arm64/*.dmg \
+            DocuBook-amd64/*.dmg \
+            --title "$TAG" \
+            --notes-file /tmp/release-notes.md || true

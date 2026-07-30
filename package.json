@@ -1,0 +1,77 @@
+{
+  "name": "@docubook/editor",
+  "private": true,
+  "version": "0.1.0-alpha",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "husky && patch-package"
+  },
+  "dependencies": {
+    "@blocknote/core": "^0.52.1",
+    "@blocknote/mantine": "^0.52.1",
+    "@blocknote/react": "^0.52.1",
+    "@blocknote/xl-ai": "^0.52.1",
+    "@mantine/core": "^9.4.2",
+    "@mantine/hooks": "^9.4.2",
+    "@mantine/utils": "^6.0.22",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-dialog": "^2.7.2",
+    "@tiptap/extension-bubble-menu": "^3.29.0",
+    "@tiptap/extension-color": "^3.29.0",
+    "@tiptap/extension-floating-menu": "^3.29.0",
+    "@tiptap/extension-highlight": "^3.29.0",
+    "@tiptap/extension-image": "^3.29.0",
+    "@tiptap/extension-link": "^3.29.0",
+    "@tiptap/extension-mention": "^3.29.0",
+    "@tiptap/extension-placeholder": "^3.29.0",
+    "@tiptap/extension-table": "^3.29.0",
+    "@tiptap/extension-table-cell": "^3.29.0",
+    "@tiptap/extension-table-header": "^3.29.0",
+    "@tiptap/extension-table-row": "^3.29.0",
+    "@tiptap/extension-task-item": "^3.29.0",
+    "@tiptap/extension-task-list": "^3.29.0",
+    "@tiptap/extension-text-align": "^3.29.0",
+    "@tiptap/extension-underline": "^3.29.0",
+    "@tiptap/pm": "^3.29.0",
+    "@tiptap/react": "^3.29.0",
+    "@tiptap/starter-kit": "^3.29.0",
+    "lucide-react": "^1.27.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "sonner": "^2.0.7",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.11.4",
+    "@types/node": "^24.13.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "esbuild": "^0.28.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "oxlint": "^1.71.0",
+    "patch-package": "^8.0.1",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~6.0.2",
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
+  },
+  "license": "GPL-3.0-only",
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "oxlint"
+    ],
+    "*.rs": [
+      "cargo check --manifest-path src-tauri/Cargo.toml"
+    ]
+  }
+}

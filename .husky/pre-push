@@ -1,0 +1,23 @@
+cd "$(dirname "$0")/.."
+echo "🔄 Running TypeScript check..."
+npx tsc -b
+if [ $? -ne 0 ]; then
+  echo "❌ TypeScript check failed. Fix errors before pushing."
+  exit 1
+fi
+
+echo "🔄 Running Rust tests..."
+(cd src-tauri && cargo test)
+if [ $? -ne 0 ]; then
+  echo "❌ Rust tests failed. Fix errors before pushing."
+  exit 1
+fi
+
+echo "🔄 Running frontend tests..."
+npx vitest run
+if [ $? -ne 0 ]; then
+  echo "❌ Frontend tests failed. Fix errors before pushing."
+  exit 1
+fi
+
+echo "✅ All checks passed!"

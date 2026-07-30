@@ -1,0 +1,534 @@
+
+mod vault;
+mod wiki;
+mod git;
+mod search;
+mod config;
+mod agent;
+
+use std::sync::Mutex;
+use tauri::State;
+
+struct AppState {
+    vault: Mutex<Option<vault::Vault>>,
+    wiki: Mutex<Option<wiki::WikiIndex>>,
+    git: Mutex<Option<git::Git>>,
+}
+
+#[tauri::command]
+fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
+    let v = vault::Vault::new(path)?;
+    let name = v.name(); let is_project = v.is_project();
+    let mut w = wiki::WikiIndex::new(v.root()); w.scan();
+    let g = git::Git::open(path);
+    *state.vault.lock().expect("lock") = Some(v);
+    *state.wiki.lock().expect("lock") = Some(w);
+    *state.git.lock().expect("lock") = Some(g);
+    Ok(format!(r#"{{"name":"{}","isProject":{}}}"#, name, is_project))
+}
+
+#[tauri::command]
+fn close_vault(state: State<AppState>) -> Result<(), String> {
+    *state.vault.lock().expect("lock") = None; *state.wiki.lock().expect("lock") = None; *state.git.lock().expect("lock") = None; Ok(())
+}
+
+#[tauri::command]
+fn vault_info(state: State<AppState>) -> Result<String, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => Ok(format!(r#"{{"name":"{}","isProject":{}}}"#, v.name(), v.is_project())),
+        None => Ok(r#"{"name":"","isProject":false}"#.to_string()),
+    }
+}
+
+#[tauri::command]
+fn list_tree(subpath: String, state: State<AppState>) -> Result<String, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => serde_json::to_string(&v.tree(&subpath)).map_err(|e| e.to_string()),
+        None => Ok("[]".to_string()),
+    }
+}
+
+#[tauri::command]
+fn read_file(path: &str, state: State<AppState>) -> Result<String, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.read_file(path), None => Err("No vault".to_string())
+    }
+}
+
+#[tauri::command]
+fn write_file(path: &str, content: &str, state: State<AppState>) -> Result<(), String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.write_file(path, content), None => Err("No vault".to_string())
+    }
+}
+
+#[tauri::command]
+fn create_file(path: &str, state: State<AppState>) -> Result<String, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.create_file(path), None => Err("No vault".to_string())
+    }
+}
+
+#[tauri::command]
+fn create_directory(path: &str, state: State<AppState>) -> Result<(), String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.create_directory(path), None => Err("No vault".to_string())
+    }
+}
+
+#[tauri::command]
+fn delete_file(path: &str, state: State<AppState>) -> Result<(), String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.delete_file(path), None => Err("No vault".to_string())
+    }
+}
+
+#[tauri::command]
+fn rename_file(from: &str, to: &str, state: State<AppState>) -> Result<(), String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.rename_file(from, to), None => Err("No vault".to_string())
+    }
+}
+
+// ── Wiki ──
+#[tauri::command]
+fn wiki_backlinks(path: &str, state: State<AppState>) -> Result<String, String> {
+    match state.wiki.lock().expect("lock").as_ref() {
+        Some(w) => serde_json::to_string(&w.backlinks(path)).map_err(|e| e.to_string()),
+        None => Ok("[]".to_string()),
+    }
+}
+
+#[tauri::command]
+fn wiki_suggest(query: &str, state: State<AppState>) -> Result<String, String> {
+    match state.wiki.lock().expect("lock").as_ref() {
+        Some(w) => serde_json::to_string(&w.suggest(query)).map_err(|e| e.to_string()),
+        None => Ok("[]".to_string()),
+    }
+}
+
+// ── Search ──
+#[tauri::command]
+fn search_vault(query: &str, state: State<AppState>) -> Result<String, String> {
+    let guard = state.vault.lock().expect("lock");
+    match guard.as_ref() {
+        Some(v) => serde_json::to_string(&search::search_vault(v.root(), query)).map_err(|e| e.to_string()),
+        None => Ok("[]".to_string()),
+    }
+}
+
+// ── Git ──
+#[tauri::command]
+fn git_stage(state: State<AppState>) -> Result<(), String> {
+    let guard = state.git.lock().expect("lock");
+    match guard.as_ref() {
+        Some(g) => g.add_all().map_err(|e| e.to_string()),
+        None => Err("No vault".to_string()),
+    }
+}
+
+#[tauri::command]
+fn git_push(message: String, state: State<AppState>) -> Result<String, String> {
+    let guard = state.git.lock().expect("lock");
+    match guard.as_ref() {
+        Some(g) => serde_json::to_string(&g.push_full(&message)).map_err(|e| e.to_string()),
+        None => Ok(r#"{"error":"No vault"}"#.to_string()),
+    }
+}
+
+#[tauri::command]
+fn git_status(state: State<AppState>) -> Result<String, String> {
+    let guard = state.git.lock().expect("lock");
+    match guard.as_ref() {
+        Some(g) if g.is_repo() => {
+            let branch = std::process::Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).current_dir(&g.repo_path).output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+            let status = g.status().unwrap_or_default();
+            Ok(format!(r#"{{"branch":"{}","status":"{}"}}"#, branch, status.trim()))
+        }
+        _ => Ok(r#"{"branch":"","status":""}"#.to_string()),
+    }
+}
+
+// ── Config ──
+#[tauri::command]
+fn read_config(state: State<AppState>) -> Result<String, String> {
+    let guard = state.vault.lock().expect("lock");
+    match guard.as_ref() {
+        Some(v) => { let cfg = config::read_config(v.root())?; serde_json::to_string(&cfg).map_err(|e| e.to_string()) }
+        None => serde_json::to_string(&config::DocuJson::default()).map_err(|e| e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn save_config(title: String, base_url: String, ai_provider: String, ai_model: String, ai_base_url: String, state: State<AppState>) -> Result<(), String> {
+    let guard = state.vault.lock().expect("lock");
+    match guard.as_ref() {
+        Some(v) => {
+            let mut cfg = if v.is_project() { config::read_config(v.root()).unwrap_or_default() } else { config::DocuJson::default() };
+            cfg.meta.title = title; cfg.meta.base_url = base_url;
+            cfg.ai = Some(config::AIConfig { provider: ai_provider, model: ai_model, base_url: Some(ai_base_url) });
+            config::write_config(v.root(), &cfg)
+        }
+        None => Err("No vault".to_string()),
+    }
+}
+
+// ── Preview ──
+#[tauri::command]
+fn markdown_preview(content: &str) -> String {
+    let parser = pulldown_cmark::Parser::new(content);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
+    format!(r#"<div class="prose prose-invert max-w-none px-4 py-4 text-sm">{}</div>"#, html)
+}
+
+/// Convert markdown to clean HTML (no wrapper) for TipTap display.
+#[tauri::command]
+fn md_to_html(content: &str) -> String {
+    let parser = pulldown_cmark::Parser::new(content);
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, parser);
+    html
+}
+
+// ── Agent ──
+#[tauri::command]
+fn get_api_key(provider: &str) -> Result<String, String> {
+    let entry = keyring::Entry::new("com.docubook.editor", provider).map_err(|e| e.to_string())?;
+    entry.get_password().map_err(|_| "not_found".to_string())
+}
+
+#[tauri::command]
+fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new("com.docubook.editor", provider).map_err(|e| e.to_string())?;
+    entry.set_password(key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_api_key(provider: &str) -> Result<(), String> {
+    let entry = keyring::Entry::new("com.docubook.editor", provider).map_err(|e| e.to_string())?;
+    match entry.delete_credential() {
+        Ok(_) => Ok(()),
+        Err(_) => Ok(()), // already gone from keychain, treat as success
+    }
+}
+
+
+#[tauri::command]
+async fn test_connection(_provider: String, model: String, base_url: String, api_key: String) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+
+    // Test 1: basic connectivity
+    let basic_body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "say ok"}],
+        "max_tokens": 8,
+    });
+    let res = client.post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&basic_body)
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+    if !res.status().is_success() {
+        return Err(format!("API error ({}): {}", res.status(), res.text().await.unwrap_or_default()));
+    }
+
+    // Test 2: tool call support — send a dummy tool definition
+    let tool_body = serde_json::json!({
+        "model": model,
+        "messages": [{"role": "user", "content": "call the test_tool"}],
+        "tools": [{
+            "type": "function",
+            "function": {
+                "name": "test_tool",
+                "description": "A test tool",
+                "parameters": {
+                    "type": "object",
+                    "properties": { "ok": { "type": "boolean" } }
+                }
+            }
+        }],
+        "tool_choice": "required",
+        "max_tokens": 50,
+    });
+    let tool_res = client.post(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&tool_body)
+        .send()
+        .await
+        .map_err(|e| format!("Tool test failed: {}", e))?;
+    if !tool_res.status().is_success() {
+        // Tool call not supported — ignore error, just report no tools
+        return Ok("connection ok".to_string());
+    }
+    let text = tool_res.text().await.map_err(|e| e.to_string())?;
+    let supports_tools = text.contains("tool_calls") || text.contains("test_tool");
+    Ok(format!(r#"{{"status":"ok","tools":{}}}"#, supports_tools))
+}
+
+#[tauri::command]
+async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
+    let agent = if let (Some(p), Some(m), Some(b)) = (&provider, &model, &base_url) {
+        let key = api_key.clone().or_else(|| {
+            keyring::Entry::new("com.docubook.editor", p).ok()?.get_password().ok()
+        }).ok_or("No API key found")?;
+        agent::Agent::new(p, m, &key, b)
+    } else {
+        agent::Agent::from_env().ok_or("No API key found. Configure via Settings (gear icon).")?
+    };
+    let _ = &agent.provider;
+    let client = reqwest::Client::new();
+    let mut body_obj = serde_json::json!({
+        "model": agent.model,
+        "messages": serde_json::from_str::<serde_json::Value>(&messages).map_err(|e| format!("Invalid messages: {}", e))?,
+        "stream": true,
+    });
+    if let Some(ref tools_str) = tools {
+        if let Ok(tools_val) = serde_json::from_str::<serde_json::Value>(tools_str) {
+            if let Some(arr) = tools_val.as_array() {
+                if !arr.is_empty() {
+                    body_obj["tools"] = tools_val;
+                    // OpenCode Go doesn't support "required". Use "auto" — AI may or may not use tools.
+                }
+            }
+        }
+    }
+    let body = body_obj;
+    let url = format!("{}/chat/completions", agent.base_url.trim_end_matches('/'));
+    let response = client.post(&url).header("Authorization", format!("Bearer {}", agent.api_key)).json(&body).send().await.map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() {
+        let err_text = response.text().await.map_err(|e| e.to_string())?;
+        return Err(format!("API error ({}): {}", status, err_text));
+    }
+    let mut stream = response;
+    
+    use tauri::Emitter;
+    let mut full = String::new();
+    // accumulating tool calls: (index, id, name, args)
+    let mut tool_calls: Vec<(i64, String, String, String)> = Vec::new();
+
+    while let Some(chunk) = stream.chunk().await.map_err(|e| e.to_string())? {
+        let text = String::from_utf8_lossy(&chunk);
+        for line in text.lines() {
+            if let Some(data) = line.strip_prefix("data: ") {
+                if data == "[DONE]" { continue; }
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+                        full.push_str(content);
+                        let _ = app.emit("ai:token", content);
+                    }
+                    if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
+                        for tc in tcs {
+                            let idx = tc["index"].as_i64().unwrap_or(0);
+                            let id = tc["id"].as_str().unwrap_or("").to_string();
+                            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+                            let args = tc["function"]["arguments"].as_str().unwrap_or("").to_string();
+                            if let Some(pos) = tool_calls.iter().position(|(i,_,_,_)| *i == idx) {
+                                if !id.is_empty() { tool_calls[pos].1 = id; }
+                                if !name.is_empty() { tool_calls[pos].2 = name; }
+                                tool_calls[pos].3.push_str(&args);
+                            } else {
+                                tool_calls.push((idx, id, name, args));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Emit complete tool calls after stream
+    for (_, id, name, args) in &tool_calls {
+        if !id.is_empty() && !name.is_empty() {
+            let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+            let _ = app.emit("ai:tool_call", serde_json::json!({
+                "toolCallId": id,
+                "toolName": name,
+                "input": input,
+            }));
+        }
+    }
+    let _ = app.emit("ai:tools_done", "");
+    if full.is_empty() && tool_calls.is_empty() {
+        return Err("AI returned empty response".to_string());
+    }
+    let _ = app.emit("ai:done", "");
+    Ok(())
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None) })
+        .invoke_handler(tauri::generate_handler![
+            open_vault, close_vault, vault_info, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
+            wiki_backlinks, wiki_suggest, search_vault, git_stage, git_push, git_status,
+            read_config, save_config, markdown_preview, md_to_html, ask_ai, get_api_key, set_api_key, delete_api_key, test_connection,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+/// Parse a single SSE data line from /chat/completions stream.
+/// Returns (content_delta, accumulated_tool_calls, is_done).
+pub fn parse_sse_line(data: &str, tool_calls: &mut Vec<(i64, String, String, String)>) -> (Option<String>, bool) {
+    if data == "[DONE]" { return (None, true); }
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(data) else { return (None, false); };
+    
+    let content = val["choices"][0]["delta"]["content"].as_str().map(|s| s.to_string());
+    
+    if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
+        for tc in tcs {
+            let idx = tc["index"].as_i64().unwrap_or(0);
+            let id = tc["id"].as_str().unwrap_or("").to_string();
+            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+            let args = tc["function"]["arguments"].as_str().unwrap_or("").to_string();
+            if let Some(pos) = tool_calls.iter().position(|(i,_,_,_)| *i == idx) {
+                if !id.is_empty() { tool_calls[pos].1 = id; }
+                if !name.is_empty() { tool_calls[pos].2 = name; }
+                tool_calls[pos].3.push_str(&args);
+            } else {
+                tool_calls.push((idx, id, name, args));
+            }
+        }
+    }
+    (content, false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_renders_html() {
+        let html = markdown_preview("# Hello\n\n**bold** and `code`");
+        assert!(html.contains("<h1"));
+        assert!(html.contains("Hello"));
+        assert!(html.contains("<strong>"));
+        assert!(html.contains("<code>"));
+    }
+
+    #[test]
+    fn empty_markdown() {
+        let html = markdown_preview("");
+        assert!(html.contains("<div"));
+    }
+
+    #[test]
+    fn markdown_handles_code_block() {
+        let html = markdown_preview("```rust\nfn main() {}\n```");
+        assert!(html.contains("<code"));
+    }
+
+    #[test]
+    fn parse_sse_text_content() {
+        let mut tcs = Vec::new();
+        let (content, done) = parse_sse_line(
+            r#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"}}]}"#,
+            &mut tcs
+        );
+        assert_eq!(content, Some("Hello".to_string()));
+        assert!(!done);
+        assert!(tcs.is_empty());
+    }
+
+    #[test]
+    fn parse_sse_done() {
+        let mut tcs = Vec::new();
+        let (content, done) = parse_sse_line("[DONE]", &mut tcs);
+        assert!(content.is_none());
+        assert!(done);
+    }
+
+    #[test]
+    fn parse_sse_tool_call_start() {
+        let mut tcs = Vec::new();
+        let (_content, done) = parse_sse_line(
+            r#"{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"applyDocumentOperations","arguments":""}}]}}]}"#,
+            &mut tcs
+        );
+        assert!(!done);
+        assert_eq!(tcs.len(), 1);
+        assert_eq!(tcs[0].0, 0);
+        assert_eq!(tcs[0].1, "call_1");
+        assert_eq!(tcs[0].2, "applyDocumentOperations");
+    }
+
+    #[test]
+    fn parse_sse_tool_call_accumulate_args() {
+        let mut tcs = Vec::new();
+        // First chunk: start with empty args
+        parse_sse_line(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"test","arguments":""}}]}}]}"#,
+            &mut tcs
+        );
+        // Second chunk: args fragment
+        parse_sse_line(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"ops\":"}}]}}]}"#,
+            &mut tcs
+        );
+        // Third chunk: complete args
+        parse_sse_line(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"[]}"}}]}}]}"#,
+            &mut tcs
+        );
+        assert_eq!(tcs.len(), 1);
+        assert_eq!(tcs[0].1, "call_1");
+        assert_eq!(tcs[0].2, "test");
+        assert_eq!(tcs[0].3, r#"{"ops":[]}"#);
+    }
+
+    #[test]
+    fn parse_sse_multiple_tool_calls() {
+        let mut tcs = Vec::new();
+        parse_sse_line(
+            r#"{"id":"1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"fn1","arguments":"{}"}},{"index":1,"id":"call_2","function":{"name":"fn2","arguments":"{}"}}]}}]}"#,
+            &mut tcs
+        );
+        assert_eq!(tcs.len(), 2);
+        assert_eq!(tcs[0].1, "call_1");
+        assert_eq!(tcs[1].1, "call_2");
+    }
+
+    #[test]
+    fn parse_sse_skips_invalid_json() {
+        let mut tcs = Vec::new();
+        let (content, done) = parse_sse_line("not json", &mut tcs);
+        assert!(content.is_none());
+        assert!(!done);
+        assert!(tcs.is_empty());
+    }
+
+    #[test]
+    fn parse_sse_multiple_indices() {
+        let mut tcs = Vec::new();
+        // Tool call at index 0
+        parse_sse_line(
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"f1","arguments":"{}"}}]}}]}"#,
+            &mut tcs
+        );
+        // Tool call at index 1 starts while index 0 is open
+        parse_sse_line(
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"b","function":{"name":"f2","arguments":"{}"}}]}}]}"#,
+            &mut tcs
+        );
+        assert_eq!(tcs.len(), 2, "tcs should have 2 entries after two tool calls at different indices");
+        assert_eq!(tcs[0].2, "f1");
+        assert_eq!(tcs[1].2, "f2");
+    }
+
+    #[test]
+    fn parse_sse_text_and_tool_call_mixed() {
+        let mut tcs = Vec::new();
+        let (content, _done) = parse_sse_line(
+            r#"{"choices":[{"index":0,"delta":{"content":"Hello","tool_calls":[{"index":0,"id":"c1","function":{"name":"fn","arguments":"{}"}}]}}]}"#,
+            &mut tcs
+        );
+        assert_eq!(content, Some("Hello".to_string()));
+        assert_eq!(tcs.len(), 1);
+    }
+}

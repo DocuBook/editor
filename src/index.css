@@ -1,0 +1,224 @@
+@import "tailwindcss";
+/* hot */
+:root {
+    --bg-primary: #0c0c0d;
+    --bg-secondary: #161618;
+    --bg-tertiary: #1c1c1f;
+    --bg-hover: #222225;
+    --border: #2a2a2e;
+    --border-subtle: #1e1e21;
+    --text-primary: #e4e4e7;
+    --text-secondary: #a1a1aa;
+    --text-muted: #52525b;
+    --accent: #3b82f6;
+    --tab-active-border: #3b82f6;
+}
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+body {
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: auto;
+    user-select: none;
+}
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+.ProseMirror {
+    outline: none;
+    caret-color: var(--accent);
+    padding-top: 16px;
+    user-select: text;
+}
+.ProseMirror > * {
+    margin: 0.125rem 0;
+}
+.ProseMirror h1 {
+    font-size: 2.25rem;
+    font-weight: 800;
+    margin: 2rem 0 0.25rem;
+    line-height: 1.25;
+    color: #f4f4f5;
+    letter-spacing: -0.02em;
+}
+.ProseMirror h2 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    margin: 1.75rem 0 0.25rem;
+    line-height: 1.3;
+    color: #e4e4e7;
+    letter-spacing: -0.01em;
+}
+.ProseMirror h3 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.25rem;
+    line-height: 1.4;
+    color: #d4d4d8;
+}
+.ProseMirror p {
+    margin: 0.25rem 0;
+    line-height: 1.65;
+}
+.ProseMirror code {
+    background: #222225;
+    color: #f87171;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+.ProseMirror pre {
+    background: #161618;
+    padding: 14px 16px;
+    border-radius: 8px;
+    margin: 12px 0;
+    border: 1px solid #2a2a2e;
+}
+.ProseMirror pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: 0.82em;
+}
+.ProseMirror blockquote {
+    border-left: 3px solid #52525b;
+    padding: 2px 0 2px 16px;
+    color: #a1a1aa;
+    margin: 8px 0;
+    font-style: italic;
+}
+.ProseMirror ul,
+.ProseMirror ol {
+    padding-left: 1.5rem;
+    margin: 0.25rem 0;
+}
+.ProseMirror li {
+    margin: 0.15rem 0;
+    line-height: 1.6;
+}
+.ProseMirror ul li::marker {
+    color: #52525b;
+}
+.ProseMirror ol li::marker {
+    color: #52525b;
+}
+.ProseMirror hr {
+    border: none;
+    border-top: 1px solid #2a2a2e;
+    margin: 1.5rem 0;
+}
+.ProseMirror > :first-child,
+.bn-inline-content > :first-child {
+    margin-top: 0.5rem;
+}
+.ProseMirror p.is-editor-empty:first-child::before {
+    color: #52525b;
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+}
+
+/* Zed-style tooltips for bottom bar */
+.tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.tip {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  transform: none;
+  background: #2a2a2e;
+  color: #e4e4e7;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tip::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 10px;
+  transform: rotate(45deg);
+  width: 6px;
+  height: 6px;
+  background: #2a2a2e;
+}
+.tip-wrap:hover .tip {
+  opacity: 1;
+}
+
+/* Toolbar tip: appears below the button, arrow points up-right */
+.tip-bar .tip {
+  top: calc(100% + 6px);
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.tip-bar .tip::after {
+  top: -4px;
+  bottom: auto;
+  right: 8px;
+  left: auto;
+}
+.tip-wrap:has([data-plus-popup]) .tip {
+  opacity: 0;
+  pointer-events: none;
+}
+.tip kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: #161618;
+  color: #a1a1aa;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Tab hover effects */
+.tab-inactive:hover {
+  color: #d4d4d8;
+  background: var(--bg-hover);
+}
+.tab-close-btn {
+  opacity: 0;
+}
+.tab-active:hover .tab-close-btn {
+  opacity: 1;
+}
+.tab-close-btn:hover {
+  background: var(--bg-hover);
+  color: #d4d4d8;
+}
