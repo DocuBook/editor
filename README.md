@@ -150,8 +150,6 @@ npm run tauri build -- --target aarch64-apple-darwin
 
 ***
 
-***
-
 ## Project Structure
 
 ```text
