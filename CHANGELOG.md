@@ -1,6 +1,54 @@
 # Changelog
 
-## v0.1.0-alpha — 2026-07-29
+## v0.1.0-alpha.2 — 2026-08-01
+
+### reliability iteration
+
+Post-release hardening pass over the initial alpha: AI transport corruption, WebKit rendering, Git integration, and API-key persistence. All changes are **backward compatible** — no breaking API or config changes.
+
+#### 🐛 Bug Fixes
+
+- **AI stream corruption (root cause)** — SSE parsing in `ask_ai` rewritten to a byte-buffered decoder: raw bytes are buffered across chunks, split on `\n`, and each complete line decoded as one UTF-8 unit. Fixes JSON split mid-event (dropped/duplicated operations) and multi-byte UTF-8 characters corrupted by per-chunk `String::from_utf8_lossy` — the root cause of garbage output from low-level models
+- **AI output over-rejection removed** — the unknown-word quality gate (`wordlist.ts`) was deleted entirely. It rejected legitimate content (proper nouns, tech terms), so models could not write anything. The transport fix above is the real guard; content is always written and reviewed via accept/reject
+- **Git branch not displayed** — `git_status` returned invalid JSON (literal newline in `git status --porcelain` output) breaking the frontend `JSON.parse`; now serialized with `serde_json::json!`
+- **`is_repo()` regression** — status check now uses exit status (`output().status.success()`), fixing terminal spam and false negatives
+- **WYSIWYG → Markdown data loss** — mode toggle now flushes the editor to the store before switching, so edits are never lost when leaving WYSIWYG
+- **WebKit drag-and-drop blocked** — removed the global `user-select: none` which aggressively blocks text selection and drag in Safari/WKWebView (child overrides ignored). UI shells now opt in individually via a shared `.ui-shell` class
+- **HTML5 drag-and-drop in WKWebView** — Tauri's native DND handler hijacks window-level drag events; `dragDropEnabled: false` in window config restores in-page HTML5 drag (BlockNote block drag)
+- **API keys lost across processes** — `keyring` crate replaced with a `keychain.rs` wrapper over the macOS `security` CLI, which persists per-provider keys reliably across app restarts
+- **Key storage security** — API keys are now macOS Keychain-only; the localStorage fallback was removed
+- **Polling toast spam** — Git-status toast removed (was re-showing every 3s poll)
+- **MDX fallback removed** — `mdx.ts` deleted; `.mdx` files are forced to source mode (never WYSIWYG), other file types open as read-only preview
+- **CSS hardcoded colors** — scattered hex literals consolidated into CSS custom properties (`:root` tokens), single source of truth for theming
+
+#### 🚀 Features
+
+- **AI transport hardening (xl-ai)** — `sendMessages` now grounds the model with the actual document state (markdown, capped at 12k chars) + task-specific formatting rules, so output is document-aware instead of generic
+- **Semantic validation + retry** — tool-call output is validated (`validateOperationsSemantics`: referenced block ids must exist); invalid output triggers an automatic retry with error feedback (`MAX_AI_ATTEMPTS = 2`) instead of corrupting the document
+- **opencode gateway attribution** — `x-opencode-client: pi` header + session id, mirroring PI's provider attribution for correct opencode-go routing
+- **File classification (`fileKind`)** — single helper classifies files: `.md`/`.markdown` toggleable WYSIWYG, `.mdx` forced source, everything else read-only preview
+- **Markdown source placeholder** — "Start writing in Markdown…" in source mode
+- **Production context-menu suppression** — native browser menu (Reload/Back) suppressed in production builds; right-click devtools preserved in dev
+- **Per-provider settings restore** — model + API key restored when switching providers; keychain key re-fetched on startup/HMR
+
+#### 🔧 Technical
+
+- **New files**: `src-tauri/src/keychain.rs` (macOS `security` CLI wrapper), `src/utils/aiBlocks.ts` (+ tests) — markdown normalization, formatting rules, operation validation
+- **Removed**: `src/utils/mdx.ts` (+ test), `src/utils/wordlist.ts`, `keyring` crate
+- **Tests**: 37 Rust (SSE chunking incl. UTF-8 split + CRLF, tool-call validation) + 37 frontend (aiBlocks, aiSettings), all passing
+- **tauri.conf.json**: `dragDropEnabled: false` to restore HTML5 DnD
+
+#### ⚠️ Known Issues & Limitations
+
+- Tool call support depends on provider/model compatibility — not all models implement function calling correctly
+- OpenCode Go provider has limited `tool_choice` support
+- `.mdx` files are source-mode only (never WYSIWYG)
+- macOS 12+ required (WebKit minimum)
+- API and configuration format may change without migration path in alpha
+
+---
+
+## v0.1.0-alpha.1 — 2026-07-29
 
 ### alpha release
 
@@ -46,7 +94,7 @@ This is the initial **alpha** release. The API and feature set are **not stable*
 
 This project follows **manual versioning** (not semver). Versions are:
 
-- `0.1.x-alpha` — Alpha releases. Features, API, and configuration format are UNSTABLE. Breaking changes expected at any time.
+- `0.1.x-alpha.N` — Alpha releases. Features, API, and configuration format are UNSTABLE. Breaking changes expected at any time.
 - `0.x.0-beta` — Future beta releases. API stabilization begins.
 - `1.x.0` — Future stable releases.
 

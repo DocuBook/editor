@@ -17,7 +17,7 @@ impl Agent {
 /** Create an agent from macOS Keychain. */
     pub fn from_env() -> Option<Self> {
         let keychain_key = |provider: &str| -> Option<String> {
-            keyring::Entry::new("com.docubook.editor", provider).ok()?.get_password().ok()
+            crate::keychain::get_key(provider).ok()
         };
         if let Some(key) = keychain_key("openai") {
             return Some(Self::new("openai", "gpt-4o", &key, "https://api.openai.com/v1"));

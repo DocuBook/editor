@@ -7,6 +7,7 @@ interface AiSettingsState {
   apiKey: string
   savedProviders: string[]
   apiKeys: Record<string, string>
+  models: Record<string, string>
   setProvider: (p: string) => void
   setModel: (m: string) => void
   setApiKey: (key: string) => void
@@ -15,7 +16,7 @@ interface AiSettingsState {
   removeSavedProvider: (id: string) => void
 }
 
-/** Persisted AI settings. Saves to localStorage, keychain still holds API key for Rust. */
+/** Persisted AI settings. apiKey excluded from localStorage — always fetched from keychain via backend. */
 export const useAiSettings = create<AiSettingsState>()(
   persist(
     (set, get) => ({
@@ -24,13 +25,33 @@ export const useAiSettings = create<AiSettingsState>()(
       apiKey: '',
       savedProviders: [],
       apiKeys: {},
-      setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '' }),
-      setModel: (m) => set({ model: m }),
+      models: {},
+      /** Restore per-provider apiKey + model when switching providers. */
+      setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || '' }),
+      /** Save model per-provider so it survives provider switches. */
+      setModel: (m) => set((s) => ({ model: m, models: { ...s.models, [s.provider]: m } })),
       setApiKey: (key) => set((s) => ({ apiKey: key, apiKeys: { ...s.apiKeys, [s.provider]: key } })),
       clearApiKey: (pid) => set((s) => { const { [pid]: _, ...rest } = s.apiKeys; return { apiKeys: rest, ...(s.provider === pid ? { apiKey: '' } : {}) } }),
       addSavedProvider: (id) => set({ savedProviders: [...new Set([...get().savedProviders, id])] }),
       removeSavedProvider: (id) => set({ savedProviders: get().savedProviders.filter(x => x !== id) }),
     }),
-    { name: 'docubook:ai-settings' }
+    {
+      name: 'docubook:ai-settings',
+      partialize: (state) => {
+        const { apiKey: _, apiKeys: __, ...safe } = state
+        return safe
+      },
+      /** Fetch API key from keychain immediately after localStorage hydration. */
+      onRehydrateStorage: () => {
+        return (rehydratedState, error) => {
+          if (error || !rehydratedState?.provider) return
+          import('@tauri-apps/api/core').then(({ invoke }) =>
+            invoke<string>('get_api_key', { provider: rehydratedState.provider })
+              .then(k => { if (k) useAiSettings.getState().setApiKey(k) })
+              .catch(() => {})
+          )
+        }
+      },
+    }
   )
 )

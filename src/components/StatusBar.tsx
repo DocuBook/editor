@@ -16,7 +16,7 @@ export default function StatusBar() {
   }, 5000)
 
   return (
-    <footer className="h-6 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center text-xs text-zinc-600 shrink-0" style={{ padding: '0 12px 0 8px' }}>
+    <footer className="ui-shell h-6 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center text-xs text-zinc-600 shrink-0" style={{ padding: '0 12px 0 8px' }}>
       <button onClick={() => setShowShortcuts(true)} style={{ padding: 2, borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', border: 'none', display: 'flex', alignItems: 'center', marginRight: 8 }} title="Keyboard Shortcuts">
         <CircleHelp size={13} />
       </button>

@@ -10,23 +10,39 @@ import { en as aiDict } from '@blocknote/xl-ai/locales'
 import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
 import { toast } from 'sonner'
-import { extractMdxBlocks, restoreMdxBlocks } from '../utils/mdx'
+import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { usePolling } from '../hooks/usePolling'
 import { PROVIDERS } from '../data/providers'
 import { useAiSettings } from '../stores/aiSettings'
 
-/** Read saved AI config from persisted store for Rust backend. */
+/** Read saved AI config from persisted store for Rust backend. Always passes provider so backend can resolve key from keychain. */
 function getAiConfig(): { provider?: string; model?: string; baseUrl?: string; apiKey?: string } {
   try {
     const { provider, model, apiKey } = useAiSettings.getState()
-    if (!provider) return {}
-    const p = PROVIDERS.find(x => x.id === provider)
-    return { provider, model: model || undefined, baseUrl: p?.api, apiKey: apiKey || undefined }
+    const p = provider ? PROVIDERS.find(x => x.id === provider) : undefined
+    return { provider: provider || undefined, model: model || undefined, baseUrl: p?.api, apiKey: apiKey || undefined }
   } catch (e) { console.error('[ai] getAiConfig error:', e); return {} }
 }
 
-// ── Non-text preview fallback ──
+/** Build a grounding message: current document state + selection for the model. */
+/** Build a grounding message: full document as markdown (model-native) + selection context. */
+function buildDocumentContext(): string {
+  const ed = useEditorStore.getState().blockEditor
+  if (!ed) return ''
+  try {
+    const md = ed.blocksToMarkdownLossy(ed.document)
+    const sel = ed.getSelection()
+    const selCtx = sel?.blocks?.length
+      ? `\n\nSelection (preserve these block types on edit):\n${sel.blocks.map((b: any) => `- ${b.id}: ${b.type}${b.level ? ' level ' + b.level : ''}`).join('\n')}`
+      : ''
+    const MAX = AI_FORMATTING_RULES.maxContextChars
+    const trimmed = md.length > MAX ? md.substring(0, MAX) + '\n...[truncated]' : md
+    return trimmed + selCtx
+  } catch { return '' }
+}
+
+/** ── Non-text preview fallback ── */
 const BINARY_EXTENSIONS = ['.png','.jpg','.jpeg','.gif','.webp','.ico','.svg','.pdf','.mp3','.mp4','.mov','.avi','.zip','.tar','.gz','.rar','.exe','.dmg','.pkg','.bin']
 
 /** Fallback UI for binary file types that can't be previewed as text. */
@@ -51,40 +67,46 @@ const getSchema = () => {
   return _schema
 }
 
-// ── Inner content components (no container — shared scroll di Editor) ──
+/** ── Inner content components (no container — shared scroll in Editor) ── */
 /** WYSIWYG block editor powered by BlockNoteJS. Loads markdown, syncs changes back. */
 function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSync: (md: string) => void; filePath: string }) {
-  const mdxRef = useRef<Map<string, string>>(new Map())
   const [clean, setClean] = useState('')
-  useEffect(() => {
-    const [c, b] = extractMdxBlocks(markdown)
-    mdxRef.current = b
-    setClean(c)
-  }, [markdown])
+  useEffect(() => { setClean(markdown) }, [markdown])
   const editorRef = useRef<any>(null)
   const editor = useCreateBlockNote({
     schema: getSchema(),
     dictionary: { ...baseDict, ai: aiDict },
     extensions: [AIExtension({
       transport: {
-        sendMessages: async ({ messages, abortSignal, body }) => {
+        sendMessages: async (args: any) => {
+          const { messages, abortSignal, body } = args
           if (!messages.length || abortSignal?.aborted) return new ReadableStream()
           const { invoke } = await import('@tauri-apps/api/core')
           const { listen } = await import('@tauri-apps/api/event')
           const config = getAiConfig()
-          const provider = PROVIDERS.find(p => p.id === config.provider)
-          const modelDef = provider?.models.find(m => m.id === config.model)
-          // opencode-go doesn't forward tool calls properly; force text-only for it
-          const supportsTools = modelDef?.toolCall === true && config.provider !== 'opencode-go'
+          /** Fallback: always resolve provider/model from store even if config incomplete (HMR-safe) */
+          const st = useAiSettings.getState()
+          const resolvedProvider = config.provider || st.provider
+          const resolvedModel = config.model || st.model
+          const providerInfo = PROVIDERS.find(p => p.id === resolvedProvider)
+          const modelDef = providerInfo?.models.find(m => m.id === resolvedModel)
+          const supportsTools = modelDef?.toolCall === true && resolvedProvider !== 'opencode-go'
           const toolDefs = (body as any)?.toolDefinitions as Record<string, { description: string; inputSchema: any }> | undefined
+          /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
           const tools = (supportsTools && toolDefs) ? Object.entries(toolDefs).map(([name, def]) => ({
-            type: 'function',
+            type: 'function' as const,
             function: { name, description: def.description, parameters: def.inputSchema },
           })) : undefined
           const sel = editorRef.current?.getSelection()
           const selText = sel?.blocks?.length ? editorRef.current.blocksToMarkdownLossy(sel.blocks) : '';
           const stream = new ReadableStream({
             async start(controller) {
+              /** Ensure API key is loaded from keychain (critical on HMR) — backend also resolves it as fallback */
+              let apiKey = config.apiKey
+              if (!apiKey && resolvedProvider) {
+                try { apiKey = await invoke<string>('get_api_key', { provider: resolvedProvider }) } catch (e) { console.error('[ai] get_api_key failed:', e) }
+                if (apiKey) useAiSettings.getState().setApiKey(apiKey)
+              }
               const id = crypto.randomUUID()
               let fullText = ''
               controller.enqueue({ type: 'text-start', id })
@@ -101,58 +123,110 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
               })
               const unsubToolsDone = await listen('ai:tools_done', () => {})
               try {
+                /** Ground the model with actual document state so output is doc-specific, not generic */
+                const docContext = buildDocumentContext()
+                const userMsg = messages.find((m: any) => m.role === 'user')
+                const userText = (userMsg?.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || ''
+                const taskRules = buildTaskFormattingRules(userText)
+                const systemGrounding = docContext
+                  ? `You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.
+
+Document state (JSON):
+${docContext}
+
+Rules (MUST follow):
+- Output ONLY the new or modified content for the requested task.
+- NEVER echo the document state JSON or block ids back into the output.
+- NEVER repeat the user's prompt or these instructions.
+- NEVER invent block ids or content that is not in the document; if the document lacks the needed information, state that instead of fabricating.
+- Use only the exact block ids from the document above when referencing existing blocks.
+- Output must be free of spelling and grammar errors.
+- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.${taskRules}`
+                  : ''
+                /** Base messages once; retry loop appends error feedback. */
+                let baseMsgs: any[]
                 if (supportsTools && tools) {
-                  // Full xl-ai flow: send xl-ai messages + tools
                   const cleanMessages = messages.map((m: any) => ({ role: m.role, content: (m.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || m.content || '' }))
-                  await invoke('ask_ai', {
-                    messages: JSON.stringify(cleanMessages),
-                    tools: JSON.stringify(tools),
-                    ...config,
-                  })
+                  baseMsgs = systemGrounding ? [{ role: 'system', content: systemGrounding }, ...cleanMessages] : cleanMessages
                 } else {
-                  // Text-only: custom prompt with selected text
-                  const userMsg = messages.find((m: any) => m.role === 'user')
-                  const userText = (userMsg?.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || ''
-                  const prompt = selText
-                    ? `${userText}
+                  const userContent = `${userText}${selText ? `\n\nSelected text:\n"${selText}"` : ''}
 
-Selected text:
-"${selText}"
-
-Respond ONLY with the requested content in Markdown format. No commentary, no questions, no explanations.`
-                    : `${userText}
-
-Respond ONLY with the requested content in Markdown format. No commentary.`
+Respond with the requested content using BlockNote-compatible Markdown. Use headings (##), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), blockquotes (>). No commentary.`
+                  baseMsgs = systemGrounding
+                    ? [{ role: 'system', content: systemGrounding }, { role: 'user', content: userContent }]
+                    : [{ role: 'user', content: userContent }]
+                }
+                /** Retry loop: semantic validation (anti-hallucination) with error feedback. */
+                let errorFeedback = ''
+                let attempts = 0
+                let accepted = false
+                let lastReason = ''
+                let emitToolCalls: any[] = []
+                let emitText = ''
+                while (attempts <= MAX_AI_ATTEMPTS) {
+                  fullText = ''
+                  toolBuffer.length = 0
+                  const msgs = errorFeedback ? [...baseMsgs, { role: 'user', content: errorFeedback }] : baseMsgs
                   await invoke('ask_ai', {
-                    messages: JSON.stringify([{ role: 'user', content: prompt }]),
-                    ...config,
+                    messages: JSON.stringify(msgs),
+                    ...(supportsTools && tools ? { tools: JSON.stringify(tools) } : {}),
+                    provider: resolvedProvider,
+                    model: resolvedModel,
+                    baseUrl: providerInfo?.api,
+                    apiKey,
                   })
+                  /** Real correctness gate: referenced ids must exist in the document (blocking). */
+                  let semanticError: string | null = null
+                  for (const tc of toolBuffer) {
+                    semanticError = validateOperationsSemantics(editorRef.current, tc.input)
+                    if (semanticError) break
+                  }
+                  /** Quality is intentionally NOT gated — the transport fix (byte-buffered SSE + UTF-8)
+                   *  is the real guard against corruption. Content is always written; user reviews via accept/reject. */
+                  const normText = normalizeMarkdown(fullText)
+                  if (!semanticError) {
+                    emitToolCalls = [...toolBuffer]
+                    emitText = normText
+                    accepted = true
+                    break
+                  }
+                  lastReason = semanticError || 'unknown'
+                  errorFeedback = `Your previous response was rejected: ${semanticError}. Use ONLY block ids that exist in the document state above. Retry.`
+                  attempts++
                 }
                 closed = true
-                controller.enqueue({ type: 'text-end', id })
-                // Flush buffered tool calls AFTER text-end (correct ordering)
-                if (toolBuffer.length > 0) {
-                  for (const tc of toolBuffer) {
-                    controller.enqueue({ type: 'tool-input-available', ...tc })
+                if (!accepted) {
+                  /** All retries failed validation — inform the user and close the menu cleanly.
+                   *  (No controller.error: it causes unhandled rejections in xl-ai's stream plumbing.) */
+                  const reason = lastReason || 'unknown'
+                  console.error('[ai] AI output failed validation:', reason)
+                  toast.error('AI output was rejected')
+                  try { editorRef.current?.extensions?.get('ai')?.rejectChanges?.() } catch {}
+                } else if (emitToolCalls.length > 0) {
+                  for (const tc of emitToolCalls) {
+                    /** Emit tool-input-available so xl-ai Chat creates a tool part → suggestions */
+                    controller.enqueue({ type: 'tool-input-available', toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input })
                   }
-                }
-                // Direct insert only if no tool calls
-                if (toolBuffer.length === 0 && fullText && editorRef.current) {
-                  try {
-                    const blocks = await editorRef.current.tryParseMarkdownToBlocks(fullText)
-                    if (blocks?.length) {
-                      const selection = editorRef.current.getSelection()
-                      if (selection?.blocks?.length) {
-                        editorRef.current.replaceBlocks(selection.blocks.map((b: any) => b.id), blocks)
-                      } else {
-                        editorRef.current.insertBlocks(blocks, editorRef.current.getTextCursorPosition().block, 'after')
-                      }
-                    } else {
-                      editorRef.current.insertContent(fullText)
-                    }
-                  } catch { editorRef.current.insertContent(fullText) }
+                  /** text-end only when a tool part was emitted (stream still open). */
+                  controller.enqueue({ type: 'text-end', id })
+                } else if (emitText && editorRef.current) {
+                  /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option A) */
+                  const input = await buildApplyDocumentInput(editorRef.current, emitText)
+                  if (input) {
+                    /** Let xl-ai create the tool part → suggestion → accept/reject flow */
+                    controller.enqueue({ type: 'tool-input-available', toolCallId: 'gen-' + crypto.randomUUID(), toolName: 'applyDocumentOperations', input })
+                    controller.enqueue({ type: 'text-end', id })
+                  } else {
+                    /** No operations could be built (empty/invalid AI output) — surface as an error instead of mutating the doc. */
+                    console.error('[ai] could not build document operations from AI output:', emitText.substring(0, 200))
+                    controller.enqueue({ type: 'text-end', id })
+                  }
+                } else {
+                  /** Nothing to emit (e.g., empty accepted output) — close text part normally. */
+                  controller.enqueue({ type: 'text-end', id })
                 }
               } catch (e) {
+                console.error('[ai] transport error:', e)
                 try { controller.error(e) } catch {}
               } finally {
                 closed = true; unsubToken(); unsubTool(); unsubToolsDone(); try { controller.close() } catch {} 
@@ -163,7 +237,7 @@ Respond ONLY with the requested content in Markdown format. No commentary.`
         },
         reconnectToStream: async () => null,
       },
-      agentCursor: { name: 'DocuBook AI', color: '#3b82f6' },
+      agentCursor: { name: 'DocuBook AI', color: 'var(--accent)' },
     })],
   }, [markdown])
   useEffect(() => { editorRef.current = editor }, [editor])
@@ -175,9 +249,9 @@ Respond ONLY with the requested content in Markdown format. No commentary.`
   const dirtyRef = useRef(false)
   const initialLoadRef = useRef(true)
 
-  // Track editor changes — skip initial load (filePath stable, remount on file change)
+  /** Track editor changes — skip initial load (filePath stable, remount on file change) */
   useEffect(() => {
-    // After current synchronous ops (replaceBlocks), mark initial load as done
+    /** After current synchronous ops (replaceBlocks), mark initial load as done */
     queueMicrotask(() => { initialLoadRef.current = false })
     const sub = editor.onChange(() => {
       if (initialLoadRef.current) return
@@ -192,11 +266,15 @@ Respond ONLY with the requested content in Markdown format. No commentary.`
     return () => setBlockEditor(null)
   }, [editor, setBlockEditor])
 
-  // Register flush-to-store for Save button
+  /** Register flush-to-store for Save button */
   useEffect(() => {
     const sync = () => {
+      /** Only flush when there are real WYSIWYG edits — blocksToMarkdownLossy is not
+       *  idempotent (it rewrites list formatting), so flushing an untouched doc would
+       *  disturb the original markdown on every mode switch. */
+      if (!dirtyRef.current) return
       try {
-        const md = restoreMdxBlocks(editor.blocksToMarkdownLossy(editor.document), mdxRef.current)
+        const md = editor.blocksToMarkdownLossy(editor.document)
           .replace(/^\n+/, '')
           .replace(/\n+$/, '')
           .replace(/^(\s*)\* /gm, '$1- ')
@@ -216,7 +294,7 @@ Respond ONLY with the requested content in Markdown format. No commentary.`
   useEffect(() => () => {
     if (!dirtyRef.current) return
     try {
-      const md = restoreMdxBlocks(editor.blocksToMarkdownLossy(editor.document), mdxRef.current)
+      const md = editor.blocksToMarkdownLossy(editor.document)
         .trim()
         .replace(/^\n+/, '')
         .replace(/\n+$/, '')
@@ -258,33 +336,36 @@ function MarkdownEditor({ content, onChange }: { content: string; onChange: (v: 
   useEffect(() => { ref.current?.focus() }, [])
   return (
     <textarea ref={ref} value={content} onChange={e => onChange(e.target.value)}
-      className="w-full min-h-full bg-transparent text-sm text-zinc-200 font-mono leading-relaxed outline-none resize-none"
+      placeholder="Start writing in Markdown…"
+      className="w-full min-h-full bg-transparent text-sm text-zinc-200 font-mono leading-relaxed outline-none resize-none placeholder:text-zinc-600"
       style={{ paddingTop: 16 }}
       spellCheck={false} />
   )
 }
 
-// ── Tab bar ──
+/** ── Tab bar ── */
 /** Tab bar with file name, undo/redo, stage, publish, and AI toggle. */
 function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   const { undo, redo } = useEditorStore()
-  const { activeTab, tabs, switchTab, closeTab, editMode, setEditMode } = useEditorStore()
+  const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [pubState, setPubState] = useState<'idle'|'committing'|'pushing'|'done'|'error'>('idle')
   const [pubMsg, setPubMsg] = useState('')
   const [staged, setStaged] = useState(false)
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const hasUnsaved = file?.dirty ?? false
+  /** Only .md files can toggle WYSIWYG ↔ markdown; .mdx is source-only, others are preview. */
+  const toggleable = file ? fileKind(file.path) === 'wysiwyg' : false
 
-  // Subscribe to activeTab separately for tab-switch effect
+  /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
 
   useEffect(() => {
-    // Reset disk-dirty on tab switch; next git poll corrects it
+    /** Reset disk-dirty on tab switch; next git poll corrects it */
     setHasDiskChanges(false)
   }, [curTab])
 
-  // Git status polling (every 3s)
+  /** Git status polling (every 3s) */
   usePolling(() => {
     import('@tauri-apps/api/core').then(m =>
       m.invoke<string>('git_status').then(s => {
@@ -293,7 +374,7 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
           const relevant = curFile ? lines.filter((l:string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
           setHasDiskChanges(relevant.some((l:string) => l.length > 1 && l[1] !== ' '));
           if (lines.length === 0 || !lines.some((l:string) => l[0] !== ' ' && l[0] !== '?')) setStaged(false) } catch {}
-      }).catch(e => { console.error('Git status:', e); toast.error('Failed to check git status') })
+      }).catch(e => { console.error('Git status:', e) })
     )
   }, 3000)
 
@@ -314,7 +395,7 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   }
 
   return (
-    <div className="h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0 text-xs" style={{ padding: '0 48px' }}>
+    <div className="ui-shell h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0 text-xs" style={{ padding: '0 48px' }}>
       <span className="tip-wrap tip-bar">
         <button onClick={() => undo()} className="rounded cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-[var(--bg-hover)] disabled:opacity-30" style={{ padding: '8px' }}><Undo2 size={16} /></button>
         <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
@@ -327,10 +408,10 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
         {tabs.length === 0 ? <span className="text-zinc-500 italic self-center">No file open</span> : tabs.map(tab => (
           <div key={tab.path} onClick={() => switchTab(tab.path)}
             className={'tab-item ' + (activeTab === tab.path ? 'tab-active' : 'tab-inactive')}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '0 32px', cursor: 'pointer', borderRight: '1px solid var(--border-subtle)', whiteSpace: 'nowrap', flexShrink: 0, ...(activeTab === tab.path ? { background: 'var(--bg-primary)', color: 'var(--text-primary)', boxShadow: 'inset 0 -1px 0 var(--tab-active-border)' } : { color: '#71717a' }) }}>
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '0 32px', cursor: 'pointer', borderRight: '1px solid var(--border-subtle)', whiteSpace: 'nowrap', flexShrink: 0, ...(activeTab === tab.path ? { background: 'var(--bg-primary)', color: 'var(--text-primary)', boxShadow: 'inset 0 -1px 0 var(--tab-active-border)' } : { color: 'var(--text-subtle)' }) }}>
             <span style={tab.deleted ? { textDecoration: 'line-through', opacity: 0.5 } : undefined}>{tab.name}</span>
             {activeTab === tab.path && (
-              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} className="tab-close-btn" style={{ position: 'absolute', right: 8, border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, borderRadius: 4, color: '#71717a', transition: 'opacity 120ms ease' }}><X size={14} /></button>
+              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} className="tab-close-btn" style={{ position: 'absolute', right: 8, border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, borderRadius: 4, color: 'var(--text-subtle)', transition: 'opacity 120ms ease' }}><X size={14} /></button>
             )}
           </div>
         ))}
@@ -342,16 +423,16 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : 'Ask AI / Write with AI'} <kbd><ChevronUp size={10} /><Option size={10} />L</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
-        <button onClick={() => setEditMode(editMode === 'wysiwyg' ? 'markdown' : 'wysiwyg')} disabled={tabs.length === 0}
+        <button onClick={() => useEditorStore.getState().toggleEditMode()} disabled={!toggleable}
         className={'rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer ' + (editMode === 'markdown' ? 'bg-zinc-700 text-white' : 'enabled:text-zinc-500 enabled:hover:text-zinc-300 enabled:hover:bg-[var(--bg-hover)]')} style={{ padding: '8px' }}
         >{editMode === 'wysiwyg' ? 'Code' : 'Editor'}</button>
-        <span className="tip">{tabs.length === 0 ? 'Open a file first' : 'Switch mode to ' + (editMode === 'wysiwyg' ? 'source' : 'editor')} <kbd><Command size={11} />E</kbd></span>
+        <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'wysiwyg' ? 'source' : 'editor') : (file && fileKind(file.path) === 'markdown' ? 'Source mode only (.mdx)' : 'Preview only')} <kbd><Command size={11} />E</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
         <button onClick={async () => {
           const s = useEditorStore.getState()
-          s.flushEditor() // sync WYSIWYG → editedContent
-          const s2 = useEditorStore.getState() // fresh state after flush
+          s.flushEditor() /** sync WYSIWYG → editedContent */
+          const s2 = useEditorStore.getState() /** fresh state after flush */
           const tab = s2.tabs.find(t => t.path === s2.activeTab)
           if (tab?.deleted) return
           try {
@@ -378,8 +459,17 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   )
 }
 
-// ── Main layout ──
-const MARKDOWN_EXTENSIONS = ['.md', '.mdx', '.markdown']
+/** ── Main layout ── */
+/** Extensions that support both WYSIWYG + markdown source (toggleable). */
+const MD_EXTENSIONS = ['.md', '.markdown']
+/** Extensions that are markdown-source only (MDX components unsupported in WYSIWYG). */
+const MDX_EXTENSIONS = ['.mdx']
+/** Classify a file: 'wysiwyg' (md — toggleable), 'markdown' (mdx — forced source), 'preview' (others). */
+const fileKind = (path: string): 'wysiwyg' | 'markdown' | 'preview' => {
+  if (MD_EXTENSIONS.some(ext => path.endsWith(ext))) return 'wysiwyg'
+  if (MDX_EXTENSIONS.some(ext => path.endsWith(ext))) return 'markdown'
+  return 'preview'
+}
 
 export default function Editor() {
   const { editMode } = useEditorStore()
@@ -394,10 +484,14 @@ export default function Editor() {
     }
   }
 
-  // Ctrl/Cmd+E toggles edit mode, Ctrl/Cmd+Alt+L opens XL AI
+  /** Ctrl/Cmd+E toggles edit mode, Ctrl/Cmd+Alt+L opens XL AI */
   useKeyboard((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
-      e.preventDefault(); useEditorStore.getState().setEditMode(useEditorStore.getState().editMode === 'wysiwyg' ? 'markdown' : 'wysiwyg')
+      e.preventDefault()
+      const s = useEditorStore.getState()
+      const active = s.tabs.find(t => t.path === s.activeTab)
+      /** Only .md files toggle; .mdx is source-only, others are preview. */
+      if (active && fileKind(active.path) === 'wysiwyg') s.toggleEditMode()
     }
     if (e.ctrlKey && e.altKey && (e.code === 'KeyL' || e.key === 'l' || e.key === 'L')) {
       e.preventDefault(); openXlAiMenu()
@@ -413,18 +507,18 @@ export default function Editor() {
     )
   }
 
-  const isMarkdown = MARKDOWN_EXTENSIONS.some(ext => file.path.endsWith(ext))
+  const kind = fileKind(file.path)
   const isBinary = BINARY_EXTENSIONS.some(ext => file.path.endsWith(ext))
 
-  // Shared scroll container — semua mode pake container yang sama
+  /** Shared scroll container — all modes use the same container. */
   let inner: React.ReactNode
   if (isBinary) {
     inner = <PreviewFallback fileName={file.name} />
   } else if (file.content == null) {
     inner = <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading...</div>
-  } else if (!isMarkdown) {
+  } else if (kind === 'preview') {
     inner = <PlainTextViewer content={file.content} fileName={file.name} />
-  } else if (editMode === 'markdown') {
+  } else if (kind === 'markdown' || editMode === 'markdown') {
     inner = <MarkdownEditor content={file.frontmatter + (file.editedContent ?? file.content.replace(file.frontmatter, ''))} onChange={v => {
       const fmMatch = v.match(/^---[\s\S]*?\n---(?:\n|$)/)
       const newFrontmatter = fmMatch ? fmMatch[0] : ''

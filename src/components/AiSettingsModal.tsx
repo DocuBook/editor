@@ -6,7 +6,7 @@ import { PROVIDERS, getDefaultModel, type ProviderInfo } from '../data/providers
 import { useAiSettings } from '../stores/aiSettings'
 
 export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
-  const { provider, model, apiKey, savedProviders,
+  const { provider, model, apiKey, savedProviders, models,
     setProvider, setModel, setApiKey, clearApiKey, addSavedProvider, removeSavedProvider } = useAiSettings()
 
   const [providerSearch, setProviderSearch] = useState('')
@@ -33,32 +33,36 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
   const selectedProvider: ProviderInfo | null = provider ? PROVIDERS.find(p => p.id === provider) || null : null
   const savedSet = new Set(savedProviders)
 
-  // Check keychain for saved providers checkmarks (async, doesn't block)
+  /** Check keychain for saved providers and load keys into memory */
   useEffect(() => {
     (async () => {
+      const current = useAiSettings.getState().provider
       for (const id of PROVIDERS.map(p => p.id)) {
         try {
           const k = await invoke<string>('get_api_key', { provider: id })
-          if (k) addSavedProvider(id)
+          if (k) {
+            addSavedProvider(id)
+            if (id === current) setApiKey(k)
+          }
         } catch {}
       }
     })()
   }, [])
 
-  // Load apiKey from keychain when switching to a provider with no stored key
+  /** Load apiKey from keychain when empty (startup, HMR, or provider switch) */
   useEffect(() => {
     if (apiKey || !provider) return
     invoke<string>('get_api_key', { provider }).then(k => { if (k) { setApiKey(k); return } }).catch(() => {})
-  }, [provider])
+  }, [provider, apiKey])
 
-  // Scroll highlighted provider into view on keyboard navigation
+  /** Scroll highlighted provider into view on keyboard navigation */
   useEffect(() => {
     if (!showProviderDropdown) return
     const el = providerListRef.current?.children[providerHighlightIdx] as HTMLElement | undefined
     el?.scrollIntoView({ block: 'nearest' })
   }, [providerHighlightIdx, showProviderDropdown])
 
-  // Scroll highlighted model into view on keyboard navigation
+  /** Scroll highlighted model into view on keyboard navigation */
   useEffect(() => {
     if (!showModelDropdown) return
     const el = modelListRef.current?.children[modelHighlightIdx] as HTMLElement | undefined
@@ -82,8 +86,8 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
   )
 
   const selectProviderFn = (p: ProviderInfo) => {
-    setProvider(p.id)
-    setModel(getDefaultModel(p.id) || '')
+    setProvider(p.id) // restores saved apiKey + model for this provider
+    if (!models[p.id]) setModel(getDefaultModel(p.id) || '') // only default if never chosen
     setShowProviderDropdown(false)
   }
 
@@ -150,7 +154,7 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
                 <div ref={providerListRef} style={{ maxHeight: 240, overflowY: 'auto' }}>
                   {filteredProviders.length === 0 ? <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No providers found</div> : filteredProviders.map((p, i) => (
                     <div key={p.id} onClick={() => selectProviderFn(p)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)', ...(provider === p.id ? { backgroundColor: 'var(--accent)', color: '#fff' } : i === providerHighlightIdx ? { backgroundColor: 'var(--bg-hover)' } : {}) }}>
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)', ...(provider === p.id ? { backgroundColor: 'var(--accent)', color: 'var(--white)' } : i === providerHighlightIdx ? { backgroundColor: 'var(--bg-hover)' } : {}) }}>
                       <span style={{ flex: 1 }}>{p.name}</span>
                       {savedSet.has(p.id) && <Check size={12} />}
                     </div>
@@ -196,7 +200,7 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
                         const filtered = selectedProvider.models.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
                         return filtered.length === 0 ? <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No models found</div> : filtered.map((m, i) => (
                           <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
-                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'monospace', ...(m.id === model ? { backgroundColor: 'var(--accent)', color: '#fff' } : i === modelHighlightIdx ? { backgroundColor: 'var(--bg-hover)' } : {}) }}>
+                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'monospace', ...(m.id === model ? { backgroundColor: 'var(--accent)', color: 'var(--white)' } : i === modelHighlightIdx ? { backgroundColor: 'var(--bg-hover)' } : {}) }}>
                             <span style={{ flex: 1 }}>{m.id}</span>
                             <span style={{ fontSize: 10, opacity: 0.7 }}>${m.costInput}/${m.costOutput} · {(m.context/1000).toFixed(0)}K</span>
                           </div>
@@ -224,7 +228,7 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
                   {saving ? '...' : (savedSet.has(provider) ? 'Update' : 'Save')}
                 </button>
                 <button onClick={handleTest} disabled={!apiKey || testing}
-                  style={{ padding: '7px 14px', fontSize: 12, borderRadius: 6, background: '#3b82f6', color: '#fff', border: 'none', cursor: testing ? 'default' : 'pointer', opacity: !apiKey || testing ? 0.4 : 1, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  style={{ padding: '7px 14px', fontSize: 12, borderRadius: 6, background: 'var(--accent)', color: 'var(--white)', border: 'none', cursor: testing ? 'default' : 'pointer', opacity: !apiKey || testing ? 0.4 : 1, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
                   {testing ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : null}
                   {testing ? 'Testing...' : 'Test'}
                 </button>
@@ -234,7 +238,7 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
                   try { await invoke('delete_api_key', { provider }); clearApiKey(provider); removeSavedProvider(provider); toast.success('API key revoked') }
                   catch (e) { toast.error(String(e)) }
                 }}
-                  style={{ padding: '4px 10px', fontSize: 11, borderRadius: 4, background: 'transparent', color: '#ef4444', border: '1px solid #ef4444', cursor: 'pointer' }}>
+                  style={{ padding: '4px 10px', fontSize: 11, borderRadius: 4, background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', cursor: 'pointer' }}>
                   Revoke API Key
                 </button>
               </div>}

@@ -36,6 +36,7 @@ interface EditorState {
   setTabDirty: (path: string, dirty: boolean) => void
   setTabDeleted: (path: string, deleted: boolean) => void
   setEditMode: (mode: EditMode) => void
+  toggleEditMode: () => void
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
@@ -88,4 +89,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, deleted } : t) }) },
   
   setEditMode: (mode) => { set({ editMode: mode }) },
+  /** Toggle editor mode; flush WYSIWYG → store BEFORE switching to markdown so edits are not lost. */
+  toggleEditMode: () => {
+    const { editMode, flushEditor } = get()
+    if (editMode === 'wysiwyg') flushEditor()
+    set({ editMode: editMode === 'wysiwyg' ? 'markdown' : 'wysiwyg' })
+  },
 }))

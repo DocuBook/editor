@@ -11,9 +11,11 @@ pub struct Git { pub repo_path: String }
 impl Git {
 /** Open a git repository at the given path. */
     pub fn open(path: &str) -> Self { Self { repo_path: path.to_string() } }
-/** Check if the path is a valid git repository. */
+/** Check if the path is a valid git repository (exit status, not just command ran).
+ *  Uses .output() (pipes stdout) so git does not print to the app terminal —
+ *  .status() inherits stdout and would spam `git rev-parse --git-dir` output (".git"). */
     pub fn is_repo(&self)  -> bool {
-        Command::new("git").args(["rev-parse", "--git-dir"]).current_dir(&self.repo_path).output().is_ok()
+        Command::new("git").args(["rev-parse", "--git-dir"]).current_dir(&self.repo_path).output().map(|o| o.status.success()).unwrap_or(false)
     }
 /** Return git status as porcelain string. */
     pub fn status(&self) -> Result<String, String> {

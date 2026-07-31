@@ -174,7 +174,7 @@ export default function Sidebar() {
   }, [isOpen, loadTree])
 
   return (
-    <aside className="w-56 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col shrink-0 h-full">
+    <aside className="ui-shell w-56 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col shrink-0 h-full">
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
       {settingsOpen && <AiSettingsModal onClose={() => setSettingsOpen(false)} />}
       <div className="flex-1 flex flex-col overflow-y-auto">
@@ -290,7 +290,7 @@ export default function Sidebar() {
               closeContextMenu()
               try { await invoke('delete_file', { path: ctxItem.path }); loadTree(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
             }}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: '#ef4444', background: 'transparent', border: 'none', borderRadius: 4, width: '100%', textAlign: 'left' }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: 'var(--danger)', background: 'transparent', border: 'none', borderRadius: 4, width: '100%', textAlign: 'left' }}
             onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
             onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>Delete</button>
         </div>

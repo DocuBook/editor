@@ -42,8 +42,8 @@ export default function GraphView({ onClose }: { onClose: () => void }) {
           <svg width="100%" height="100%" viewBox="0 0 800 600" className="max-w-full max-h-full">
             {data.nodes.map((node, i) => (
               <g key={node.id} onClick={() => { openFile(node.id, node.title + '.md'); onClose() }} style={{ cursor: 'pointer' }}>
-                <circle cx={100 + (i % 10) * 70} cy={50 + Math.floor(i / 10) * 70} r="8" fill="#3b82f6" stroke="#1d4ed8" strokeWidth="1.5" />
-                <text x={100 + (i % 10) * 70 + 12} y={50 + Math.floor(i / 10) * 70 + 3} fill="#a1a1aa" fontSize="10">{node.title}</text>
+                <circle cx={100 + (i % 10) * 70} cy={50 + Math.floor(i / 10) * 70} r="8" fill="var(--accent)" stroke="var(--accent-hover)" strokeWidth="1.5" />
+                <text x={100 + (i % 10) * 70 + 12} y={50 + Math.floor(i / 10) * 70 + 3} fill="var(--text-secondary)" fontSize="10">{node.title}</text>
               </g>
             ))}
           </svg>

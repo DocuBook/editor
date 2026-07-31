@@ -1,9 +1,8 @@
 # DocuBook Editor
 
-A **vault-based** document editor with **WYSIWYG block editing**, **AI assistant**, and **Git integration**.
-Built with Tauri v2 (Rust) + BlockNoteJS (React).
+A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
 
-> The markdown editor that thinks like a developer — Obsidian vaults, Notion blocks, Zed-speed search and git. All in one
+> The markdown editor that thinks like a developer — Obsidian vaults, Notion blocks, Zed-speed search, and Git — all in one.
 
 ***
 
@@ -17,7 +16,7 @@ Built with Tauri v2 (Rust) + BlockNoteJS (React).
 - Search files by filename (like Zed/Obsidian Cmd+F)
 - Frontmatter (YAML) auto-extracted, preserved during edits
 - **.md** files open in WYSIWYG editor (fully supported)
-- **.mdx** support in development — currently only works in source/markdown mode
+- **.mdx** files open in markdown/source mode only (never WYSIWYG)
 - All other file types (JSON, TOML, YAML, etc.) open in view-only mode
 
 ### WYSIWYG Block Editor (Notion-like)
@@ -27,40 +26,33 @@ Built with Tauri v2 (Rust) + BlockNoteJS (React).
 - Bubble menu for inline formatting (bold, italic, code, link, highlight)
 - Markdown source mode — toggle between WYSIWYG and raw markdown
 - **.md files only** — WYSIWYG mode supports standard CommonMark markdown
-- **MDX support in development** — MDX components fall back to plain text in WYSIWYG; edit in source mode instead
+- **.mdx is source-mode only** — MDX files never open in WYSIWYG; edit in markdown source instead
 
 ### AI Assistant
 
 - Inline AI powered by BlockNote XL (`@blocknote/xl-ai`) + custom Rust backend
 - Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
 - Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
-- Configure API keys in-app via **Settings** (gear icon in sidebar) — stored in macOS Keychain + localStorage
+- API keys configured in **Settings** — stored in macOS Keychain only, never localStorage
 - **174 providers** with **5,811 models** — auto-synced from [models.dev](https://models.dev)
 
-> [!NOTE]
-> **Tool Call Support**  
-> AI models that support **function/tool calling** (4,675 of 5,811 models) can generate structured document operations (headings, lists, code blocks, tables) instead of plain markdown text.  
-> When the selected model supports tool calls, the editor uses xl-ai's native suggestion workflow (accept/reject). Otherwise, it falls back to direct text insertion with markdown parsing.
+> [!NOTE]\
+>  **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, ≈4,675 across 172 providers) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
 
-**Popular Providers:**
+**Popular Providers** (all support the accept/reject suggestion flow):
 
-| Provider | Models | Tool Calls | Notes |
-|----------|--------|------------|-------|
-| OpenAI | gpt-4o-mini, gpt-4o, gpt-5.6 | ✅ | Best overall quality, reliable tool calls |
-| Anthropic | claude-haiku-4.5, sonnet-4, opus-5 | ✅ | Excellent for long documents |
-| Google Gemini | gemini-2.0-flash, 2.5-pro, 3.6-flash | ✅ | Cheapest capable models |
-| DeepSeek | v4-flash, reasoner, v4 | ✅ | Via deepseek.com or gateways |
-| Mistral AI | small, medium, large | ✅ | Good quality/price ratio |
-| Groq | llama-3.1-8b, llama-3.3-70b | ✅ | Free tier available, fastest inference |
-| Cohere | command-r7b, command-a | ✅ | Good for RAG workflows |
-| Perplexity | sonar, sonar-pro | ✅ | Web-augmented generation |
-
-> [!TIP]
-> For the best experience with structured content (headings, code blocks, lists), choose a model with tool call support. For simple text generation, all models work via the markdown fallback path.
+| Provider      | Notable models                       |
+| ------------- | ------------------------------------ |
+| OpenAI        | gpt-4o-mini, gpt-4o, gpt-5.6         |
+| Anthropic     | claude-haiku-4.5, sonnet-4, opus-5   |
+| Google Gemini | gemini-2.0-flash, 2.5-pro, 3.6-flash |
+| DeepSeek      | v4-flash, reasoner, v4               |
+| Mistral AI    | small, medium, large                 |
+| Groq          | llama-3.1-8b, llama-3.3-70b          |
+| Cohere        | command-r7b, command-a               |
+| Perplexity    | sonar, sonar-pro                     |
 
 **Provider data** is auto-generated from [models.dev/api.json](https://models.dev/api.json) — an open-source database of AI model specs, pricing, and capabilities. Run `curl https://models.dev/api.json` to get the latest data.
-
-Configure your API key in **Settings** (gear icon in sidebar). Keys are stored in macOS Keychain with a localStorage fallback per provider.
 
 ### Git Integration
 
@@ -84,7 +76,7 @@ Configure your API key in **Settings** (gear icon in sidebar). Keys are stored i
 | ---------- | ------------------------------- |
 | Frontend   | React 19, TypeScript 6, Zustand |
 | UI         | Tailwind CSS v4, Lucide icons   |
-| Editor     | BlockNoteJS v3 (ProseMirror)    |
+| Editor     | BlockNoteJS 0.52 (ProseMirror)  |
 | Backend    | Rust with Tauri v2              |
 | Build      | Vite 8 + Rolldown               |
 | Markdown   | pulldown-cmark (Rust)           |
@@ -135,7 +127,7 @@ npm run tauri build -- --target aarch64-apple-darwin
 6. Save — stages changes, Publish — commit + push
 7. Toggle AI in toolbar for AI assistance
 
-> **Note:** Only `.md` files are fully supported in WYSIWYG mode. For `.mdx` files or content with MDX components, use **source mode** (Code button) instead.
+> **Note:** Only `.md` files are fully supported in WYSIWYG mode. `.mdx` files are source-mode only and never open in WYSIWYG.
 
 ### Keyboard Shortcuts
 
@@ -144,8 +136,13 @@ npm run tauri build -- --target aarch64-apple-darwin
 | `Ctrl/Cmd+J`                | Toggle sidebar              |
 | `Ctrl/Cmd+F` / `Ctrl/Cmd+P` | Open file search            |
 | `Ctrl/Cmd+O`                | Open vault / project folder |
+| `Ctrl/Cmd+E`                | Toggle WYSIWYG / Markdown   |
+| `Ctrl/Cmd+Z` / `+Shift+Z`   | Undo / Redo                 |
+| `Ctrl/Cmd+N`                | New file                    |
+| `Ctrl/Cmd+Alt+N`            | New folder                  |
 | `Ctrl+Alt+L`                | Toggle AI panel             |
 | `Ctrl/Cmd+Enter`            | Run AI prompt               |
+| `Ctrl/Cmd+,`                | AI Settings                 |
 | `/` (in editor)             | Slash command menu          |
 | `↑` / `↓` / `Enter`         | Navigate search results     |
 | `Enter` (on create/rename)  | Confirm                     |
@@ -159,23 +156,36 @@ npm run tauri build -- --target aarch64-apple-darwin
 
 ```text
 src/
+  main.tsx              Entry point
+  App.tsx               Root layout, keyboard shortcuts
   components/
-    Editor.tsx       WYSIWYG + Markdown modes
-    Sidebar.tsx      Vault tree, search, CRUD, context menu
-    StatusBar.tsx    Git branch indicator
-    GraphView.tsx    Note graph visualization
+    Editor.tsx          WYSIWYG + Markdown modes, AI transport (xl-ai ↔ Rust)
+    Sidebar.tsx         Vault tree, search, CRUD, context menu
+    StatusBar.tsx       Git branch indicator
+    GraphView.tsx       Note graph visualization
+    AiSettingsModal.tsx Provider/model/API-key settings (keychain)
+    ShortcutsModal.tsx  Keyboard shortcuts reference
   stores/
-    editor.ts        Tabs, file content, edited content
-    vault.ts         Vault state, tree, folder expansion
-  App.tsx            Root layout
+    editor.ts           Tabs, file content, edited content
+    vault.ts            Vault state, tree, folder expansion
+    aiSettings.ts       Provider/model/saved-providers (persisted) — API keys live only in keychain
+  data/
+    providers.ts        Auto-generated provider/model catalog (models.dev)
+  hooks/
+    useKeyboard.ts      Keyboard shortcut handling
+    usePolling.ts       Interval polling (git status)
+    useClickOutside.ts  Click-outside detection for menus
+  utils/
+    aiBlocks.ts         AI text → applyDocumentOperations (suggestions)
 src-tauri/src/
-  lib.rs             Tauri commands
-  vault/             File system vault
-  wiki/              Wikilink index
-  git/               Git add-commit-push
-  search/            Filename search
-  config/            docu.json config
-  agent/             AI agent (OpenAI/Anthropic)
+  lib.rs                Tauri commands (vault, wiki, git, search, AI)
+  keychain.rs           macOS Keychain access via `security` CLI
+  agent/                AI agent config (provider/model/base URL)
+  vault/                File system vault
+  wiki/                 Wikilink index
+  git/                  Git add-commit-push
+  search/               Filename search
+  config/               docu.json config
 ```
 
 ***

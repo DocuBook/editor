@@ -5,6 +5,7 @@ mod git;
 mod search;
 mod config;
 mod agent;
+mod keychain;
 
 use std::sync::Mutex;
 use tauri::State;
@@ -144,7 +145,7 @@ fn git_status(state: State<AppState>) -> Result<String, String> {
             let branch = std::process::Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).current_dir(&g.repo_path).output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
             let status = g.status().unwrap_or_default();
-            Ok(format!(r#"{{"branch":"{}","status":"{}"}}"#, branch, status.trim()))
+            Ok(serde_json::json!({ "branch": branch, "status": status.trim() }).to_string())
         }
         _ => Ok(r#"{"branch":"","status":""}"#.to_string()),
     }
@@ -195,29 +196,25 @@ fn md_to_html(content: &str) -> String {
 // ── Agent ──
 #[tauri::command]
 fn get_api_key(provider: &str) -> Result<String, String> {
-    let entry = keyring::Entry::new("com.docubook.editor", provider).map_err(|e| e.to_string())?;
-    entry.get_password().map_err(|_| "not_found".to_string())
+    keychain::get_key(provider)
 }
 
 #[tauri::command]
 fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new("com.docubook.editor", provider).map_err(|e| e.to_string())?;
-    entry.set_password(key).map_err(|e| e.to_string())
+    keychain::set_key(provider, key)
 }
 
 #[tauri::command]
 fn delete_api_key(provider: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new("com.docubook.editor", provider).map_err(|e| e.to_string())?;
-    match entry.delete_credential() {
-        Ok(_) => Ok(()),
-        Err(_) => Ok(()), // already gone from keychain, treat as success
-    }
+    keychain::delete_key(provider)
 }
 
 
 #[tauri::command]
 async fn test_connection(_provider: String, model: String, base_url: String, api_key: String) -> Result<String, String> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build().map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
     // Test 1: basic connectivity
@@ -272,15 +269,16 @@ async fn test_connection(_provider: String, model: String, base_url: String, api
 #[tauri::command]
 async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
     let agent = if let (Some(p), Some(m), Some(b)) = (&provider, &model, &base_url) {
-        let key = api_key.clone().or_else(|| {
-            keyring::Entry::new("com.docubook.editor", p).ok()?.get_password().ok()
-        }).ok_or("No API key found")?;
+        let key = api_key.clone().or_else(|| keychain::get_key(p).ok()).ok_or("No API key found")?;
         agent::Agent::new(p, m, &key, b)
     } else {
         agent::Agent::from_env().ok_or("No API key found. Configure via Settings (gear icon).")?
     };
     let _ = &agent.provider;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build().map_err(|e| format!("Client error: {}", e))?;
     let mut body_obj = serde_json::json!({
         "model": agent.model,
         "messages": serde_json::from_str::<serde_json::Value>(&messages).map_err(|e| format!("Invalid messages: {}", e))?,
@@ -291,14 +289,22 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
             if let Some(arr) = tools_val.as_array() {
                 if !arr.is_empty() {
                     body_obj["tools"] = tools_val;
-                    // OpenCode Go doesn't support "required". Use "auto" — AI may or may not use tools.
+                    // Force model to call applyDocumentOperations so xl-ai creates suggestions
+                    body_obj["tool_choice"] = serde_json::json!("required");
                 }
             }
         }
     }
     let body = body_obj;
     let url = format!("{}/chat/completions", agent.base_url.trim_end_matches('/'));
-    let response = client.post(&url).header("Authorization", format!("Bearer {}", agent.api_key)).json(&body).send().await.map_err(|e| e.to_string())?;
+    // Mirror PI: opencode gateways route better when the client + session are identified.
+    let mut req = client.post(&url).header("Authorization", format!("Bearer {}", agent.api_key));
+    if agent.provider == "opencode-go" || agent.provider == "opencode" {
+        req = req
+            .header("x-opencode-client", "pi")
+            .header("x-opencode-session", format!("docubook-{}", std::process::id()));
+    }
+    let response = req.json(&body).send().await.map_err(|e| e.to_string())?;
     let status = response.status();
     if !status.is_success() {
         let err_text = response.text().await.map_err(|e| e.to_string())?;
@@ -308,47 +314,65 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     
     use tauri::Emitter;
     let mut full = String::new();
-    // accumulating tool calls: (index, id, name, args)
     let mut tool_calls: Vec<(i64, String, String, String)> = Vec::new();
 
+    // Byte-buffered SSE parse (mirrors PI's streaming UTF-8 decoder):
+    // buffer RAW bytes across chunks, split on \n (0x0A), decode each COMPLETE line.
+    // Per-chunk String::from_utf8_lossy corrupts multi-byte UTF-8 chars split across chunks,
+    // and partial SSE lines (JSON split mid-event) are dropped.
+    let mut byte_buf: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.chunk().await.map_err(|e| e.to_string())? {
-        let text = String::from_utf8_lossy(&chunk);
-        for line in text.lines() {
-            if let Some(data) = line.strip_prefix("data: ") {
-                if data == "[DONE]" { continue; }
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
-                        full.push_str(content);
-                        let _ = app.emit("ai:token", content);
-                    }
-                    if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
-                        for tc in tcs {
-                            let idx = tc["index"].as_i64().unwrap_or(0);
-                            let id = tc["id"].as_str().unwrap_or("").to_string();
-                            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
-                            let args = tc["function"]["arguments"].as_str().unwrap_or("").to_string();
-                            if let Some(pos) = tool_calls.iter().position(|(i,_,_,_)| *i == idx) {
-                                if !id.is_empty() { tool_calls[pos].1 = id; }
-                                if !name.is_empty() { tool_calls[pos].2 = name; }
-                                tool_calls[pos].3.push_str(&args);
-                            } else {
-                                tool_calls.push((idx, id, name, args));
-                            }
-                        }
-                    }
-                }
+        byte_buf.extend_from_slice(&chunk);
+        let mut start = 0;
+        while let Some(pos) = byte_buf[start..].iter().position(|&b| b == b'\n') {
+            let line_end = start + pos;
+            let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
+            let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
+            if !data.is_empty() {
+                process_sse_data(data, &mut full, &mut tool_calls, &app);
             }
+            start = line_end + 1;
+        }
+        // Drop processed bytes; keep the partial tail for the next chunk.
+        byte_buf.drain(..start);
+    }
+    // Process any final event without a trailing newline.
+    if !byte_buf.is_empty() {
+        let line = String::from_utf8_lossy(&byte_buf);
+        let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
+        if !data.is_empty() {
+            process_sse_data(data, &mut full, &mut tool_calls, &app);
         }
     }
-    // Emit complete tool calls after stream
+    // Emit complete tool calls after stream — validate blocknote tool calls
     for (_, id, name, args) in &tool_calls {
         if !id.is_empty() && !name.is_empty() {
-            let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
-            let _ = app.emit("ai:tool_call", serde_json::json!({
-                "toolCallId": id,
-                "toolName": name,
-                "input": input,
-            }));
+            if name == "apply_blocknote_blocks" {
+                match validate_tool_call(name, args) {
+                    Ok(_valid) => {
+                        let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+                        let _ = app.emit("ai:tool_call", serde_json::json!({
+                            "toolCallId": id,
+                            "toolName": name,
+                            "input": input,
+                        }));
+                    }
+                    Err(e) => {
+                        let _ = app.emit("ai:tool_error", serde_json::json!({
+                            "toolCallId": id,
+                            "toolName": name,
+                            "error": e,
+                        }));
+                    }
+                }
+            } else {
+                let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+                let _ = app.emit("ai:tool_call", serde_json::json!({
+                    "toolCallId": id,
+                    "toolName": name,
+                    "input": input,
+                }));
+            }
         }
     }
     let _ = app.emit("ai:tools_done", "");
@@ -371,6 +395,32 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/// Process one complete SSE `data:` payload (content delta + tool call accumulation).
+fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, String, String, String)>, app: &tauri::AppHandle) {
+    use tauri::Emitter;
+    if data == "[DONE]" { return; }
+    let Ok(val) = serde_json::from_str::<serde_json::Value>(data) else { return; };
+    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+        full.push_str(content);
+        let _ = app.emit("ai:token", content);
+    }
+    if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
+        for tc in tcs {
+            let idx = tc["index"].as_i64().unwrap_or(0);
+            let id = tc["id"].as_str().unwrap_or("").to_string();
+            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+            let args = tc["function"]["arguments"].as_str().unwrap_or("").to_string();
+            if let Some(pos) = tool_calls.iter().position(|(i,_,_,_)| *i == idx) {
+                if !id.is_empty() { tool_calls[pos].1 = id; }
+                if !name.is_empty() { tool_calls[pos].2 = name; }
+                tool_calls[pos].3.push_str(&args);
+            } else {
+                tool_calls.push((idx, id, name, args));
+            }
+        }
+    }
 }
 
 /// Parse a single SSE data line from /chat/completions stream.
@@ -397,6 +447,41 @@ pub fn parse_sse_line(data: &str, tool_calls: &mut Vec<(i64, String, String, Str
         }
     }
     (content, false)
+}
+
+// ── BlockNote tool call validation ──
+
+#[derive(serde::Deserialize, Debug)]
+struct Cursor {
+    mode: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct ApplyBlocksInput {
+    blocks: Vec<serde_json::Value>,
+    cursor: Cursor,
+}
+
+impl ApplyBlocksInput {
+    pub fn is_valid_mode(&self) -> bool {
+        matches!(self.cursor.mode.as_str(), "replace_selection" | "after" | "before")
+    }
+}
+
+/// Validate and convert a raw tool call args string into a typed ApplyBlocksInput.
+pub fn validate_tool_call(name: &str, args: &str) -> Result<ApplyBlocksInput, String> {
+    if name != "apply_blocknote_blocks" {
+        return Err("not a blocknote tool".to_string());
+    }
+    let input: ApplyBlocksInput = serde_json::from_str(args)
+        .map_err(|e| format!("Invalid apply_blocknote_blocks args: {}", e))?;
+    if !input.is_valid_mode() {
+        return Err(format!("Invalid cursor mode: '{}'. Must be replace_selection, after, or before.", input.cursor.mode));
+    }
+    if input.blocks.is_empty() {
+        return Err("blocks array must not be empty".to_string());
+    }
+    Ok(input)
 }
 
 #[cfg(test)]
@@ -530,5 +615,176 @@ mod tests {
         );
         assert_eq!(content, Some("Hello".to_string()));
         assert_eq!(tcs.len(), 1);
+    }
+
+    // ── Tool call validation tests ──
+
+    #[test]
+    fn validate_blocknote_tool_valid_input() {
+        let args = r#"{"blocks":[{"type":"heading","level":2,"text":"Hello"}],"cursor":{"mode":"after"}}"#;
+        let result = validate_tool_call("apply_blocknote_blocks", args);
+        assert!(result.is_ok(), "valid input should pass: {:?}", result.err());
+        let input = result.unwrap();
+        assert_eq!(input.blocks.len(), 1);
+        assert_eq!(input.cursor.mode, "after");
+    }
+
+    #[test]
+    fn validate_blocknote_tool_invalid_json() {
+        let result = validate_tool_call("apply_blocknote_blocks", "not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_blocknote_tool_invalid_mode() {
+        let args = r#"{"blocks":[{"type":"paragraph"}],"cursor":{"mode":"invalid"}}"#;
+        let result = validate_tool_call("apply_blocknote_blocks", args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid cursor mode"));
+    }
+
+    #[test]
+    fn validate_blocknote_tool_empty_blocks() {
+        let args = r#"{"blocks":[],"cursor":{"mode":"after"}}"#;
+        let result = validate_tool_call("apply_blocknote_blocks", args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_non_blocknote_tool_skipped() {
+        let result = validate_tool_call("some_other_tool", "{}");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not a blocknote tool"));
+    }
+
+    #[test]
+    fn validate_blocknote_tool_all_valid_modes() {
+        for mode in &["replace_selection", "after", "before"] {
+            let args = format!(r#"{{"blocks":[{{"type":"paragraph","text":"x"}}],"cursor":{{"mode":"{}"}}}}"#, mode);
+            assert!(validate_tool_call("apply_blocknote_blocks", &args).is_ok(), "mode '{}' should be valid", mode);
+        }
+    }
+
+    #[test]
+    fn validate_blocknote_tool_missing_required_fields() {
+        let args = r#"{"blocks":[{"type":"paragraph"}]}"#;
+        let result = validate_tool_call("apply_blocknote_blocks", args);
+        assert!(result.is_err());
+    }
+}
+
+#[cfg(test)]
+mod sse_chunking {
+    /** Simulate the byte-buffered SSE parse: feed chunks that split events AND multi-byte UTF-8 chars. */
+    fn parse_sse_chunks(chunks: Vec<&str>) -> (String, Vec<(i64, String, String, String)>) {
+        let mut byte_buf: Vec<u8> = Vec::new();
+        let mut full = String::new();
+        let tool_calls: Vec<(i64, String, String, String)> = Vec::new();
+        for chunk in chunks {
+            byte_buf.extend_from_slice(chunk.as_bytes());
+            let mut start = 0;
+            while let Some(pos) = byte_buf[start..].iter().position(|&b| b == b'\n') {
+                let line_end = start + pos;
+                let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
+                let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
+                if !data.is_empty() {
+                    if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
+                        if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+                            full.push_str(content);
+                        }
+                    }
+                }
+                start = line_end + 1;
+            }
+            byte_buf.drain(..start);
+        }
+        if !byte_buf.is_empty() {
+            let line = String::from_utf8_lossy(&byte_buf);
+            let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
+            if !data.is_empty() {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+                        full.push_str(content);
+                    }
+                }
+            }
+        }
+        (full, tool_calls)
+    }
+
+    #[test]
+    fn sse_event_split_across_chunks_is_reassembled() {
+        // One event split mid-JSON across 3 chunks (the exact failure mode)
+        let event = r#"data: {"choices":[{"delta":{"content":"Menghantui"}}]}"#;
+        let chunks = vec![
+            &event[..20],
+            &event[20..40],
+            &event[40..],
+        ];
+        let (full, _) = parse_sse_chunks(chunks);
+        assert_eq!(full, "Menghantui", "content must survive chunk boundaries");
+    }
+
+    #[test]
+    fn sse_multiple_events_in_one_chunk() {
+        let chunks = vec![
+            "data: {\"choices\":[{\"delta\":{\"content\":\"Halo \"}}]}\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"dunia\"}}]}\ndata: [DONE]\n",
+        ];
+        let (full, _) = parse_sse_chunks(chunks);
+        assert_eq!(full, "Halo dunia");
+    }
+
+    #[test]
+    fn sse_partial_at_end_completes_with_next_chunk() {
+        // First chunk ends with partial event (no newline), second completes it
+        let first = r#"data: {"choices":[{"delta":{"content":"padahal"#;
+        let second = r#" yang"}}]}"#;
+        let (full, _) = parse_sse_chunks(vec![first, second]);
+        assert_eq!(full, "padahal yang");
+    }
+}
+
+#[cfg(test)]
+mod sse_utf8_chunking {
+    /** Feed chunks that split a multi-byte UTF-8 char (é = 0xC3 0xA9) mid-boundary. */
+    fn parse_utf8_chunks(chunks: Vec<Vec<u8>>) -> String {
+        let mut byte_buf: Vec<u8> = Vec::new();
+        let mut full = String::new();
+        for chunk in chunks {
+            byte_buf.extend_from_slice(&chunk);
+            let mut start = 0;
+            while let Some(pos) = byte_buf[start..].iter().position(|&b| b == b'\n') {
+                let line_end = start + pos;
+                let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
+                let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+                        full.push_str(content);
+                    }
+                }
+                start = line_end + 1;
+            }
+            byte_buf.drain(..start);
+        }
+        full
+    }
+
+    #[test]
+    fn utf8_char_split_across_chunks_survives() {
+        // "café" — the é (0xC3 0xA9) is split across two chunks.
+        // Event bytes: data: {"choices":[{"delta":{"content":"café"}}]}\n
+        let line = b"data: {\"choices\":[{\"delta\":{\"content\":\"caf\xc3\xa9\"}}]}\n";
+        // split mid-é: first chunk ends after 0xC3, second starts with 0xA9
+        let split_at = line.len() - 3; // before the final 0xA9 of é + "}}\n"
+        let chunks = vec![line[..split_at].to_vec(), line[split_at..].to_vec()];
+        assert_eq!(parse_utf8_chunks(chunks), "café");
+    }
+
+    #[test]
+    fn crlf_line_endings_handled() {
+        let line = b"data: {\"choices\":[{\"delta\":{\"content\":\"halo\"}}]}\r\n";
+        assert_eq!(parse_utf8_chunks(vec![line.to_vec()]), "halo");
     }
 }

@@ -9,6 +9,7 @@ interface AiSettingsState {
   apiKey: string
   savedProviders: string[]
   apiKeys: Record<string, string>
+  models: Record<string, string>
   setProvider: (p: string) => void
   setModel: (m: string) => void
   setApiKey: (key: string) => void
@@ -24,8 +25,9 @@ const createStore = () =>
     apiKey: '',
     savedProviders: [],
     apiKeys: {},
-    setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '' }),
-    setModel: (m) => set({ model: m }),
+    models: {},
+    setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || '' }),
+    setModel: (m) => set((s) => ({ model: m, models: { ...s.models, [s.provider]: m } })),
     setApiKey: (key) => set((s) => ({ apiKey: key, apiKeys: { ...s.apiKeys, [s.provider]: key } })),
     clearApiKey: (pid) => set((s) => { const { [pid]: _, ...rest } = s.apiKeys; return { apiKeys: rest, ...(s.provider === pid ? { apiKey: '' } : {}) } }),
     addSavedProvider: (id) => set({ savedProviders: [...new Set([...get().savedProviders, id])] }),
@@ -46,6 +48,32 @@ describe('aiSettings store', () => {
     expect(s.apiKey).toBe('')
     expect(s.savedProviders).toEqual([])
     expect(s.apiKeys).toEqual({})
+    expect(s.models).toEqual({})
+  })
+
+  it('setModel saves per-provider and restores on provider switch', () => {
+    store.getState().setProvider('openai')
+    store.getState().setModel('gpt-5.6')
+    expect(store.getState().model).toBe('gpt-5.6')
+    expect(store.getState().models['openai']).toBe('gpt-5.6')
+
+    // switch to another provider, pick a different model
+    store.getState().setProvider('anthropic')
+    expect(store.getState().model).toBe('')
+    store.getState().setModel('opus-5')
+    expect(store.getState().models['anthropic']).toBe('opus-5')
+
+    // switch back — last model for openai is restored, not defaulted to cheapest
+    store.getState().setProvider('openai')
+    expect(store.getState().model).toBe('gpt-5.6')
+
+    store.getState().setProvider('anthropic')
+    expect(store.getState().model).toBe('opus-5')
+  })
+
+  it('setProvider restores model only when previously saved', () => {
+    store.getState().setProvider('groq')
+    expect(store.getState().model).toBe('')
   })
 
   it('setProvider loads apiKey from apiKeys', () => {

@@ -20,8 +20,8 @@ export default function App() {
     return () => window.removeEventListener('keydown', h)
   }, [])
 
-  // Suppress default browser context menu (Reload, Back, etc.)
-  // Only in production — dev mode needs right-click for Inspect Element
+  /** Suppress default browser context menu (Reload, Back, etc.) */
+  /** Only in production — dev mode needs right-click for Inspect Element */
   useEffect(() => {
     if (import.meta.env.PROD) {
       const h = (e: MouseEvent) => { if (!e.defaultPrevented) e.preventDefault() }
