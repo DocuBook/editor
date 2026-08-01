@@ -3,7 +3,6 @@ mod vault;
 mod wiki;
 mod git;
 mod search;
-mod config;
 mod agent;
 mod keychain;
 
@@ -19,13 +18,13 @@ struct AppState {
 #[tauri::command]
 fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
     let v = vault::Vault::new(path)?;
-    let name = v.name(); let is_project = v.is_project();
+    let name = v.name();
     let mut w = wiki::WikiIndex::new(v.root()); w.scan();
     let g = git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);
     *state.wiki.lock().expect("lock") = Some(w);
     *state.git.lock().expect("lock") = Some(g);
-    Ok(format!(r#"{{"name":"{}","isProject":{}}}"#, name, is_project))
+    Ok(format!(r#"{{"name":"{}"}}"#, name))
 }
 
 #[tauri::command]
@@ -36,8 +35,8 @@ fn close_vault(state: State<AppState>) -> Result<(), String> {
 #[tauri::command]
 fn vault_info(state: State<AppState>) -> Result<String, String> {
     match state.vault.lock().expect("lock").as_ref() {
-        Some(v) => Ok(format!(r#"{{"name":"{}","isProject":{}}}"#, v.name(), v.is_project())),
-        None => Ok(r#"{"name":"","isProject":false}"#.to_string()),
+        Some(v) => Ok(format!(r#"{{"name":"{}"}}"#, v.name())),
+        None => Ok(r#"{"name":""}"#.to_string()),
     }
 }
 
@@ -148,30 +147,6 @@ fn git_status(state: State<AppState>) -> Result<String, String> {
             Ok(serde_json::json!({ "branch": branch, "status": status.trim() }).to_string())
         }
         _ => Ok(r#"{"branch":"","status":""}"#.to_string()),
-    }
-}
-
-// ── Config ──
-#[tauri::command]
-fn read_config(state: State<AppState>) -> Result<String, String> {
-    let guard = state.vault.lock().expect("lock");
-    match guard.as_ref() {
-        Some(v) => { let cfg = config::read_config(v.root())?; serde_json::to_string(&cfg).map_err(|e| e.to_string()) }
-        None => serde_json::to_string(&config::DocuJson::default()).map_err(|e| e.to_string()),
-    }
-}
-
-#[tauri::command]
-fn save_config(title: String, base_url: String, ai_provider: String, ai_model: String, ai_base_url: String, state: State<AppState>) -> Result<(), String> {
-    let guard = state.vault.lock().expect("lock");
-    match guard.as_ref() {
-        Some(v) => {
-            let mut cfg = if v.is_project() { config::read_config(v.root()).unwrap_or_default() } else { config::DocuJson::default() };
-            cfg.meta.title = title; cfg.meta.base_url = base_url;
-            cfg.ai = Some(config::AIConfig { provider: ai_provider, model: ai_model, base_url: Some(ai_base_url) });
-            config::write_config(v.root(), &cfg)
-        }
-        None => Err("No vault".to_string()),
     }
 }
 
@@ -391,7 +366,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_vault, close_vault, vault_info, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
             wiki_backlinks, wiki_suggest, search_vault, git_stage, git_push, git_status,
-            read_config, save_config, markdown_preview, md_to_html, ask_ai, get_api_key, set_api_key, delete_api_key, test_connection,
+            markdown_preview, md_to_html, ask_ai, get_api_key, set_api_key, delete_api_key, test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -27,8 +27,6 @@ impl Vault {
     pub fn name(&self) -> String {
         self.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
     }
-/** Check if docu.json exists (DocuBook project). */
-    pub fn is_project(&self) -> bool { self.root.join("docu.json").exists() }
 /** Walk a directory and return sorted file list (dirs first, alphabetical). */
 /** Block path traversal via .. */
     fn safe_path(&self, path: &str) -> Result<PathBuf, String> {

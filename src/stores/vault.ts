@@ -8,7 +8,7 @@ export interface FileInfo { path: string; name: string; type: string; depth?: nu
 
 /** Internal vault state (not exported). */
 interface VaultState {
-  name: string; isProject: boolean; isOpen: boolean; vaultPath: string
+  name: string; isOpen: boolean; vaultPath: string
   tree: FileInfo[]; visibleItems: FileInfo[]; expanded: Record<string, boolean>; childrenCache: Record<string, FileInfo[]>; loading: boolean
   openVault: () => Promise<void>; closeVault: () => void; resumeVault: () => Promise<void>
   loadTree: (subpath?: string) => Promise<void>
@@ -19,7 +19,7 @@ interface VaultState {
 export const useVaultStore = create<VaultState>()(
   persist(
     (set, get) => ({
-      name: '', isProject: false, isOpen: false, vaultPath: '',
+      name: '', isOpen: false, vaultPath: '',
       tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false,
 
       /** Open a directory picker and load the selected folder as vault. */
@@ -31,7 +31,7 @@ export const useVaultStore = create<VaultState>()(
           set({ loading: true })
           const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
-          set({ name: d.name, isProject: d.isProject, vaultPath: path, isOpen: true, expanded: {} })
+          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
           await get().loadTree()
           set({ loading: false })
         } catch (e) { console.error(e); toast.error('Failed to open vault'); set({ loading: false }) }
@@ -39,7 +39,7 @@ export const useVaultStore = create<VaultState>()(
       /** Close vault and reset all state. */
       closeVault: () => {
         invoke('close_vault')
-        set({ name: '', isProject: false, isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
+        set({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
       },
       /** Reopen vault from persisted path (called on app mount after persist rehydration). */
       resumeVault: async () => {
@@ -49,7 +49,7 @@ export const useVaultStore = create<VaultState>()(
         try {
           const res = await invoke<string>('open_vault', { path: vaultPath })
           const d = JSON.parse(res)
-          set({ name: d.name, isProject: d.isProject, isOpen: true, expanded: expanded || {} })
+          set({ name: d.name, isOpen: true, expanded: expanded || {} })
           await get().loadTree()
         } catch {
           // Vault can't be reopened (deleted/moved) — clear persisted state
