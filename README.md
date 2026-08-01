@@ -140,13 +140,22 @@ npm run tauri build -- --target aarch64-apple-darwin
 | `Ctrl/Cmd+Z` / `+Shift+Z`   | Undo / Redo                 |
 | `Ctrl/Cmd+N`                | New file                    |
 | `Ctrl/Cmd+Alt+N`            | New folder                  |
-| `Ctrl+Alt+L`                | Toggle AI panel             |
-| `Ctrl/Cmd+Enter`            | Run AI prompt               |
+| `Ctrl+Alt+L`                | Ask AI / Write with AI (opens AI menu at cursor) |
 | `Ctrl/Cmd+,`                | AI Settings                 |
 | `/` (in editor)             | Slash command menu          |
 | `↑` / `↓` / `Enter`         | Navigate search results     |
 | `Enter` (on create/rename)  | Confirm                     |
 | `Escape` (on create/rename) | Cancel                      |
+
+BlockNote editor shortcuts (built-in, no setup needed):
+
+| Shortcut                    | Action                      |
+| --------------------------- | --------------------------- |
+| `Tab` / `Shift+Tab`         | Indent / outdent block      |
+| `Enter` / `Shift+Enter`     | New block / line break      |
+| `Ctrl/Cmd+B` / `+I` / `+U` / `+K` | Bold / Italic / Underline / Link |
+| `Ctrl/Cmd+Alt+1`–`5`        | Heading level 1–5           |
+| `#`, `-`, `1.`, `[]`, `>`, ` ``` ` + `Space` | Heading, list, numbered list, checkbox, quote, code |
 
 ***
 

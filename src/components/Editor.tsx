@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef } from 'react'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems } from '@blocknote/react'
+import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
 import { en as baseDict } from '@blocknote/core/locales'
-import { AIExtension, AIMenuController, getAISlashMenuItems } from '@blocknote/xl-ai'
+import { AIExtension, AIMenuController, AIToolbarButton, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
 import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
@@ -241,6 +241,45 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
     })],
   }, [markdown])
   useEffect(() => { editorRef.current = editor }, [editor])
+
+  /** Follow the AI writing position. xl-ai's built-in auto-scroll self-disables once content
+   *  outgrows the viewport (its scroll-event race kills `autoScroll` under streaming), so we
+   *  scroll the writing block ourselves and stop only on real user input (wheel/touch/keys). */
+  const aiMenu: any = useExtensionState<any>(AIExtension, { editor, selector: (s: any) => s.aiMenuState })
+  const isAiWriting = !!aiMenu && aiMenu !== 'closed' && aiMenu.status === 'ai-writing'
+  const followRef = useRef(true)
+
+  /** User scrolling (wheel/touch/scroll keys) stops the follower; re-armed on next AI run. */
+  useEffect(() => {
+    if (!isAiWriting) { followRef.current = true; return }
+    const stop = () => { followRef.current = false }
+    const opts = { capture: true, passive: true }
+    const keys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
+    const onKey = (e: KeyboardEvent) => { if (keys.has(e.key)) stop() }
+    document.addEventListener('wheel', stop, opts)
+    document.addEventListener('touchmove', stop, opts)
+    document.addEventListener('keydown', onKey, opts)
+    return () => {
+      document.removeEventListener('wheel', stop, opts)
+      document.removeEventListener('touchmove', stop, opts)
+      document.removeEventListener('keydown', onKey, opts)
+    }
+  }, [isAiWriting])
+
+  /** Token-level scroll: any DOM change in the editor while AI writes re-centers the writing block. */
+  useEffect(() => {
+    if (!isAiWriting || !aiMenu?.blockId) return
+    const root = editor.domElement
+    if (!root) return
+    const scroll = () => {
+      if (!followRef.current) return
+      const el = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
+      el?.scrollIntoView({ block: 'center' })
+    }
+    const mo = new MutationObserver(scroll)
+    mo.observe(root, { childList: true, subtree: true, characterData: true })
+    return () => mo.disconnect()
+  }, [isAiWriting, aiMenu?.blockId, editor])
   const { setBlockEditor, setFlushEditor } = useEditorStore()
   const onSyncRef = useRef(onSync)
   onSyncRef.current = onSync
@@ -303,8 +342,10 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
     } catch {}
   }, [])
 
-  return <BlockNoteView editor={editor} theme="dark" slashMenu={false}>
+  return <BlockNoteView editor={editor} theme="dark" slashMenu={false} formattingToolbar={false}>
     <AIMenuController />
+    {/** Bubble menu (formatting toolbar) with xl-ai entry so the AI text prompt opens from a selection. */}
+    <FormattingToolbarController formattingToolbar={FormattingToolbarWithAI} />
     <SuggestionMenuController triggerCharacter="/"
       getItems={async (query) => {
         const defaultItems = getDefaultReactSlashMenuItems(editor)
@@ -319,6 +360,14 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
     />
   </BlockNoteView>
 }
+
+/** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */
+const FormattingToolbarWithAI = () => (
+  <FormattingToolbar>
+    {getFormattingToolbarItems()}
+    <AIToolbarButton />
+  </FormattingToolbar>
+)
 
 /** Plain text viewer for non-markdown files. */
 function PlainTextViewer({ content, fileName }: { content: string; fileName: string }) {

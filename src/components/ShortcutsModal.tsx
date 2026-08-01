@@ -14,11 +14,18 @@ const SHORTCUTS = [
     { keys: '\u2318Z', desc: 'Undo' },
     { keys: '\u2318\u21E7Z', desc: 'Redo' },
     { keys: '\u2318E', desc: 'Toggle WYSIWYG / Markdown' },
-    { keys: '\u2318\u23CE', desc: 'Run AI prompt' },
   ]},
   { category: 'AI & Settings', items: [
-    { keys: '\u02C6\u2325L', desc: 'Toggle AI panel' },
+    { keys: '\u02C6\u2325L', desc: 'Ask AI / Write with AI (opens AI menu at cursor)' },
     { keys: '\u2318,', desc: 'AI Settings' },
+  ]},
+  { category: 'BlockNote Editor (built-in)', items: [
+    { keys: 'Tab / \u21E7Tab', desc: 'Indent / outdent block' },
+    { keys: 'Enter', desc: 'New block' },
+    { keys: '\u21E7Enter', desc: 'Line break in block' },
+    { keys: '\u2318B / \u2318I / \u2318U / \u2318K', desc: 'Bold / Italic / Underline / Link' },
+    { keys: '\u2318\u23251-5', desc: 'Heading level 1-5' },
+    { keys: '# / - / 1. / [] / > / ``` + space', desc: 'Heading / bullet list / numbered list / checkbox / quote / code' },
   ]},
   { category: 'Files', items: [
     { keys: '\u2318N', desc: 'New file' },

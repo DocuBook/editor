@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "DocuBook"
-version = "0.1.0-alpha"
+version = "0.1.0-alpha.3"
 dependencies = [
  "pulldown-cmark",
  "regex",
