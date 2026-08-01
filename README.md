@@ -185,6 +185,7 @@ src/
   utils/
     aiBlocks.ts         AI text → applyDocumentOperations (suggestions)
 src-tauri/src/
+  main.rs               Tauri entry point
   lib.rs                Tauri commands (vault, wiki, git, search, AI)
   keychain.rs           macOS Keychain access via `security` CLI
   agent/                AI agent config (provider/model/base URL)
@@ -192,7 +193,6 @@ src-tauri/src/
   wiki/                 Wikilink index
   git/                  Git add-commit-push
   search/               Filename search
-  config/               docu.json config
 ```
 
 ***
@@ -200,3 +200,7 @@ src-tauri/src/
 ## License
 
 [GPL-3.0](./LICENSE) — DocuBook now integrates BlockNote XL package (`@blocknote/xl-ai`) which is licensed under GPL-3.0. The GPL ensures that modified versions of the app remain free and open — if you distribute the app, you must share your changes under the same license.
+
+### Commercial Use
+
+The GPL-3.0 license is valid for commercial activities at the service and infrastructure level — cloud hosting, managed deployments, and AI provider gateways. For any commercial use of this kind, such as running DocuBook as infrastructure or as an AI gateway/provider, please contact the author first to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
