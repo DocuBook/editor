@@ -16,10 +16,10 @@ Foundation improvements to the Rust AI streaming pipeline and error UX. All chan
 #### 🧹 Cleanup
 
 - **Dead legacy tool validation removed** — `ApplyBlocksInput`, `Cursor`, `validate_tool_call`, and 7 tests for `apply_blocknote_blocks` deleted (unused since the transport switched to xl-ai's own `applyDocumentOperations`)
-- **Dead `agent::from_env` removed** — the keychain-fallback constructor was never called (frontend always passes explicit provider/config) and hardcoded an incorrect `base_url` for Anthropic (Anthropic natively uses a different API format)
+- **Dead** `agent::from_env` **removed** — the keychain-fallback constructor was never called (frontend always passes explicit provider/config) and hardcoded an incorrect `base_url` for Anthropic (Anthropic natively uses a different API format)
 - **Provider field now emitted** in `ai:done` event (previously an unused field with a `let _ =` suppress)
 
-***
+---
 
 ## v0.1.0-alpha.3 — 2026-08-01
 
@@ -30,13 +30,13 @@ Fixes to the xl-ai integration: the AI entry point in the bubble menu, AI auto-s
 #### 🐛 Bug Fixes
 
 - **AI auto-scroll stops when suggestion exceeds viewport** — xl-ai's built-in auto-scroll self-disables once content outgrows the screen: its scroll-event race (a new scroll before the previous `scrollend`) permanently kills `autoScroll` under streaming, so the editor stopped following the writing position. Replaced with an app-side follower: while the AI writes, a `MutationObserver` on the editor DOM re-centers the current writing block on every token append, stopping only on real user input (wheel/touch/scroll keys) and re-arming on the next AI run
-- **Shortcut reference cleanup** — ghost `Ctrl/Cmd+Enter` "Run AI prompt" (never implemented) removed; `Ctrl+Alt+L` relabeled from "Toggle AI panel" to "Ask AI / Write with AI (opens AI menu at cursor)"; BlockNote built-in editor shortcuts now documented in the reference (status bar `?` modal + README): Tab/Shift+Tab indent, Enter/Shift+Enter, Cmd+B/I/U/K, Cmd+Alt+1–5 heading levels, and markdown input rules (`#`, `-`, `1.`, `[]`, `>`, ` ``` `)
+- **Shortcut reference cleanup** — ghost `Ctrl/Cmd+Enter` "Run AI prompt" (never implemented) removed; `Ctrl+Alt+L` relabeled from "Toggle AI panel" to "Ask AI / Write with AI (opens AI menu at cursor)"; BlockNote built-in editor shortcuts now documented in the reference (status bar `?` modal + README): Tab/Shift+Tab indent, Enter/Shift+Enter, Cmd+B/I/U/K, Cmd+Alt+1–5 heading levels, and markdown input rules (`#`, `-`, `1.`, `[]`, `>`, `space`)
 
 #### 🚀 Features
 
 - **Bubble menu AI entry** — the formatting toolbar (bubble menu on text selection) is replaced with the default items + xl-ai's `AIToolbarButton`; selecting text now opens the AI text prompt with selection-aware commands (improve writing, fix spelling, translate, simplify) and a custom prompt input
 
-***
+---
 
 ## v0.1.0-alpha.2 — 2026-08-01
 
@@ -49,7 +49,7 @@ Post-release hardening pass over the initial alpha: AI transport corruption, Web
 - **AI stream corruption (root cause)** — SSE parsing in `ask_ai` rewritten to a byte-buffered decoder: raw bytes are buffered across chunks, split on `\n`, and each complete line decoded as one UTF-8 unit. Fixes JSON split mid-event (dropped/duplicated operations) and multi-byte UTF-8 characters corrupted by per-chunk `String::from_utf8_lossy` — the root cause of garbage output from low-level models
 - **AI output over-rejection removed** — the unknown-word quality gate (`wordlist.ts`) was deleted entirely. It rejected legitimate content (proper nouns, tech terms), so models could not write anything. The transport fix above is the real guard; content is always written and reviewed via accept/reject
 - **Git branch not displayed** — `git_status` returned invalid JSON (literal newline in `git status --porcelain` output) breaking the frontend `JSON.parse`; now serialized with `serde_json::json!`
-- **`is_repo()` regression** — status check now uses exit status (`output().status.success()`), fixing terminal spam and false negatives
+- `is_repo()` **regression** — status check now uses exit status (`output().status.success()`), fixing terminal spam and false negatives
 - **WYSIWYG → Markdown data loss** — mode toggle now flushes the editor to the store before switching, so edits are never lost when leaving WYSIWYG
 - **WebKit drag-and-drop blocked** — removed the global `user-select: none` which aggressively blocks text selection and drag in Safari/WKWebView (child overrides ignored). UI shells now opt in individually via a shared `.ui-shell` class
 - **HTML5 drag-and-drop in WKWebView** — Tauri's native DND handler hijacks window-level drag events; `dragDropEnabled: false` in window config restores in-page HTML5 drag (BlockNote block drag)
@@ -64,7 +64,7 @@ Post-release hardening pass over the initial alpha: AI transport corruption, Web
 - **AI transport hardening (xl-ai)** — `sendMessages` now grounds the model with the actual document state (markdown, capped at 12k chars) + task-specific formatting rules, so output is document-aware instead of generic
 - **Semantic validation + retry** — tool-call output is validated (`validateOperationsSemantics`: referenced block ids must exist); invalid output triggers an automatic retry with error feedback (`MAX_AI_ATTEMPTS = 2`) instead of corrupting the document
 - **opencode gateway attribution** — `x-opencode-client: pi` header + session id, mirroring PI's provider attribution for correct opencode-go routing
-- **File classification (`fileKind`)** — single helper classifies files: `.md`/`.markdown` toggleable WYSIWYG, `.mdx` forced source, everything else read-only preview
+- **File classification** (`fileKind`) — single helper classifies files: `.md`/`.markdown` toggleable WYSIWYG, `.mdx` forced source, everything else read-only preview
 - **Markdown source placeholder** — "Start writing in Markdown…" in source mode
 - **Production context-menu suppression** — native browser menu (Reload/Back) suppressed in production builds; right-click devtools preserved in dev
 - **Per-provider settings restore** — model + API key restored when switching providers; keychain key re-fetched on startup/HMR
