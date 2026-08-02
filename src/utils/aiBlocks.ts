@@ -73,11 +73,22 @@ export async function buildApplyDocumentInput(editor: any, fullText: string): Pr
     const sel = editor.getSelection()
     if (sel?.blocks?.length) {
       const formatted = inheritFormatOnReplace(sel.blocks, parsed)
-      const operations = formatted.map((block: any, i: number) => ({
+      /** Update ops map 1:1 onto the selection; extra blocks (model returned more than selected)
+       *  become an add-op after the last selected block — never an "undefined$" id that fails validation. */
+      const operations: any[] = formatted.slice(0, sel.blocks.length).map((block: any, i: number) => ({
         type: 'update',
         id: sel.blocks[i]?.id + '$',
         block: editor.blocksToHTMLLossy([block]),
       }))
+      const extras = formatted.slice(sel.blocks.length)
+      if (extras.length) {
+        operations.push({
+          type: 'add',
+          referenceId: sel.blocks[sel.blocks.length - 1]?.id + '$',
+          position: 'after',
+          blocks: extras.map((b: any) => editor.blocksToHTMLLossy([b])),
+        })
+      }
       return { type: 'applyDocumentOperations', operations }
     }
     const cursor = editor.getTextCursorPosition()

@@ -81,6 +81,27 @@ describe('buildApplyDocumentInput', () => {
     expect(input.operations[0].block).toBe('<p>Translated title</p>')
   })
 
+  it('converts extra AI blocks beyond selection into add-ops (no undefined$ id)', async () => {
+    const editor = {
+      tryParseMarkdownToBlocks: async () => [
+        { type: 'paragraph', content: [{ type: 'text', text: 'title' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'extra content' }] },
+      ],
+      blocksToHTMLLossy: (blocks: any[]) => blocks.map((b: any) => `<p>${b.content?.[0]?.text ?? ''}</p>`).join(''),
+      getSelection: () => ({ blocks: [{ id: 'h1', type: 'heading', level: 2 }] }),
+      getTextCursorPosition: () => ({ block: { id: 'b' } }),
+    }
+    const input = await buildApplyDocumentInput(editor, 'Improved text with more content')
+    expect(input.operations.length).toBe(2)
+    expect(input.operations[0]).toMatchObject({ type: 'update', id: 'h1$' })
+    expect(input.operations[1]).toEqual({
+      type: 'add',
+      referenceId: 'h1$',
+      position: 'after',
+      blocks: ['<p>extra content</p>'],
+    })
+  })
+
   it('returns null for empty text', async () => {
     const editor = mockEditor({ cursorBlockId: 'b' })
     expect(await buildApplyDocumentInput(editor, '   ')).toBeNull()

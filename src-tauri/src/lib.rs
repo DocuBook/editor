@@ -7,12 +7,14 @@ mod agent;
 mod keychain;
 
 use std::sync::Mutex;
-use tauri::State;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{State, Manager};
 
 struct AppState {
     vault: Mutex<Option<vault::Vault>>,
     wiki: Mutex<Option<wiki::WikiIndex>>,
     git: Mutex<Option<git::Git>>,
+    ai_cancel: AtomicBool,
 }
 
 #[tauri::command]
@@ -243,16 +245,19 @@ async fn test_connection(_provider: String, model: String, base_url: String, api
 
 #[tauri::command]
 async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
-    let agent = if let (Some(p), Some(m), Some(b)) = (&provider, &model, &base_url) {
-        let key = api_key.clone().or_else(|| keychain::get_key(p).ok()).ok_or("No API key found")?;
-        agent::Agent::new(p, m, &key, b)
-    } else {
-        agent::Agent::from_env().ok_or("No API key found. Configure via Settings (gear icon).")?
+    let agent = match (&provider, &model, &base_url) {
+        (Some(p), Some(m), Some(b)) => {
+            let key = api_key.clone().or_else(|| keychain::get_key(p).ok()).ok_or("No API key found")?;
+            agent::Agent::new(p, m, &key, b)
+        }
+        _ => return Err("Provider, model, and base URL are required".to_string()),
     };
-    let _ = &agent.provider;
+    let state = app.state::<AppState>();
+    state.ai_cancel.store(false, Ordering::SeqCst);
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(120))
+        // Streaming: no total deadline (long generations) — read_timeout resets per chunk, only stalls abort.
+        .read_timeout(std::time::Duration::from_secs(120))
         .build().map_err(|e| format!("Client error: {}", e))?;
     let mut body_obj = serde_json::json!({
         "model": agent.model,
@@ -297,6 +302,7 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     // and partial SSE lines (JSON split mid-event) are dropped.
     let mut byte_buf: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.chunk().await.map_err(|e| e.to_string())? {
+        if state.ai_cancel.load(Ordering::SeqCst) { break }
         byte_buf.extend_from_slice(&chunk);
         let mut start = 0;
         while let Some(pos) = byte_buf[start..].iter().position(|&b| b == b'\n') {
@@ -319,54 +325,40 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
             process_sse_data(data, &mut full, &mut tool_calls, &app);
         }
     }
-    // Emit complete tool calls after stream — validate blocknote tool calls
+    // Emit complete tool calls after stream — validation lives frontend-side (doc state).
     for (_, id, name, args) in &tool_calls {
         if !id.is_empty() && !name.is_empty() {
-            if name == "apply_blocknote_blocks" {
-                match validate_tool_call(name, args) {
-                    Ok(_valid) => {
-                        let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
-                        let _ = app.emit("ai:tool_call", serde_json::json!({
-                            "toolCallId": id,
-                            "toolName": name,
-                            "input": input,
-                        }));
-                    }
-                    Err(e) => {
-                        let _ = app.emit("ai:tool_error", serde_json::json!({
-                            "toolCallId": id,
-                            "toolName": name,
-                            "error": e,
-                        }));
-                    }
-                }
-            } else {
-                let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
-                let _ = app.emit("ai:tool_call", serde_json::json!({
-                    "toolCallId": id,
-                    "toolName": name,
-                    "input": input,
-                }));
-            }
+            let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
+            let _ = app.emit("ai:tool_call", serde_json::json!({
+                "toolCallId": id,
+                "toolName": name,
+                "input": input,
+            }));
         }
     }
     let _ = app.emit("ai:tools_done", "");
     if full.is_empty() && tool_calls.is_empty() {
         return Err("AI returned empty response".to_string());
     }
-    let _ = app.emit("ai:done", "");
+    let _ = app.emit("ai:done", serde_json::json!({ "provider": agent.provider }));
     Ok(())
+}
+
+/// Cancel the in-flight AI request (frontend abort). Stream loop checks the flag between chunks.
+#[tauri::command]
+fn cancel_ai(state: State<AppState>) {
+    state.ai_cancel.store(true, Ordering::SeqCst);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None) })
+        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: AtomicBool::new(false) })
         .invoke_handler(tauri::generate_handler![
             open_vault, close_vault, vault_info, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
             wiki_backlinks, wiki_suggest, search_vault, git_stage, git_push, git_status,
-            markdown_preview, md_to_html, ask_ai, get_api_key, set_api_key, delete_api_key, test_connection,
+            markdown_preview, md_to_html, ask_ai, cancel_ai, get_api_key, set_api_key, delete_api_key, test_connection,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -422,41 +414,6 @@ pub fn parse_sse_line(data: &str, tool_calls: &mut Vec<(i64, String, String, Str
         }
     }
     (content, false)
-}
-
-// ── BlockNote tool call validation ──
-
-#[derive(serde::Deserialize, Debug)]
-struct Cursor {
-    mode: String,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct ApplyBlocksInput {
-    blocks: Vec<serde_json::Value>,
-    cursor: Cursor,
-}
-
-impl ApplyBlocksInput {
-    pub fn is_valid_mode(&self) -> bool {
-        matches!(self.cursor.mode.as_str(), "replace_selection" | "after" | "before")
-    }
-}
-
-/// Validate and convert a raw tool call args string into a typed ApplyBlocksInput.
-pub fn validate_tool_call(name: &str, args: &str) -> Result<ApplyBlocksInput, String> {
-    if name != "apply_blocknote_blocks" {
-        return Err("not a blocknote tool".to_string());
-    }
-    let input: ApplyBlocksInput = serde_json::from_str(args)
-        .map_err(|e| format!("Invalid apply_blocknote_blocks args: {}", e))?;
-    if !input.is_valid_mode() {
-        return Err(format!("Invalid cursor mode: '{}'. Must be replace_selection, after, or before.", input.cursor.mode));
-    }
-    if input.blocks.is_empty() {
-        return Err("blocks array must not be empty".to_string());
-    }
-    Ok(input)
 }
 
 #[cfg(test)]
@@ -590,62 +547,6 @@ mod tests {
         );
         assert_eq!(content, Some("Hello".to_string()));
         assert_eq!(tcs.len(), 1);
-    }
-
-    // ── Tool call validation tests ──
-
-    #[test]
-    fn validate_blocknote_tool_valid_input() {
-        let args = r#"{"blocks":[{"type":"heading","level":2,"text":"Hello"}],"cursor":{"mode":"after"}}"#;
-        let result = validate_tool_call("apply_blocknote_blocks", args);
-        assert!(result.is_ok(), "valid input should pass: {:?}", result.err());
-        let input = result.unwrap();
-        assert_eq!(input.blocks.len(), 1);
-        assert_eq!(input.cursor.mode, "after");
-    }
-
-    #[test]
-    fn validate_blocknote_tool_invalid_json() {
-        let result = validate_tool_call("apply_blocknote_blocks", "not json");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn validate_blocknote_tool_invalid_mode() {
-        let args = r#"{"blocks":[{"type":"paragraph"}],"cursor":{"mode":"invalid"}}"#;
-        let result = validate_tool_call("apply_blocknote_blocks", args);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Invalid cursor mode"));
-    }
-
-    #[test]
-    fn validate_blocknote_tool_empty_blocks() {
-        let args = r#"{"blocks":[],"cursor":{"mode":"after"}}"#;
-        let result = validate_tool_call("apply_blocknote_blocks", args);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("must not be empty"));
-    }
-
-    #[test]
-    fn validate_non_blocknote_tool_skipped() {
-        let result = validate_tool_call("some_other_tool", "{}");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not a blocknote tool"));
-    }
-
-    #[test]
-    fn validate_blocknote_tool_all_valid_modes() {
-        for mode in &["replace_selection", "after", "before"] {
-            let args = format!(r#"{{"blocks":[{{"type":"paragraph","text":"x"}}],"cursor":{{"mode":"{}"}}}}"#, mode);
-            assert!(validate_tool_call("apply_blocknote_blocks", &args).is_ok(), "mode '{}' should be valid", mode);
-        }
-    }
-
-    #[test]
-    fn validate_blocknote_tool_missing_required_fields() {
-        let args = r#"{"blocks":[{"type":"paragraph"}]}"#;
-        let result = validate_tool_call("apply_blocknote_blocks", args);
-        assert!(result.is_err());
     }
 }
 

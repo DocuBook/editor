@@ -14,25 +14,6 @@ impl Agent {
         Self { provider: provider.to_string(), model: model.to_string(), api_key: api_key.to_string(), base_url: base_url.to_string() }
     }
 
-/** Create an agent from macOS Keychain. */
-    pub fn from_env() -> Option<Self> {
-        let keychain_key = |provider: &str| -> Option<String> {
-            crate::keychain::get_key(provider).ok()
-        };
-        if let Some(key) = keychain_key("openai") {
-            return Some(Self::new("openai", "gpt-4o", &key, "https://api.openai.com/v1"));
-        }
-        if let Some(key) = keychain_key("anthropic") {
-            return Some(Self::new("anthropic", "claude-sonnet-4-20250514", &key, "https://api.anthropic.com"));
-        }
-        if let Some(key) = keychain_key("google") {
-            return Some(Self::new("google", "gemini-2.0-flash", &key, "https://generativelanguage.googleapis.com/v1beta"));
-        }
-        if let Some(key) = keychain_key("openrouter") {
-            return Some(Self::new("openrouter", "openai/gpt-4o", &key, "https://openrouter.ai/api/v1"));
-        }
-        None
-    }
 }
 
 #[cfg(test)]
@@ -46,11 +27,6 @@ mod tests {
         assert_eq!(a.model, "test-model");
         assert_eq!(a.api_key, "sk-test-key");
         assert_eq!(a.base_url, "https://test.com/v1");
-    }
-
-    #[test]
-    fn from_env_returns_none_without_keys() {
-        assert!(Agent::from_env().is_none());
     }
 
     #[test]

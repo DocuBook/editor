@@ -122,6 +122,8 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
                 toolBuffer.push(e.payload)
               })
               const unsubToolsDone = await listen('ai:tools_done', () => {})
+              /** Propagate xl-ai abort → Rust cancel (stops the in-flight reqwest stream). */
+              abortSignal?.addEventListener?.('abort', () => { invoke('cancel_ai').catch(() => {}) })
               try {
                 /** Ground the model with actual document state so output is doc-specific, not generic */
                 const docContext = buildDocumentContext()
@@ -196,12 +198,12 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
                 }
                 closed = true
                 if (!accepted) {
-                  /** All retries failed validation — inform the user and close the menu cleanly.
-                   *  (No controller.error: it causes unhandled rejections in xl-ai's stream plumbing.) */
+                  /** Signal the error to xl-ai so its AIMenu shows error state with retry/cancel
+                   *  (built-in getDefaultAIMenuItemsForError renders retry + cancel buttons). */
                   const reason = lastReason || 'unknown'
                   console.error('[ai] AI output failed validation:', reason)
-                  toast.error('AI output was rejected')
-                  try { editorRef.current?.extensions?.get('ai')?.rejectChanges?.() } catch {}
+                  toast.error('AI output was rejected — retry or cancel in the AI menu')
+                  controller.error(new Error(reason))
                 } else if (emitToolCalls.length > 0) {
                   for (const tc of emitToolCalls) {
                     /** Emit tool-input-available so xl-ai Chat creates a tool part → suggestions */
@@ -217,9 +219,9 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
                     controller.enqueue({ type: 'tool-input-available', toolCallId: 'gen-' + crypto.randomUUID(), toolName: 'applyDocumentOperations', input })
                     controller.enqueue({ type: 'text-end', id })
                   } else {
-                    /** No operations could be built (empty/invalid AI output) — surface as an error instead of mutating the doc. */
+                    /** Let xl-ai show error state (retry/cancel in AIMenu) instead of silently closing. */
                     console.error('[ai] could not build document operations from AI output:', emitText.substring(0, 200))
-                    controller.enqueue({ type: 'text-end', id })
+                    controller.error(new Error('AI output could not be converted to document operations'))
                   }
                 } else {
                   /** Nothing to emit (e.g., empty accepted output) — close text part normally. */

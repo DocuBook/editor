@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.1.0-alpha.4 — 2026-08-02
+
+### AI backend hardening
+
+Foundation improvements to the Rust AI streaming pipeline and error UX. All changes are **backward compatible** — no breaking API or config changes.
+
+#### 🐛 Bug Fixes
+
+- **Replace selection + AI returns extra blocks** — when the model produces more blocks than the selection (very common for improve/rewrite), extra blocks received `id: "undefined$"` causing semantic validation rejection and a silent toast. Extra blocks are now appended as a single `add` operation after the last selected block
+- **AI streaming total timeout cuts long generations** — `reqwest::Client::timeout()` is a total deadline; long generations from slow/local models were cut off at 120s. Replaced with `read_timeout` (per-chunk idle, resets on each read) — long streams survive as long as bytes keep flowing
+- **User abort never stopped backend** — when xl-ai cancels a request (user closes menu, new request), the Rust `ask_ai` stream continued until completion or 120s timeout. Now a `cancel_ai` command sets an `AtomicBool` flag checked per chunk; frontend wires the abort signal to invoke it
+- **AI error state not shown in xl-ai's own UI** — when the retry loop exhausted or output could not be parsed into document operations, the AI menu closed silently (only a toast appeared). Now `controller.error()` is emitted so xl-ai's built-in AIMenu renders the error state with **retry + cancel** buttons (`getDefaultAIMenuItemsForError`)
+
+#### 🧹 Cleanup
+
+- **Dead legacy tool validation removed** — `ApplyBlocksInput`, `Cursor`, `validate_tool_call`, and 7 tests for `apply_blocknote_blocks` deleted (unused since the transport switched to xl-ai's own `applyDocumentOperations`)
+- **Dead `agent::from_env` removed** — the keychain-fallback constructor was never called (frontend always passes explicit provider/config) and hardcoded an incorrect `base_url` for Anthropic (Anthropic natively uses a different API format)
+- **Provider field now emitted** in `ai:done` event (previously an unused field with a `let _ =` suppress)
+
+***
+
 ## v0.1.0-alpha.3 — 2026-08-01
 
 ### AI editing polish
