@@ -204,3 +204,6 @@ src-tauri/src/
 ### Commercial Use
 
 The GPL-3.0 license is valid for commercial activities at the service and infrastructure level — cloud hosting, managed deployments, and AI provider gateways. For any commercial use of this kind, such as running DocuBook as infrastructure or as an AI gateway/provider, please contact the author first to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
+
+> [!NOTE]
+> **Personal and community use remains free forever.** Using DocuBook for yourself, your studies, or your community — on your own devices or your own server — always stays free and open source.
