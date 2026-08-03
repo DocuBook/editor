@@ -66,7 +66,7 @@ jobs:
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked
-          cargo audit --manifest-path src-tauri/Cargo.toml
+          cd src-tauri && cargo audit
 
 
   build:
@@ -88,6 +88,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           targets: ${{ matrix.target }}
+      # arm64 runners (macos-14) install only the native target by default —
+      # ensure the matrix target is present for the x86_64 job.
+      - name: Ensure target
+        run: rustup target add ${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
