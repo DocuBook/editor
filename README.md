@@ -1,8 +1,13 @@
-# DocuBook Editor
+<p align="center">
+  <img alt="DocuBook" src="https://shieldcn.dev/header/graph.svg?title=DocuBook+Editor&amp;subtitle=The+markdown+editor+that+thinks+like+a+developer+%E2%80%94+Obsidian+vaults%2C+Notion+blocks%2C+Zed-speed+search%2C+and+Git+%E2%80%94+all+in+one.&amp;logo=lu%3AWandSparkles&amp;mode=dark" />
+</p>
 
-A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
+<p align="center">
+  <a href="https://github.com/DocuBook/editor/releases"><img alt="release" src="https://shieldcn.dev/github/DocuBook/editor/release.svg?split=true" /></a>
+  <a href="https://github.com/DocuBook/editor/actions"><img alt="CI" src="https://shieldcn.dev/github/DocuBook/editor/ci.svg?split=true" /></a>
+</p>
 
-> The markdown editor that thinks like a developer — Obsidian vaults, Notion blocks, Zed-speed search, and Git — all in one.
+> A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
 
 ***
 
