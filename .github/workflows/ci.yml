@@ -122,7 +122,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: DocuBook-*
-          merge-multiple: true
+          # Keep per-artifact folders (DocuBook-arm64/, DocuBook-amd64/) so the
+          # release globs resolve — merge-multiple flattens and breaks them.
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ github.token }}
