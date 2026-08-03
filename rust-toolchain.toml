@@ -1,0 +1,6 @@
+# Pin the Rust toolchain so local builds and CI are deterministic.
+# Local verification: rustc 1.94.1 (2026-03-25). Bump deliberately when upgrading.
+[toolchain]
+channel = "1.94.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

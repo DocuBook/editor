@@ -1,1 +1,1 @@
-npx oxlint
+npx lint-staged

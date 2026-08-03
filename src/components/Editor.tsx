@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState } from '@blocknote/react'
+import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState, useBlockNoteEditor } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
@@ -7,22 +7,30 @@ import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blo
 import { en as baseDict } from '@blocknote/core/locales'
 import { AIExtension, AIMenuController, AIToolbarButton, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
-import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder } from 'lucide-react'
+import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder, GitBranch, Link2 } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
+import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
 import { useKeyboard } from '../hooks/useKeyboard'
-import { usePolling } from '../hooks/usePolling'
-import { PROVIDERS } from '../data/providers'
+import { useGitStatus } from '../stores/gitStatus'
 import { useAiSettings } from '../stores/aiSettings'
 
-/** Read saved AI config from persisted store for Rust backend. Always passes provider so backend can resolve key from keychain. */
-function getAiConfig(): { provider?: string; model?: string; baseUrl?: string; apiKey?: string } {
+/** Lazy-load the provider catalog (2.17 MB — keep it out of the initial bundle). */
+let _providersCache: typeof import('../data/providers').PROVIDERS | null = null
+async function getProviders() {
+  if (!_providersCache) _providersCache = (await import('../data/providers')).PROVIDERS
+  return _providersCache
+}
+
+/** Read saved AI config from persisted store for Rust backend. The API key is
+ *  intentionally NOT sent — the backend resolves it from the keychain (SEC-5). */
+async function getAiConfig(): Promise<{ provider?: string; model?: string; baseUrl?: string }> {
   try {
-    const { provider, model, apiKey } = useAiSettings.getState()
-    const p = provider ? PROVIDERS.find(x => x.id === provider) : undefined
-    return { provider: provider || undefined, model: model || undefined, baseUrl: p?.api, apiKey: apiKey || undefined }
+    const { provider, model } = useAiSettings.getState()
+    const p = provider ? (await getProviders()).find(x => x.id === provider) : undefined
+    return { provider: provider || undefined, model: model || undefined, baseUrl: p?.api }
   } catch (e) { console.error('[ai] getAiConfig error:', e); return {} }
 }
 
@@ -70,18 +78,28 @@ const getSchema = () => {
 
 /** Welcome screen shown when no vault is open — Zed-style launchpad (Open Folder / Create Vault / Recent). */
 function WelcomeScreen() {
-  const { recent, openRecent, openVault, createVault, loading } = useVaultStore()
-  const [step, setStep] = useState<'idle' | 'name'>('idle')
+  const { recent, openRecent, openVault, createVault, cloneVault, loading } = useVaultStore()
+  const [step, setStep] = useState<'idle' | 'name' | 'clone'>('idle')
   const [parent, setParent] = useState('')
   const [name, setName] = useState('My Vault')
+  const [repoUrl, setRepoUrl] = useState('')
+  const [cloneErr, setCloneErr] = useState('')
 
-  const pickParent = async () => {
+  const pickParent = async (title: string) => {
     const { open } = await import('@tauri-apps/plugin-dialog')
-    const p = await open({ directory: true, multiple: false, title: 'Create Vault', defaultPath: recent[0]?.parent })
+    const p = await open({ directory: true, multiple: false, title, defaultPath: recent[0]?.parent })
     if (!p) return
-    setParent(p); setStep('name')
+    setParent(p)
   }
   const create = () => { if (name.trim()) createVault(parent, name.trim()) }
+  const pickCreateParent = async () => { await pickParent('Create Vault'); setStep('name') }
+  const pickCloneParent = async () => { await pickParent('Clone Repository'); setCloneErr(''); setRepoUrl(''); setStep('clone') }
+  const clone = async () => {
+    if (!repoUrl.trim() || !parent) return
+    setCloneErr('')
+    try { await cloneVault(repoUrl.trim(), parent) }
+    catch (e) { setCloneErr(String(e)) }
+  }
 
   const btn = 'w-full flex items-center gap-2 rounded-md px-4 py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors'
   const btnPrimary = btn + ' justify-center bg-[var(--bg-hover)] text-[var(--text-primary)] border-none hover:bg-[var(--bg-tertiary)]'
@@ -97,8 +115,11 @@ function WelcomeScreen() {
           <button disabled={loading} onClick={openVault} className={btnPrimary}>
             Open Folder <span className="ml-auto text-[11px] text-[var(--text-muted)] flex items-center gap-0.5"><Command size={11} />O</span>
           </button>
-          <button disabled={loading} onClick={pickParent} className={btnSecondary}>
+          <button disabled={loading} onClick={pickCreateParent} className={btnSecondary}>
             Create New Vault
+          </button>
+          <button disabled={loading} onClick={pickCloneParent} className={btnSecondary}>
+            Clone Repository <GitBranch size={13} className="text-[var(--text-muted)]" />
           </button>
         </div>
         {recent.length > 0 && (
@@ -117,11 +138,28 @@ function WelcomeScreen() {
           </div>
         )}
         {step === 'name' && (
-          <div className="mt-4">
+          <div className="mt-4 text-left">
             <input autoFocus type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Vault name"
               onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setStep('idle'); setName('My Vault') } }}
               className="w-full bg-[var(--bg-primary)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] outline-none" />
-            <div className="text-[10px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">Created in {parent}</div>
+            <div className="text-[10px] text-[var(--text-muted)] mt-1 truncate">Created in {parent}</div>
+          </div>
+        )}
+        {step === 'clone' && (
+          <div className="mt-4 text-left">
+            <input autoFocus type="text" value={repoUrl} onChange={e => { setRepoUrl(e.target.value); setCloneErr('') }} placeholder="https://github.com/user/repo.git"
+              onKeyDown={e => { if (e.key === 'Enter') clone(); if (e.key === 'Escape') { setStep('idle'); setCloneErr('') } }}
+              className="w-full bg-[var(--bg-primary)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] outline-none" />
+            <div className="flex items-center gap-2 mt-2">
+              <button disabled={loading || !repoUrl.trim()} onClick={clone} className={btnPrimary + ' !w-auto px-4'}>
+                {loading ? 'Cloning…' : 'Clone'}
+              </button>
+              <button onClick={() => { setStep('idle'); setCloneErr('') }} className="text-xs text-[var(--text-muted)] hover:text-zinc-300 cursor-pointer bg-transparent border-none">Cancel</button>
+            </div>
+            {cloneErr && <div className="mt-2 text-[11px] text-[var(--danger)] leading-relaxed">Clone failed: {cloneErr}</div>}
+            <div className="text-[10px] text-[var(--text-muted)] mt-2 leading-relaxed">
+              Clone into {parent}. Private repos need your SSH key or git credential helper (macOS Keychain) already configured on this machine — the app uses them automatically. Public repos need no setup.
+            </div>
           </div>
         )}
       </div>
@@ -145,12 +183,12 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
           if (!messages.length || abortSignal?.aborted) return new ReadableStream()
           const { invoke } = await import('@tauri-apps/api/core')
           const { listen } = await import('@tauri-apps/api/event')
-          const config = getAiConfig()
+          const config = await getAiConfig()
           /** Fallback: always resolve provider/model from store even if config incomplete (HMR-safe) */
           const st = useAiSettings.getState()
           const resolvedProvider = config.provider || st.provider
           const resolvedModel = config.model || st.model
-          const providerInfo = PROVIDERS.find(p => p.id === resolvedProvider)
+          const providerInfo = (await getProviders()).find(p => p.id === resolvedProvider)
           const modelDef = providerInfo?.models.find(m => m.id === resolvedModel)
           const supportsTools = modelDef?.toolCall === true && resolvedProvider !== 'opencode-go'
           const toolDefs = (body as any)?.toolDefinitions as Record<string, { description: string; inputSchema: any }> | undefined
@@ -163,12 +201,6 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
           const selText = sel?.blocks?.length ? editorRef.current.blocksToMarkdownLossy(sel.blocks) : '';
           const stream = new ReadableStream({
             async start(controller) {
-              /** Ensure API key is loaded from keychain (critical on HMR) — backend also resolves it as fallback */
-              let apiKey = config.apiKey
-              if (!apiKey && resolvedProvider) {
-                try { apiKey = await invoke<string>('get_api_key', { provider: resolvedProvider }) } catch (e) { console.error('[ai] get_api_key failed:', e) }
-                if (apiKey) useAiSettings.getState().setApiKey(apiKey)
-              }
               const id = crypto.randomUUID()
               let fullText = ''
               controller.enqueue({ type: 'text-start', id })
@@ -237,7 +269,6 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
                     provider: resolvedProvider,
                     model: resolvedModel,
                     baseUrl: providerInfo?.api,
-                    apiKey,
                   })
                   /** Real correctness gate: referenced ids must exist in the document (blocking). */
                   let semanticError: string | null = null
@@ -430,9 +461,70 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
 const FormattingToolbarWithAI = () => (
   <FormattingToolbar>
     {getFormattingToolbarItems()}
+    <LinkNoteButton />
     <AIToolbarButton />
   </FormattingToolbar>
 )
+
+/** "Link note" — search vault notes and insert a `[[wikilink]]` at the cursor. */
+function LinkNoteButton() {
+  const editor = useBlockNoteEditor()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<{ path: string; title: string }[]>([])
+  const [selected, setSelected] = useState(0)
+
+  useEffect(() => {
+    if (!open || !query.trim()) { setResults([]); return }
+    const t = setTimeout(() => {
+      invoke<string>('wiki_suggest', { query: query.trim() }).then(s => {
+        try { setResults(JSON.parse(s)); setSelected(0) } catch {}
+      }).catch(() => {})
+    }, 150)
+    return () => clearTimeout(t)
+  }, [query, open])
+
+  const insert = (title: string) => {
+    try {
+      editor.insertInlineContent([{ type: 'text', text: `[[${title}]]`, styles: {} }] as any)
+    } catch (e) { console.error('insert link:', e) }
+    setOpen(false); setQuery(''); setResults([])
+  }
+
+  return (
+    <>
+      <button onClick={() => { setOpen(true); setQuery('') }} title="Insert note link ([[wikilink]])"
+        className="flex items-center justify-center p-1 rounded hover:bg-[var(--bg-hover)] text-[var(--text-muted)] cursor-pointer">
+        <Link2 size={14} />
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]" onClick={() => setOpen(false)}>
+          <div onClick={e => e.stopPropagation()} className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg w-[400px] max-h-[300px] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]">
+            <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && results[selected]) { e.preventDefault(); insert(results[selected].title) }
+                if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(i => Math.min(i + 1, results.length - 1)) }
+                if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(i => Math.max(i - 1, 0)) }
+                if (e.key === 'Escape') { e.preventDefault(); setOpen(false) }
+              }}
+              placeholder="Search notes to link…"
+              className="w-full bg-transparent border-b border-[var(--border)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none" />
+            <div className="max-h-[250px] overflow-y-auto py-1">
+              {results.length === 0 && query && <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No notes found</div>}
+              {results.map((r, i) => (
+                <div key={r.path} onClick={() => insert(r.title)}
+                  onMouseEnter={() => setSelected(i)}
+                  className={'px-3 py-1.5 text-sm cursor-pointer ' + (i === selected ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)]')}>
+                  {r.title}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
 
 /** Plain text viewer for non-markdown files. */
 function PlainTextViewer({ content, fileName }: { content: string; fileName: string }) {
@@ -480,23 +572,23 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
     setHasDiskChanges(false)
   }, [curTab])
 
-  /** Git status polling (every 3s) */
-  usePolling(() => {
-    import('@tauri-apps/api/core').then(m =>
-      m.invoke<string>('git_status').then(s => {
-        try { const d = JSON.parse(s); const lines = d.status?.trim() ? d.status.split('\n').filter((l:string) => l.trim()) : [];
-          const curFile = useEditorStore.getState().activeTab
-          const relevant = curFile ? lines.filter((l:string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
-          setHasDiskChanges(relevant.some((l:string) => l.length > 1 && l[1] !== ' '));
-          if (lines.length === 0 || !lines.some((l:string) => l[0] !== ' ' && l[0] !== '?')) setStaged(false) } catch {}
-      }).catch(e => { console.error('Git status:', e) })
-    )
-  }, 3000)
+  /** Git status: shared store (single poller from App root) — derive per-tab state. */
+  const gitStatus = useGitStatus(s => s.status)
+  useEffect(() => {
+    const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
+    const curFile = useEditorStore.getState().activeTab
+    const relevant = curFile ? lines.filter((l: string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
+    setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== ' '))
+    if (lines.length === 0 || !lines.some((l: string) => l[0] !== ' ' && l[0] !== '?')) setStaged(false)
+  }, [gitStatus])
 
   const publish = async () => {
     setPubState('committing')
     try {
-      const msg = `Auto-commit: ${tabs.find(t => t.path === activeTab)?.name || 'changes'}`
+      const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
+      /** Sanitize the filename for use in a git commit message: strip control
+       *  characters, newlines, and trailing dots (Windows-invalid). */
+      const msg = `Auto-commit: ${rawName.replace(/[\x00-\x1f\x7f]/g, '').replace(/\.+$/g, '').trim() || 'changes'}`
       const res = await (await import('@tauri-apps/api/core')).invoke<string>('git_push', { message: msg })
       const d = JSON.parse(res)
       if (d.error && d.error !== 'Nothing to push') { setPubMsg(d.error); setPubState('error'); setStaged(false) }

@@ -1,19 +1,12 @@
 import { useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import { GitBranch, CircleHelp } from 'lucide-react'
 import ShortcutsModal from './ShortcutsModal'
-import { usePolling } from '../hooks/usePolling'
+import { useGitStatus } from '../stores/gitStatus'
 
-/** Bottom status bar showing git branch state. */
+/** Bottom status bar showing git branch state (consumes the shared git-status poll). */
 export default function StatusBar() {
-  const [branch, setBranch] = useState<string | null>(null)
+  const branch = useGitStatus(s => s.branch)
   const [showShortcuts, setShowShortcuts] = useState(false)
-
-  usePolling(() => {
-    invoke<string>('git_status').then(s => {
-      try { const r = JSON.parse(s); setBranch(r.branch || null) } catch { setBranch(null) }
-    }).catch(() => setBranch(null))
-  }, 5000)
 
   return (
     <footer className="ui-shell h-6 bg-[var(--bg-secondary)] border-t border-[var(--border-subtle)] flex items-center text-xs text-zinc-600 shrink-0 px-3 pl-2">

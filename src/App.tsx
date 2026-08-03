@@ -8,11 +8,33 @@ import GraphView from './components/GraphView'
 import { Toaster } from 'sonner'
 import { PanelLeftOpen, Command } from 'lucide-react'
 
+import { useGitPolling } from './stores/gitStatus'
+import { useEditorStore } from './stores/editor'
+
 /** Root application component with keyboard shortcuts. */
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [graphOpen, setGraphOpen] = useState(false)
   const toggleSidebar = () => setSidebarOpen(o => !o)
+
+  /** Single git-status poller shared by StatusBar + TabBar. */
+  useGitPolling()
+
+  /** Graceful shutdown: on window close, flush + save all dirty tabs, then confirm. */
+  useEffect(() => {
+    let unsub: (() => void) | undefined
+    let cancelled = false
+    import('@tauri-apps/api/event').then(({ listen }) =>
+      listen('app:before-close', async () => {
+        await useEditorStore.getState().persistAllDirty()
+        if (!cancelled) {
+          const { invoke } = await import('@tauri-apps/api/core')
+          try { await invoke('app_ready_to_close') } catch (e) { console.error('close:', e) }
+        }
+      }).then(u => { if (!cancelled) unsub = u })
+    )
+    return () => { cancelled = true; unsub?.() }
+  }, [])
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {

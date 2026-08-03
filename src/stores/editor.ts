@@ -38,6 +38,8 @@ interface EditorState {
   setEditedContent: (path: string, md: string) => void
   setTabDirty: (path: string, dirty: boolean) => void
   setTabDeleted: (path: string, deleted: boolean) => void
+  /** Flush the WYSIWYG editor and write every dirty tab to disk (graceful close). */
+  persistAllDirty: () => Promise<void>
   setEditMode: (mode: EditMode) => void
   toggleEditMode: () => void
 }
@@ -97,6 +99,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setTabDirty: (path, dirty) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, dirty } : t) }) },
   setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, deleted } : t) }) },
+
+  /** Flush WYSIWYG then write every dirty tab to disk — used on app close. */
+  persistAllDirty: async () => {
+    get().flushEditor()
+    for (const tab of get().tabs) {
+      if (tab.dirty && tab.editedContent && !tab.deleted) {
+        const content = tab.frontmatter + tab.editedContent.replace(/^\n+/, '').replace(/\n+$/, '')
+        try { await invoke('write_file', { path: tab.path, content }) } catch (e) { console.error('save on close:', e) }
+      }
+    }
+  },
   
   setEditMode: (mode) => { set({ editMode: mode }) },
   /** Toggle editor mode; flush WYSIWYG → store BEFORE switching to markdown so edits are not lost. */

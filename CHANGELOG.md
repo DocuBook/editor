@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.1.0-alpha.6 — 2026-08-03
+
+### Security hardening & release readiness
+
+Execution of the release audit (35 findings, issues #2–#36). The webview is treated as **untrusted** and the Rust backend as the trust boundary: path access is canonicalized, AI base URLs are allowlisted, API keys never leave the Keychain, and every Tauri command is scoped by the capabilities ACL. All changes are **backward compatible** — no breaking API or config changes.
+
+#### 🐛 Bug Fixes
+
+- **Vault path traversal (critical)** — `safe_path` now canonicalizes and verifies containment: absolute paths, `..` escapes, and symlink escapes are rejected, while not-yet-existing targets (create/write) are still accepted via their deepest existing ancestor
+- **SSRF + API key exfiltration (critical)** — AI base URLs are allowlisted to provider endpoints (models.dev catalog + loopback for local LLM servers); `http` to remote hosts, private/link-local IPs, and non-allowlisted hosts are rejected; the API key is always resolved from the Keychain and a webview-provided key is ignored
+- **Stored XSS via markdown HTML** — `md_to_html` / `markdown_preview` now render with raw HTML disabled and ammonia-sanitize the output (script/iframe/event handlers/`javascript:` URLs stripped)
+- **Unbounded AI response buffering** — 8 MiB cap with a `truncated` flag on `ai:done` (memory-exhaustion guard)
+- **Internal error details leaked to the UI** — transport errors map to user-safe messages; HTTP errors show only the status, never the provider body/URLs
+- **IPC authorization** — all 31 Tauri commands are scoped via the capabilities ACL (`allow-*` permissions, canonical Tauri format); strict production CSP (`script-src 'self'`, `base-uri`/`form-action`/`frame-ancestors`/`object-src` none) + relaxed `devCsp` for the react-refresh preamble; prototype-pollution freeze applied after module evaluation in `main.tsx` (Tauri's `freezePrototype` config injected pre-load and crashed zod/xl-ai, which assign `Object.prototype.toString` during evaluation)
+- **API keys readable from the webview** — `get_api_key` removed entirely; the Settings key input is local state and never loads or displays the stored key; the AI transport no longer sends the key
+- **Filenames in auto-commit messages** — control chars/newlines and trailing dots stripped
+- **`git_status` polled twice** — Editor (3s) + StatusBar (5s) replaced by a single shared poller; per-tab state derives from it
+- **Search modal keyboard navigation did not scroll** — ArrowUp/Down moved the highlight past the visible area; the list now scrolls the selected result into view (`block: nearest`)
+- **openai/anthropic/google direct connect broken** — their `api` fields were empty in the provider catalog; filled with canonical endpoints
+
+#### 🚀 Features
+
+- **Git settings UI** — Settings modal (⌘,) now has AI + Git tabs: commit identity (per-vault, global config untouched), remote add/remove, and in-app **Initialize git repository** (no terminal needed)
+- **Clone repository** — welcome screen flow with URL input, remote-only validation (no local paths/`file://`), anti-traversal folder naming, and clear private-repo guidance
+- **Graceful shutdown** — window close emits `app:before-close` → the frontend saves every dirty tab → confirms; 3s force-close fallback if the frontend hangs
+- **Error boundary** — a render crash shows a recovery screen with Reload instead of a blank window
+- **Health/diagnostics command** — version / vault-open / git-repo status for the future cloud service
+- **Wiki (Obsidian-style wikilinks)** — `[[Note]]` resolution to real files, backlinks with one-line context snippets (previously always empty), a note-search **Link note** button in the formatting toolbar that inserts `[[wikilink]]` at the cursor, and snippets in the sidebar Backlinks panel
+- **Basic backend logging** — lifecycle logs for vault open and AI request start/done
+
+#### 🧹 Cleanup
+
+- **Dead Tauri commands pruned** — `vault_info`, `wiki_suggest` removed (never called); SSE parsing already unified in a single dispatcher
+- **Unused `@mantine/utils` (v6) removed** — eliminates the v6/v9 version skew with `@mantine/core@9`
+- **Providers catalog lazy-loaded** — 621 KB chunk split out of the initial bundle (2.17 MB → ~1.5 MB)
+- **Rust toolchain pinned** (`rust-toolchain.toml`, 1.94.1) — deterministic local builds and CI
+- **CI hardened** — version-consistency check, `npm audit` + `cargo audit` + Dependabot, publish job fails loudly (no `|| true`), pinned runners (macOS 14 / Ubuntu 22.04), pre-commit runs `lint-staged`
+- **macOS 12 minimum enforced** in the bundle config
+- **Repo hygiene** — `.editorconfig`, `.gitattributes`, `.npmrc`, `.env` ignored
+- **Docs reorganized** — README is end-user only (install/first-run/troubleshooting, corrected provider/model counts, clarified GPL commercial clause); developer content moved to `CONTRIBUTING.md`; `SECURITY.md` + issue/PR templates + CODEOWNERS added
+
+---
+
 ## v0.1.0-alpha.5 — 2026-08-03
 
 ### Editor stability & vault onboarding

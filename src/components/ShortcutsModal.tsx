@@ -38,7 +38,7 @@ const SHORTCUTS = [
   ]},
   { category: 'AI & Settings', items: [
     { keys: '\u02C6\u2325L', desc: 'Ask AI / Write with AI (opens AI menu at cursor)' },
-    { keys: '\u2318,', desc: 'AI Settings' },
+    { keys: '\u2318,', desc: 'Settings' },
   ]},
   { category: 'Writing', items: [
     { keys: 'Tab / \u21E7Tab', desc: 'Indent / outdent block' },

@@ -17,7 +17,16 @@ if (!Array.prototype.toSpliced) {
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import ErrorBoundary from './components/ErrorBoundary'
+
+// Prototype-pollution hardening (replaces Tauri's freezePrototype, which is
+// injected before app load and breaks zod/xl-ai: they assign
+// Object.prototype.toString during module evaluation). Freezing AFTER all
+// imports have evaluated keeps the hardening without the load-time crash.
+Object.freeze(Object.prototype)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode><App /></React.StrictMode>,
+  <React.StrictMode>
+    <ErrorBoundary><App /></ErrorBoundary>
+  </React.StrictMode>,
 )

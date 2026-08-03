@@ -41,17 +41,9 @@ export const useAiSettings = create<AiSettingsState>()(
         const { apiKey: _, apiKeys: __, ...safe } = state
         return safe
       },
-      /** Fetch API key from keychain immediately after localStorage hydration. */
-      onRehydrateStorage: () => {
-        return (rehydratedState, error) => {
-          if (error || !rehydratedState?.provider) return
-          import('@tauri-apps/api/core').then(({ invoke }) =>
-            invoke<string>('get_api_key', { provider: rehydratedState.provider })
-              .then(k => { if (k) useAiSettings.getState().setApiKey(k) })
-              .catch(() => {})
-          )
-        }
-      },
+      /** API key is NOT persisted and never read from the webview — the backend
+       *  resolves it from the keychain on demand (SEC-5). */
+      onRehydrateStorage: () => () => {},
     }
   )
 )

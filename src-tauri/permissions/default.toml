@@ -1,0 +1,360 @@
+# App command permissions — SEC-3: every Tauri command is scoped via the capabilities ACL.
+# Auto-generated from the generate_handler! list (canonical Tauri format).
+# If a command is added/removed, update this file and capabilities/default.json together.
+
+[default]
+permissions = [
+  "allow-app-ready-to-close",
+  "allow-ask-ai",
+  "allow-cancel-ai",
+  "allow-close-vault",
+  "allow-create-directory",
+  "allow-create-file",
+  "allow-create-vault",
+  "allow-delete-api-key",
+  "allow-delete-file",
+  "allow-git-add-remote",
+  "allow-git-clone",
+  "allow-git-init",
+  "allow-git-push",
+  "allow-git-remove-remote",
+  "allow-git-set-identity",
+  "allow-git-settings",
+  "allow-git-stage",
+  "allow-git-status",
+  "allow-health",
+  "allow-list-api-keys",
+  "allow-list-tree",
+  "allow-markdown-preview",
+  "allow-md-to-html",
+  "allow-open-vault",
+  "allow-read-file",
+  "allow-rename-file",
+  "allow-search-vault",
+  "allow-set-api-key",
+  "allow-test-connection",
+  "allow-wiki-backlinks",
+  "allow-wiki-suggest",
+  "allow-write-file"
+]
+
+[[permission]]
+identifier = "allow-app-ready-to-close"
+description = "Enables the app_ready_to_close command."
+commands.allow = ["app_ready_to_close"]
+
+[[permission]]
+identifier = "deny-app-ready-to-close"
+description = "Denies the app_ready_to_close command."
+commands.deny = ["app_ready_to_close"]
+
+[[permission]]
+identifier = "allow-ask-ai"
+description = "Enables the ask_ai command."
+commands.allow = ["ask_ai"]
+
+[[permission]]
+identifier = "deny-ask-ai"
+description = "Denies the ask_ai command."
+commands.deny = ["ask_ai"]
+
+[[permission]]
+identifier = "allow-cancel-ai"
+description = "Enables the cancel_ai command."
+commands.allow = ["cancel_ai"]
+
+[[permission]]
+identifier = "deny-cancel-ai"
+description = "Denies the cancel_ai command."
+commands.deny = ["cancel_ai"]
+
+[[permission]]
+identifier = "allow-close-vault"
+description = "Enables the close_vault command."
+commands.allow = ["close_vault"]
+
+[[permission]]
+identifier = "deny-close-vault"
+description = "Denies the close_vault command."
+commands.deny = ["close_vault"]
+
+[[permission]]
+identifier = "allow-create-directory"
+description = "Enables the create_directory command."
+commands.allow = ["create_directory"]
+
+[[permission]]
+identifier = "deny-create-directory"
+description = "Denies the create_directory command."
+commands.deny = ["create_directory"]
+
+[[permission]]
+identifier = "allow-create-file"
+description = "Enables the create_file command."
+commands.allow = ["create_file"]
+
+[[permission]]
+identifier = "deny-create-file"
+description = "Denies the create_file command."
+commands.deny = ["create_file"]
+
+[[permission]]
+identifier = "allow-create-vault"
+description = "Enables the create_vault command."
+commands.allow = ["create_vault"]
+
+[[permission]]
+identifier = "deny-create-vault"
+description = "Denies the create_vault command."
+commands.deny = ["create_vault"]
+
+[[permission]]
+identifier = "allow-delete-api-key"
+description = "Enables the delete_api_key command."
+commands.allow = ["delete_api_key"]
+
+[[permission]]
+identifier = "deny-delete-api-key"
+description = "Denies the delete_api_key command."
+commands.deny = ["delete_api_key"]
+
+[[permission]]
+identifier = "allow-delete-file"
+description = "Enables the delete_file command."
+commands.allow = ["delete_file"]
+
+[[permission]]
+identifier = "deny-delete-file"
+description = "Denies the delete_file command."
+commands.deny = ["delete_file"]
+
+[[permission]]
+identifier = "allow-git-add-remote"
+description = "Enables the git_add_remote command."
+commands.allow = ["git_add_remote"]
+
+[[permission]]
+identifier = "deny-git-add-remote"
+description = "Denies the git_add_remote command."
+commands.deny = ["git_add_remote"]
+
+[[permission]]
+identifier = "allow-git-clone"
+description = "Enables the git_clone command."
+commands.allow = ["git_clone"]
+
+[[permission]]
+identifier = "deny-git-clone"
+description = "Denies the git_clone command."
+commands.deny = ["git_clone"]
+
+[[permission]]
+identifier = "allow-git-init"
+description = "Enables the git_init command."
+commands.allow = ["git_init"]
+
+[[permission]]
+identifier = "deny-git-init"
+description = "Denies the git_init command."
+commands.deny = ["git_init"]
+
+[[permission]]
+identifier = "allow-git-push"
+description = "Enables the git_push command."
+commands.allow = ["git_push"]
+
+[[permission]]
+identifier = "deny-git-push"
+description = "Denies the git_push command."
+commands.deny = ["git_push"]
+
+[[permission]]
+identifier = "allow-git-remove-remote"
+description = "Enables the git_remove_remote command."
+commands.allow = ["git_remove_remote"]
+
+[[permission]]
+identifier = "deny-git-remove-remote"
+description = "Denies the git_remove_remote command."
+commands.deny = ["git_remove_remote"]
+
+[[permission]]
+identifier = "allow-git-set-identity"
+description = "Enables the git_set_identity command."
+commands.allow = ["git_set_identity"]
+
+[[permission]]
+identifier = "deny-git-set-identity"
+description = "Denies the git_set_identity command."
+commands.deny = ["git_set_identity"]
+
+[[permission]]
+identifier = "allow-git-settings"
+description = "Enables the git_settings command."
+commands.allow = ["git_settings"]
+
+[[permission]]
+identifier = "deny-git-settings"
+description = "Denies the git_settings command."
+commands.deny = ["git_settings"]
+
+[[permission]]
+identifier = "allow-git-stage"
+description = "Enables the git_stage command."
+commands.allow = ["git_stage"]
+
+[[permission]]
+identifier = "deny-git-stage"
+description = "Denies the git_stage command."
+commands.deny = ["git_stage"]
+
+[[permission]]
+identifier = "allow-git-status"
+description = "Enables the git_status command."
+commands.allow = ["git_status"]
+
+[[permission]]
+identifier = "deny-git-status"
+description = "Denies the git_status command."
+commands.deny = ["git_status"]
+
+[[permission]]
+identifier = "allow-health"
+description = "Enables the health command."
+commands.allow = ["health"]
+
+[[permission]]
+identifier = "deny-health"
+description = "Denies the health command."
+commands.deny = ["health"]
+
+[[permission]]
+identifier = "allow-list-api-keys"
+description = "Enables the list_api_keys command."
+commands.allow = ["list_api_keys"]
+
+[[permission]]
+identifier = "deny-list-api-keys"
+description = "Denies the list_api_keys command."
+commands.deny = ["list_api_keys"]
+
+[[permission]]
+identifier = "allow-list-tree"
+description = "Enables the list_tree command."
+commands.allow = ["list_tree"]
+
+[[permission]]
+identifier = "deny-list-tree"
+description = "Denies the list_tree command."
+commands.deny = ["list_tree"]
+
+[[permission]]
+identifier = "allow-markdown-preview"
+description = "Enables the markdown_preview command."
+commands.allow = ["markdown_preview"]
+
+[[permission]]
+identifier = "deny-markdown-preview"
+description = "Denies the markdown_preview command."
+commands.deny = ["markdown_preview"]
+
+[[permission]]
+identifier = "allow-md-to-html"
+description = "Enables the md_to_html command."
+commands.allow = ["md_to_html"]
+
+[[permission]]
+identifier = "deny-md-to-html"
+description = "Denies the md_to_html command."
+commands.deny = ["md_to_html"]
+
+[[permission]]
+identifier = "allow-open-vault"
+description = "Enables the open_vault command."
+commands.allow = ["open_vault"]
+
+[[permission]]
+identifier = "deny-open-vault"
+description = "Denies the open_vault command."
+commands.deny = ["open_vault"]
+
+[[permission]]
+identifier = "allow-read-file"
+description = "Enables the read_file command."
+commands.allow = ["read_file"]
+
+[[permission]]
+identifier = "deny-read-file"
+description = "Denies the read_file command."
+commands.deny = ["read_file"]
+
+[[permission]]
+identifier = "allow-rename-file"
+description = "Enables the rename_file command."
+commands.allow = ["rename_file"]
+
+[[permission]]
+identifier = "deny-rename-file"
+description = "Denies the rename_file command."
+commands.deny = ["rename_file"]
+
+[[permission]]
+identifier = "allow-search-vault"
+description = "Enables the search_vault command."
+commands.allow = ["search_vault"]
+
+[[permission]]
+identifier = "deny-search-vault"
+description = "Denies the search_vault command."
+commands.deny = ["search_vault"]
+
+[[permission]]
+identifier = "allow-set-api-key"
+description = "Enables the set_api_key command."
+commands.allow = ["set_api_key"]
+
+[[permission]]
+identifier = "deny-set-api-key"
+description = "Denies the set_api_key command."
+commands.deny = ["set_api_key"]
+
+[[permission]]
+identifier = "allow-test-connection"
+description = "Enables the test_connection command."
+commands.allow = ["test_connection"]
+
+[[permission]]
+identifier = "deny-test-connection"
+description = "Denies the test_connection command."
+commands.deny = ["test_connection"]
+
+[[permission]]
+identifier = "allow-wiki-backlinks"
+description = "Enables the wiki_backlinks command."
+commands.allow = ["wiki_backlinks"]
+
+[[permission]]
+identifier = "deny-wiki-backlinks"
+description = "Denies the wiki_backlinks command."
+commands.deny = ["wiki_backlinks"]
+
+[[permission]]
+identifier = "allow-wiki-suggest"
+description = "Enables the wiki_suggest command."
+commands.allow = ["wiki_suggest"]
+
+[[permission]]
+identifier = "deny-wiki-suggest"
+description = "Denies the wiki_suggest command."
+commands.deny = ["wiki_suggest"]
+
+[[permission]]
+identifier = "allow-write-file"
+description = "Enables the write_file command."
+commands.allow = ["write_file"]
+
+[[permission]]
+identifier = "deny-write-file"
+description = "Denies the write_file command."
+commands.deny = ["write_file"]
+

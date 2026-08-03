@@ -1,7 +1,7 @@
 {
   "name": "@docubook/editor",
   "private": true,
-  "version": "0.1.0-alpha.5",
+  "version": "0.1.0-alpha.6",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -20,7 +20,6 @@
     "@blocknote/xl-ai": "^0.52.1",
     "@mantine/core": "^9.4.2",
     "@mantine/hooks": "^9.4.2",
-    "@mantine/utils": "^6.0.22",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tiptap/extension-bubble-menu": "^3.29.0",
@@ -67,11 +66,6 @@
   },
   "license": "GPL-3.0-only",
   "lint-staged": {
-    "*.{ts,tsx}": [
-      "oxlint"
-    ],
-    "*.rs": [
-      "cargo check --manifest-path src-tauri/Cargo.toml"
-    ]
+    "*.{ts,tsx}": "oxlint"
   }
 }

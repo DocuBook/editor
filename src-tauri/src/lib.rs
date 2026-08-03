@@ -8,13 +8,15 @@ mod keychain;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{State, Manager};
+use tauri::{State, Manager, Emitter};
 
 struct AppState {
     vault: Mutex<Option<vault::Vault>>,
     wiki: Mutex<Option<wiki::WikiIndex>>,
     git: Mutex<Option<git::Git>>,
     ai_cancel: AtomicBool,
+    /** Set when the frontend confirmed it is safe to close (graceful shutdown). */
+    closing: AtomicBool,
 }
 
 #[tauri::command]
@@ -22,6 +24,7 @@ fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
     let v = vault::Vault::new(path)?;
     let name = v.name();
     let mut w = wiki::WikiIndex::new(v.root()); w.scan();
+    eprintln!("[docubook] open_vault: {} (git repo: {})", path, std::path::Path::new(path).join(".git").exists());
     let g = git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);
     *state.wiki.lock().expect("lock") = Some(w);
@@ -45,14 +48,6 @@ fn create_vault(parent: &str, name: &str, state: State<AppState>) -> Result<Stri
 #[tauri::command]
 fn close_vault(state: State<AppState>) -> Result<(), String> {
     *state.vault.lock().expect("lock") = None; *state.wiki.lock().expect("lock") = None; *state.git.lock().expect("lock") = None; Ok(())
-}
-
-#[tauri::command]
-fn vault_info(state: State<AppState>) -> Result<String, String> {
-    match state.vault.lock().expect("lock").as_ref() {
-        Some(v) => Ok(format!(r#"{{"name":"{}"}}"#, v.name())),
-        None => Ok(r#"{"name":""}"#.to_string()),
-    }
 }
 
 #[tauri::command]
@@ -107,6 +102,14 @@ fn rename_file(from: &str, to: &str, state: State<AppState>) -> Result<(), Strin
 
 // ── Wiki ──
 #[tauri::command]
+fn wiki_suggest(query: String, state: State<AppState>) -> Result<String, String> {
+    match state.wiki.lock().expect("lock").as_ref() {
+        Some(w) => serde_json::to_string(&w.suggest(&query)).map_err(|e| e.to_string()),
+        None => Ok("[]".to_string()),
+    }
+}
+
+#[tauri::command]
 fn wiki_backlinks(path: &str, state: State<AppState>) -> Result<String, String> {
     match state.wiki.lock().expect("lock").as_ref() {
         Some(w) => serde_json::to_string(&w.backlinks(path)).map_err(|e| e.to_string()),
@@ -114,25 +117,82 @@ fn wiki_backlinks(path: &str, state: State<AppState>) -> Result<String, String> 
     }
 }
 
-#[tauri::command]
-fn wiki_suggest(query: &str, state: State<AppState>) -> Result<String, String> {
-    match state.wiki.lock().expect("lock").as_ref() {
-        Some(w) => serde_json::to_string(&w.suggest(query)).map_err(|e| e.to_string()),
-        None => Ok("[]".to_string()),
-    }
-}
-
 // ── Search ──
 #[tauri::command]
-fn search_vault(query: &str, state: State<AppState>) -> Result<String, String> {
-    let guard = state.vault.lock().expect("lock");
-    match guard.as_ref() {
-        Some(v) => serde_json::to_string(&search::search_vault(v.root(), query)).map_err(|e| e.to_string()),
-        None => Ok("[]".to_string()),
-    }
+async fn search_vault(query: String, state: State<'_, AppState>) -> Result<String, String> {
+    let root = match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.root().to_path_buf(),
+        None => return Ok("[]".to_string()),
+    };
+    // File scan can take a moment on large vaults — off the main thread.
+    let results = tauri::async_runtime::spawn_blocking(move || search::search_vault(&root, &query))
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&results).map_err(|e| e.to_string())
 }
 
 // ── Git ──
+#[tauri::command]
+async fn git_clone(url: String, parent: String, state: State<'_, AppState>) -> Result<String, String> {
+    // Network clone can take seconds — run off the main thread so the
+    // "Cloning…" UI stays responsive.
+    let dir = tauri::async_runtime::spawn_blocking(move || git::Git::clone_repo(&url, &parent))
+        .await
+        .map_err(|e| e.to_string())??;
+    let resp = open_vault(&dir, state)?;
+    let mut v: serde_json::Value = serde_json::from_str(&resp).map_err(|e| e.to_string())?;
+    v["path"] = serde_json::Value::String(dir);
+    Ok(v.to_string())
+}
+
+#[tauri::command]
+fn git_init(state: State<AppState>) -> Result<(), String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.init(),
+        None => Err("No vault".into()),
+    }
+}
+
+#[tauri::command]
+fn git_settings(state: State<AppState>) -> Result<String, String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) if g.is_repo() => {
+            let (name, email) = g.identity()?;
+            let remotes = g.remotes()?;
+            Ok(serde_json::json!({
+                "isRepo": true, "name": name, "email": email,
+                "remotes": remotes.iter().map(|(n, u)| serde_json::json!({ "name": n, "url": u })).collect::<Vec<_>>(),
+            }).to_string())
+        }
+        Some(_) => Ok(r#"{"isRepo":false,"noVault":false,"name":"","email":"","remotes":[]}"#.to_string()),
+        None => Ok(r#"{"isRepo":false,"noVault":true,"name":"","email":"","remotes":[]}"#.to_string()),
+    }
+}
+
+#[tauri::command]
+fn git_add_remote(name: String, url: String, state: State<AppState>) -> Result<(), String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.add_remote(&name, &url),
+        None => Err("No vault".into()),
+    }
+}
+
+#[tauri::command]
+fn git_remove_remote(name: String, state: State<AppState>) -> Result<(), String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.remove_remote(&name),
+        None => Err("No vault".into()),
+    }
+}
+
+#[tauri::command]
+fn git_set_identity(name: String, email: String, state: State<AppState>) -> Result<(), String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.set_identity(&name, &email),
+        None => Err("No vault".into()),
+    }
+}
+
 #[tauri::command]
 fn git_stage(state: State<AppState>) -> Result<(), String> {
     let guard = state.git.lock().expect("lock");
@@ -143,12 +203,18 @@ fn git_stage(state: State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn git_push(message: String, state: State<AppState>) -> Result<String, String> {
-    let guard = state.git.lock().expect("lock");
-    match guard.as_ref() {
-        Some(g) => serde_json::to_string(&g.push_full(&message)).map_err(|e| e.to_string()),
-        None => Ok(r#"{"error":"No vault"}"#.to_string()),
-    }
+async fn git_push(message: String, state: State<'_, AppState>) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Ok(r#"{"error":"No vault"}"#.to_string()),
+    };
+    // add+commit+push can take seconds on large repos — off the main thread.
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&git::Git::open(&repo_path).push_full(&message)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(res)
 }
 
 #[tauri::command]
@@ -167,26 +233,42 @@ fn git_status(state: State<AppState>) -> Result<String, String> {
 
 // ── Preview ──
 #[tauri::command]
-fn markdown_preview(content: &str) -> String {
-    let parser = pulldown_cmark::Parser::new(content);
+/** Render markdown to HTML with raw HTML DISABLED, then sanitize — closes
+ *  stored-XSS via raw tags, event handlers, and javascript: URLs. */
+fn markdown_to_safe_html(content: &str) -> String {
+    let mut options = pulldown_cmark::Options::empty();
+    options.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    options.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    options.insert(pulldown_cmark::Options::ENABLE_TASKLISTS);
+    // Raw HTML is NOT enabled — inline <script>/<img onerror> become escaped text.
+    let parser = pulldown_cmark::Parser::new_ext(content, options);
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, parser);
-    format!(r#"<div class="prose prose-invert max-w-none px-4 py-4 text-sm">{}</div>"#, html)
+    // Defense in depth: strip anything ammonia's allowlist does not permit
+    // (script, iframe, event handlers, javascript: URLs).
+    ammonia::clean(&html)
+}
+
+#[tauri::command]
+fn markdown_preview(content: &str) -> String {
+    format!(r#"<div class="prose prose-invert max-w-none px-4 py-4 text-sm">{}</div>"#, markdown_to_safe_html(content))
 }
 
 /// Convert markdown to clean HTML (no wrapper) for TipTap display.
 #[tauri::command]
 fn md_to_html(content: &str) -> String {
-    let parser = pulldown_cmark::Parser::new(content);
-    let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, parser);
-    html
+    markdown_to_safe_html(content)
 }
 
 // ── Agent ──
 #[tauri::command]
-fn get_api_key(provider: &str) -> Result<String, String> {
-    keychain::get_key(provider)
+async fn list_api_keys(providers: Vec<String>) -> Result<String, String> {
+    // Keychain scan spawns ~174 `security` processes — run off the main thread
+    // so opening Settings never blocks the UI.
+    let keys = tauri::async_runtime::spawn_blocking(move || keychain::list_keys(&providers))
+        .await
+        .map_err(|e| e.to_string())?;
+    serde_json::to_string(&keys).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -202,6 +284,8 @@ fn delete_api_key(provider: &str) -> Result<(), String> {
 
 #[tauri::command]
 async fn test_connection(_provider: String, model: String, base_url: String, api_key: String) -> Result<String, String> {
+    // SSRF / exfiltration guard — the key may only be sent to an allowed host.
+    agent::validate_base_url(&base_url)?;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build().map_err(|e| format!("Client error: {}", e))?;
@@ -257,15 +341,21 @@ async fn test_connection(_provider: String, model: String, base_url: String, api
 }
 
 #[tauri::command]
-async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
+async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, _api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
     let agent = match (&provider, &model, &base_url) {
         (Some(p), Some(m), Some(b)) => {
-            let key = api_key.clone().or_else(|| keychain::get_key(p).ok()).ok_or("No API key found")?;
+            // SSRF / exfiltration guard: base URL must be an allowlisted provider
+            // endpoint or a loopback (local LLM) server.
+            agent::validate_base_url(b)?;
+            // API key is ALWAYS resolved from the keychain — a webview-provided
+            // key is ignored so it can never be exfiltrated to a non-trusted host.
+            let key = keychain::get_key(p).map_err(|_| "No API key found in keychain")?;
             agent::Agent::new(p, m, &key, b)
         }
         _ => return Err("Provider, model, and base URL are required".to_string()),
     };
     let state = app.state::<AppState>();
+    eprintln!("[docubook] ask_ai: provider={} model={}", agent.provider, agent.model);
     state.ai_cancel.store(false, Ordering::SeqCst);
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -297,11 +387,11 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
             .header("x-opencode-client", "pi")
             .header("x-opencode-session", format!("docubook-{}", std::process::id()));
     }
-    let response = req.json(&body).send().await.map_err(|e| e.to_string())?;
+    let response = req.json(&body).send().await.map_err(|e| sanitize_ai_error(&e.to_string()))?;
     let status = response.status();
     if !status.is_success() {
-        let err_text = response.text().await.map_err(|e| e.to_string())?;
-        return Err(format!("API error ({}): {}", status, err_text));
+        // Do NOT surface the raw provider body — it may leak internal details.
+        return Err(format!("AI provider error (HTTP {})", status));
     }
     let mut stream = response;
     
@@ -314,7 +404,8 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     // Per-chunk String::from_utf8_lossy corrupts multi-byte UTF-8 chars split across chunks,
     // and partial SSE lines (JSON split mid-event) are dropped.
     let mut byte_buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = stream.chunk().await.map_err(|e| e.to_string())? {
+    let mut truncated = false;
+    while let Some(chunk) = stream.chunk().await.map_err(|e| sanitize_ai_error(&e.to_string()))? {
         if state.ai_cancel.load(Ordering::SeqCst) { break }
         byte_buf.extend_from_slice(&chunk);
         let mut start = 0;
@@ -324,11 +415,17 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
             let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
             if !data.is_empty() {
                 process_sse_data(data, &mut full, &mut tool_calls, &app);
+                // Cap runaway responses (memory exhaustion guard).
+                if full.len() >= MAX_AI_BUFFER {
+                    truncated = true;
+                    break;
+                }
             }
             start = line_end + 1;
         }
         // Drop processed bytes; keep the partial tail for the next chunk.
         byte_buf.drain(..start);
+        if truncated { break }
     }
     // Process any final event without a trailing newline.
     if !byte_buf.is_empty() {
@@ -353,8 +450,31 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     if full.is_empty() && tool_calls.is_empty() {
         return Err("AI returned empty response".to_string());
     }
-    let _ = app.emit("ai:done", serde_json::json!({ "provider": agent.provider }));
+    eprintln!("[docubook] ask_ai done: chars={} tools={} truncated={}", full.len(), tool_calls.len(), truncated);
+    let _ = app.emit("ai:done", serde_json::json!({ "provider": agent.provider, "truncated": truncated }));
     Ok(())
+}
+
+/** Cap runaway AI responses (memory-exhaustion guard): 8 MiB of text is far
+ *  beyond any legitimate document. When exceeded the stream is stopped and
+ *  `ai:done` carries `truncated: true`. */
+const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
+
+/** Map transport errors to user-safe messages — never leak URLs, paths, or
+ *  raw provider details into the UI (structured error contract). */
+fn sanitize_ai_error(err: &str) -> String {
+    let e = err.to_lowercase();
+    if e.contains("dns") || e.contains("resolve") || e.contains("connection") || e.contains("refused") || e.contains("connect") {
+        "Could not reach the AI provider — check your connection".into()
+    } else if e.contains("timeout") || e.contains("timed out") {
+        "The AI provider timed out".into()
+    } else if e.contains("tls") || e.contains("ssl") || e.contains("certificate") {
+        "Secure connection to the AI provider failed".into()
+    } else if e.contains("body") || e.contains("json") || e.contains("parse") {
+        "The AI provider returned an unreadable response".into()
+    } else {
+        "AI request failed".into()
+    }
 }
 
 /// Cancel the in-flight AI request (frontend abort). Stream loop checks the flag between chunks.
@@ -367,14 +487,58 @@ fn cancel_ai(state: State<AppState>) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: AtomicBool::new(false) })
+        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: AtomicBool::new(false), closing: AtomicBool::new(false) })
+        .on_window_event(|window, event| {
+            // Graceful shutdown: ask the frontend to flush & save, then confirm.
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<AppState>();
+                if state.closing.swap(true, Ordering::SeqCst) {
+                    return; // already confirmed by the frontend — allow close
+                }
+                let _ = window.emit("app:before-close", ());
+                api.prevent_close();
+                // Fallback: force close if the frontend never confirms (e.g. crashed).
+                let win = window.clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    if !win.state::<AppState>().closing.load(Ordering::SeqCst) {
+                        let _ = win.close();
+                    }
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
-            open_vault, close_vault, create_vault, vault_info, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
+            open_vault, close_vault, create_vault, git_clone, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
+            git_settings, git_add_remote, git_remove_remote, git_set_identity, git_init,
             wiki_backlinks, wiki_suggest, search_vault, git_stage, git_push, git_status,
-            markdown_preview, md_to_html, ask_ai, cancel_ai, get_api_key, set_api_key, delete_api_key, test_connection,
+            markdown_preview, md_to_html, ask_ai, cancel_ai, set_api_key, delete_api_key, list_api_keys, test_connection,
+            health, app_ready_to_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+/** Frontend confirms it saved everything — safe to actually close. */
+#[tauri::command]
+fn app_ready_to_close(app: tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    state.closing.store(true, Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window("main") {
+        w.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/** Minimal health/diagnostics surface (reused by the future cloud service). */
+#[tauri::command]
+fn health(state: State<AppState>) -> Result<String, String> {
+    let vault_open = state.vault.lock().expect("lock").is_some();
+    let git_repo = state.git.lock().expect("lock").as_ref().map(|g| g.is_repo()).unwrap_or(false);
+    Ok(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "vaultOpen": vault_open,
+        "gitRepo": git_repo,
+    }).to_string())
 }
 
 /// Process one complete SSE `data:` payload (content delta + tool call accumulation).
@@ -686,5 +850,52 @@ mod sse_utf8_chunking {
     fn crlf_line_endings_handled() {
         let line = b"data: {\"choices\":[{\"delta\":{\"content\":\"halo\"}}]}\r\n";
         assert_eq!(parse_utf8_chunks(vec![line.to_vec()]), "halo");
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+
+    fn has(hay: &str, needle: &str) -> bool { hay.contains(needle) }
+
+    #[test]
+    fn markdown_xss_payloads_are_neutralized() {
+        // raw script tag → escaped text, no executable script element
+        let out = markdown_to_safe_html("<script>alert(1)</script>");
+        assert!(!has(&out, "<script"), "script tag survived: {out}");
+        assert!(!has(&out, "<script>alert"), "script content leaked: {out}");
+
+        // event handler attribute stripped
+        let out = markdown_to_safe_html("<img src=x onerror=alert(1)>");
+        assert!(!has(&out, "onerror"), "onerror survived: {out}");
+
+        // javascript: link URL neutralized
+        let out = markdown_to_safe_html("[click](javascript:alert(1))");
+        assert!(!has(&out, "javascript:"), "javascript: URL survived: {out}");
+
+        // iframe dropped
+        let out = markdown_to_safe_html("<iframe src=https://evil></iframe>");
+        assert!(!has(&out, "iframe"), "iframe survived: {out}");
+    }
+
+
+    #[test]
+    fn ai_error_contract_is_user_safe() {
+        // raw provider/transport details are never leaked
+        assert!(!sanitize_ai_error("error sending request for url (https://internal.corp:8080/chat/completions): connection refused").contains("internal.corp"));
+        assert!(sanitize_ai_error("connection refused").contains("Could not reach"));
+        assert!(sanitize_ai_error("operation timed out after 120s").contains("timed out"));
+        assert!(sanitize_ai_error("TLS handshake failed").contains("Secure connection"));
+        assert!(!sanitize_ai_error("random error xyz").contains("random error"));
+        assert!(sanitize_ai_error("random error xyz").contains("AI request failed"));
+    }
+
+    #[test]
+    fn markdown_safe_content_still_renders() {
+        let out = markdown_to_safe_html("# Title\n\n**bold** and [link](https://example.com)");
+        assert!(has(&out, "<h1"), "heading lost: {out}");
+        assert!(has(&out, "<strong>"), "bold lost: {out}");
+        assert!(has(&out, "<a href=\"https://example.com\""), "link lost: {out}");
     }
 }

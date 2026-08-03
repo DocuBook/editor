@@ -29,7 +29,7 @@ export default function GraphView({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-40 bg-[var(--bg-primary)]" onClick={onClose}>
       <div className="absolute top-3 right-3 z-10" onClick={e => e.stopPropagation()}>
-        <button onClick={onClose} className="p-1 rounded hover:bg-[var(--bg-hover)] text-zinc-500">
+        <button onClick={onClose} className="p-1 rounded hover:bg-[var(--bg-hover)] text-zinc-500 cursor-pointer">
           <X size={20} />
         </button>
       </div>

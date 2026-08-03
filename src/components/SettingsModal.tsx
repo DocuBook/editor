@@ -2,12 +2,31 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 import { X, Eye, EyeOff, Check, Loader, ChevronsUpDown, Search } from 'lucide-react'
-import { PROVIDERS, getDefaultModel, type ProviderInfo } from '../data/providers'
 import { useAiSettings } from '../stores/aiSettings'
+import GitSettings from './GitSettings'
+import type { ProviderInfo } from '../data/providers'
 
-export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
-  const { provider, model, apiKey, savedProviders, models,
-    setProvider, setModel, setApiKey, clearApiKey, addSavedProvider, removeSavedProvider } = useAiSettings()
+export default function SettingsModal({ onClose }: { onClose: () => void }) {
+  const [section, setSection] = useState<'ai' | 'git'>('ai')
+  const { provider, model, savedProviders, models,
+    setProvider, setModel, clearApiKey, addSavedProvider, removeSavedProvider } = useAiSettings()
+
+  /** API key is entered here but NEVER read back from the backend —
+   *  the key stays in the keychain (SEC-5: keys are backend-only). */
+  const [keyInput, setKeyInput] = useState('')
+
+  /** Provider catalog lazy-loaded (2.17 MB — not part of the initial bundle). */
+  const [providers, setProviders] = useState<ProviderInfo[]>([])
+  const providersRef = useRef<ProviderInfo[]>([])
+  useEffect(() => {
+    let cancelled = false
+    import('../data/providers').then(m => {
+      if (cancelled) return
+      providersRef.current = m.PROVIDERS
+      setProviders(m.PROVIDERS)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const [providerSearch, setProviderSearch] = useState('')
   const [showProviderDropdown, setShowProviderDropdown] = useState(false)
@@ -30,30 +49,18 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
   const providerListRef = useRef<HTMLDivElement>(null)
   const modelListRef = useRef<HTMLDivElement>(null)
 
-  const selectedProvider: ProviderInfo | null = provider ? PROVIDERS.find(p => p.id === provider) || null : null
+  const selectedProvider: ProviderInfo | null = provider ? providers.find(p => p.id === provider) || null : null
   const savedSet = new Set(savedProviders)
 
-  /** Check keychain for saved providers and load keys into memory */
+  /** Resync which providers have saved keys — one batch call instead of one invoke per provider. */
   useEffect(() => {
     (async () => {
-      const current = useAiSettings.getState().provider
-      for (const id of PROVIDERS.map(p => p.id)) {
-        try {
-          const k = await invoke<string>('get_api_key', { provider: id })
-          if (k) {
-            addSavedProvider(id)
-            if (id === current) setApiKey(k)
-          }
-        } catch {}
-      }
+      try {
+        const ids = JSON.parse(await invoke<string>('list_api_keys', { providers: providers.map(p => p.id) })) as string[]
+        ids.forEach(id => addSavedProvider(id))
+      } catch {}
     })()
   }, [])
-
-  /** Load apiKey from keychain when empty (startup, HMR, or provider switch) */
-  useEffect(() => {
-    if (apiKey || !provider) return
-    invoke<string>('get_api_key', { provider }).then(k => { if (k) { setApiKey(k); return } }).catch(() => {})
-  }, [provider, apiKey])
 
   /** Scroll highlighted provider into view on keyboard navigation */
   useEffect(() => {
@@ -81,33 +88,34 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('mousedown', h)
   }, [])
 
-  const filteredProviders = PROVIDERS.filter(p =>
+  const filteredProviders = providers.filter(p =>
     !providerSearch || p.name.toLowerCase().includes(providerSearch.toLowerCase()) || p.id.toLowerCase().includes(providerSearch.toLowerCase())
   )
 
   const selectProviderFn = (p: ProviderInfo) => {
     setProvider(p.id) // restores saved apiKey + model for this provider
-    if (!models[p.id]) setModel(getDefaultModel(p.id) || '') // only default if never chosen
+    if (!models[p.id]) { import('../data/providers').then(m => { if (!useAiSettings.getState().models[p.id]) setModel(m.getDefaultModel(p.id) || '') }) } // only default if never chosen
     setShowProviderDropdown(false)
   }
 
   const handleSave = async () => {
-    if (!provider || !apiKey) return
+    if (!provider || !keyInput) return
     setSaving(true)
     try {
-      await invoke('set_api_key', { provider, key: apiKey })
+      await invoke('set_api_key', { provider, key: keyInput })
       addSavedProvider(provider)
+      setKeyInput('')
       toast.success('API key saved')
     } catch (e) { toast.error('Failed to save API key'); console.error(e) }
     setSaving(false)
   }
 
   const handleTest = async () => {
-    if (!provider || !apiKey) return
+    if (!provider || !keyInput) return
     setTesting(true)
     try {
-      const p = PROVIDERS.find(x => x.id === provider)
-      await invoke<string>('test_connection', { provider, model: model || p?.models[0]?.id || '', baseUrl: p?.api || '', apiKey })
+      const p = providers.find(x => x.id === provider)
+      await invoke<string>('test_connection', { provider, model: model || p?.models[0]?.id || '', baseUrl: p?.api || '', apiKey: keyInput })
       toast.success('Connection OK')
     } catch (e) { toast.error(String(e)) }
     setTesting(false)
@@ -117,10 +125,22 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh]" onClick={onClose}>
       <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl w-[540px] max-h-[80vh] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
-          <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">AI Providers</h2>
+          <div className="flex items-center gap-3">
+            <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">Settings</h2>
+            <div className="flex gap-1">
+              {(['ai', 'git'] as const).map(s => (
+                <button key={s} onClick={() => setSection(s)}
+                  className={'text-xs px-2 py-1 rounded cursor-pointer bg-transparent border-none ' + (section === s ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-zinc-300')}>
+                  {s === 'ai' ? 'AI' : 'Git'}
+                </button>
+              ))}
+            </div>
+          </div>
           <button onClick={onClose} className="p-1.5 rounded cursor-pointer bg-transparent text-[var(--text-muted)] border-none hover:text-zinc-300"><X size={16} /></button>
         </div>
         <div className="overflow-y-auto max-h-[calc(80vh-60px)] p-4">
+          {section === 'ai' ? (
+            <>
           <div className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
             API keys are stored in your macOS Keychain.
             {savedProviders.length > 0 && <span className="block mt-1 text-[var(--accent)]">✓ {savedProviders.length} provider{savedProviders.length > 1 ? 's' : ''} configured</span>}
@@ -215,20 +235,20 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
               <label className="text-xs font-medium text-[var(--text-primary)] mb-1.5 block">API Key</label>
               <div className="flex gap-2 mb-2">
                 <div className="relative flex-1">
-                  <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..."
+                  <input type={showKey ? 'text' : 'password'} value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder={savedSet.has(provider) ? 'Key saved — type a new key to replace it' : 'sk-...'}
                     className="w-full bg-[var(--bg-primary)] border border-[var(--border)] rounded-md pl-3 pr-10 py-[7px] text-xs text-[var(--text-primary)] outline-none font-mono" />
                   <button onClick={() => setShowKey(v => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-1 hover:text-zinc-300">
                     {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
-                <button onClick={handleSave} disabled={!apiKey || saving}
-                  className="px-3.5 py-[7px] text-xs rounded-md bg-[var(--bg-tertiary)] text-[var(--text-primary)] border-none whitespace-nowrap flex items-center gap-1 disabled:opacity-40 disabled:cursor-default">
+                <button onClick={handleSave} disabled={!keyInput || saving}
+                  className="px-3.5 py-[7px] text-xs rounded-md bg-[var(--bg-tertiary)] text-[var(--text-primary)] border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
                   {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
                   {saving ? '...' : (savedSet.has(provider) ? 'Update' : 'Save')}
                 </button>
-                <button onClick={handleTest} disabled={!apiKey || testing}
-                  className="px-3.5 py-[7px] text-xs rounded-md bg-[var(--accent)] text-[var(--white)] border-none whitespace-nowrap flex items-center gap-1 disabled:opacity-40 disabled:cursor-default">
+                <button onClick={handleTest} disabled={!keyInput || testing}
+                  className="px-3.5 py-[7px] text-xs rounded-md bg-[var(--accent)] text-[var(--white)] border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
                   {testing ? <Loader size={12} className="animate-spin" /> : null}
                   {testing ? 'Testing...' : 'Test'}
                 </button>
@@ -244,6 +264,10 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
               </div>}
               {selectedProvider && <div className="text-[10px] text-[var(--text-muted)] font-mono mb-1">Base URL: {selectedProvider.api}</div>}
             </>
+          )}
+            </>
+          ) : (
+            <GitSettings />
           )}
         </div>
       </div>

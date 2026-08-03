@@ -4271,7 +4271,7 @@ export const PROVIDERS: ProviderInfo[] = [
   },
   {
     id: 'openai', name: 'OpenAI',
-    api: '',
+    api: 'https://api.openai.com/v1',
     models: [
       { id: 'gpt-image-1-mini', name: 'gpt-image-1-mini', costInput: 0, costOutput: 0, context: 0 },
       { id: 'chatgpt-image-latest', name: 'chatgpt-image-latest', costInput: 0, costOutput: 0, context: 0 },
@@ -4425,7 +4425,7 @@ export const PROVIDERS: ProviderInfo[] = [
   },
   {
     id: 'google', name: 'Google',
-    api: '',
+    api: 'https://generativelanguage.googleapis.com/v1beta',
     models: [
       { id: 'lyria-3-pro-preview', name: 'Lyria 3 Pro Preview', costInput: 0, costOutput: 0, context: 1048576 },
       { id: 'lyria-3-clip-preview', name: 'Lyria 3 Clip Preview', costInput: 0, costOutput: 0, context: 1048576 },
@@ -5641,7 +5641,7 @@ export const PROVIDERS: ProviderInfo[] = [
   },
   {
     id: 'anthropic', name: 'Anthropic',
-    api: '',
+    api: 'https://api.anthropic.com',
     models: [
       { id: 'claude-haiku-4-5', name: 'Claude Haiku 4.5 (latest)', costInput: 1, costOutput: 5, context: 200000, toolCall: true },
       { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5', costInput: 1, costOutput: 5, context: 200000, toolCall: true },

@@ -13,7 +13,7 @@ export interface RecentVault { path: string; name: string; parent: string }
 interface VaultState {
   name: string; isOpen: boolean; vaultPath: string; recent: RecentVault[]
   tree: FileInfo[]; visibleItems: FileInfo[]; expanded: Record<string, boolean>; childrenCache: Record<string, FileInfo[]>; loading: boolean
-  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; closeVault: () => void; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
+  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; cloneVault: (url: string, parent: string) => Promise<void>; closeVault: () => void; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
   loadTree: (subpath?: string) => Promise<void>
   toggleFolder: (item: FileInfo) => Promise<void>; flattenTree: (items: FileInfo[], depth: number) => FileInfo[]
 }
@@ -56,6 +56,17 @@ export const useVaultStore = create<VaultState>()(
           pushRecent(parent.replace(/\/+$/, '') + '/' + name)
           await get().loadTree()
         } catch (e) { console.error(e); toast.error('Failed to create vault') }
+      },
+      /** Clone a remote git repository into parent dir and open it as vault. */
+      cloneVault: async (url: string, parent: string) => {
+        set({ loading: true })
+        try {
+          const res = await invoke<string>('git_clone', { url, parent })
+          const d = JSON.parse(res)
+          set({ name: d.name, vaultPath: d.path, isOpen: true, expanded: {} })
+          pushRecent(d.path)
+          await get().loadTree()
+        } catch (e) { throw e } finally { set({ loading: false }) }
       },
       /** Close vault and reset all state. */
       closeVault: () => {

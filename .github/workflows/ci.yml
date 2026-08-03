@@ -15,7 +15,7 @@ env:
 
 jobs:
   lint:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,9 +29,19 @@ jobs:
         run: npx tsc -b
       - name: Frontend tests
         run: npx vitest run
+      - name: Check version consistency (package.json / Cargo.toml / tauri.conf.json)
+        run: |
+          npm_v=$(node -p "require('./package.json').version")
+          cargo_v=$(grep '^version' src-tauri/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
+          tauri_v=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "package.json=$npm_v Cargo.toml=$cargo_v tauri.conf.json=$tauri_v"
+          if [ "$npm_v" != "$cargo_v" ] || [ "$npm_v" != "$tauri_v" ]; then
+            echo "::error::Version mismatch — bump all three together"
+            exit 1
+          fi
 
   test:
-    runs-on: macos-latest
+    runs-on: macos-14
     needs: [lint]
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +50,24 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+  security:
+    runs-on: ubuntu-22.04
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: npm audit (fail on critical)
+        run: npm audit --audit-level=critical
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --manifest-path src-tauri/Cargo.toml
+
 
   build:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -52,7 +80,7 @@ jobs:
             arch: arm64
           - target: x86_64-apple-darwin
             arch: amd64
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,7 +109,7 @@ jobs:
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: write
       packages: write
@@ -107,4 +135,4 @@ jobs:
             DocuBook-arm64/*.dmg \
             DocuBook-amd64/*.dmg \
             --title "$TAG" \
-            --notes-file /tmp/release-notes.md || true
+            --notes-file /tmp/release-notes.md

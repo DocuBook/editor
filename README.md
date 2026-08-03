@@ -34,10 +34,10 @@ A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, 
 - Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
 - Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
 - API keys configured in **Settings** — stored in macOS Keychain only, never localStorage
-- **174 providers** with **5,811 models** — auto-synced from [models.dev](https://models.dev)
+- **174 providers** with **5,482 models** (verified from `providers.ts`) — auto-synced from [models.dev](https://models.dev)
 
 > [!NOTE]\
->  **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, ≈4,675 across 172 providers) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
+>  **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, 5,429 across 172 providers) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
 
 **Popular Providers** (all support the accept/reject suggestion flow):
 
@@ -83,39 +83,21 @@ A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, 
 
 ***
 
-## Prerequisites
-
-- **macOS** 12 (Monterey) or later
-- **Node.js** >= 22
-- **Bun** or npm
-- **Rust** toolchain (rustup)
-- **Tauri v2 system dependencies** — see https://v2.tauri.app/start/prerequisites/
-
-***
-
 ## Build from Source
 
-```text
-git clone https://github.com/DocuBook/editor.git
-cd editor
-npm install
-npm run tauri dev        # dev mode with hot reload
-npm run tauri build      # production build
-```
-
-### Cross-compile
-
-```text
-# Intel Macs
-rustup target add x86_64-apple-darwin
-npm run tauri build -- --target x86_64-apple-darwin
-
-# Apple Silicon
-rustup target add aarch64-apple-darwin
-npm run tauri build -- --target aarch64-apple-darwin
-```
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-compiling, and the project layout.
 
 ***
+
+## Install & Getting Started
+
+1. **Install** — download the DMG from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook into Applications. (First launch: macOS may ask to confirm an unsigned build — right-click → Open, then confirm.)
+2. **Open or create a vault** — on the welcome screen choose **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL to pull a vault from GitHub/GitLab).
+3. **Connect AI (optional)** — press `⌘,` → **AI** tab, pick a provider, paste your API key, Save. Keys are stored in the macOS Keychain and never leave your machine.
+4. **Set up git publishing (optional)** — press `⌘,` → **Git** tab: set your commit name/email and add a remote. Private repos use your macOS Keychain / SSH keys automatically.
+5. **Start writing** — click a file in the sidebar. Type `/` for slash commands; select text for the formatting toolbar; use the **Code** button to toggle WYSIWYG/markdown.
+
+> **Troubleshooting:** AI not responding? Check the provider key in Settings → AI and that your network allows the provider endpoint. Git publish failing? Check Settings → Git for identity/remote, and that your SSH key or credential helper is set up on this machine.
 
 ## Usage
 
@@ -141,7 +123,7 @@ npm run tauri build -- --target aarch64-apple-darwin
 | `Ctrl/Cmd+N`                | New file                    |
 | `Ctrl/Cmd+Alt+N`            | New folder                  |
 | `Ctrl+Alt+L`                | Ask AI / Write with AI (opens AI menu at cursor) |
-| `Ctrl/Cmd+,`                | AI Settings                 |
+| `Ctrl/Cmd+,`                | Settings (AI + Git)         |
 | `/` (in editor)             | Slash command menu          |
 | `↑` / `↓` / `Enter`         | Navigate search results     |
 | `Enter` (on create/rename)  | Confirm                     |
@@ -172,51 +154,17 @@ Writing shortcuts (built-in, no setup needed):
 
 ***
 
-## Project Structure
-
-```text
-src/
-  main.tsx              Entry point
-  App.tsx               Root layout, keyboard shortcuts
-  components/
-    Editor.tsx          WYSIWYG + Markdown modes, AI transport (xl-ai ↔ Rust)
-    Sidebar.tsx         Vault tree, search, CRUD, context menu
-    StatusBar.tsx       Git branch indicator
-    GraphView.tsx       Note graph visualization
-    AiSettingsModal.tsx Provider/model/API-key settings (keychain)
-    ShortcutsModal.tsx  Keyboard shortcuts reference
-  stores/
-    editor.ts           Tabs, file content, edited content
-    vault.ts            Vault state, tree, folder expansion
-    aiSettings.ts       Provider/model/saved-providers (persisted) — API keys live only in keychain
-  data/
-    providers.ts        Auto-generated provider/model catalog (models.dev)
-  hooks/
-    useKeyboard.ts      Keyboard shortcut handling
-    usePolling.ts       Interval polling (git status)
-    useClickOutside.ts  Click-outside detection for menus
-  utils/
-    aiBlocks.ts         AI text → applyDocumentOperations (suggestions)
-src-tauri/src/
-  main.rs               Tauri entry point
-  lib.rs                Tauri commands (vault, wiki, git, search, AI)
-  keychain.rs           macOS Keychain access via `security` CLI
-  agent/                AI agent config (provider/model/base URL)
-  vault/                File system vault
-  wiki/                 Wikilink index
-  git/                  Git add-commit-push
-  search/               Filename search
-```
-
-***
-
 ## License
 
 [GPL-3.0](./LICENSE) — DocuBook now integrates BlockNote XL package (`@blocknote/xl-ai`) which is licensed under GPL-3.0. The GPL ensures that modified versions of the app remain free and open — if you distribute the app, you must share your changes under the same license.
 
 ### Commercial Use
 
-The GPL-3.0 license is valid for commercial activities at the service and infrastructure level — cloud hosting, managed deployments, and AI provider gateways. For any commercial use of this kind, such as running DocuBook as infrastructure or as an AI gateway/provider, please contact the author first to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
+**GPL-3.0 permits commercial use** — you may sell the app, host it as a service, or use it internally, as long as you comply with the copyleft obligations (offer source, keep it under GPL-3.0, preserve notices). No permission is required for standard commercial use.
+
+The **optional cooperation clause** below is a separate, voluntary arrangement — it is NOT a GPL requirement and does not restrict what the license already permits:
+
+> If you would like to work with the author directly — for example, running DocuBook as a dedicated managed service or building an AI gateway/provider on top of it — reach out to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
 
 > [!NOTE]
 > **Personal and community use remains free forever.** Using DocuBook for yourself, your studies, or your community — on your own devices or your own server — always stays free and open source.

@@ -50,3 +50,45 @@ pub fn delete_key(provider: &str) -> Result<(), String> {
         Err(stderr.trim().to_string())
     }
 }
+
+/** Return the subset of providers that have an API key in the login keychain.
+ *  Each `security` call is a short-lived process, so checks run in bounded
+ *  parallel batches (16 at a time) instead of 100+ sequential spawns.
+ *  An empty provider list is a no-op (no keychain access). */
+pub fn list_keys(providers: &[String]) -> Vec<String> {
+    if providers.is_empty() {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for chunk in providers.chunks(16) {
+        std::thread::scope(|s| {
+            let handles: Vec<_> = chunk.iter().map(|p| {
+                let p = p.clone();
+                s.spawn(move || {
+                    Command::new("security")
+                        .args(["find-generic-password", "-s", SERVICE, "-a", &p, "-w"])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false)
+                })
+            }).collect();
+            for (h, p) in handles.into_iter().zip(chunk.iter()) {
+                if h.join().unwrap_or(false) {
+                    found.push(p.clone());
+                }
+            }
+        });
+    }
+    found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn list_keys_empty_is_a_noop() {
+        let empty: Vec<String> = vec![];
+        assert!(list_keys(&empty).is_empty());
+    }
+}

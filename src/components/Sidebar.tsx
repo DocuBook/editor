@@ -4,7 +4,7 @@ import { useEditorStore } from '../stores/editor'
 import { invoke } from '@tauri-apps/api/core'
 import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, PanelLeftClose } from 'lucide-react'
 import { toast } from 'sonner'
-import AiSettingsModal from './AiSettingsModal'
+import SettingsModal from './SettingsModal'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 
@@ -48,6 +48,12 @@ function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (pa
     return () => window.removeEventListener('keydown', h)
   }, [onClose, results, selectedIdx, openFile, onSelect])
 
+  /** Keep the highlighted result in view when navigating with the keyboard. */
+  useEffect(() => {
+    const el = resultsRef.current?.children[selectedIdx] as HTMLElement | undefined
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIdx])
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]" onClick={onClose}>
       <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] w-[500px] max-h-[50vh] overflow-hidden" onClick={e => e.stopPropagation()}>
@@ -79,7 +85,7 @@ function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (pa
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel() {
-  const [items, setItems] = useState<{path:string;name:string}[]>([])
+  const [items, setItems] = useState<{path:string;name:string;snippet:string}[]>([])
   const { openFile } = useEditorStore()
   const activeTab = useEditorStore(s => s.activeTab)
 
@@ -94,8 +100,9 @@ function BacklinksPanel() {
       <div className="text-zinc-600 uppercase tracking-wider mb-1 px-1">Backlinks ({items.length})</div>
       {items.map(item => (
         <div key={item.path} onClick={() => openFile(item.path, item.name)}
-          className="text-zinc-500 hover:text-zinc-300 cursor-pointer py-1 px-1 truncate rounded hover:bg-[var(--bg-hover)]">
-          {item.name}
+          className="text-zinc-500 hover:text-zinc-300 cursor-pointer py-1 px-1 rounded hover:bg-[var(--bg-hover)]">
+          <div className="truncate">{item.name}</div>
+          {item.snippet && <div className="truncate text-[10px] text-zinc-600">{item.snippet}</div>}
         </div>
       ))}
     </div>
@@ -192,7 +199,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   return (
     <aside className="ui-shell w-56 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col shrink-0 h-full">
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
-      {settingsOpen && <AiSettingsModal onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-2 py-3">
         <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{isOpen ? name : 'No vault'}</span>
         <span className="flex items-center gap-1 shrink-0 ml-2">
@@ -289,7 +296,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
           <button onClick={() => setSettingsOpen(true)} className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors">
             <Settings size={18} />
           </button>
-          <span className="tip">AI Settings <kbd><Command size={11} />,</kbd></span>
+          <span className="tip">Settings <kbd><Command size={11} />,</kbd></span>
         </span>
       </div>
       <div className="border-t border-[var(--border-subtle)] max-h-32 overflow-y-auto text-xs">

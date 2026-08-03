@@ -28,12 +28,34 @@ impl Vault {
         self.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
     }
 /** Walk a directory and return sorted file list (dirs first, alphabetical). */
-/** Block path traversal via .. */
+/** Resolve a vault-relative path safely.
+ *  Rejects absolute paths and any path that resolves (after symlink resolution
+ *  and `..` normalization) outside the vault root. Targets that do not exist
+ *  yet are checked via their deepest existing ancestor, so create/write flows
+ *  stay safe too. */
     fn safe_path(&self, path: &str) -> Result<PathBuf, String> {
-        if path.contains("..") {
+        let p = Path::new(path);
+        if p.is_absolute() {
             return Err("Path traversal blocked".to_string());
         }
-        Ok(self.root.join(path))
+        let root = self.root.canonicalize().map_err(|e| format!("Vault root: {}", e))?;
+        let joined = self.root.join(path);
+        // canonicalize the deepest EXISTING ancestor (resolves symlinks),
+        // then re-append the non-existent tail so new files are checked too
+        let mut existing = joined.as_path();
+        let mut suffix: Vec<std::ffi::OsString> = Vec::new();
+        while !existing.exists() {
+            match (existing.parent(), existing.file_name()) {
+                (Some(parent), Some(name)) => { suffix.push(name.to_os_string()); existing = parent; }
+                _ => break,
+            }
+        }
+        let mut resolved = existing.canonicalize().map_err(|e| format!("Path: {}", e))?;
+        for s in suffix.iter().rev() { resolved.push(s); }
+        if !resolved.starts_with(&root) {
+            return Err("Path traversal blocked".to_string());
+        }
+        Ok(joined)
     }
 
     pub fn tree(&self, subpath: &str) -> Vec<FileInfo> {
@@ -110,6 +132,31 @@ mod tests {
         let v = Vault { root: PathBuf::from("/") };
         // root's file_name is None on some platforms, empty on others
         assert_eq!(v.name(), "");
+    }
+
+    #[test]
+    fn safe_path_rejects_escape_and_accepts_legit() {
+        let dir = std::env::temp_dir().join(format!("docubook-sec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.md"), "x").unwrap();
+        std::fs::create_dir(dir.join("folder")).unwrap();
+        std::os::unix::fs::symlink("/etc", dir.join("link")).unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        // traversal: absolute, .. escapes, nested ..
+        assert!(v.safe_path("/etc/passwd").is_err());
+        assert!(v.safe_path("../../etc/passwd").is_err());
+        assert!(v.safe_path("a/../../b").is_err());
+        // symlink escape
+        assert!(v.safe_path("link/passwd").is_err());
+        // legit paths (existing + not-yet-existing target)
+        assert!(v.safe_path("notes.md").is_ok());
+        assert!(v.safe_path("folder/sub.md").is_ok());
+        assert!(v.safe_path("newfile.md").is_ok());
+        // filename containing ".." is not a traversal component
+        assert!(v.safe_path("a..b.md").is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
