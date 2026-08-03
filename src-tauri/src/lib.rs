@@ -29,6 +29,19 @@ fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
     Ok(format!(r#"{{"name":"{}"}}"#, name))
 }
 
+/** Validate a vault folder name (no separators, no traversal). */
+fn valid_vault_name(name: &str) -> bool {
+    !name.is_empty() && name != "." && !name.contains("..") && !name.contains('/') && !name.contains('\\')
+}
+
+#[tauri::command]
+fn create_vault(parent: &str, name: &str, state: State<AppState>) -> Result<String, String> {
+    if !valid_vault_name(name) { return Err("Invalid vault name".to_string()); }
+    let dir = std::path::Path::new(parent).join(name);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    open_vault(dir.to_str().ok_or("Invalid path")?, state)
+}
+
 #[tauri::command]
 fn close_vault(state: State<AppState>) -> Result<(), String> {
     *state.vault.lock().expect("lock") = None; *state.wiki.lock().expect("lock") = None; *state.git.lock().expect("lock") = None; Ok(())
@@ -356,7 +369,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: AtomicBool::new(false) })
         .invoke_handler(tauri::generate_handler![
-            open_vault, close_vault, vault_info, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
+            open_vault, close_vault, create_vault, vault_info, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
             wiki_backlinks, wiki_suggest, search_vault, git_stage, git_push, git_status,
             markdown_preview, md_to_html, ask_ai, cancel_ai, get_api_key, set_api_key, delete_api_key, test_connection,
         ])
@@ -419,6 +432,17 @@ pub fn parse_sse_line(data: &str, tool_calls: &mut Vec<(i64, String, String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vault_name_validation() {
+        assert!(valid_vault_name("my vault"));
+        assert!(!valid_vault_name(""));
+        assert!(!valid_vault_name("."));
+        assert!(!valid_vault_name(".."));
+        assert!(!valid_vault_name("../evil"));
+        assert!(!valid_vault_name("a/b"));
+        assert!(!valid_vault_name("a\\b"));
+    }
 
     #[test]
     fn markdown_renders_html() {

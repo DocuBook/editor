@@ -6,11 +6,13 @@ import Editor from './components/Editor'
 import StatusBar from './components/StatusBar'
 import GraphView from './components/GraphView'
 import { Toaster } from 'sonner'
+import { PanelLeftOpen, Command } from 'lucide-react'
 
 /** Root application component with keyboard shortcuts. */
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [graphOpen, setGraphOpen] = useState(false)
+  const toggleSidebar = () => setSidebarOpen(o => !o)
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -33,7 +35,18 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">
       <div className="flex flex-1 min-h-0">
-        {sidebarOpen && <Sidebar />}
+        {sidebarOpen ? (
+          <Sidebar onToggleSidebar={toggleSidebar} />
+        ) : (
+          <div className="shrink-0 flex flex-col items-center border-r border-[var(--border-subtle)] w-[34px] pt-1.5">
+            <span className="tip-wrap tip-strip">
+              <button onClick={toggleSidebar} aria-label="Expand sidebar" className="hover:bg-[var(--bg-hover)] hover:text-zinc-300 transition-colors p-1.5 cursor-pointer bg-transparent border-none rounded-md flex text-[var(--text-subtle)]">
+                <PanelLeftOpen size={16} />
+              </button>
+              <span className="tip">Expand sidebar <kbd><Command size={11} />J</kbd></span>
+            </span>
+          </div>
+        )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor /></main>
       </div>
       <StatusBar />

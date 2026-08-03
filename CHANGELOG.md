@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.1.0-alpha.5 — 2026-08-03
+
+### Editor stability & vault onboarding
+
+Undo/redo reliability fixes and a proper first-run experience: welcome screen, vault creation, and recent vaults. All changes are **backward compatible** — no breaking API or config changes.
+
+#### 🐛 Bug Fixes
+
+- **Undo/redo crash** — the toolbar state read `_tiptapEditor.can().undo()` which does not exist (BlockNote registers history as a prosemirror plugin, not a TipTap command), throwing a `TypeError` on every editor change. Availability is now read from the history plugin via `undoDepth`/`redoDepth`
+- **Undo/redo falsely enabled on untouched documents** — the initial content load (`replaceBlocks`) was recorded in undo history, so a freshly opened file showed enabled buttons and Cmd+Z reverted the load back to blank. The load transaction now runs with `addToHistory: false`, keeping history empty until the user actually edits
+- **AI button appeared active in markdown mode** — the Sparkles button only works while the WYSIWYG editor is mounted, but stayed enabled in markdown mode (and for `.mdx`/preview files). It is now disabled whenever the WYSIWYG editor isn't rendered, with a tooltip explaining why
+- **Search/New shortcuts ran without a vault** — ⌘F/⌘P/⌘N and the sidebar search/plus buttons acted as if a vault were open. They are now disabled (with a toast prompt) until a vault is opened
+- **Shortcut reference missing BlockNote format shortcuts** — the built-in reference (status bar `?` modal + README) merged the markdown input rules into a single row and omitted BlockNote's real format shortcuts (`Ctrl/Cmd+Shift+6`–`9`, `Ctrl/Cmd+Alt+Q`/`0`). Input rules are now listed per format and the keyboard shortcuts are documented
+- **Mode switch shortcut moved to Ctrl/Cmd+Shift+E** — ⌘E collided with BlockNote's inline-code mark (both actions fired on one keypress: ProseMirror applies code, the app toggles mode). The WYSIWYG/Markdown toggle now lives on ⌘⇧E (handler, TabBar tooltip, shortcuts modal, and README updated); ⌘E inside the editor is freed for inline code
+- **Sidebar collapse was invisible** — the sidebar could only be toggled via ⌘J with no visible affordance. Added a collapse button in the sidebar header and a slim expand strip on the left edge when collapsed, both with ⌘J tooltips
+- **Tailwind padding/margin utilities were silently dead** — the unlayered universal reset (`* { margin: 0; padding: 0 }`) in `index.css` overrode every Tailwind v4 utility (`.p-*`, `.m-*`, `space-y-*` live in `@layer utilities`, and unlayered rules beat layered ones regardless of specificity). Tree rows sat flush against the top-bar border, bottom-bar buttons lost their padding, and spacing was inconsistent app-wide — masked by inline styles. The reset now lives in `@layer base`, restoring the intended layout everywhere
+- **Scrollbars were always visible** — the custom `::-webkit-scrollbar` styling forced WebKit into classic mode, painting scrollbars permanently on every overflowing container (tree, tab strip, modals) even when idle. Removed the styling: macOS overlay scrollbars now appear only while the user is actually scrolling
+
+#### 🧹 Cleanup
+
+- **Inline styles converted to Tailwind utilities** — 121 `style={{...}}` props across 7 components (App, Sidebar, Editor, ShortcutsModal, StatusBar, GraphView, AiSettingsModal) replaced with JIT classes, now that utilities actually apply (tree indentation became `depth-0`–`depth-12` CSS classes). Visually verified via headless computed-style audit (padding, radius, width, shadow identical to the old inline values); the only 3 remaining inline styles are runtime pixel positioning (context menu, dropdown popups) which static classes cannot express
+
+#### 🚀 Features
+
+- **Welcome screen** — when no vault is open, a Zed-style launchpad offers Open Folder, Create Vault, and recent vaults instead of an empty editor
+- **Create Vault** — new vault folders can be created directly from the welcome screen (backend `create_vault` command with name validation: no path separators, dots, or traversal)
+- **Recent vaults** — the last 5 opened vaults are remembered (localStorage) for one-click reopening; the open-folder dialog defaults to the most recent vault's parent; deleted vaults are dropped from the list with a toast
+
+---
+
 ## v0.1.0-alpha.4 — 2026-08-02
 
 ### AI backend hardening

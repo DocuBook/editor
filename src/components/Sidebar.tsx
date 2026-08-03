@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { invoke } from '@tauri-apps/api/core'
-import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option } from 'lucide-react'
+import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, PanelLeftClose } from 'lucide-react'
 import { toast } from 'sonner'
 import AiSettingsModal from './AiSettingsModal'
 import { useClickOutside } from '../hooks/useClickOutside'
@@ -50,27 +50,27 @@ function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (pa
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]" onClick={onClose}>
-      <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12, boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)', width: 500, maxHeight: '50vh', overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid var(--border)' }}>
-          <Search size={16} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+      <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] w-[500px] max-h-[50vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-5 py-3 border-b border-[var(--border)]">
+          <Search size={16} className="text-[var(--text-muted)] shrink-0" />
           <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)}
-            style={{ width: '100%', background: 'transparent', fontSize: 14, color: 'var(--text-primary)', outline: 'none', border: 'none' }} placeholder="Search files..." />
-          <button onClick={onClose} style={{ padding: 4, borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)' }}><X size={16} /></button>
+            className="w-full bg-transparent text-sm text-[var(--text-primary)] outline-none border-none" placeholder="Search files..." />
+          <button onClick={onClose} className="p-1 rounded cursor-pointer bg-transparent text-[var(--text-muted)] hover:text-zinc-300"><X size={16} /></button>
         </div>
-        <div ref={resultsRef} style={{ overflowY: 'auto', maxHeight: '40vh', padding: 8 }}>
-          {results.length === 0 && query && <div style={{ padding: '24px 12px', fontSize: 14, color: 'var(--text-muted)', textAlign: 'center' }}>No files found</div>}
+        <div ref={resultsRef} className="overflow-y-auto max-h-[40vh] p-2">
+          {results.length === 0 && query && <div className="py-6 px-3 text-sm text-[var(--text-muted)] text-center">No files found</div>}
           {results.map((item, i) => (
             <div key={item.path} onClick={() => { 
               const parent = item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : ''
               onSelect(parent)
               openFile(item.path, item.name); onClose() }}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', cursor: 'pointer', fontSize: 14, borderRadius: 4, backgroundColor: i === selectedIdx ? 'var(--bg-hover)' : 'transparent', color: i === selectedIdx ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-              <FileText size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 'auto' }}>{item.path}</span>
+              className={'flex items-center gap-3 px-3 py-2 cursor-pointer text-sm rounded ' + (i === selectedIdx ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)]')}>
+              <FileText size={14} className="text-[var(--text-muted)] shrink-0" />
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
+              <span className="text-xs text-[var(--text-muted)] overflow-hidden text-ellipsis whitespace-nowrap ml-auto">{item.path}</span>
             </div>
           ))}
-          {!query && <div style={{ padding: '24px 12px', fontSize: 14, color: 'var(--text-muted)', textAlign: 'center' }}>Type to search files...</div>}
+          {!query && <div className="py-6 px-3 text-sm text-[var(--text-muted)] text-center">Type to search files...</div>}
         </div>
       </div>
     </div>
@@ -102,7 +102,7 @@ function BacklinksPanel() {
   )
 }
 
-export default function Sidebar() {
+export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [creating, setCreating] = useState<'file'|'folder'|null>(null)
@@ -156,13 +156,29 @@ export default function Sidebar() {
 
   // Keyboard shortcuts
   useKeyboard((e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'f') { e.preventDefault(); setSearchOpen(true) }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      e.preventDefault()
+      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
+      setSearchOpen(true)
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === 'o') { e.preventDefault(); openVault() }
-    if ((e.metaKey || e.ctrlKey) && e.key === 'p') { e.preventDefault(); setSearchOpen(true) }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'p') {
+      e.preventDefault()
+      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
+      setSearchOpen(true)
+    }
     if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true) }
     if (e.key === 'Escape' && settingsOpen) { setSettingsOpen(false) }
-    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN' && !e.altKey) { e.preventDefault(); if (!isOpen) return; setCreating('file'); setNewName('') }
-    if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyN') { e.preventDefault(); if (!isOpen) return; setCreating('folder'); setNewName('') }
+    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN' && !e.altKey) {
+      e.preventDefault()
+      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
+      setCreating('file'); setNewName('')
+    }
+    if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyN') {
+      e.preventDefault()
+      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
+      setCreating('folder'); setNewName('')
+    }
   })
 
   // Refresh tree on window focus
@@ -177,20 +193,28 @@ export default function Sidebar() {
     <aside className="ui-shell w-56 bg-[var(--bg-secondary)] border-r border-[var(--border-subtle)] flex flex-col shrink-0 h-full">
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
       {settingsOpen && <AiSettingsModal onClose={() => setSettingsOpen(false)} />}
-      <div className="flex-1 flex flex-col overflow-y-auto">
-        <div className="flex items-center justify-between border-b border-[var(--border-subtle)]" style={{ padding: '12px 8px' }}>
-          {isOpen ? (
-            <><span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{name}</span><button onClick={closeVault} className="text-zinc-600 hover:text-zinc-300 text-xs shrink-0 ml-2">[x]</button></>
-          ) : <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">No vault</span>}
-        </div>
+      <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-2 py-3">
+        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{isOpen ? name : 'No vault'}</span>
+        <span className="flex items-center gap-1 shrink-0 ml-2">
+          <span className="tip-wrap tip-bar">
+            <button onClick={onToggleSidebar} aria-label="Collapse sidebar" className="hover:text-zinc-300 transition-colors p-1 cursor-pointer bg-transparent border-none rounded flex text-[var(--text-subtle)]">
+              <PanelLeftClose size={14} />
+            </button>
+            <span className="tip">Collapse sidebar <kbd><Command size={11} />J</kbd></span>
+          </span>
+          {isOpen && (
+            <button onClick={closeVault} className="text-zinc-600 hover:text-zinc-300 text-xs p-1 cursor-pointer bg-transparent border-none rounded">[x]</button>
+          )}
+        </span>
+      </div>
 
-        {isOpen ? (
-          <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5" onClick={e => { if (e.target === e.currentTarget) setCurrentFolder('') }}>
+      {isOpen ? (
+        <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5" onClick={e => { if (e.target === e.currentTarget) setCurrentFolder('') }}>
             {loading && <div className="text-zinc-500 text-xs p-2">Loading...</div>}
             {!loading && visibleItems.length === 0 && !creating && <div className="text-zinc-500 italic text-xs p-2">Empty vault</div>}
             {renaming && (
               <input ref={renameRef} type="text" defaultValue={renaming.name}
-                style={{ width: '100%', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13, padding: '6px 10px', borderRadius: 4, border: '1px solid var(--accent)', outline: 'none', marginBottom: 4 }}
+                className="w-full bg-[var(--bg-primary)] text-[var(--text-primary)] text-[13px] px-2.5 py-1.5 rounded border border-[var(--accent)] outline-none mb-1"
                 onKeyDown={async e => {
                   if (e.key === 'Enter') {
                     const dir = renaming.path.substring(0, renaming.path.lastIndexOf('/') + 1)
@@ -204,20 +228,20 @@ export default function Sidebar() {
             {creating && (
               <input ref={newInputRef} type="text" value={newName} onChange={e => setNewName(e.target.value)}
                 placeholder={creating === 'file' ? (currentFolder ? 'File in ' + currentFolder + '/' : 'Filename...') : (currentFolder ? 'Folder in ' + currentFolder + '/' : 'Folder name...')}
-                style={{ width: '100%', background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: 13, padding: '6px 10px', borderRadius: 4, border: '1px solid var(--accent)', outline: 'none', marginBottom: 4 }}
+                className="w-full bg-[var(--bg-primary)] text-[var(--text-primary)] text-[13px] px-2.5 py-1.5 rounded border border-[var(--accent)] outline-none mb-1"
                 onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setCreating(null); setNewName('') } }} />
             )}
             {visibleItems.map(item => (
               <div key={item.path}>
                 {item.type === '1' ? (
-                  <div onClick={() => { toggleFolder(item); setCurrentFolder(item.path) }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }} style={{ paddingLeft: 8 + (item.depth || 0) * 20 + 'px' }}
-                    className={'flex items-center gap-2 py-1 pr-2 rounded hover:bg-[var(--bg-hover)] cursor-pointer ' + (item.isExpanded ? 'text-zinc-300' : 'text-zinc-400')}>
+                  <div onClick={() => { toggleFolder(item); setCurrentFolder(item.path) }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
+                    className={'depth-' + Math.min(item.depth || 0, 12) + ' flex items-center gap-2 py-1 pr-2 rounded hover:bg-[var(--bg-hover)] cursor-pointer ' + (item.isExpanded ? 'text-zinc-300' : 'text-zinc-400')}>
                     {item.isExpanded ? <FolderOpen size={14} /> : <Folder size={14} />}
                     <span className="truncate">{item.name}</span>
                   </div>
                 ) : (
-                  <div onClick={() => { openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '') }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }} style={{ paddingLeft: 8 + (item.depth || 0) * 20 + 'px' }}
-                    className="flex items-center gap-2 py-1 pr-2 rounded hover:bg-[var(--bg-hover)] cursor-pointer text-zinc-300">
+                  <div onClick={() => { openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '') }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
+                    className={'depth-' + Math.min(item.depth || 0, 12) + ' flex items-center gap-2 py-1 pr-2 rounded hover:bg-[var(--bg-hover)] cursor-pointer text-zinc-300'}>
                     <FileText size={14} className="text-zinc-500 shrink-0" />
                     <span className="truncate">{item.name}</span>
                   </div>
@@ -228,20 +252,38 @@ export default function Sidebar() {
         ) : (
           <div className="flex-1 flex items-center justify-center p-4 text-sm text-zinc-500 italic">Open a vault to start</div>
         )}
-      </div>
-
-      <div className="flex items-center gap-4 border-t border-[var(--border-subtle)]" style={{ padding: '12px 8px' }}>
+      <div className="flex items-center gap-4 border-t border-[var(--border-subtle)] px-2 py-3">
         <span className="tip-wrap">
           <button onClick={openVault} className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors">
             <Folder size={18} />
           </button>
           <span className="tip">Open project <kbd><Command size={11} />O</kbd></span>
         </span>
+        <span className="tip-wrap relative" ref={plusMenuRef}>
+            <button onClick={() => setShowPlusMenu(o => !o)} data-plus-btn disabled={!isOpen} className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+              <Plus size={18} />
+            </button>
+            <span className="tip">{isOpen ? 'Create a file/folder' : 'Open a vault to create files'}</span>
+          {showPlusMenu && (
+            <div data-plus-popup className="absolute bottom-full left-0 mb-1 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+              <button onClick={() => { setShowPlusMenu(false); setCreating('file'); setNewName('') }}
+                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-[var(--text-secondary)] bg-transparent border-none rounded w-full text-left hover:bg-[var(--bg-hover)]">
+                <FileText size={14} /> New File
+                <span className="ml-auto text-[10px] text-[var(--text-muted)] font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-[var(--bg-primary)] px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />N</kbd></span>
+              </button>
+              <button onClick={() => { setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
+                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-[var(--text-secondary)] bg-transparent border-none rounded w-full text-left hover:bg-[var(--bg-hover)]">
+                <Folder size={14} /> New Folder
+                <span className="ml-auto text-[10px] text-[var(--text-muted)] font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-[var(--bg-primary)] px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />N</kbd></span>
+              </button>
+            </div>
+          )}
+        </span>
         <span className="tip-wrap">
-          <button onClick={() => setSearchOpen(true)} className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors">
+          <button onClick={() => setSearchOpen(true)} disabled={!isOpen} className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
             <Search size={18} />
           </button>
-          <span className="tip">Search project files <kbd><Command size={11} />F</kbd></span>
+          <span className="tip">{isOpen ? <>Search project files <kbd><Command size={11} />F</kbd></> : 'Open a vault to search files'}</span>
         </span>
         <span className="tip-wrap">
           <button onClick={() => setSettingsOpen(true)} className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors">
@@ -249,50 +291,22 @@ export default function Sidebar() {
           </button>
           <span className="tip">AI Settings <kbd><Command size={11} />,</kbd></span>
         </span>
-        <span className="tip-wrap" style={{ position: 'relative' }} ref={plusMenuRef}>
-            <button onClick={() => setShowPlusMenu(o => !o)} data-plus-btn className="cursor-pointer p-3 rounded-md hover:bg-[var(--bg-hover)] text-zinc-400 hover:text-zinc-200 transition-colors">
-              <Plus size={18} />
-            </button>
-            <span className="tip">Create a file/folder</span>
-          {showPlusMenu && (
-            <div data-plus-popup style={{ position: 'absolute', bottom: '100%', left: 0, marginBottom: 4, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, minWidth: 180, zIndex: 50, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-              <button onClick={() => { setShowPlusMenu(false); setCreating('file'); setNewName('') }}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)', background: 'transparent', border: 'none', borderRadius: 4, width: '100%', textAlign: 'left' }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
-                <FileText size={14} /> New File
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 2, whiteSpace: "nowrap" }}><kbd style={{ display: "inline-flex", alignItems: "center", gap: 2, background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 3, fontSize: 10 }}><Command size={9} />N</kbd></span>
-              </button>
-              <button onClick={() => { setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)', background: 'transparent', border: 'none', borderRadius: 4, width: '100%', textAlign: 'left' }}
-                onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
-                onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>
-                <Folder size={14} /> New Folder
-                <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', display: 'flex', alignItems: 'center', gap: 2, whiteSpace: "nowrap" }}><kbd style={{ display: "inline-flex", alignItems: "center", gap: 2, background: 'var(--bg-primary)', padding: '1px 4px', borderRadius: 3, fontSize: 10 }}><Option size={9} /><Command size={9} />N</kbd></span>
-              </button>
-            </div>
-          )}
-        </span>
       </div>
       <div className="border-t border-[var(--border-subtle)] max-h-32 overflow-y-auto text-xs">
         <BacklinksPanel />
       </div>
       {ctxItem && (
-        <div ref={ctxMenuRef} data-ctx-menu style={{ position: 'fixed', top: ctxPos.y, left: ctxPos.x, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, padding: 4, minWidth: 120, zIndex: 100, boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
+        <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.3)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
           <button onClick={async () => {
               closeContextMenu()
               setRenaming({ path: ctxItem.path, name: ctxItem.name })
             }}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)', background: 'transparent', border: 'none', borderRadius: 4, width: '100%', textAlign: 'left' }}
-            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
-            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>Rename</button>
+            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-[var(--text-secondary)] bg-transparent border-none rounded w-full text-left hover:bg-[var(--bg-hover)]">Rename</button>
           <button onClick={async () => {
               closeContextMenu()
               try { await invoke('delete_file', { path: ctxItem.path }); loadTree(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
             }}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13, color: 'var(--danger)', background: 'transparent', border: 'none', borderRadius: 4, width: '100%', textAlign: 'left' }}
-            onMouseEnter={e => e.currentTarget.style.backgroundColor = 'var(--bg-hover)'}
-            onMouseLeave={e => e.currentTarget.style.backgroundColor = 'transparent'}>Delete</button>
+            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-[var(--danger)] bg-transparent border-none rounded w-full text-left hover:bg-[var(--bg-hover)]">Delete</button>
         </div>
       )}
     </aside>

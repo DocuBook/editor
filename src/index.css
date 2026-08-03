@@ -20,12 +20,16 @@
     --white: #fff;
     --tab-active-border: #3b82f6;
 }
-*,
-*::before,
-*::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
+/* Layered so Tailwind utilities (p-*, m-*, space-*) still win the cascade —
+ * unlayered rules beat @layer utilities regardless of specificity. */
+@layer base {
+    *,
+    *::before,
+    *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
 }
 body {
     font-family:
@@ -39,20 +43,24 @@ body {
        interaction on descendants (text selection AND drag-and-drop) and ignores
        child overrides. UI shells opt in via the shared .ui-shell class instead. */
 }
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-::-webkit-scrollbar-track {
-    background: transparent;
-}
-::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-    background: var(--text-muted);
-}
+/* No custom ::-webkit-scrollbar styling — styling forces classic (always-visible)
+ * scrollbars in WKWebView. Unstyled, macOS shows overlay scrollbars that only
+ * appear while the user is actually scrolling. */
+
+/* Vault tree indentation per nesting level (was inline paddingLeft: 8 + depth*20). */
+.depth-0  { padding-left: 8px; }
+.depth-1  { padding-left: 28px; }
+.depth-2  { padding-left: 48px; }
+.depth-3  { padding-left: 68px; }
+.depth-4  { padding-left: 88px; }
+.depth-5  { padding-left: 108px; }
+.depth-6  { padding-left: 128px; }
+.depth-7  { padding-left: 148px; }
+.depth-8  { padding-left: 168px; }
+.depth-9  { padding-left: 188px; }
+.depth-10 { padding-left: 208px; }
+.depth-11 { padding-left: 228px; }
+.depth-12 { padding-left: 248px; }
 .ProseMirror {
     outline: none;
     caret-color: var(--accent);
@@ -206,6 +214,16 @@ body {
   bottom: auto;
   right: 8px;
   left: auto;
+}
+/* Tooltip for the collapsed-sidebar expand strip: below the button, left-aligned. */
+.tip-strip .tip {
+  top: calc(100% + 6px);
+  left: 0;
+}
+.tip-strip .tip::after {
+  top: -4px;
+  bottom: auto;
+  left: 10px;
 }
 .tip-wrap:has([data-plus-popup]) .tip {
   opacity: 0;

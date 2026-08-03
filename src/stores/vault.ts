@@ -6,57 +6,84 @@ import { toast } from 'sonner'
 /** File or directory info from the vault tree. */
 export interface FileInfo { path: string; name: string; type: string; depth?: number; isExpanded?: boolean }
 
+/** A previously-opened vault (for the recent list + dialog default path). */
+export interface RecentVault { path: string; name: string; parent: string }
+
 /** Internal vault state (not exported). */
 interface VaultState {
-  name: string; isOpen: boolean; vaultPath: string
+  name: string; isOpen: boolean; vaultPath: string; recent: RecentVault[]
   tree: FileInfo[]; visibleItems: FileInfo[]; expanded: Record<string, boolean>; childrenCache: Record<string, FileInfo[]>; loading: boolean
-  openVault: () => Promise<void>; closeVault: () => void; resumeVault: () => Promise<void>
+  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; closeVault: () => void; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
   loadTree: (subpath?: string) => Promise<void>
   toggleFolder: (item: FileInfo) => Promise<void>; flattenTree: (items: FileInfo[], depth: number) => FileInfo[]
 }
 
-/** Zustand store managing vault lifecycle and file tree state. Persists vaultPath + expanded to localStorage. */
+/** Zustand store managing vault lifecycle and file tree state. Persists vaultPath + expanded + recent to localStorage. */
 export const useVaultStore = create<VaultState>()(
   persist(
-    (set, get) => ({
-      name: '', isOpen: false, vaultPath: '',
-      tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false,
+    (set, get) => {
+      /** Track opened vaults for the recent list (dedupe, newest first, max 5). */
+      const pushRecent = (path: string) => {
+        const name = path.split('/').pop() || ''
+        const parent = path.replace(/\/[^/]*$/, '')
+        set({ recent: [{ path, name, parent }, ...get().recent.filter(r => r.path !== path)].slice(0, 5) })
+      }
+      return {
+        name: '', isOpen: false, vaultPath: '', recent: [],
+        tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false,
 
       /** Open a directory picker and load the selected folder as vault. */
       openVault: async () => {
         try {
           const { open } = await import('@tauri-apps/plugin-dialog')
-          const path = await open({ directory: true, multiple: false, title: 'Open Vault' })
+          const path = await open({ directory: true, multiple: false, title: 'Open Vault', defaultPath: get().recent[0]?.parent })
           if (!path) return
           set({ loading: true })
           const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
           set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
+          pushRecent(path)
           await get().loadTree()
           set({ loading: false })
         } catch (e) { console.error(e); toast.error('Failed to open vault'); set({ loading: false }) }
+      },
+      /** Create a new vault folder inside parent dir and open it. */
+      createVault: async (parent: string, name: string) => {
+        try {
+          const res = await invoke<string>('create_vault', { parent, name })
+          const d = JSON.parse(res)
+          set({ name: d.name, vaultPath: parent.replace(/\/+$/, '') + '/' + name, isOpen: true, expanded: {} })
+          pushRecent(parent.replace(/\/+$/, '') + '/' + name)
+          await get().loadTree()
+        } catch (e) { console.error(e); toast.error('Failed to create vault') }
       },
       /** Close vault and reset all state. */
       closeVault: () => {
         invoke('close_vault')
         set({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
       },
-      /** Reopen vault from persisted path (called on app mount after persist rehydration). */
-      resumeVault: async () => {
-        const { vaultPath, expanded } = get()
-        if (!vaultPath) return
+      /** Open a vault by path (no auto-resume at startup — user picks from welcome screen). */
+      openRecent: async (path: string) => {
         set({ loading: true })
         try {
-          const res = await invoke<string>('open_vault', { path: vaultPath })
+          const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
-          set({ name: d.name, isOpen: true, expanded: expanded || {} })
+          set({ name: d.name, vaultPath: path, isOpen: true, expanded: get().expanded })
+          pushRecent(path)
           await get().loadTree()
         } catch {
-          // Vault can't be reopened (deleted/moved) — clear persisted state
-          set({ vaultPath: '', expanded: {}, isOpen: false })
+          // Vault can't be reopened (deleted/moved) — drop from recent + clear last vault so welcome shows next time
+          set({ vaultPath: '', recent: get().recent.filter(r => r.path !== path) })
+          toast.error('Vault not found — removed from recent')
         } finally {
           set({ loading: false })
         }
+      },
+      /** Auto-resume last vault on startup (Zed-style restore_on_startup: last_session). */
+      resumeVault: async () => {
+        const { vaultPath } = get()
+        if (!vaultPath) return
+        await get().openRecent(vaultPath)
       },
       /** Load root tree (or subtree) from Rust backend. Re-fetches expanded folders. */
       loadTree: async (subpath = '') => {
@@ -96,10 +123,11 @@ export const useVaultStore = create<VaultState>()(
         }
         return r
       },
-    }),
+      }
+    },
     {
       name: 'docubook:vault',
-      partialize: (state) => ({ vaultPath: state.vaultPath, expanded: state.expanded }),
+      partialize: (state) => ({ vaultPath: state.vaultPath, expanded: state.expanded, recent: state.recent }),
       onRehydrateStorage: () => (state) => { state?.resumeVault?.() },
     }
   )

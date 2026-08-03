@@ -115,33 +115,33 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh]" onClick={onClose}>
-      <div style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12, width: 540, maxHeight: '80vh', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.4)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <h2 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>AI Providers</h2>
-          <button onClick={onClose} style={{ padding: 6, borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', border: 'none' }}><X size={16} /></button>
+      <div className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl w-[540px] max-h-[80vh] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)]">
+          <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">AI Providers</h2>
+          <button onClick={onClose} className="p-1.5 rounded cursor-pointer bg-transparent text-[var(--text-muted)] border-none hover:text-zinc-300"><X size={16} /></button>
         </div>
-        <div style={{ overflowY: 'auto', maxHeight: 'calc(80vh - 60px)', padding: 16 }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16, lineHeight: 1.5 }}>
+        <div className="overflow-y-auto max-h-[calc(80vh-60px)] p-4">
+          <div className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
             API keys are stored in your macOS Keychain.
-            {savedProviders.length > 0 && <span style={{ display: 'block', marginTop: 4, color: 'var(--accent)' }}>✓ {savedProviders.length} provider{savedProviders.length > 1 ? 's' : ''} configured</span>}
+            {savedProviders.length > 0 && <span className="block mt-1 text-[var(--accent)]">✓ {savedProviders.length} provider{savedProviders.length > 1 ? 's' : ''} configured</span>}
           </div>
 
           {/* Provider */}
-          <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>Provider</label>
-          <div ref={providerRef} style={{ position: 'relative', marginBottom: provider ? 12 : 20 }}>
+          <label className="text-xs font-medium text-[var(--text-primary)] mb-1.5 block">Provider</label>
+          <div ref={providerRef} className={'relative ' + (provider ? 'mb-3' : 'mb-5')}>
             <div onClick={() => { 
                 const r = providerRef.current?.getBoundingClientRect()
                 if (r) setProviderDropdownPos({ position: 'fixed', top: r.bottom + 4, left: r.left, right: window.innerWidth - r.right, width: r.width })
                 setShowProviderDropdown(o => !o); setTimeout(() => searchRef.current?.focus(), 50) 
               }}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, padding: '7px 12px', cursor: 'pointer', fontSize: 13, color: provider ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-              <span style={{ flex: 1 }}>{selectedProvider ? selectedProvider.name + (savedSet.has(selectedProvider.id) ? ' ✓' : '') : '— Select a provider —'}</span>
-              <ChevronsUpDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              className={'flex items-center gap-2 bg-[var(--bg-primary)] border border-[var(--border)] rounded-md px-3 py-[7px] cursor-pointer text-[13px] ' + (provider ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]')}>
+              <span className="flex-1">{selectedProvider ? selectedProvider.name + (savedSet.has(selectedProvider.id) ? ' ✓' : '') : '— Select a provider —'}</span>
+              <ChevronsUpDown size={14} className="text-[var(--text-muted)] shrink-0" />
             </div>
             {showProviderDropdown && providerDropdownPos && (
-              <div style={{ ...providerDropdownPos, maxHeight: 280, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.3)', overflow: 'clip' }}>
-                <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Search size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+              <div style={providerDropdownPos} className="max-h-[280px] bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg z-[200] shadow-[0_8px_24px_rgba(0,0,0,0.3)] overflow-clip">
+                <div className="px-2 py-1.5 border-b border-[var(--border-subtle)] flex items-center gap-1.5">
+                  <Search size={14} className="text-[var(--text-muted)] shrink-0" />
                   <input ref={searchRef} type="text" value={providerSearch} onChange={e => { setProviderSearch(e.target.value); setProviderHighlightIdx(0) }}
                     onKeyDown={e => {
                       if (e.key === 'ArrowDown') { e.preventDefault(); setProviderHighlightIdx(i => Math.min(i + 1, filteredProviders.length - 1)) }
@@ -149,13 +149,13 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
                       if (e.key === 'Enter' && filteredProviders[providerHighlightIdx]) { e.preventDefault(); selectProviderFn(filteredProviders[providerHighlightIdx]) }
                       if (e.key === 'Escape') { e.preventDefault(); setShowProviderDropdown(false) }
                     }}
-                    placeholder="Search providers..." style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', fontSize: 12, color: 'var(--text-primary)' }} />
+                    placeholder="Search providers..." className="w-full bg-transparent border-none outline-none text-xs text-[var(--text-primary)]" />
                 </div>
-                <div ref={providerListRef} style={{ maxHeight: 240, overflowY: 'auto' }}>
-                  {filteredProviders.length === 0 ? <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No providers found</div> : filteredProviders.map((p, i) => (
+                <div ref={providerListRef} className="max-h-[240px] overflow-y-auto">
+                  {filteredProviders.length === 0 ? <div className="py-4 px-3 text-xs text-[var(--text-muted)] text-center">No providers found</div> : filteredProviders.map((p, i) => (
                     <div key={p.id} onClick={() => selectProviderFn(p)}
-                      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)', ...(provider === p.id ? { backgroundColor: 'var(--accent)', color: 'var(--white)' } : i === providerHighlightIdx ? { backgroundColor: 'var(--bg-hover)' } : {}) }}>
-                      <span style={{ flex: 1 }}>{p.name}</span>
+                      className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-[var(--accent)] text-[var(--white)]' : i === providerHighlightIdx ? 'bg-[var(--bg-hover)] text-[var(--text-secondary)]' : 'text-[var(--text-secondary)]')}>
+                      <span className="flex-1">{p.name}</span>
                       {savedSet.has(p.id) && <Check size={12} />}
                     </div>
                   ))}
@@ -167,24 +167,24 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
           {/* Model */}
           {selectedProvider && (
             <>
-              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>Model</label>
-              <div ref={modelRef} style={{ position: 'relative', marginBottom: 12 }}>
+              <label className="text-xs font-medium text-[var(--text-primary)] mb-1.5 block">Model</label>
+              <div ref={modelRef} className="relative mb-3">
                 <div onClick={() => { 
                     const r = modelRef.current?.getBoundingClientRect()
                     if (r) setModelDropdownPos({ position: 'fixed', top: r.bottom + 4, left: r.left, right: window.innerWidth - r.right, width: r.width })
                     setShowModelDropdown(o => !o); setTimeout(() => modelSearchRef.current?.focus(), 50) 
                   }}
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, padding: '7px 12px', cursor: 'pointer', fontSize: 13, color: 'var(--text-primary)' }}>
+                  className="flex items-center gap-2 bg-[var(--bg-primary)] border border-[var(--border)] rounded-md px-3 py-[7px] cursor-pointer text-[13px] text-[var(--text-primary)]">
                   {model ? (() => {
                     const m = selectedProvider.models.find(x => x.id === model)
                     return m ? `${m.name} ($${m.costInput}/$${m.costOutput}, ${(m.context/1000).toFixed(0)}K ctx)` : model
-                  })() : <span style={{ color: 'var(--text-muted)' }}>— Select a model —</span>}
-                  <ChevronsUpDown size={14} style={{ color: 'var(--text-muted)', flexShrink: 0, marginLeft: 'auto' }} />
+                  })() : <span className="text-[var(--text-muted)]">— Select a model —</span>}
+                  <ChevronsUpDown size={14} className="text-[var(--text-muted)] shrink-0 ml-auto" />
                 </div>
                 {showModelDropdown && modelDropdownPos && (
-                  <div style={{ ...modelDropdownPos, maxHeight: 240, backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 200, boxShadow: '0 8px 24px rgba(0,0,0,0.3)', overflow: 'clip' }}>
-                    <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Search size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                  <div style={modelDropdownPos} className="max-h-[240px] bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg z-[200] shadow-[0_8px_24px_rgba(0,0,0,0.3)] overflow-clip">
+                    <div className="px-2 py-1.5 border-b border-[var(--border-subtle)] flex items-center gap-1.5">
+                      <Search size={14} className="text-[var(--text-muted)] shrink-0" />
                       <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}
                         onKeyDown={e => {
                           const filtered = selectedProvider.models.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
@@ -193,16 +193,16 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
                           if (e.key === 'Enter' && filtered[modelHighlightIdx]) { e.preventDefault(); setModel(filtered[modelHighlightIdx].id); setShowModelDropdown(false) }
                           if (e.key === 'Escape') { e.preventDefault(); setShowModelDropdown(false) }
                         }}
-                        placeholder="Search models..." style={{ width: '100%', background: 'transparent', border: 'none', outline: 'none', fontSize: 12, color: 'var(--text-primary)' }} />
+                        placeholder="Search models..." className="w-full bg-transparent border-none outline-none text-xs text-[var(--text-primary)]" />
                     </div>
-                    <div ref={modelListRef} style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    <div ref={modelListRef} className="max-h-[200px] overflow-y-auto">
                       {(() => {
                         const filtered = selectedProvider.models.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
-                        return filtered.length === 0 ? <div style={{ padding: '16px 12px', fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>No models found</div> : filtered.map((m, i) => (
+                        return filtered.length === 0 ? <div className="py-4 px-3 text-xs text-[var(--text-muted)] text-center">No models found</div> : filtered.map((m, i) => (
                           <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
-                            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)', fontFamily: 'monospace', ...(m.id === model ? { backgroundColor: 'var(--accent)', color: 'var(--white)' } : i === modelHighlightIdx ? { backgroundColor: 'var(--bg-hover)' } : {}) }}>
-                            <span style={{ flex: 1 }}>{m.id}</span>
-                            <span style={{ fontSize: 10, opacity: 0.7 }}>${m.costInput}/${m.costOutput} · {(m.context/1000).toFixed(0)}K</span>
+                            className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-[var(--accent)] text-[var(--white)]' : i === modelHighlightIdx ? 'bg-[var(--bg-hover)] text-[var(--text-secondary)]' : 'text-[var(--text-secondary)]')}>
+                            <span className="flex-1">{m.id}</span>
+                            <span className="text-[10px] opacity-70">${m.costInput}/${m.costOutput} · {(m.context/1000).toFixed(0)}K</span>
                           </div>
                         ))
                       })()}
@@ -212,37 +212,37 @@ export default function AiSettingsModal({ onClose }: { onClose: () => void }) {
               </div>
 
               {/* API Key */}
-              <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6, display: 'block' }}>API Key</label>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <div style={{ position: 'relative', flex: 1 }}>
+              <label className="text-xs font-medium text-[var(--text-primary)] mb-1.5 block">API Key</label>
+              <div className="flex gap-2 mb-2">
+                <div className="relative flex-1">
                   <input type={showKey ? 'text' : 'password'} value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="sk-..."
-                    style={{ width: '100%', background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, padding: '7px 40px 7px 12px', fontSize: 12, color: 'var(--text-primary)', outline: 'none', fontFamily: 'monospace' }} />
+                    className="w-full bg-[var(--bg-primary)] border border-[var(--border)] rounded-md pl-3 pr-10 py-[7px] text-xs text-[var(--text-primary)] outline-none font-mono" />
                   <button onClick={() => setShowKey(v => !v)}
-                    style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 4 }}>
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-1 hover:text-zinc-300">
                     {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
                 <button onClick={handleSave} disabled={!apiKey || saving}
-                  style={{ padding: '7px 14px', fontSize: 12, borderRadius: 6, background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: 'none', cursor: saving ? 'default' : 'pointer', opacity: !apiKey || saving ? 0.4 : 1, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {saving ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Check size={12} />}
+                  className="px-3.5 py-[7px] text-xs rounded-md bg-[var(--bg-tertiary)] text-[var(--text-primary)] border-none whitespace-nowrap flex items-center gap-1 disabled:opacity-40 disabled:cursor-default">
+                  {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
                   {saving ? '...' : (savedSet.has(provider) ? 'Update' : 'Save')}
                 </button>
                 <button onClick={handleTest} disabled={!apiKey || testing}
-                  style={{ padding: '7px 14px', fontSize: 12, borderRadius: 6, background: 'var(--accent)', color: 'var(--white)', border: 'none', cursor: testing ? 'default' : 'pointer', opacity: !apiKey || testing ? 0.4 : 1, whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {testing ? <Loader size={12} style={{ animation: 'spin 1s linear infinite' }} /> : null}
+                  className="px-3.5 py-[7px] text-xs rounded-md bg-[var(--accent)] text-[var(--white)] border-none whitespace-nowrap flex items-center gap-1 disabled:opacity-40 disabled:cursor-default">
+                  {testing ? <Loader size={12} className="animate-spin" /> : null}
                   {testing ? 'Testing...' : 'Test'}
                 </button>
               </div>
-              {savedSet.has(provider) && <div style={{ marginBottom: 8 }}>
+              {savedSet.has(provider) && <div className="mb-2">
                 <button onClick={async () => {
                   try { await invoke('delete_api_key', { provider }); clearApiKey(provider); removeSavedProvider(provider); toast.success('API key revoked') }
                   catch (e) { toast.error(String(e)) }
                 }}
-                  style={{ padding: '4px 10px', fontSize: 11, borderRadius: 4, background: 'transparent', color: 'var(--danger)', border: '1px solid var(--danger)', cursor: 'pointer' }}>
+                  className="px-2.5 py-1 text-[11px] rounded bg-transparent text-[var(--danger)] border border-[var(--danger)] cursor-pointer">
                   Revoke API Key
                 </button>
               </div>}
-              {selectedProvider && <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace', marginBottom: 4 }}>Base URL: {selectedProvider.api}</div>}
+              {selectedProvider && <div className="text-[10px] text-[var(--text-muted)] font-mono mb-1">Base URL: {selectedProvider.api}</div>}
             </>
           )}
         </div>

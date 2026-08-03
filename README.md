@@ -136,8 +136,8 @@ npm run tauri build -- --target aarch64-apple-darwin
 | `Ctrl/Cmd+J`                | Toggle sidebar              |
 | `Ctrl/Cmd+F` / `Ctrl/Cmd+P` | Open file search            |
 | `Ctrl/Cmd+O`                | Open vault / project folder |
-| `Ctrl/Cmd+E`                | Toggle WYSIWYG / Markdown   |
-| `Ctrl/Cmd+Z` / `+Shift+Z`   | Undo / Redo                 |
+| `Ctrl/Cmd+Shift+E`          | Toggle WYSIWYG / Markdown   |
+| `Ctrl/Cmd+Z` / `+Shift+Z` / `+Y` | Undo / Redo |
 | `Ctrl/Cmd+N`                | New file                    |
 | `Ctrl/Cmd+Alt+N`            | New folder                  |
 | `Ctrl+Alt+L`                | Ask AI / Write with AI (opens AI menu at cursor) |
@@ -147,15 +147,28 @@ npm run tauri build -- --target aarch64-apple-darwin
 | `Enter` (on create/rename)  | Confirm                     |
 | `Escape` (on create/rename) | Cancel                      |
 
-BlockNote editor shortcuts (built-in, no setup needed):
+Writing shortcuts (built-in, no setup needed):
 
 | Shortcut                    | Action                      |
 | --------------------------- | --------------------------- |
 | `Tab` / `Shift+Tab`         | Indent / outdent block      |
 | `Enter` / `Shift+Enter`     | New block / line break      |
-| `Ctrl/Cmd+B` / `+I` / `+U` / `+K` | Bold / Italic / Underline / Link |
-| `Ctrl/Cmd+Alt+1`–`5`        | Heading level 1–5           |
-| `#`, `-`, `1.`, `[]`, `>`, ` ``` ` + `Space` | Heading, list, numbered list, checkbox, quote, code |
+| `Ctrl/Cmd+B` / `+I` / `+U` / `+K` / `+Shift+S` | Bold / Italic / Underline / Link / Strike |
+| `Ctrl/Cmd+E` | Inline code |
+| `Shift+Cmd+↑` / `+↓` | Move block up / down |
+| `Ctrl/Cmd+Alt+0` | Paragraph |
+| `Ctrl/Cmd+Alt+1`–`5` | Heading level 1–5 |
+| `Ctrl/Cmd+Alt+Q` | Quote |
+| `Ctrl/Cmd+Shift+6` | Toggle list |
+| `Ctrl/Cmd+Shift+7` | Numbered list |
+| `Ctrl/Cmd+Shift+8` | Bullet list |
+| `Ctrl/Cmd+Shift+9` | Checklist |
+| `#` + `Space` | Toggle heading |
+| `-` + `Space` | Toggle bullet list |
+| `1.` + `Space` | Toggle numbered list |
+| `[]` + `Space` | Toggle checklist |
+| `>` + `Space` | Toggle quote |
+| ` ``` ` + `Space` | Toggle code block |
 
 ***
 

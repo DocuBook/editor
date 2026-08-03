@@ -1,5 +1,26 @@
 import { useEffect } from 'react'
-import { X } from 'lucide-react'
+import { X, Command, ArrowBigUp, Option, ChevronUp, ArrowUp, ArrowDown } from 'lucide-react'
+
+/** Render shortcut key glyphs (⌘⇧⌥⌃↑↓) as lucide icons — consistent with TabBar tooltips. */
+const KEY_ICONS: Record<string, { Icon: any; size?: number }> = {
+  '\u2318': { Icon: Command, size: 11 },
+  '\u21E7': { Icon: ArrowBigUp, size: 11 },
+  '\u2325': { Icon: Option, size: 11 },
+  '\u02C6': { Icon: ChevronUp, size: 10 },
+  '\u2191': { Icon: ArrowUp, size: 11 },
+  '\u2193': { Icon: ArrowDown, size: 11 },
+}
+function ShortcutKeys({ keys }: { keys: string }) {
+  const parts = keys.split(/([\u2318\u21E7\u2325\u02C6\u2191\u2193])/)
+  return (
+    <kbd className="bg-[var(--bg-primary)] px-1.5 py-0.5 rounded text-[11px] font-inherit inline-flex items-center gap-0.5 whitespace-nowrap">
+      {parts.map((p, i) => {
+        const def = KEY_ICONS[p]
+        return def ? <def.Icon key={i} size={def.size} /> : <span key={i}>{p}</span>
+      })}
+    </kbd>
+  )
+}
 
 const SHORTCUTS = [
   { category: 'Navigation', items: [
@@ -12,20 +33,33 @@ const SHORTCUTS = [
   ]},
   { category: 'Editor', items: [
     { keys: '\u2318Z', desc: 'Undo' },
-    { keys: '\u2318\u21E7Z', desc: 'Redo' },
-    { keys: '\u2318E', desc: 'Toggle WYSIWYG / Markdown' },
+    { keys: '\u2318\u21E7Z / \u2318Y', desc: 'Redo' },
+    { keys: '\u2318\u21E7E', desc: 'Toggle WYSIWYG / Markdown' },
   ]},
   { category: 'AI & Settings', items: [
     { keys: '\u02C6\u2325L', desc: 'Ask AI / Write with AI (opens AI menu at cursor)' },
     { keys: '\u2318,', desc: 'AI Settings' },
   ]},
-  { category: 'BlockNote Editor (built-in)', items: [
+  { category: 'Writing', items: [
     { keys: 'Tab / \u21E7Tab', desc: 'Indent / outdent block' },
     { keys: 'Enter', desc: 'New block' },
     { keys: '\u21E7Enter', desc: 'Line break in block' },
-    { keys: '\u2318B / \u2318I / \u2318U / \u2318K', desc: 'Bold / Italic / Underline / Link' },
+    { keys: '\u2318B / \u2318I / \u2318U / \u2318K / \u2318\u21E7S', desc: 'Bold / Italic / Underline / Link / Strike' },
+    { keys: '\u2318E', desc: 'Inline code' },
+    { keys: '\u2318\u21E7\u2191 / \u2318\u21E7\u2193', desc: 'Move block up / down' },
+    { keys: '\u2318\u23250', desc: 'Paragraph' },
     { keys: '\u2318\u23251-5', desc: 'Heading level 1-5' },
-    { keys: '# / - / 1. / [] / > / ``` + space', desc: 'Heading / bullet list / numbered list / checkbox / quote / code' },
+    { keys: '\u2318\u2325Q', desc: 'Quote' },
+    { keys: '\u2318\u21E76', desc: 'Toggle list' },
+    { keys: '\u2318\u21E77', desc: 'Numbered list' },
+    { keys: '\u2318\u21E78', desc: 'Bullet list' },
+    { keys: '\u2318\u21E79', desc: 'Checklist' },
+    { keys: '# + space', desc: 'Toggle heading' },
+    { keys: '- + space', desc: 'Toggle bullet list' },
+    { keys: '1. + space', desc: 'Toggle numbered list' },
+    { keys: '[] + space', desc: 'Toggle checklist' },
+    { keys: '> + space', desc: 'Toggle quote' },
+    { keys: '``` + space', desc: 'Toggle code block' },
   ]},
   { category: 'Files', items: [
     { keys: '\u2318N', desc: 'New file' },
@@ -40,20 +74,20 @@ export default function ShortcutsModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', h)
   }, [onClose])
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: '10vh' }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 12, width: 480, maxHeight: '70vh', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.4)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Keyboard Shortcuts</span>
-          <button onClick={onClose} style={{ padding: 4, borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--text-muted)', border: 'none' }}><X size={16} /></button>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="bg-[var(--bg-secondary)] border border-[var(--border)] rounded-xl w-[480px] max-h-[70vh] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-[var(--border-subtle)]">
+          <span className="text-[13px] font-semibold text-[var(--text-primary)]">Keyboard Shortcuts</span>
+          <button onClick={onClose} className="p-1 rounded cursor-pointer bg-transparent text-[var(--text-muted)] border-none hover:text-zinc-300"><X size={16} /></button>
         </div>
-        <div style={{ padding: '8px 0', overflowY: 'auto', maxHeight: 'calc(70vh - 55px)' }}>
+        <div className="py-2 overflow-y-auto max-h-[calc(70vh-55px)]">
           {SHORTCUTS.map(group => (
             <div key={group.category}>
-              <div style={{ padding: '8px 20px 4px', fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 600 }}>{group.category}</div>
+              <div className="px-5 pt-2 pb-1 text-[10px] text-[var(--text-muted)] uppercase tracking-[0.05em] font-semibold">{group.category}</div>
               {group.items.map((item, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 20px', fontSize: 13, color: 'var(--text-secondary)' }}>
+                <div key={i} className="flex items-center justify-between px-5 py-1.5 text-[13px] text-[var(--text-secondary)]">
                   <span>{item.desc}</span>
-                  <kbd style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 4, fontSize: 11, fontFamily: 'inherit' }}>{item.keys}</kbd>
+                  <ShortcutKeys keys={item.keys} />
                 </div>
               ))}
             </div>

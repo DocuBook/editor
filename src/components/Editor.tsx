@@ -7,8 +7,9 @@ import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blo
 import { en as baseDict } from '@blocknote/core/locales'
 import { AIExtension, AIMenuController, AIToolbarButton, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
-import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp } from 'lucide-react'
+import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
+import { useVaultStore } from '../stores/vault'
 import { toast } from 'sonner'
 import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -65,6 +66,67 @@ const getSchema = () => {
     },
   })
   return _schema
+}
+
+/** Welcome screen shown when no vault is open — Zed-style launchpad (Open Folder / Create Vault / Recent). */
+function WelcomeScreen() {
+  const { recent, openRecent, openVault, createVault, loading } = useVaultStore()
+  const [step, setStep] = useState<'idle' | 'name'>('idle')
+  const [parent, setParent] = useState('')
+  const [name, setName] = useState('My Vault')
+
+  const pickParent = async () => {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const p = await open({ directory: true, multiple: false, title: 'Create Vault', defaultPath: recent[0]?.parent })
+    if (!p) return
+    setParent(p); setStep('name')
+  }
+  const create = () => { if (name.trim()) createVault(parent, name.trim()) }
+
+  const btn = 'w-full flex items-center gap-2 rounded-md px-4 py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  const btnPrimary = btn + ' justify-center bg-[var(--bg-hover)] text-[var(--text-primary)] border-none hover:bg-[var(--bg-tertiary)]'
+  const btnSecondary = btn + ' justify-center bg-transparent text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--bg-hover)]'
+  return (
+    <div className="flex-1 flex items-center justify-center p-8">
+      <div className="w-full max-w-[384px] text-center">
+        <div className="text-xl font-semibold text-[var(--text-primary)]">DocuBook</div>
+        <div className="text-xs text-[var(--text-muted)] mt-1 mb-8 leading-relaxed">
+          The markdown editor that thinks like a developer — Obsidian vaults, Notion blocks, Zed-speed search, and Git — all in one.
+        </div>
+        <div className="flex flex-col gap-2">
+          <button disabled={loading} onClick={openVault} className={btnPrimary}>
+            Open Folder <span className="ml-auto text-[11px] text-[var(--text-muted)] flex items-center gap-0.5"><Command size={11} />O</span>
+          </button>
+          <button disabled={loading} onClick={pickParent} className={btnSecondary}>
+            Create New Vault
+          </button>
+        </div>
+        {recent.length > 0 && (
+          <div className="mt-6">
+            <div className="text-[10px] uppercase tracking-[1px] text-[var(--text-muted)] mb-1.5">Recent Vaults</div>
+            <div className="flex flex-col gap-1">
+              {recent.map(r => (
+                <button key={r.path} disabled={loading} onClick={() => openRecent(r.path)}
+                  className={btn + ' justify-start px-3 py-2 bg-transparent text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--bg-hover)]'}>
+                  <Folder size={14} className="text-[var(--text-muted)] shrink-0" />
+                  <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)] font-medium">{r.name}</span>
+                  <span className="ml-auto text-[10px] text-[var(--text-muted)] overflow-hidden text-ellipsis whitespace-nowrap max-w-[40%]">{r.parent}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        {step === 'name' && (
+          <div className="mt-4">
+            <input autoFocus type="text" value={name} onChange={e => setName(e.target.value)} placeholder="Vault name"
+              onKeyDown={e => { if (e.key === 'Enter') create(); if (e.key === 'Escape') { setStep('idle'); setName('My Vault') } }}
+              className="w-full bg-[var(--bg-primary)] border border-[var(--border)] rounded-md px-3 py-2 text-sm text-[var(--text-primary)] outline-none" />
+            <div className="text-[10px] text-[var(--text-muted)] mt-1 whitespace-nowrap overflow-hidden text-ellipsis">Created in {parent}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 /** ── Inner content components (no container — shared scroll in Editor) ── */
@@ -298,6 +360,7 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
       if (initialLoadRef.current) return
       dirtyRef.current = true
       useEditorStore.getState().setTabDirty(filePath, true)
+      useEditorStore.getState().setUndoRedoState()
     })
     return () => sub()
   }, [editor])
@@ -328,7 +391,7 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
 
   useEffect(() => {
     if (!clean) return
-    try { const blocks = editor.tryParseMarkdownToBlocks(clean); editor.replaceBlocks(editor.document, blocks) }
+    try { const blocks = editor.tryParseMarkdownToBlocks(clean); editor.transact(tr => { tr.setMeta('addToHistory', false); editor.replaceBlocks(editor.document, blocks) }); useEditorStore.getState().setUndoRedoState() }
     catch (e) { console.error('BlockNote load:', e); toast.error('Failed to load editor') }
   }, [editor, clean])
 
@@ -376,7 +439,7 @@ function PlainTextViewer({ content, fileName }: { content: string; fileName: str
   return (
     <>
       <div className="text-[11px] text-zinc-600 font-mono uppercase tracking-wider mb-4">{fileName}</div>
-      <pre className="text-sm text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap" style={{ paddingTop: 16 }}>{content}</pre>
+      <pre className="text-sm text-zinc-300 font-mono leading-relaxed whitespace-pre-wrap pt-4">{content}</pre>
     </>
   )
 }
@@ -388,8 +451,7 @@ function MarkdownEditor({ content, onChange }: { content: string; onChange: (v: 
   return (
     <textarea ref={ref} value={content} onChange={e => onChange(e.target.value)}
       placeholder="Start writing in Markdown…"
-      className="w-full min-h-full bg-transparent text-sm text-zinc-200 font-mono leading-relaxed outline-none resize-none placeholder:text-zinc-600"
-      style={{ paddingTop: 16 }}
+      className="w-full min-h-full bg-transparent text-sm text-zinc-200 font-mono leading-relaxed outline-none resize-none placeholder:text-zinc-600 pt-4"
       spellCheck={false} />
   )
 }
@@ -397,7 +459,7 @@ function MarkdownEditor({ content, onChange }: { content: string; onChange: (v: 
 /** ── Tab bar ── */
 /** Tab bar with file name, undo/redo, stage, publish, and AI toggle. */
 function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
-  const { undo, redo } = useEditorStore()
+  const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [pubState, setPubState] = useState<'idle'|'committing'|'pushing'|'done'|'error'>('idle')
   const [pubMsg, setPubMsg] = useState('')
@@ -407,6 +469,8 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   const hasUnsaved = file?.dirty ?? false
   /** Only .md files can toggle WYSIWYG ↔ markdown; .mdx is source-only, others are preview. */
   const toggleable = file ? fileKind(file.path) === 'wysiwyg' : false
+  /** AI (XL) only works while the WYSIWYG editor is mounted. */
+  const aiActive = file ? fileKind(file.path) === 'wysiwyg' && editMode === 'wysiwyg' : false
 
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
@@ -446,38 +510,37 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   }
 
   return (
-    <div className="ui-shell h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0 text-xs" style={{ padding: '0 48px' }}>
+    <div className="ui-shell h-12 bg-[var(--bg-secondary)] border-b border-[var(--border-subtle)] flex items-center gap-3 shrink-0 text-xs px-12">
       <span className="tip-wrap tip-bar">
-        <button onClick={() => undo()} className="rounded cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-[var(--bg-hover)] disabled:opacity-30" style={{ padding: '8px' }}><Undo2 size={16} /></button>
+        <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed p-2"><Undo2 size={16} /></button>
         <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
-        <button onClick={() => redo()} className="rounded cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-[var(--bg-hover)] disabled:opacity-30" style={{ padding: '8px' }}><Redo2 size={16} /></button>
+        <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-zinc-500 hover:text-zinc-300 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed p-2"><Redo2 size={16} /></button>
         <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
       </span>
       <div className="flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
         {tabs.length === 0 ? <span className="text-zinc-500 italic self-center">No file open</span> : tabs.map(tab => (
           <div key={tab.path} onClick={() => switchTab(tab.path)}
-            className={'tab-item ' + (activeTab === tab.path ? 'tab-active' : 'tab-inactive')}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', padding: '0 32px', cursor: 'pointer', borderRight: '1px solid var(--border-subtle)', whiteSpace: 'nowrap', flexShrink: 0, ...(activeTab === tab.path ? { background: 'var(--bg-primary)', color: 'var(--text-primary)', boxShadow: 'inset 0 -1px 0 var(--tab-active-border)' } : { color: 'var(--text-subtle)' }) }}>
-            <span style={tab.deleted ? { textDecoration: 'line-through', opacity: 0.5 } : undefined}>{tab.name}</span>
+            className={'tab-item flex items-center justify-center relative px-8 cursor-pointer border-r border-[var(--border-subtle)] whitespace-nowrap shrink-0 ' + (activeTab === tab.path ? 'tab-active bg-[var(--bg-primary)] text-[var(--text-primary)] shadow-[inset_0_-1px_0_var(--tab-active-border)]' : 'tab-inactive text-[var(--text-subtle)]')}>
+            <span className={tab.deleted ? 'line-through opacity-50' : undefined}>{tab.name}</span>
             {activeTab === tab.path && (
-              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} className="tab-close-btn" style={{ position: 'absolute', right: 8, border: 'none', background: 'transparent', cursor: 'pointer', padding: 4, borderRadius: 4, color: 'var(--text-subtle)', transition: 'opacity 120ms ease' }}><X size={14} /></button>
+              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} className="tab-close-btn absolute right-2 border-none bg-transparent cursor-pointer p-1 rounded text-[var(--text-subtle)] transition-opacity"><X size={14} /></button>
             )}
           </div>
         ))}
       </div>
       <div className="flex-1" />
       <span className="tip-wrap tip-bar">
-        <button onClick={onAiToggle} disabled={tabs.length === 0}
-        className="rounded text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer enabled:text-zinc-400 enabled:hover:text-zinc-200 enabled:hover:bg-[var(--bg-hover)]" style={{ padding: '8px' }}><Sparkles size={14} /></button>
-        <span className="tip">{tabs.length === 0 ? 'Open a file first' : 'Ask AI / Write with AI'} <kbd><ChevronUp size={10} /><Option size={10} />L</kbd></span>
+        <button onClick={onAiToggle} disabled={!aiActive}
+        className="rounded text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer enabled:text-zinc-400 enabled:hover:text-zinc-200 enabled:hover:bg-[var(--bg-hover)] p-2"><Sparkles size={14} /></button>
+        <span className="tip">{!file ? 'Open a file first' : !toggleable ? 'AI works on .md files' : editMode === 'markdown' ? 'AI works in Editor mode' : 'Ask AI / Write with AI'} <kbd><ChevronUp size={10} /><Option size={10} />L</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
         <button onClick={() => useEditorStore.getState().toggleEditMode()} disabled={!toggleable}
-        className={'rounded text-xs disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer ' + (editMode === 'markdown' ? 'bg-zinc-700 text-white' : 'enabled:text-zinc-500 enabled:hover:text-zinc-300 enabled:hover:bg-[var(--bg-hover)]')} style={{ padding: '8px' }}
+        className={'rounded text-xs p-2 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer ' + (editMode === 'markdown' ? 'bg-zinc-700 text-white' : 'enabled:text-zinc-500 enabled:hover:text-zinc-300 enabled:hover:bg-[var(--bg-hover)]')}
         >{editMode === 'wysiwyg' ? 'Code' : 'Editor'}</button>
-        <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'wysiwyg' ? 'source' : 'editor') : (file && fileKind(file.path) === 'markdown' ? 'Source mode only (.mdx)' : 'Preview only')} <kbd><Command size={11} />E</kbd></span>
+        <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'wysiwyg' ? 'source' : 'editor') : (file && fileKind(file.path) === 'markdown' ? 'Source mode only (.mdx)' : 'Preview only')} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
         <button onClick={async () => {
@@ -496,12 +559,12 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
           } catch(e) { console.error('Save:', e); toast.error('Failed to save') }
         }}
         disabled={!(hasDiskChanges || hasUnsaved) || file?.deleted}
-        className="rounded cursor-pointer text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed" style={{ padding: '8px' }}>Save</button>
+        className="rounded cursor-pointer text-xs text-zinc-400 hover:text-zinc-200 hover:bg-[var(--bg-hover)] disabled:opacity-30 disabled:cursor-not-allowed p-2">Save</button>
         <span className="tip">Stage changes</span>
       </span>
       <span className="tip-wrap tip-bar">
         <button onClick={publish} disabled={!staged || pubState === 'committing' || pubState === 'pushing'}
-        className={'rounded cursor-pointer text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed ' + ({ idle: 'bg-blue-600 text-white hover:bg-blue-500', committing: 'bg-yellow-600 text-white', pushing: 'bg-yellow-600 text-white', done: 'bg-green-600 text-white', error: 'bg-red-600 text-white' }[pubState] || 'bg-blue-600 text-white')} style={{ padding: '8px' }}>
+        className={'rounded cursor-pointer text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed p-2 ' + ({ idle: 'bg-blue-600 text-white hover:bg-blue-500', committing: 'bg-yellow-600 text-white', pushing: 'bg-yellow-600 text-white', done: 'bg-green-600 text-white', error: 'bg-red-600 text-white' }[pubState] || 'bg-blue-600 text-white')}>
         {pubState === 'idle' && <>Publish</>}{pubState === 'committing' && <>Commit...</>}{pubState === 'pushing' && <>Push...</>}{pubState === 'done' && <>{pubMsg} ✓</>}{pubState === 'error' && <>Failed</>}
         </button>
         <span className="tip">Git commit + push</span>
@@ -525,6 +588,7 @@ const fileKind = (path: string): 'wysiwyg' | 'markdown' | 'preview' => {
 export default function Editor() {
   const { editMode } = useEditorStore()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
+  const vaultOpen = useVaultStore(s => s.isOpen)
 
   const openXlAiMenu = () => {
     const editor = useEditorStore.getState().blockEditor
@@ -535,9 +599,9 @@ export default function Editor() {
     }
   }
 
-  /** Ctrl/Cmd+E toggles edit mode, Ctrl/Cmd+Alt+L opens XL AI */
+  /** Ctrl/Cmd+Shift+E toggles edit mode (not ⌘E — conflicts with BlockNote's inline-code mark), Ctrl/Cmd+Alt+L opens XL AI */
   useKeyboard((e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
       e.preventDefault()
       const s = useEditorStore.getState()
       const active = s.tabs.find(t => t.path === s.activeTab)
@@ -553,7 +617,9 @@ export default function Editor() {
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TabBar onAiToggle={() => {}} />
-        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Open a file to start editing</div>
+        {vaultOpen
+          ? <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
+          : <WelcomeScreen />}
       </div>
     )
   }
@@ -586,7 +652,7 @@ export default function Editor() {
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
       <TabBar onAiToggle={openXlAiMenu} />
       <div className="flex-1 flex flex-col min-h-0 relative">
-        <div className="flex-1 min-h-0" style={{ overflowY: 'auto', padding: '48px 64px 32px' }}>
+        <div className="flex-1 min-h-0 overflow-y-auto pt-12 px-16 pb-8">
           {inner}
         </div>
       </div>

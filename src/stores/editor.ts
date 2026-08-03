@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { invoke } from '@tauri-apps/api/core'
+import { undoDepth, redoDepth } from '@tiptap/pm/history'
 
 export interface Tab {
   path: string
@@ -21,8 +22,10 @@ export type EditMode = 'wysiwyg' | 'markdown'
 interface EditorState {
   tabs: Tab[]; activeTab: string | null; editMode: EditMode
   blockEditor: any | null
+  canUndo: boolean; canRedo: boolean
   _flushEditor: (() => void) | null
   setBlockEditor: (e: any) => void
+  setUndoRedoState: () => void
   flushEditor: () => void
   setFlushEditor: (fn: (() => void) | null) => void
   undo: () => void
@@ -40,13 +43,20 @@ interface EditorState {
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
-  tabs: [], activeTab: null, editMode: 'wysiwyg', blockEditor: null, _flushEditor: null as (() => void) | null,
+  tabs: [], activeTab: null, editMode: 'wysiwyg', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void) | null,
 
-  setBlockEditor: (e) => { set({ blockEditor: e }) },
+  setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
+  /** Read undo/redo availability from the live TipTap editor (resets on replaceBlocks).
+   *  BlockNote registers history as a prosemirror plugin (no TipTap undo/redo command),
+   *  so availability is read via undoDepth/redoDepth of the history state. */
+  setUndoRedoState: () => {
+    const state = get().blockEditor?._tiptapEditor?.state
+    set({ canUndo: !!state && undoDepth(state) > 0, canRedo: !!state && redoDepth(state) > 0 })
+  },
   flushEditor: () => { try { get()._flushEditor?.() } catch {} },
   setFlushEditor: (fn) => { set({ _flushEditor: fn }) },
-  undo: () => { try { get().blockEditor?.undo() } catch {} },
-  redo: () => { try { get().blockEditor?.redo() } catch {} },
+  undo: () => { try { get().blockEditor?.undo() } catch {}; get().setUndoRedoState() },
+  redo: () => { try { get().blockEditor?.redo() } catch {}; get().setUndoRedoState() },
   
   openFile: async (path, name) => {
     if (get().tabs.find(t => t.path === path)) { set({ activeTab: path }); return }
