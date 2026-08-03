@@ -66,7 +66,7 @@ jobs:
       - name: cargo audit
         run: |
           cargo install cargo-audit --locked
-          cargo audit --manifest-path src-tauri/Cargo.toml
+          cd src-tauri && cargo audit
 
 
   build:
@@ -88,6 +88,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           targets: ${{ matrix.target }}
+      # arm64 runners (macos-14) install only the native target by default —
+      # ensure the matrix target is present for the x86_64 job.
+      - name: Ensure target
+        run: rustup target add ${{ matrix.target }}
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -118,7 +122,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: DocuBook-*
-          merge-multiple: true
+          # Keep per-artifact folders (DocuBook-arm64/, DocuBook-amd64/) so the
+          # release globs resolve — merge-multiple flattens and breaks them.
       - name: Generate release notes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -131,8 +136,10 @@ jobs:
             /^## / && flag==1 { exit }
             flag { print }
           ' CHANGELOG.md > /tmp/release-notes.md
-          gh release create "$TAG" \
-            DocuBook-arm64/*.dmg \
-            DocuBook-amd64/*.dmg \
+          # Artifacts preserve their full relative path (upload-artifact v4), so
+          # locate the DMGs recursively instead of assuming a flat layout.
+          DMGS=$(find DocuBook-* -name '*.dmg')
+          echo "release assets: $DMGS"
+          gh release create "$TAG" $DMGS \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md
