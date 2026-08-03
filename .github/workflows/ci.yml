@@ -136,8 +136,10 @@ jobs:
             /^## / && flag==1 { exit }
             flag { print }
           ' CHANGELOG.md > /tmp/release-notes.md
-          gh release create "$TAG" \
-            DocuBook-arm64/*.dmg \
-            DocuBook-amd64/*.dmg \
+          # Artifacts preserve their full relative path (upload-artifact v4), so
+          # locate the DMGs recursively instead of assuming a flat layout.
+          DMGS=$(find DocuBook-* -name '*.dmg')
+          echo "release assets: $DMGS"
+          gh release create "$TAG" $DMGS \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md
