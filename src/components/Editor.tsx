@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState, useBlockNoteEditor } from '@blocknote/react'
+import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState, useBlockNoteEditor, useComponentsContext, EditLinkButton, DeleteLinkButton, LinkToolbarController, type LinkToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
@@ -7,7 +7,7 @@ import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blo
 import { en as baseDict } from '@blocknote/core/locales'
 import { AIExtension, AIMenuController, AIToolbarButton, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
-import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder, GitBranch, Link2 } from 'lucide-react'
+import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder, GitBranch, Link2, ExternalLink } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import { invoke } from '@tauri-apps/api/core'
@@ -438,10 +438,11 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
     } catch {}
   }, [])
 
-  return <BlockNoteView editor={editor} theme="dark" slashMenu={false} formattingToolbar={false}>
+  return <BlockNoteView editor={editor} theme="dark" slashMenu={false} formattingToolbar={false} linkToolbar={false}>
     <AIMenuController />
     {/** Bubble menu (formatting toolbar) with xl-ai entry so the AI text prompt opens from a selection. */}
     <FormattingToolbarController formattingToolbar={FormattingToolbarWithAI} />
+    <LinkToolbarController linkToolbar={WikiLinkToolbar} />
     <SuggestionMenuController triggerCharacter="/"
       getItems={async (query) => {
         const defaultItems = getDefaultReactSlashMenuItems(editor)
@@ -455,6 +456,45 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
       }}
     />
   </BlockNoteView>
+}
+
+/** Open an external URL: native uses the system opener (tauri-plugin-opener →
+ *  macOS `open` → default browser); web falls back to window.open. Same user
+ *  behavior on both runtimes (ADR D10 parity). */
+async function openExternal(url: string) {
+  try {
+    const { openUrl } = await import('@tauri-apps/plugin-opener')
+    await openUrl(url)
+  } catch {
+    window.open(url, '_blank')
+  }
+}
+
+/** LinkToolbar override: "open" on a link pointing to a vault note (relative
+ *  path, no scheme) opens the file in the app — not a browser tab. External
+ *  URLs open via the system opener (native) / new tab (web).
+ *  Edit/Remove stay BlockNote defaults. */
+function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPositionFrozen }: LinkToolbarProps) {
+  const Components = useComponentsContext()!
+  const openFile = useEditorStore(s => s.openFile)
+  const isVaultLink = !!url && !/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('#') && !url.startsWith('/')
+  return (
+    <Components.LinkToolbar.Root className="bn-toolbar bn-link-toolbar">
+      <Components.LinkToolbar.Button
+        mainTooltip="Open"
+        label="Open"
+        isSelected={false}
+        onClick={() => {
+          if (!url) return
+          if (isVaultLink) openFile(url, url.split('/').pop() || url)
+          else openExternal(url)
+        }}
+        icon={<ExternalLink size={14} />}
+      />
+      <EditLinkButton url={url} text={text} range={range} setToolbarOpen={setToolbarOpen} setToolbarPositionFrozen={setToolbarPositionFrozen} />
+      <DeleteLinkButton range={range} setToolbarOpen={setToolbarOpen} />
+    </Components.LinkToolbar.Root>
+  )
 }
 
 /** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */

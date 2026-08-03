@@ -39,6 +39,7 @@
     "allow-test-connection",
     "allow-wiki-backlinks",
     "allow-wiki-suggest",
-    "allow-write-file"
+    "allow-write-file",
+    "opener:default"
   ]
 }

@@ -487,6 +487,7 @@ fn cancel_ai(state: State<AppState>) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: AtomicBool::new(false), closing: AtomicBool::new(false) })
         .on_window_event(|window, event| {
             // Graceful shutdown: ask the frontend to flush & save, then confirm.

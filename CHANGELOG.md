@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.0-alpha.7 — 2026-08-04
+
+### Wiki link navigation
+
+The link toolbar's **Open** action is now context-aware, with native/web parity (ADR D10): a link to a vault note opens the note inside the app; an external URL opens in the system browser on native and a new tab on web. All changes are **backward compatible** — no breaking API or config changes.
+
+#### 🐛 Bug Fixes
+
+- **External links did nothing on native** — `window.open` in WKWebView is a silent no-op (Tauri default `new_window_handler: None`, wry's WKUIDelegate returns nil). External links now open via the system opener on native (`tauri-plugin-opener` → macOS `open`), falling back to `window.open` on web
+
+#### 🚀 Features
+
+- **Wiki-aware link toolbar** — the link toolbar's Open button now checks the link target: a vault-relative link (`[notes](notes.md)`, no scheme) calls `openFile` and opens the note in the app; anything else opens externally. Edit/Remove keep BlockNote defaults
+
+---
+
 ## v0.1.0-alpha.6 — 2026-08-03
 
 ### Security hardening & release readiness
