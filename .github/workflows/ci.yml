@@ -70,7 +70,10 @@ jobs:
 
 
   build:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # Run on PRs too — build is a required branch-protection check, and this
+    # catches dependency/compile breaks (e.g. a major bump) before merge.
+    # Artifacts upload regardless; publish stays tag-only.
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [test]
     strategy:
       matrix:
