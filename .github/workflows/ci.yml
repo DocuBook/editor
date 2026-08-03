@@ -70,7 +70,10 @@ jobs:
 
 
   build:
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    # Run on PRs too — build is a required branch-protection check, and this
+    # catches dependency/compile breaks (e.g. a major bump) before merge.
+    # Artifacts upload regardless; publish stays tag-only.
+    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [test]
     strategy:
       matrix:
@@ -102,7 +105,7 @@ jobs:
       - name: Build Tauri (${{ matrix.arch }})
         run: npx tauri build --target ${{ matrix.target }}
       - name: Upload DMG
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DocuBook-${{ matrix.arch }}
           path: |
@@ -119,7 +122,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: DocuBook-*
           # Keep per-artifact folders (DocuBook-arm64/, DocuBook-amd64/) so the
