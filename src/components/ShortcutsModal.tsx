@@ -63,7 +63,7 @@ const SHORTCUTS = [
   ]},
   { category: 'Files', items: [
     { keys: '\u2318N', desc: 'New file' },
-    { keys: '\u2318\u21E7N', desc: 'New folder' },
+    { keys: '\u2318\u2325N', desc: 'New folder' },
   ]},
 ]
 

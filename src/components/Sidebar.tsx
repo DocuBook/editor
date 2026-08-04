@@ -177,12 +177,12 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
     }
     if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true) }
     if (e.key === 'Escape' && settingsOpen) { setSettingsOpen(false) }
-    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN' && !e.altKey) {
+    if ((e.metaKey || e.ctrlKey) && e.code === 'KeyN' && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
       setCreating('file'); setNewName('')
     }
-    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === 'KeyN') {
+    if ((e.metaKey || e.ctrlKey) && e.altKey && e.code === 'KeyN') {
       e.preventDefault()
       if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
       setCreating('folder'); setNewName('')
