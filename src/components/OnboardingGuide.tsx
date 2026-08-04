@@ -24,7 +24,7 @@ const steps = [
   {
     icon: Sparkles,
     title: 'Write with AI',
-    body: 'In Editor mode, press ⌥L or click ✨ to ask AI to write, improve, or summarize. Configure your API key in Settings (⌘,).',
+    body: 'In Editor mode, press ⌃⌥L or click ✨ to ask AI to write, improve, or summarize. Configure your API key in Settings (⌘,).',
   },
   {
     icon: GitBranch,
