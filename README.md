@@ -103,29 +103,32 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
    | `DocuBook_<version>_aarch64.dmg` | arm64        | Apple Silicon (M1/M2/M3/M4…) — native |
    | `DocuBook_<version>_x64.dmg`     | x86_64       | Intel; Apple Silicon via Rosetta 2    |
 
-2. **First launch** — DocUBook is an **unsigned build** during the alpha phase, so macOS Gatekeeper shows _"developer cannot be verified"_ on first open. This is expected — it is **not** a malware warning. Two ways past it:
+2. **First launch** — alpha builds are **not notarized**, so Gatekeeper blocks the first open. The dialog differs by arch (not a malware warning):
 
-   **Everyone (no terminal needed)**
-   - Right-click **DocUBook** in Applications → **Open** → click **Open** in the dialog.
-   - (Or: System Settings → Privacy & Security → **Open Anyway**.)
-   - Do this once — the app opens normally afterwards.
+   - **Apple Silicon (`aarch64.dmg`)** — _"app is damaged"_. macOS launchd refuses to spawn an **unsigned** arm64 binary (`RBSRequestErrorDomain Code=5`), so the build keeps an **ad-hoc signature**; with the download quarantine flag still on, Gatekeeper reads that signature as invalid and reports "damaged." There is **no Open Anyway** button for this case — clear the quarantine flag once:
+     ```sh
+     xattr -cr /Applications/DocUBook.app
+     open /Applications/DocUBook.app
+     ```
+   - **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
+     - Right-click **DocUBook** in Applications → **Open** → **Open**, or
+     - System Settings → Privacy & Security → **Open Anyway**, or
+     - the same `xattr -cr /Applications/DocUBook.app` one-liner above.
 
-   **Technical users (terminal)**
+   Do the bypass once — the app opens normally afterwards.
+
+   **Verify your build (terminal)**
 
    ```sh
-   # clear the download quarantine flag, then launch
-   xattr -dr com.apple.quarantine /Applications/DocUBook.app
-   open /Applications/DocUBook.app
-
-   # verify — unsigned is expected for alpha builds:
-   codesign -dv /Applications/DocUBook.app 2>&1 | head -1
-   # → "code object is not signed at all"
-
-   spctl -a -t exec -vv /Applications/DocUBook.app
-   # → "rejected" is expected for now; becomes "accepted" once signing is added
-
    file /Applications/DocUBook.app/Contents/MacOS/DocUBook
    # → "Mach-O thin (arm64)" = Apple Silicon · "Mach-O thin (x86_64)" = Intel
+
+   codesign -dv /Applications/DocUBook.app 2>&1 | head -1
+   # arm64 → "Signature=adhoc" (required: launchd spawn gate)
+   # x64   → "code object is not signed at all" (expected for alpha)
+
+   spctl -a -t exec -vv /Applications/DocUBook.app
+   # "rejected" is expected until notarization is added
    ```
 
 3. **Open or create a vault** — on the welcome screen choose **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL to pull a vault from GitHub/GitLab).
@@ -133,7 +136,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 5. **Set up git publishing (optional)** — press `⌘,` → **Git** tab: set your commit name/email and add a remote. Private repos use your macOS Keychain / SSH keys automatically.
 6. **Start writing** — click a file in the sidebar. Type `/` for slash commands; select text for the formatting toolbar; use the **Code** button to toggle WYSIWYG/markdown.
 
-> **Troubleshooting:** AI not responding? Check the provider key in Settings → AI and that your network allows the provider endpoint. Git publish failing? Check Settings → Git for identity/remote, and that your SSH key or credential helper is set up on this machine.
+> **Troubleshooting:** Launch fails on Apple Silicon with _"Launch failed" / POSIX 163_? It means a **stripped** (unsigned) arm64 build reached the machine — redownload the `aarch64.dmg` and re-run `xattr -cr`. AI not responding? Check the provider key in Settings → AI and that your network allows the provider endpoint. Git publish failing? Check Settings → Git for identity/remote, and that your SSH key or credential helper is set up on this machine.
 
 ## Usage
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.0-alpha.9 — 2026-08-05
+
+### Fix arm64 launch — keep ad-hoc signature on Apple Silicon
+
+v0.1.0-alpha.8 stripped the linker's ad-hoc signature on arm64 to match x86_64 (unsigned → "Open Anyway" parity). That broke arm64 launch entirely: Apple Silicon launchd **refuses to spawn an unsigned arm64 binary** (`RBSRequestErrorDomain Code=5` / `POSIX 163 Launch failed`). So the ad-hoc signature is now **kept** on aarch64 — the price is a different Gatekeeper dialog ("app is damaged" with no Open Anyway button), which is bypassed via `xattr -cr DocUBook.app` once after download. x86_64 stays stripped-unsigned ("developer cannot be verified" → right-click Open). The CI gates this: arm64 build fails if the binary is unsigned.
+
+#### 🐛 Bug Fixes
+
+- **Apple Silicon launch fails (POSIX 163)** — aarch64 CI no longer strips the ad-hoc signature (`codesign --remove-signature` limited to `if: amd64`). A new **Verify arm64 signature** step fails the build if the arm64 binary is unsigned — launchd requires the signature to spawn the process
+
+#### 📚 Documentation
+
+- **Install guide** — First launch section is now per-arch: `xattr -cr` for Apple Silicon, right-click Open for Intel. Troubleshooting line added for POSIX 163 on arm64
+
+---
+
 ## v0.1.0-alpha.8 — 2026-08-04
 
 ### Unsigned DMG on Apple Silicon

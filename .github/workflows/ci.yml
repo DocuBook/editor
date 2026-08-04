@@ -104,11 +104,18 @@ jobs:
         run: npm run build
       - name: Build Tauri (${{ matrix.arch }}, no bundle)
         run: npx tauri build --target ${{ matrix.target }} --no-bundle
-      # macOS arm64 binaries are auto-signed `adhoc` by the linker; an
-      # ad-hoc-signed app + quarantine fails Gatekeeper with "app is damaged"
-      # (no Open Anyway). Stripping → unsigned → "developer cannot be verified"
-      # (Open Anyway) — parity with x86_64. Fails loud (CI-1) if still signed.
-      - name: Strip ad-hoc signature (Gatekeeper "damaged" fix)
+      # macOS arm64 binaries are auto-signed `adhoc` by the linker. Apple
+      # Silicon launchd REQUIRES a signature to spawn an arm64 process —
+      # unsigned → RBSRequestErrorDomain Code=5 / POSIX 163 "Launch failed"
+      # (no Open Anyway saves this; launch itself is rejected). So we KEEP
+      # the adhoc signature on arm64 and strip only on x86_64.
+      #
+      # arm64 (adhoc-signed, kept):   download+quarantine shows "app is
+      #   damaged" → user runs `xattr -cr "DocuBook.app"` once, then launches.
+      # x86_64 (stripped, unsigned):  shows "developer cannot be verified"
+      #   → Open Anyway → launches. launchd tolerates unsigned x86_64.
+      - name: Strip ad-hoc signature (x86_64 only — Gatekeeper "damaged" fix)
+        if: matrix.arch == 'amd64'
         run: |
           BIN="src-tauri/target/${{ matrix.target }}/release/DocuBook"
           if ! codesign -dv "$BIN" >/dev/null 2>&1; then
@@ -121,6 +128,15 @@ jobs:
             fi
             echo "OK: signature removed — $BIN"
           fi
+      - name: Verify arm64 keeps signature (launchd spawn gate)
+        if: matrix.arch == 'arm64'
+        run: |
+          BIN="src-tauri/target/${{ matrix.target }}/release/DocuBook"
+          if ! codesign -dv "$BIN" >/dev/null 2>&1; then
+            echo "::error::$BIN is unsigned — Apple Silicon launchd will refuse spawn (POSIX 163)"
+            exit 1
+          fi
+          echo "OK: $BIN keeps adhoc signature — launchd can spawn"
       - name: Bundle DMG (${{ matrix.arch }})
         run: npx tauri bundle --target ${{ matrix.target }}
       - name: Upload DMG
@@ -162,6 +178,19 @@ jobs:
           # locate the DMGs recursively instead of assuming a flat layout.
           DMGS=$(find DocuBook-* -name '*.dmg')
           echo "release assets: $DMGS"
+          # Arm64 ad-hoc-signed download triggers Gatekeeper "app is damaged".
+          # Users clear it once before first launch.
+          cat >> /tmp/release-notes.md <<'EOF'
+
+          ---
+          **macOS (Apple Silicon — `*-arm64.dmg`):** first run may show “app
+          is damaged.” Clear the quarantine flag once:
+          ```bash
+          xattr -cr "/Applications/DocuBook.app"
+          ```
+          **macOS (Intel — `*-amd64.dmg`):** right-click the app → *Open* →
+          *Open Anyway* on the Gatekeeper dialog.
+          EOF
           gh release create "$TAG" $DMGS \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md
