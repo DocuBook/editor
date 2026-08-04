@@ -9,7 +9,7 @@
 
 > A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
 
-***
+---
 
 ## Features
 
@@ -42,7 +42,7 @@
 - **174 providers** with **5,482 models** (verified from `providers.ts`) — auto-synced from [models.dev](https://models.dev)
 
 > [!NOTE]\
->  **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, 5,429 across 172 providers) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
+> **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, 5,429 across 172 providers) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
 
 **Popular Providers** (all support the accept/reject suggestion flow):
 
@@ -73,34 +73,65 @@
 - Backlinks panel for current file (wikilinks)
 - Bottom toolbar: Open vault, Search files, New file/folder
 
-***
+---
 
 ## Stack
 
-| Layer      | Tech                            |
-| ---------- | ------------------------------- |
-| Frontend   | React 19, TypeScript 6, Zustand |
-| UI         | Tailwind CSS v4, Lucide icons   |
-| Editor     | BlockNoteJS 0.52 (ProseMirror)  |
-| Backend    | Rust with Tauri v2              |
-| Build      | Vite 8 + Rolldown               |
-| Markdown   | pulldown-cmark (Rust)           |
+| Layer    | Tech                            |
+| -------- | ------------------------------- |
+| Frontend | React 19, TypeScript 6, Zustand |
+| UI       | Tailwind CSS v4, Lucide icons   |
+| Editor   | BlockNoteJS 0.52 (ProseMirror)  |
+| Backend  | Rust with Tauri v2              |
+| Build    | Vite 8 + Rolldown               |
+| Markdown | pulldown-cmark (Rust)           |
 
-***
+---
 
 ## Build from Source
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-compiling, and the project layout.
 
-***
+---
 
 ## Install & Getting Started
 
-1. **Install** — download the DMG from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook into Applications. (First launch: macOS may ask to confirm an unsigned build — right-click → Open, then confirm.)
-2. **Open or create a vault** — on the welcome screen choose **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL to pull a vault from GitHub/GitLab).
-3. **Connect AI (optional)** — press `⌘,` → **AI** tab, pick a provider, paste your API key, Save. Keys are stored in the macOS Keychain and never leave your machine.
-4. **Set up git publishing (optional)** — press `⌘,` → **Git** tab: set your commit name/email and add a remote. Private repos use your macOS Keychain / SSH keys automatically.
-5. **Start writing** — click a file in the sidebar. Type `/` for slash commands; select text for the formatting toolbar; use the **Code** button to toggle WYSIWYG/markdown.
+1. **Install** — download the DMG for your Mac from the [Releases](https://github.com/DocUBook/editor/releases) page and drag DocUBook into Applications:
+
+   | DMG                              | Architecture | Mac                                   |
+   | -------------------------------- | ------------ | ------------------------------------- |
+   | `DocuBook_<version>_aarch64.dmg` | arm64        | Apple Silicon (M1/M2/M3/M4…) — native |
+   | `DocuBook_<version>_x64.dmg`     | x86_64       | Intel; Apple Silicon via Rosetta 2    |
+
+2. **First launch** — DocUBook is an **unsigned build** during the alpha phase, so macOS Gatekeeper shows _"developer cannot be verified"_ on first open. This is expected — it is **not** a malware warning. Two ways past it:
+
+   **Everyone (no terminal needed)**
+   - Right-click **DocUBook** in Applications → **Open** → click **Open** in the dialog.
+   - (Or: System Settings → Privacy & Security → **Open Anyway**.)
+   - Do this once — the app opens normally afterwards.
+
+   **Technical users (terminal)**
+
+   ```sh
+   # clear the download quarantine flag, then launch
+   xattr -dr com.apple.quarantine /Applications/DocUBook.app
+   open /Applications/DocUBook.app
+
+   # verify — unsigned is expected for alpha builds:
+   codesign -dv /Applications/DocUBook.app 2>&1 | head -1
+   # → "code object is not signed at all"
+
+   spctl -a -t exec -vv /Applications/DocUBook.app
+   # → "rejected" is expected for now; becomes "accepted" once signing is added
+
+   file /Applications/DocUBook.app/Contents/MacOS/DocUBook
+   # → "Mach-O thin (arm64)" = Apple Silicon · "Mach-O thin (x86_64)" = Intel
+   ```
+
+3. **Open or create a vault** — on the welcome screen choose **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL to pull a vault from GitHub/GitLab).
+4. **Connect AI (optional)** — press `⌘,` → **AI** tab, pick a provider, paste your API key, Save. Keys are stored in the macOS Keychain and never leave your machine.
+5. **Set up git publishing (optional)** — press `⌘,` → **Git** tab: set your commit name/email and add a remote. Private repos use your macOS Keychain / SSH keys automatically.
+6. **Start writing** — click a file in the sidebar. Type `/` for slash commands; select text for the formatting toolbar; use the **Code** button to toggle WYSIWYG/markdown.
 
 > **Troubleshooting:** AI not responding? Check the provider key in Settings → AI and that your network allows the provider endpoint. Git publish failing? Check Settings → Git for identity/remote, and that your SSH key or credential helper is set up on this machine.
 
@@ -118,46 +149,46 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 
 ### Keyboard Shortcuts
 
-| Shortcut                    | Action                      |
-| --------------------------- | --------------------------- |
-| `Ctrl/Cmd+J`                | Toggle sidebar              |
-| `Ctrl/Cmd+F` / `Ctrl/Cmd+P` | Open file search            |
-| `Ctrl/Cmd+O`                | Open vault / project folder |
-| `Ctrl/Cmd+Shift+E`          | Toggle WYSIWYG / Markdown   |
-| `Ctrl/Cmd+Z` / `+Shift+Z` / `+Y` | Undo / Redo |
-| `Ctrl/Cmd+N`                | New file                    |
-| `Ctrl/Cmd+Alt+N`            | New folder                  |
-| `Ctrl+Alt+L`                | Ask AI / Write with AI (opens AI menu at cursor) |
-| `Ctrl/Cmd+,`                | Settings (AI + Git)         |
-| `/` (in editor)             | Slash command menu          |
-| `↑` / `↓` / `Enter`         | Navigate search results     |
-| `Enter` (on create/rename)  | Confirm                     |
-| `Escape` (on create/rename) | Cancel                      |
+| Shortcut                         | Action                                           |
+| -------------------------------- | ------------------------------------------------ |
+| `Ctrl/Cmd+J`                     | Toggle sidebar                                   |
+| `Ctrl/Cmd+F` / `Ctrl/Cmd+P`      | Open file search                                 |
+| `Ctrl/Cmd+O`                     | Open vault / project folder                      |
+| `Ctrl/Cmd+Shift+E`               | Toggle WYSIWYG / Markdown                        |
+| `Ctrl/Cmd+Z` / `+Shift+Z` / `+Y` | Undo / Redo                                      |
+| `Ctrl/Cmd+N`                     | New file                                         |
+| `Ctrl/Cmd+Alt+N`                 | New folder                                       |
+| `Ctrl+Alt+L`                     | Ask AI / Write with AI (opens AI menu at cursor) |
+| `Ctrl/Cmd+,`                     | Settings (AI + Git)                              |
+| `/` (in editor)                  | Slash command menu                               |
+| `↑` / `↓` / `Enter`              | Navigate search results                          |
+| `Enter` (on create/rename)       | Confirm                                          |
+| `Escape` (on create/rename)      | Cancel                                           |
 
 Writing shortcuts (built-in, no setup needed):
 
-| Shortcut                    | Action                      |
-| --------------------------- | --------------------------- |
-| `Tab` / `Shift+Tab`         | Indent / outdent block      |
-| `Enter` / `Shift+Enter`     | New block / line break      |
+| Shortcut                                       | Action                                    |
+| ---------------------------------------------- | ----------------------------------------- |
+| `Tab` / `Shift+Tab`                            | Indent / outdent block                    |
+| `Enter` / `Shift+Enter`                        | New block / line break                    |
 | `Ctrl/Cmd+B` / `+I` / `+U` / `+K` / `+Shift+S` | Bold / Italic / Underline / Link / Strike |
-| `Ctrl/Cmd+E` | Inline code |
-| `Shift+Cmd+↑` / `+↓` | Move block up / down |
-| `Ctrl/Cmd+Alt+0` | Paragraph |
-| `Ctrl/Cmd+Alt+1`–`5` | Heading level 1–5 |
-| `Ctrl/Cmd+Alt+Q` | Quote |
-| `Ctrl/Cmd+Shift+6` | Toggle list |
-| `Ctrl/Cmd+Shift+7` | Numbered list |
-| `Ctrl/Cmd+Shift+8` | Bullet list |
-| `Ctrl/Cmd+Shift+9` | Checklist |
-| `#` + `Space` | Toggle heading |
-| `-` + `Space` | Toggle bullet list |
-| `1.` + `Space` | Toggle numbered list |
-| `[]` + `Space` | Toggle checklist |
-| `>` + `Space` | Toggle quote |
-| ` ``` ` + `Space` | Toggle code block |
+| `Ctrl/Cmd+E`                                   | Inline code                               |
+| `Shift+Cmd+↑` / `+↓`                           | Move block up / down                      |
+| `Ctrl/Cmd+Alt+0`                               | Paragraph                                 |
+| `Ctrl/Cmd+Alt+1`–`5`                           | Heading level 1–5                         |
+| `Ctrl/Cmd+Alt+Q`                               | Quote                                     |
+| `Ctrl/Cmd+Shift+6`                             | Toggle list                               |
+| `Ctrl/Cmd+Shift+7`                             | Numbered list                             |
+| `Ctrl/Cmd+Shift+8`                             | Bullet list                               |
+| `Ctrl/Cmd+Shift+9`                             | Checklist                                 |
+| `#` + `Space`                                  | Toggle heading                            |
+| `-` + `Space`                                  | Toggle bullet list                        |
+| `1.` + `Space`                                 | Toggle numbered list                      |
+| `[]` + `Space`                                 | Toggle checklist                          |
+| `>` + `Space`                                  | Toggle quote                              |
+| ` ``` ` + `Space`                              | Toggle code block                         |
 
-***
+---
 
 ## License
 
