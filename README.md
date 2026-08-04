@@ -96,7 +96,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 
 ## Install & Getting Started
 
-1. **Install** — download the DMG for your Mac from the [Releases](https://github.com/DocUBook/editor/releases) page and drag DocUBook into Applications:
+1. **Install** — download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook into Applications:
 
    | DMG                              | Architecture | Mac                                   |
    | -------------------------------- | ------------ | ------------------------------------- |
@@ -107,27 +107,27 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 
    - **Apple Silicon (`aarch64.dmg`)** — _"app is damaged"_. macOS launchd refuses to spawn an **unsigned** arm64 binary (`RBSRequestErrorDomain Code=5`), so the build keeps an **ad-hoc signature**; with the download quarantine flag still on, Gatekeeper reads that signature as invalid and reports "damaged." There is **no Open Anyway** button for this case — clear the quarantine flag once:
      ```sh
-     xattr -cr /Applications/DocUBook.app
-     open /Applications/DocUBook.app
+     xattr -cr /Applications/DocuBook.app
+     open /Applications/DocuBook.app
      ```
    - **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
-     - Right-click **DocUBook** in Applications → **Open** → **Open**, or
+     - Right-click **DocuBook** in Applications → **Open** → **Open**, or
      - System Settings → Privacy & Security → **Open Anyway**, or
-     - the same `xattr -cr /Applications/DocUBook.app` one-liner above.
+     - the same `xattr -cr /Applications/DocuBook.app` one-liner above.
 
    Do the bypass once — the app opens normally afterwards.
 
    **Verify your build (terminal)**
 
    ```sh
-   file /Applications/DocUBook.app/Contents/MacOS/DocUBook
+   file /Applications/DocuBook.app/Contents/MacOS/DocuBook
    # → "Mach-O thin (arm64)" = Apple Silicon · "Mach-O thin (x86_64)" = Intel
 
-   codesign -dv /Applications/DocUBook.app 2>&1 | head -1
+   codesign -dv /Applications/DocuBook.app 2>&1 | head -1
    # arm64 → "Signature=adhoc" (required: launchd spawn gate)
    # x64   → "code object is not signed at all" (expected for alpha)
 
-   spctl -a -t exec -vv /Applications/DocUBook.app
+   spctl -a -t exec -vv /Applications/DocuBook.app
    # "rejected" is expected until notarization is added
    ```
 
