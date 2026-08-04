@@ -4,7 +4,6 @@ import './index.css'
 import Sidebar from './components/Sidebar'
 import Editor from './components/Editor'
 import StatusBar from './components/StatusBar'
-import GraphView from './components/GraphView'
 import { Toaster } from 'sonner'
 import { PanelLeftOpen, Command } from 'lucide-react'
 
@@ -14,7 +13,6 @@ import { useEditorStore } from './stores/editor'
 /** Root application component with keyboard shortcuts. */
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [graphOpen, setGraphOpen] = useState(false)
   const toggleSidebar = () => setSidebarOpen(o => !o)
 
   /** Single git-status poller shared by StatusBar + TabBar. */
@@ -72,7 +70,6 @@ export default function App() {
         <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor /></main>
       </div>
       <StatusBar />
-      {graphOpen && <GraphView onClose={() => setGraphOpen(false)} />}
       <Toaster position="bottom-right" theme="dark" richColors />
     </div>
   )

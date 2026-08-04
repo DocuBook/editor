@@ -133,7 +133,8 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   const handleCreate = async () => {
     if (!newName.trim() || !isOpen || !creating) return
     try {
-      const name = newName.trim()
+      let name = newName.trim()
+      if (creating === 'file' && !/\.\w{1,10}$/i.test(name)) name = name + '.md'
       const fullPath = currentFolder ? (name.startsWith(currentFolder + '/') ? name : currentFolder + '/' + name) : name
       if (creating === 'folder') {
         await invoke('create_directory', { path: fullPath })
@@ -225,7 +226,9 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
                 onKeyDown={async e => {
                   if (e.key === 'Enter') {
                     const dir = renaming.path.substring(0, renaming.path.lastIndexOf('/') + 1)
-                    const newPath = dir + (e.target as HTMLInputElement).value
+                    let target = (e.target as HTMLInputElement).value
+                    if (/\.md$/i.test(renaming.path) && !/\.\w{1,10}$/i.test(target)) target = target + '.md'
+                    const newPath = dir + target
                     try { await invoke('rename_file', { from: renaming.path, to: newPath }); loadTree() } catch(err) { console.error(err); toast.error('Failed to rename') }
                     setRenaming(null)
                   }
@@ -250,7 +253,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
                   <div onClick={() => { openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '') }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
                     className={'depth-' + Math.min(item.depth || 0, 12) + ' flex items-center gap-2 py-1 pr-2 rounded hover:bg-[var(--bg-hover)] cursor-pointer text-zinc-300'}>
                     <FileText size={14} className="text-zinc-500 shrink-0" />
-                    <span className="truncate">{item.name}</span>
+                    <span className="truncate">{item.name.replace(/\.md$/i, '')}</span>
                   </div>
                 )}
               </div>

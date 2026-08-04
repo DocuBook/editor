@@ -10,6 +10,7 @@ import { en as aiDict } from '@blocknote/xl-ai/locales'
 import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder, GitBranch, Link2, ExternalLink } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
+import OnboardingGuide, { isOnboardingDone } from './OnboardingGuide'
 import { invoke } from '@tauri-apps/api/core'
 import { toast } from 'sonner'
 import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
@@ -576,14 +577,19 @@ function PlainTextViewer({ content, fileName }: { content: string; fileName: str
   )
 }
 
-/** Raw markdown textarea editor (source mode). */
+/** Raw markdown textarea editor (code mode). */
 function MarkdownEditor({ content, onChange }: { content: string; onChange: (v: string) => void }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   useEffect(() => { ref.current?.focus() }, [])
+  // Auto-resize: grow with content so only the outer container scrolls.
+  useEffect(() => {
+    const el = ref.current
+    if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
+  }, [content])
   return (
     <textarea ref={ref} value={content} onChange={e => onChange(e.target.value)}
       placeholder="Start writing in Markdown…"
-      className="w-full min-h-full bg-transparent text-sm text-zinc-200 font-mono leading-relaxed outline-none resize-none placeholder:text-zinc-600 pt-4"
+      className="w-full bg-transparent text-sm text-zinc-200 font-mono leading-relaxed outline-none resize-none placeholder:text-zinc-600 pt-4"
       spellCheck={false} />
   )
 }
@@ -599,10 +605,10 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const hasUnsaved = file?.dirty ?? false
-  /** Only .md files can toggle WYSIWYG ↔ markdown; .mdx is source-only, others are preview. */
+  /** Only .md files can toggle Editor ↔ Code; others are preview. */
   const toggleable = file ? fileKind(file.path) === 'wysiwyg' : false
-  /** AI (XL) only works while the WYSIWYG editor is mounted. */
-  const aiActive = file ? fileKind(file.path) === 'wysiwyg' && editMode === 'wysiwyg' : false
+  /** AI available only in Editor (WYSIWYG) mode — BlockNote must be mounted. */
+  const aiAvailable = file ? fileKind(file.path) === 'wysiwyg' && editMode === 'editor' : false
 
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
@@ -664,15 +670,15 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
       </div>
       <div className="flex-1" />
       <span className="tip-wrap tip-bar">
-        <button onClick={onAiToggle} disabled={!aiActive}
+        <button onClick={onAiToggle} disabled={!aiAvailable}
         className="rounded text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer enabled:text-zinc-400 enabled:hover:text-zinc-200 enabled:hover:bg-[var(--bg-hover)] p-2"><Sparkles size={14} /></button>
-        <span className="tip">{!file ? 'Open a file first' : !toggleable ? 'AI works on .md files' : editMode === 'markdown' ? 'AI works in Editor mode' : 'Ask AI / Write with AI'} <kbd><ChevronUp size={10} /><Option size={10} />L</kbd></span>
+        <span className="tip">{!file ? 'Open a file first' : !aiAvailable && fileKind(file.path) === 'wysiwyg' ? 'Switch to Editor for AI' : aiAvailable ? 'Ask AI / Write with AI' : 'AI works on .md files'} <kbd><ChevronUp size={10} /><Option size={10} />L</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
         <button onClick={() => useEditorStore.getState().toggleEditMode()} disabled={!toggleable}
-        className={'rounded text-xs p-2 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer ' + (editMode === 'markdown' ? 'bg-zinc-700 text-white' : 'enabled:text-zinc-500 enabled:hover:text-zinc-300 enabled:hover:bg-[var(--bg-hover)]')}
-        >{editMode === 'wysiwyg' ? 'Code' : 'Editor'}</button>
-        <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'wysiwyg' ? 'source' : 'editor') : (file && fileKind(file.path) === 'markdown' ? 'Source mode only (.mdx)' : 'Preview only')} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
+        className={'rounded text-xs p-2 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer ' + (editMode === 'code' ? 'bg-zinc-700 text-white' : 'enabled:text-zinc-500 enabled:hover:text-zinc-300 enabled:hover:bg-[var(--bg-hover)]')}
+        >{editMode === 'editor' ? 'Markdown' : 'Editor'}</button>
+        <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
       <span className="tip-wrap tip-bar">
         <button onClick={async () => {
@@ -706,14 +712,11 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
 }
 
 /** ── Main layout ── */
-/** Extensions that support both WYSIWYG + markdown source (toggleable). */
-const MD_EXTENSIONS = ['.md', '.markdown']
-/** Extensions that are markdown-source only (MDX components unsupported in WYSIWYG). */
-const MDX_EXTENSIONS = ['.mdx']
-/** Classify a file: 'wysiwyg' (md — toggleable), 'markdown' (mdx — forced source), 'preview' (others). */
-const fileKind = (path: string): 'wysiwyg' | 'markdown' | 'preview' => {
-  if (MD_EXTENSIONS.some(ext => path.endsWith(ext))) return 'wysiwyg'
-  if (MDX_EXTENSIONS.some(ext => path.endsWith(ext))) return 'markdown'
+/** Extensions that support Editor + Code modes (toggleable). */
+const MD_EXTENSION = '.md'
+/** Classify a file: 'wysiwyg' (.md — toggleable), 'preview' (others). */
+const fileKind = (path: string): 'wysiwyg' | 'preview' => {
+  if (path.endsWith(MD_EXTENSION)) return 'wysiwyg'
   return 'preview'
 }
 
@@ -721,6 +724,12 @@ export default function Editor() {
   const { editMode } = useEditorStore()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const vaultOpen = useVaultStore(s => s.isOpen)
+  const [onboardingDone, setOnboardingDone] = useState(() => isOnboardingDone())
+
+  // Re-check when vault first opens
+  useEffect(() => {
+    if (vaultOpen && !isOnboardingDone()) setOnboardingDone(false)
+  }, [vaultOpen])
 
   const openXlAiMenu = () => {
     const editor = useEditorStore.getState().blockEditor
@@ -737,7 +746,7 @@ export default function Editor() {
       e.preventDefault()
       const s = useEditorStore.getState()
       const active = s.tabs.find(t => t.path === s.activeTab)
-      /** Only .md files toggle; .mdx is source-only, others are preview. */
+      /** Only .md files toggle; others are preview. */
       if (active && fileKind(active.path) === 'wysiwyg') s.toggleEditMode()
     }
     if (e.ctrlKey && e.altKey && (e.code === 'KeyL' || e.key === 'l' || e.key === 'L')) {
@@ -746,6 +755,15 @@ export default function Editor() {
   })
 
   if (!file) {
+    if (!onboardingDone && vaultOpen) {
+      return (
+        <div className="flex-1 flex flex-col min-w-0 min-h-0">
+          <TabBar onAiToggle={() => {}} />
+          <OnboardingGuide onDismiss={() => setOnboardingDone(true)} />
+        </div>
+      )
+    }
+
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TabBar onAiToggle={() => {}} />
@@ -767,7 +785,7 @@ export default function Editor() {
     inner = <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading...</div>
   } else if (kind === 'preview') {
     inner = <PlainTextViewer content={file.content} fileName={file.name} />
-  } else if (kind === 'markdown' || editMode === 'markdown') {
+  } else if (editMode === 'code') {
     inner = <MarkdownEditor content={file.frontmatter + (file.editedContent ?? file.content.replace(file.frontmatter, ''))} onChange={v => {
       const fmMatch = v.match(/^---[\s\S]*?\n---(?:\n|$)/)
       const newFrontmatter = fmMatch ? fmMatch[0] : ''

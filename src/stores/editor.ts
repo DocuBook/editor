@@ -5,7 +5,7 @@ import { undoDepth, redoDepth } from '@tiptap/pm/history'
 export interface Tab {
   path: string
   name: string
-  /** Full original file content (frontmatter + MDX + markdown). null = not yet loaded. */
+  /** Full original file content (frontmatter + markdown body). null = not yet loaded. */
   content: string | null
   /** YAML frontmatter */
   frontmatter: string
@@ -17,7 +17,7 @@ export interface Tab {
   deleted: boolean
 }
 
-export type EditMode = 'wysiwyg' | 'markdown'
+export type EditMode = 'editor' | 'code'
 
 interface EditorState {
   tabs: Tab[]; activeTab: string | null; editMode: EditMode
@@ -45,7 +45,7 @@ interface EditorState {
 }
 
 export const useEditorStore = create<EditorState>((set, get) => ({
-  tabs: [], activeTab: null, editMode: 'wysiwyg', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void) | null,
+  tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void) | null,
 
   setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
   /** Read undo/redo availability from the live TipTap editor (resets on replaceBlocks).
@@ -112,10 +112,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   
   setEditMode: (mode) => { set({ editMode: mode }) },
-  /** Toggle editor mode; flush WYSIWYG → store BEFORE switching to markdown so edits are not lost. */
+  /** Toggle editor mode; flush Editor → store BEFORE switching to Code so edits are not lost. */
   toggleEditMode: () => {
     const { editMode, flushEditor } = get()
-    if (editMode === 'wysiwyg') flushEditor()
-    set({ editMode: editMode === 'wysiwyg' ? 'markdown' : 'wysiwyg' })
+    if (editMode === 'editor') flushEditor()
+    set({ editMode: editMode === 'editor' ? 'code' : 'editor' })
   },
 }))

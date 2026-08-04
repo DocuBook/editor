@@ -67,6 +67,8 @@ impl Vault {
                 if name == ".git" || name == ".DS_Store" || name == "node_modules" { continue; }
                 let rel = if subpath.is_empty() { name.clone() } else { format!("{}/{}", subpath, name) };
                 let ft = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) { "1" } else { "0" };
+                // Only show .md files in the tree — directories always visible
+                if ft == "0" && !name.ends_with(".md") { continue; }
                 let info = FileInfo { path: rel, name, file_type: ft.to_string() };
                 if ft == "1" { dirs.push(info) } else { files.push(info) }
             }
@@ -164,8 +166,8 @@ mod tests {
         let dir = std::env::temp_dir().join("vault-test-sort");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("b.txt"), "").unwrap();
-        std::fs::write(dir.join("a.txt"), "").unwrap();
+        std::fs::write(dir.join("b.md"), "").unwrap();
+        std::fs::write(dir.join("a.md"), "").unwrap();
         std::fs::create_dir(dir.join("z-dir")).unwrap();
         std::fs::create_dir(dir.join("a-dir")).unwrap();
 
@@ -177,9 +179,9 @@ mod tests {
         assert_eq!(tree[1].name, "z-dir");
         assert_eq!(tree[1].file_type, "1");
         // then files
-        assert_eq!(tree[2].name, "a.txt");
+        assert_eq!(tree[2].name, "a.md");
         assert_eq!(tree[2].file_type, "0");
-        assert_eq!(tree[3].name, "b.txt");
+        assert_eq!(tree[3].name, "b.md");
         assert_eq!(tree[3].file_type, "0");
 
         let _ = std::fs::remove_dir_all(&dir);

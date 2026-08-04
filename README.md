@@ -21,17 +21,16 @@
 - Search files by filename (like Zed/Obsidian Cmd+F)
 - Frontmatter (YAML) auto-extracted, preserved during edits
 - **.md** files open in WYSIWYG editor (fully supported)
-- **.mdx** files open in markdown/source mode only (never WYSIWYG)
-- All other file types (JSON, TOML, YAML, etc.) open in view-only mode
+- All other file types (`.mdx`, `.markdown`, JSON, TOML, YAML, etc.) open in view-only mode
 
 ### WYSIWYG Block Editor (Notion-like)
 
 - BlockNoteJS — Notion-style block-based rich text editor
 - Slash command menu (`/`) to insert headings, lists, quotes, code blocks, dividers
 - Bubble menu for inline formatting (bold, italic, code, link, highlight)
-- Markdown source mode — toggle between WYSIWYG and raw markdown
+- Markdown source mode — toggle between WYSIWYG and raw markdown (code mode)
 - **.md files only** — WYSIWYG mode supports standard CommonMark markdown
-- **.mdx is source-mode only** — MDX files never open in WYSIWYG; edit in markdown source instead
+- Non-`.md` files (`.mdx`, `.markdown`, etc.) open in view-only mode
 
 ### AI Assistant
 
@@ -148,7 +147,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 6. Save — stages changes, Publish — commit + push
 7. Toggle AI in toolbar for AI assistance
 
-> **Note:** Only `.md` files are fully supported in WYSIWYG mode. `.mdx` files are source-mode only and never open in WYSIWYG.
+> **Note:** Only `.md` files are fully supported in WYSIWYG mode. Other extensions (`.mdx`, `.markdown`, `.txt`, etc.) open in view-only mode.
 
 ### Keyboard Shortcuts
 

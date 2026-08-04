@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.1.0-alpha.10 — 2026-08-05
+
+### Only `.md` — extension standardization + onboarding
+
+Editor, sidebar, and wiki now treat `.md` as the sole first-class extension. Every other file type is preview-only. The sidebar hides non-`.md` files, auto-appends `.md` on new-file creation, and strips the extension from the tree display. A one-time onboarding guide welcomes new users.
+
+#### 🚀 Features
+
+- **Onboarding guide** — four-step overview (create note, switch modes, AI, git) shown once per install when a vault opens. Survives force-quit and updates via `localStorage`; never re-appears after dismissal
+
+#### 🐛 Bug Fixes
+
+- **MarkdownEditor double scrollbar** — removed `min-h-full` from the source textarea; replaced with auto-resize so only the outer container scrolls
+- **AI button flicker in code mode** — reverted auto-switch-to-Editor behavior; ✨ now disabled in code mode with tooltip "Switch to Editor for AI"
+
+#### 💄 Polish
+
+- **Sidebar `.md` standardization:**
+  - Only `.md` files and directories appear in the tree (`.txt`, `.json`, `.mdx`, images, etc. are hidden from the sidebar)
+  - New files auto-append `.md` when the user doesn't type an extension
+  - Rename preserves `.md` when the old file had it and the user doesn't type a new extension
+  - Tree display strips `.md` (tab titles and search results show the full filename)
+- **Extension cleanup — removed `.markdown` / `.mdx` special handling:**
+  - `fileKind` now returns only `'wysiwyg'` (`.md`) or `'preview'` (everything else)
+  - `.mdx` and `.markdown` are now preview-only (previously: source-only and WYSIWYG respectively)
+  - `EditMode` renamed to `'editor' | 'code'` (was `'wysiwyg' | 'markdown'`)
+- **GraphView removed** — experimental feature deleted; backend `wiki_graph` command, GraphNode/Edge/Data structs, and all UI references cleaned up across 9 files
+- **README:** updated keyboard shortcuts, install guide, and `.mdx` references to reflect current state
+
+---
+
 ## v0.1.0-alpha.9 — 2026-08-05
 
 ### Fix arm64 launch — keep ad-hoc signature on Apple Silicon
