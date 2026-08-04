@@ -102,8 +102,27 @@ jobs:
       - run: npm ci
       - name: Build frontend
         run: npm run build
-      - name: Build Tauri (${{ matrix.arch }})
-        run: npx tauri build --target ${{ matrix.target }}
+      - name: Build Tauri (${{ matrix.arch }}, no bundle)
+        run: npx tauri build --target ${{ matrix.target }} --no-bundle
+      # macOS arm64 binaries are auto-signed `adhoc` by the linker; an
+      # ad-hoc-signed app + quarantine fails Gatekeeper with "app is damaged"
+      # (no Open Anyway). Stripping → unsigned → "developer cannot be verified"
+      # (Open Anyway) — parity with x86_64. Fails loud (CI-1) if still signed.
+      - name: Strip ad-hoc signature (Gatekeeper "damaged" fix)
+        run: |
+          BIN="src-tauri/target/${{ matrix.target }}/release/DocuBook"
+          if ! codesign -dv "$BIN" >/dev/null 2>&1; then
+            echo "SKIP: $BIN is already unsigned"
+          else
+            codesign --remove-signature "$BIN"
+            if codesign -dv "$BIN" >/dev/null 2>&1; then
+              echo "::error::signature still present after strip: $BIN"
+              exit 1
+            fi
+            echo "OK: signature removed — $BIN"
+          fi
+      - name: Bundle DMG (${{ matrix.arch }})
+        run: npx tauri bundle --target ${{ matrix.target }}
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:

@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.0-alpha.8 — 2026-08-04
+
+### Unsigned DMG on Apple Silicon
+
+The aarch64 (Apple Silicon) DMG previously shipped **ad-hoc signed** — macOS arm64 binaries are auto-signed by the linker (ld64) at link time. An ad-hoc-signed app + quarantine fails Gatekeeper with **"app is damaged and can't be opened"**, which has no Open Anyway bypass. The build now strips the ad-hoc signature before bundling, so both architectures ship fully unsigned — Gatekeeper shows *"developer cannot be verified"* with the **Open Anyway** option on first run. CI-only change; no app code changed.
+
+#### 🐛 Bug Fixes
+
+- **"App is damaged" on Apple Silicon** — CI workflow now splits `tauri build` (no bundle) → strip linker ad-hoc signature (`codesign --remove-signature`, fails loud per CI-1 if still signed) → `tauri bundle`. x86_64 links unsigned already and is unaffected — end state: both arches unsigned → Open Anyway available
+
+---
+
 ## v0.1.0-alpha.7 — 2026-08-04
 
 ### Wiki link navigation
