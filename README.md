@@ -11,6 +11,121 @@
 
 ---
 
+## Install
+
+Two distributions from the same codebase — **web (self-hosted Docker)** and **desktop (macOS)**. Pick one: vaults, the WYSIWYG editor, AI, and Git behave identically.
+
+### Option A — Web (Docker, self-host)
+
+> [!IMPORTANT]
+> Docker **pulls a prebuilt image** — no build step on your side. The image is built in CI on every release (`ghcr.io/docubook/editor`) and contains the frontend **and** the server.
+
+**Quick start:**
+
+```bash
+docker pull ghcr.io/docubook/editor
+docker run -d --name docubook -p 8080:8080 \
+  -v docubook:/data \
+  ghcr.io/docubook/editor
+# open http://localhost:8080 → setup wizard creates the admin account
+```
+
+**Docker Compose:**
+
+```yaml
+# docker-compose.yml
+services:
+  docubook:
+    image: ghcr.io/docubook/editor
+    ports:
+      - "8080:8080"
+    volumes:
+      - docubook:/data          # vaults + keys.json + config.json (0600)
+    environment:
+      PORT: 8080
+      # DB_ADMIN_EMAIL: admin@example.com    # set BOTH to skip the wizard
+      # DB_ADMIN_PASSWORD: change-me-123
+      # DB_NO_AUTH: "false"                  # "1" = open access without login
+      # DB_SECURE_COOKIE: "1"                # enable behind HTTPS
+    restart: unless-stopped
+
+volumes:
+  docubook:
+```
+
+All environment variables are documented in [`.env.example`](./.env.example).
+
+**Requirements (web):**
+
+| Resource | Minimum | Recommended | Notes |
+|---|---|---|---|
+| CPU | 1 vCPU | 2 vCPU | lightweight axum server; git ops are occasional |
+| Memory | **512 MB** | 1 GB | AI responses are streamed (not buffered) |
+| Storage | 1 GB free | 10 GB | vault content lives in `/data` (volume) |
+| Image size | ~20 MB compressed / ~35 MB unpacked | — | single stripped Rust binary + built frontend; verified in CI on every PR (`Report image size`) |
+
+Works on any Docker-capable host: VPS (Hetzner, DigitalOcean, Linode, AWS Lightsail, Oracle Cloud…), Docker hosting (Coolify, Portainer, CapRover, Dokku, Yunohost…), NAS (Synology, Unraid), and ARM hosts (statically-linked musl binary).
+
+**Deployment notes:**
+
+- **Persistence**: everything lives in the `/data` volume (`vaults/`, `keys.json`, `config.json`). Back up that volume; the container is stateless and can be recreated any time.
+- **HTTPS**: run behind a reverse proxy (Coolify/Traefik/Caddy/Nginx). Set `DB_SECURE_COOKIE=1` so the session cookie is only sent over HTTPS.
+- **Upgrades**: `docker compose pull && docker compose up -d` — data is untouched. Sessions reset on restart (re-login required).
+- **Health**: the image ships a Docker `HEALTHCHECK` against `/api/health` — Coolify/Portainer show container health automatically.
+
+### Option B — Desktop (macOS)
+
+Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook into Applications:
+
+| DMG                              | Architecture | Mac                                   |
+| -------------------------------- | ------------ | ------------------------------------- |
+| `DocuBook_<version>_aarch64.dmg` | arm64        | Apple Silicon (M1/M2/M3/M4…) — native |
+| `DocuBook_<version>_x64.dmg`     | x86_64       | Intel; Apple Silicon via Rosetta 2    |
+
+**First launch** — builds are **not notarized** (until the project sponsors Apple Developer signing/notarization), so Gatekeeper blocks the first open. The dialog differs by arch (not a malware warning):
+
+- **Apple Silicon (`aarch64.dmg`)** — _"app is damaged"_. macOS launchd refuses to spawn an **unsigned** arm64 binary (`RBSRequestErrorDomain Code=5`), so the build keeps an **ad-hoc signature**; with the download quarantine flag still on, Gatekeeper reads that signature as invalid and reports "damaged." There is **no Open Anyway** button for this case — clear the quarantine flag once:
+  ```sh
+  xattr -cr /Applications/DocuBook.app
+  open /Applications/DocuBook.app
+  ```
+- **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
+  - Right-click **DocuBook** in Applications → **Open** → **Open**, or
+  - System Settings → Privacy & Security → **Open Anyway**, or
+  - the same `xattr -cr /Applications/DocuBook.app` one-liner above.
+
+  Do the bypass once — the app opens normally afterwards.
+
+**Verify your build:**
+
+```sh
+file /Applications/DocuBook.app/Contents/MacOS/DocuBook
+# → "Mach-O thin (arm64)" = Apple Silicon · "Mach-O thin (x86_64)" = Intel
+
+codesign -dv /Applications/DocuBook.app 2>&1 | head -1
+# arm64 → "Signature=adhoc" (required: launchd spawn gate)
+# x64   → "code object is not signed at all" (expected until notarization)
+
+spctl -a -t exec -vv /Applications/DocuBook.app
+# "rejected" is expected until notarization is added
+```
+
+### First run (both)
+
+- **Web**: open the URL → the setup wizard creates the admin account (or provision headless with `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`, both required). Data lives in the `/data` volume — back it up.
+- **Desktop**: open the app → welcome screen → **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL). Vaults are plain local folders — no lock-in.
+- **Connect AI**: Settings → **AI** — pick a provider, paste your API key. Keys are stored **backend-side only** (macOS Keychain on desktop, a 0600 file in `/data` on web) and never leave the machine.
+- **Publish with Git**: Settings → **Git** — set commit name/email and add a remote. Private repos use your Keychain / SSH keys on desktop; the container's git identity on web.
+- **Start writing**: click a file in the sidebar, type `/` for slash commands, use the **Code** button to toggle WYSIWYG/markdown. See [Usage](#usage).
+
+### Troubleshooting (both)
+
+- **Desktop launch fails on Apple Silicon** with _"Launch failed" / POSIX 163_ — a **stripped** (unsigned) arm64 build reached the machine: redownload `aarch64.dmg` and re-run `xattr -cr`.
+- **AI not responding** (either platform): check the provider key in Settings → AI and that your network allows the provider endpoint.
+- **Git publish failing**: check identity/remote in Settings → Git; on web also confirm the container's git identity is configured.
+
+---
+
 ## Features
 
 ### Vault System (Obsidian-like)
@@ -38,10 +153,10 @@
 - Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
 - Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
 - API keys configured in **Settings** — stored in macOS Keychain only, never localStorage
-- **174 providers** with **5,482 models** (verified from `providers.ts`) — auto-synced from [models.dev](https://models.dev)
+- **100+ providers** with **1,000+ models** — auto-synced from [models.dev](https://models.dev) into `src/data/providers.ts` (the generated catalog is the single source of truth; currently 174 providers / 5,482 models)
 
 > [!NOTE]\
-> **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, 5,429 across 172 providers) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
+> **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, the majority of the 1,000+ catalog) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
 
 **Popular Providers** (all support the accept/reject suggestion flow):
 
@@ -92,50 +207,6 @@
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-compiling, and the project layout.
 
 ---
-
-## Install & Getting Started
-
-1. **Install** — download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook into Applications:
-
-   | DMG                              | Architecture | Mac                                   |
-   | -------------------------------- | ------------ | ------------------------------------- |
-   | `DocuBook_<version>_aarch64.dmg` | arm64        | Apple Silicon (M1/M2/M3/M4…) — native |
-   | `DocuBook_<version>_x64.dmg`     | x86_64       | Intel; Apple Silicon via Rosetta 2    |
-
-2. **First launch** — alpha builds are **not notarized**, so Gatekeeper blocks the first open. The dialog differs by arch (not a malware warning):
-
-   - **Apple Silicon (`aarch64.dmg`)** — _"app is damaged"_. macOS launchd refuses to spawn an **unsigned** arm64 binary (`RBSRequestErrorDomain Code=5`), so the build keeps an **ad-hoc signature**; with the download quarantine flag still on, Gatekeeper reads that signature as invalid and reports "damaged." There is **no Open Anyway** button for this case — clear the quarantine flag once:
-     ```sh
-     xattr -cr /Applications/DocuBook.app
-     open /Applications/DocuBook.app
-     ```
-   - **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
-     - Right-click **DocuBook** in Applications → **Open** → **Open**, or
-     - System Settings → Privacy & Security → **Open Anyway**, or
-     - the same `xattr -cr /Applications/DocuBook.app` one-liner above.
-
-   Do the bypass once — the app opens normally afterwards.
-
-   **Verify your build (terminal)**
-
-   ```sh
-   file /Applications/DocuBook.app/Contents/MacOS/DocuBook
-   # → "Mach-O thin (arm64)" = Apple Silicon · "Mach-O thin (x86_64)" = Intel
-
-   codesign -dv /Applications/DocuBook.app 2>&1 | head -1
-   # arm64 → "Signature=adhoc" (required: launchd spawn gate)
-   # x64   → "code object is not signed at all" (expected for alpha)
-
-   spctl -a -t exec -vv /Applications/DocuBook.app
-   # "rejected" is expected until notarization is added
-   ```
-
-3. **Open or create a vault** — on the welcome screen choose **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL to pull a vault from GitHub/GitLab).
-4. **Connect AI (optional)** — press `⌘,` → **AI** tab, pick a provider, paste your API key, Save. Keys are stored in the macOS Keychain and never leave your machine.
-5. **Set up git publishing (optional)** — press `⌘,` → **Git** tab: set your commit name/email and add a remote. Private repos use your macOS Keychain / SSH keys automatically.
-6. **Start writing** — click a file in the sidebar. Type `/` for slash commands; select text for the formatting toolbar; use the **Code** button to toggle WYSIWYG/markdown.
-
-> **Troubleshooting:** Launch fails on Apple Silicon with _"Launch failed" / POSIX 163_? It means a **stripped** (unsigned) arm64 build reached the machine — redownload the `aarch64.dmg` and re-run `xattr -cr`. AI not responding? Check the provider key in Settings → AI and that your network allows the provider endpoint. Git publish failing? Check Settings → Git for identity/remote, and that your SSH key or credential helper is set up on this machine.
 
 ## Usage
 

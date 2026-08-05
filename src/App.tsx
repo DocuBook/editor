@@ -9,11 +9,19 @@ import { PanelLeftOpen, Command } from 'lucide-react'
 
 import { useGitPolling } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
+import { listen, invoke } from './lib/ipc'
+import { useAuth, initAuthGuard } from './stores/auth'
+import SetupWizard from './components/SetupWizard'
+import Login from './components/Login'
+
+initAuthGuard()
 
 /** Root application component with keyboard shortcuts. */
 export default function App() {
+  const { status } = useAuth()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const toggleSidebar = () => setSidebarOpen(o => !o)
+  useEffect(() => { useAuth.getState().init() }, [])
 
   /** Single git-status poller shared by StatusBar + TabBar. */
   useGitPolling()
@@ -22,15 +30,12 @@ export default function App() {
   useEffect(() => {
     let unsub: (() => void) | undefined
     let cancelled = false
-    import('@tauri-apps/api/event').then(({ listen }) =>
-      listen('app:before-close', async () => {
-        await useEditorStore.getState().persistAllDirty()
-        if (!cancelled) {
-          const { invoke } = await import('@tauri-apps/api/core')
-          try { await invoke('app_ready_to_close') } catch (e) { console.error('close:', e) }
-        }
-      }).then(u => { if (!cancelled) unsub = u })
-    )
+    listen('app:before-close', async () => {
+      await useEditorStore.getState().persistAllDirty()
+      if (!cancelled) {
+        try { await invoke('app_ready_to_close') } catch (e) { console.error('close:', e) }
+      }
+    }).then(u => { if (!cancelled) unsub = u })
     return () => { cancelled = true; unsub?.() }
   }, [])
 
@@ -51,6 +56,14 @@ export default function App() {
       return () => window.removeEventListener('contextmenu', h)
     }
   }, [])
+
+  /** Auth gate: checking → setup wizard → login → app. Desktop (Tauri) never
+   *  gates — this branch only triggers on web when the server enforces login. */
+  if (status === 'checking') {
+    return <div className="h-screen flex items-center justify-center text-xs text-[var(--text-muted)]">Loading…</div>
+  }
+  if (status === 'setup') return <SetupWizard />
+  if (status === 'login') return <Login />
 
   return (
     <div className="h-screen flex flex-col bg-[var(--bg-primary)] text-[var(--text-primary)]">

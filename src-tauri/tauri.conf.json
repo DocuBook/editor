@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DocuBook",
-  "version": "0.1.0-alpha.10",
+  "version": "0.1.0-beta.1",
   "identifier": "com.docubook.editor",
   "build": {
     "frontendDist": "../dist",

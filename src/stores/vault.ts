@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
 
 /** File or directory info from the vault tree. */
@@ -35,8 +35,7 @@ export const useVaultStore = create<VaultState>()(
       /** Open a directory picker and load the selected folder as vault. */
       openVault: async () => {
         try {
-          const { open } = await import('@tauri-apps/plugin-dialog')
-          const path = await open({ directory: true, multiple: false, title: 'Open Vault', defaultPath: get().recent[0]?.parent })
+          const path = await openDir({ title: 'Open Vault', defaultPath: get().recent[0]?.parent })
           if (!path) return
           set({ loading: true })
           const res = await invoke<string>('open_vault', { path })
@@ -90,7 +89,7 @@ export const useVaultStore = create<VaultState>()(
           set({ loading: false })
         }
       },
-      /** Auto-resume last vault on startup (Zed-style restore_on_startup: last_session). */
+      /** Auto-resume last vault on startup (restore-on-startup: last session). */
       resumeVault: async () => {
         const { vaultPath } = get()
         if (!vaultPath) return

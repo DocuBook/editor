@@ -12,8 +12,8 @@ export const useGitStatus = create<GitStatusState>(() => ({ branch: '', status: 
 
 async function pollGitStatus() {
   try {
-    const m = await import('@tauri-apps/api/core')
-    const s = await m.invoke<string>('git_status')
+    const { invoke } = await import('../lib/ipc')
+    const s = await invoke<string>('git_status')
     const d = JSON.parse(s)
     useGitStatus.setState({ branch: d.branch || '', status: d.status || '' })
   } catch {

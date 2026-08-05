@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { Plus, X, GitBranch } from 'lucide-react'
 

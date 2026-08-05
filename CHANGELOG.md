@@ -1,5 +1,46 @@
 # Changelog
 
+## v0.1.0-beta.1 — 2026-08-05
+
+### Web (Docker) distribution + admin account
+
+Same codebase now ships as a self-hosted web server (`docubook/editor` image): the React frontend served over HTTP, backed by the same Rust modules as the desktop app — no extra build steps, `docker pull` and run. Desktop distribution (DMG) is unchanged.
+
+#### 🚀 Features
+
+- **Web server (`src-tauri-server`)** — axum HTTP server reusing the desktop vault/wiki/git/search/agent modules via `#[path]` includes; single binary serving the built frontend + `/api/*`; SSE streaming for AI
+- **Setup wizard on first run** — create the admin account (Argon2id, session cookie `HttpOnly`/`SameSite=Strict`, login rate-limited 5×/min). Headless provisioning via `DB_ADMIN_EMAIL`/`DB_ADMIN_PASSWORD` env; `DB_NO_AUTH=1` keeps open access (pre-web behavior)
+- **Settings → System (web only)** — change password, sign out, toggle login requirement, session TTL. Precedence: env var > `/data/config.json` > default; env-sourced values shown locked ("from env")
+- **Vault picker modal (web)** — replaces the browser `prompt()` with an in-app modal (list / open / create), same contract as the native folder dialog
+- **Docker packaging** — multi-stage build (node → rust musl → alpine), non-root user, `/data` volume, `HEALTHCHECK` on `/api/health`, GHCR publish on tags (`ghcr.io/docubook/editor`); all server env vars documented in `.env.example`
+
+#### 🛡️ Security
+
+- **Setup-takeover guard** — optional `DB_SETUP_TOKEN` (required in the wizard when set) + rate-limited `setup_admin`; closes the pre-auth admin-claim race on public deployments (backward compatible: no env = previous behavior)
+- **Server path allowlist** — vault paths must resolve inside `DATA_DIR`; closes arbitrary file read via the API (desktop unaffected — it still opens any local folder)
+- **Security headers** — CSP, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy` on static and API responses
+
+#### ⚡ Performance
+
+- **git_status: 1 subprocess instead of 2** — `--porcelain=v2 -b` mapped back to v1 output; desktop command now async (off the UI thread); ~38% cheaper per 3s poll
+- **AI request timeouts** — 30s budget for response headers and first token; frontend watchdog aborts stalled streams after 60s; generic API calls time out after 30s
+- **Smaller image** — `strip = "debuginfo"` release profile (symbols kept for `RUST_BACKTRACE`)
+
+#### 🐛 Bug Fixes
+
+- **Static assets gated by auth** — the middleware wrapped the whole router incl. the frontend, so after setup the app shell returned 401 and the UI never loaded; non-`/api` paths are now always public (data access stays gated)
+- **SPA fallback returned 404** — `not_found_service` forces `404`; switched to `fallback()` so deep links serve `index.html` with 200
+- **System tab on desktop showed endless loading** — web-only tab is now hidden in the Tauri app
+- **Deadlock on first setup** — `setup_admin` re-locked the non-reentrant config mutex; lock released before issuing the session cookie
+
+#### 🔧 CI
+
+- **Docker image built on every PR** (push only on tags) with a `Report image size` step — Dockerfile breakage is caught before merge
+
+#### 🔄 Renames
+
+- Desktop crate: `DocuBook` → `docubook-desktop`; web server crate: `docubook-server` (CI/Docker paths updated)
+
 ## v0.1.0-alpha.10 — 2026-08-05
 
 ### Only `.md` — extension standardization + onboarding
