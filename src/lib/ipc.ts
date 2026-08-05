@@ -130,12 +130,18 @@ async function streamAskAi(args: Record<string, unknown>) {
 /**
  * Folder picker.
  * - Desktop: native directory dialog (full filesystem access).
- * - Web: modal listing server-side vaults (the server owns the filesystem).
+ * - Web: the server owns the filesystem. "Open Vault" shows the vault picker
+ *   modal (list / open / create); Create/Clone flows get the server vaults
+ *   folder directly as parent — their own name/clone form follows, so there is
+ *   no double entry and no nested-vault bug.
  */
 export async function openDir(opts?: { title?: string; defaultPath?: string }): Promise<string | null> {
   if (isTauri) {
     const { open } = await import('@tauri-apps/plugin-dialog')
     return open({ directory: true, multiple: false, ...opts }) as Promise<string | null>
+  }
+  if (opts?.title !== 'Open Vault') {
+    return (await post('web_vault_root', {}) as string).trim() || null
   }
   const { pickServerVault } = await import('../components/VaultPicker')
   return pickServerVault()
