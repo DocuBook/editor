@@ -94,10 +94,10 @@ impl Config {
             "session_ttl_hours": self.session_ttl_hours,
         });
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
         }
         std::fs::write(&self.path, serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("Cannot write {}: {} — check the /data volume ownership", self.path.display(), e))?;
         #[cfg(unix)]
         let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
         Ok(())

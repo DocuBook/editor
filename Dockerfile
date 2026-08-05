@@ -31,6 +31,10 @@ WORKDIR /app
 COPY --from=server /src/src-tauri-server/target/release/docubook-server /app/docubook-server
 COPY --from=web /app/dist /app/www
 ENV DATA_DIR=/data WWW_DIR=/app/www PORT=8080
+# /data must exist with docubook ownership BEFORE the USER switch: named
+# volumes inherit the mount-point ownership, so without this the volume is
+# root-owned and config.json/keys.json writes fail (EACCES, os error 13).
+RUN mkdir -p /data && chown -R docubook:docubook /data
 USER docubook
 VOLUME /data
 EXPOSE 8080

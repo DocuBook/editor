@@ -26,10 +26,10 @@ fn load(data_dir: &Path) -> HashMap<String, String> {
 fn save(data_dir: &Path, map: &HashMap<String, String>) -> Result<(), String> {
     let path = keys_file(data_dir);
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
     }
     let json = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| format!("Cannot write {}: {} — check the /data volume ownership", path.display(), e))?;
     #[cfg(unix)]
     let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     Ok(())
