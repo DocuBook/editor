@@ -22,6 +22,35 @@ impl Git {
         let out = Command::new("git").args(["status", "--porcelain"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     }
+
+    /** Branch + status in ONE git subprocess (PERF: the old two-command
+     *  rev-parse + status cost ~2× per 3s poll). Runs `status --porcelain=v2 -b`
+     *  and maps v2 lines back to v1-style `XY path` so frontend parsers are
+     *  unchanged. Returns (branch, v1_status_string). */
+    pub fn status_with_branch(&self) -> Result<(String, String), String> {
+        let out = Command::new("git")
+            .args(["status", "--porcelain=v2", "-b"])
+            .current_dir(&self.repo_path)
+            .output()
+            .map_err(|e| e.to_string())?;
+        let text = String::from_utf8_lossy(&out.stdout);
+        let mut branch = String::new();
+        let mut lines: Vec<String> = Vec::new();
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("# branch.head ") {
+                branch = rest.trim().to_string();
+            } else if let Some(rest) = line.strip_prefix("1 ") {
+                // v2: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path> → v1: XY path
+                let mut it = rest.split_whitespace();
+                if let (Some(xy), Some(path)) = (it.next(), it.last()) {
+                    lines.push(format!("{xy} {path}"));
+                }
+            } else if let Some(rest) = line.strip_prefix("? ") {
+                lines.push(format!("? {}", rest.trim()));
+            }
+        }
+        Ok((branch, lines.join("\n")))
+    }
 /** Stage all changes. */
     pub fn add_all(&self) -> Result<(), String> {
         Command::new("git").args(["add", "-A"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;

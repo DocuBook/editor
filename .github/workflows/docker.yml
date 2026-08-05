@@ -1,0 +1,53 @@
+# Builds the web Docker image: full check on every PR, push to GHCR on tags.
+# Users never build: `docker pull ghcr.io/docubook/editor` and run.
+name: Docker Web Image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/docubook/editor
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+      # PR: build-only validation of the Dockerfile (frontend + musl server +
+      # runtime image). Tag: build + push.
+      - name: Build (PR check / tag push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags || 'docubook/editor:check' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Report image size
+        run: |
+          IMG="${{ steps.meta.outputs.image || 'docubook/editor:check' }}"
+          SIZE=$(docker image inspect --format='{{.Size}}' "$IMG" | awk '{printf "%.1f MB", $1/1024/1024}')
+          echo "::notice::docubook/editor image size = $SIZE"

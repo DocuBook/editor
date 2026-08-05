@@ -218,17 +218,23 @@ async fn git_push(message: String, state: State<'_, AppState>) -> Result<String,
 }
 
 #[tauri::command]
-fn git_status(state: State<AppState>) -> Result<String, String> {
-    let guard = state.git.lock().expect("lock");
-    match guard.as_ref() {
-        Some(g) if g.is_repo() => {
-            let branch = std::process::Command::new("git").args(["rev-parse", "--abbrev-ref", "HEAD"]).current_dir(&g.repo_path).output()
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
-            let status = g.status().unwrap_or_default();
-            Ok(serde_json::json!({ "branch": branch, "status": status.trim() }).to_string())
+async fn git_status(state: State<'_, AppState>) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Ok(r#"{"branch":"","status":""}"#.to_string()),
+    };
+    // git spawns subprocesses (is_repo + status) — off the main thread (PERF:
+    // this runs on a 3s poller; previously SYNC on the UI thread).
+    let (branch, status) = tauri::async_runtime::spawn_blocking(move || {
+        let g = git::Git::open(&repo_path);
+        if !g.is_repo() {
+            return (String::new(), String::new());
         }
-        _ => Ok(r#"{"branch":"","status":""}"#.to_string()),
-    }
+        g.status_with_branch().unwrap_or_default()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "branch": branch, "status": status.trim() }).to_string())
 }
 
 // ── Preview ──
@@ -356,6 +362,7 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     };
     let state = app.state::<AppState>();
     eprintln!("[docubook] ask_ai: provider={} model={}", agent.provider, agent.model);
+    let started = std::time::Instant::now();
     state.ai_cancel.store(false, Ordering::SeqCst);
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -380,21 +387,36 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     }
     let body = body_obj;
     let url = format!("{}/chat/completions", agent.base_url.trim_end_matches('/'));
-    // Mirror PI: opencode gateways route better when the client + session are identified.
+    // Gateway attribution: opencode providers route better when the client + session are identified.
     let mut req = client.post(&url).header("Authorization", format!("Bearer {}", agent.api_key));
     if agent.provider == "opencode-go" || agent.provider == "opencode" {
         req = req
             .header("x-opencode-client", "pi")
             .header("x-opencode-session", format!("docubook-{}", std::process::id()));
     }
-    let response = req.json(&body).send().await.map_err(|e| sanitize_ai_error(&e.to_string()))?;
+    // Timeout budget (P1): 30s to get response headers AND first chunk — a
+    // provider that accepts the request but never sends data errors out at 30s
+    // instead of hanging on send() or the 120s read_timeout.
+    let response = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        req.json(&body).send(),
+    )
+    .await
+    .map_err(|_| "AI provider did not respond — try again".to_string())?
+    .map_err(|e| sanitize_ai_error(&e.to_string()))?;
     let status = response.status();
     if !status.is_success() {
         // Do NOT surface the raw provider body — it may leak internal details.
         return Err(format!("AI provider error (HTTP {})", status));
     }
     let mut stream = response;
-    
+    // First chunk budget: headers arrived but body never starts → 30s, not 120s.
+    let first_chunk = tokio::time::timeout(std::time::Duration::from_secs(30), stream.chunk())
+        .await
+        .map_err(|_| "AI provider did not respond — try again".to_string())?
+        .map_err(|e| sanitize_ai_error(&e.to_string()))?
+        .ok_or_else(|| "AI provider returned an empty response".to_string())?;
+
     use tauri::Emitter;
     let mut full = String::new();
     let mut tool_calls: Vec<(i64, String, String, String)> = Vec::new();
@@ -405,7 +427,15 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     // and partial SSE lines (JSON split mid-event) are dropped.
     let mut byte_buf: Vec<u8> = Vec::new();
     let mut truncated = false;
-    while let Some(chunk) = stream.chunk().await.map_err(|e| sanitize_ai_error(&e.to_string()))? {
+    // Process the pre-fetched first chunk, then stream the rest (read_timeout 120s
+    // per chunk for long generations).
+    let mut pending_first = Some(first_chunk);
+    loop {
+        let chunk = match pending_first.take() {
+            Some(c) => Some(c),
+            None => stream.chunk().await.map_err(|e| sanitize_ai_error(&e.to_string()))?,
+        };
+        let Some(chunk) = chunk else { break };
         if state.ai_cancel.load(Ordering::SeqCst) { break }
         byte_buf.extend_from_slice(&chunk);
         let mut start = 0;
@@ -450,7 +480,7 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     if full.is_empty() && tool_calls.is_empty() {
         return Err("AI returned empty response".to_string());
     }
-    eprintln!("[docubook] ask_ai done: chars={} tools={} truncated={}", full.len(), tool_calls.len(), truncated);
+    eprintln!("[docubook] ask_ai done: elapsed={:.1}s chars={} tools={} truncated={}", started.elapsed().as_secs_f32(), full.len(), tool_calls.len(), truncated);
     let _ = app.emit("ai:done", serde_json::json!({ "provider": agent.provider, "truncated": truncated }));
     Ok(())
 }

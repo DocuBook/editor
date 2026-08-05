@@ -11,7 +11,7 @@ import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBig
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide, { isOnboardingDone } from './OnboardingGuide'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, listen, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
 import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -77,7 +77,7 @@ const getSchema = () => {
   return _schema
 }
 
-/** Welcome screen shown when no vault is open — Zed-style launchpad (Open Folder / Create Vault / Recent). */
+/** Welcome screen shown when no vault is open — launchpad (Open Folder / Create Vault / Recent). */
 function WelcomeScreen() {
   const { recent, openRecent, openVault, createVault, cloneVault, loading } = useVaultStore()
   const [step, setStep] = useState<'idle' | 'name' | 'clone'>('idle')
@@ -87,8 +87,7 @@ function WelcomeScreen() {
   const [cloneErr, setCloneErr] = useState('')
 
   const pickParent = async (title: string) => {
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const p = await open({ directory: true, multiple: false, title, defaultPath: recent[0]?.parent })
+    const p = await openDir({ title, defaultPath: recent[0]?.parent })
     if (!p) return
     setParent(p)
   }
@@ -182,8 +181,6 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
         sendMessages: async (args: any) => {
           const { messages, abortSignal, body } = args
           if (!messages.length || abortSignal?.aborted) return new ReadableStream()
-          const { invoke } = await import('@tauri-apps/api/core')
-          const { listen } = await import('@tauri-apps/api/event')
           const config = await getAiConfig()
           /** Fallback: always resolve provider/model from store even if config incomplete (HMR-safe) */
           const st = useAiSettings.getState()
@@ -635,7 +632,7 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
       /** Sanitize the filename for use in a git commit message: strip control
        *  characters, newlines, and trailing dots (Windows-invalid). */
       const msg = `Auto-commit: ${rawName.replace(/[\x00-\x1f\x7f]/g, '').replace(/\.+$/g, '').trim() || 'changes'}`
-      const res = await (await import('@tauri-apps/api/core')).invoke<string>('git_push', { message: msg })
+      const res = await invoke<string>('git_push', { message: msg })
       const d = JSON.parse(res)
       if (d.error && d.error !== 'Nothing to push') { setPubMsg(d.error); setPubState('error'); setStaged(false) }
       else {
@@ -691,9 +688,9 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
             if (tab && s2.activeTab) {
               const src = tab.content ?? ''
               const content = tab.frontmatter + (tab.editedContent ?? src.replace(tab.frontmatter, ''))
-              await (await import('@tauri-apps/api/core')).invoke('write_file', { path: s2.activeTab, content })
+              await invoke('write_file', { path: s2.activeTab, content })
             }
-            await (await import('@tauri-apps/api/core')).invoke('git_stage'); setStaged(true); useEditorStore.getState().setTabDirty(s2.activeTab!, false); setHasDiskChanges(false)
+            await invoke('git_stage'); setStaged(true); useEditorStore.getState().setTabDirty(s2.activeTab!, false); setHasDiskChanges(false)
           } catch(e) { console.error('Save:', e); toast.error('Failed to save') }
         }}
         disabled={!(hasDiskChanges || hasUnsaved) || file?.deleted}

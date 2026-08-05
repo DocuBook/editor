@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
 import { X, Eye, EyeOff, Check, Loader, ChevronsUpDown, Search } from 'lucide-react'
 import { useAiSettings } from '../stores/aiSettings'
 import GitSettings from './GitSettings'
+import SystemSettings from './SystemSettings'
 import type { ProviderInfo } from '../data/providers'
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [section, setSection] = useState<'ai' | 'git'>('ai')
+  const [section, setSection] = useState<'ai' | 'git' | 'system'>('ai')
   const { provider, model, savedProviders, models,
     setProvider, setModel, clearApiKey, addSavedProvider, removeSavedProvider } = useAiSettings()
 
@@ -128,10 +129,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-3">
             <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">Settings</h2>
             <div className="flex gap-1">
-              {(['ai', 'git'] as const).map(s => (
+              {(['ai', 'git', 'system'] as const).filter(s => s !== 'system' || !isTauri).map(s => (
                 <button key={s} onClick={() => setSection(s)}
                   className={'text-xs px-2 py-1 rounded cursor-pointer bg-transparent border-none ' + (section === s ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-zinc-300')}>
-                  {s === 'ai' ? 'AI' : 'Git'}
+                  {s === 'ai' ? 'AI' : s === 'git' ? 'Git' : 'System'}
                 </button>
               ))}
             </div>
@@ -142,7 +143,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           {section === 'ai' ? (
             <>
           <div className="text-xs text-[var(--text-muted)] mb-4 leading-relaxed">
-            API keys are stored in your macOS Keychain.
+            API keys are stored in {isTauri ? 'your macOS Keychain' : 'a server-side file (0600 perms)'}.
             {savedProviders.length > 0 && <span className="block mt-1 text-[var(--accent)]">✓ {savedProviders.length} provider{savedProviders.length > 1 ? 's' : ''} configured</span>}
           </div>
 
@@ -266,6 +267,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </>
           )}
             </>
+          ) : section === 'system' ? (
+            <SystemSettings />
           ) : (
             <GitSettings />
           )}

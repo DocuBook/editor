@@ -1,0 +1,28 @@
+# DocuBook editor — web (Docker) distribution
+services:
+  docubook:
+    build: .
+    image: docubook/editor
+    ports:
+      - "8080:8080"
+    volumes:
+      - docubook:/data   # vaults + api keys + config.json (all 0600)
+    environment:
+      # ── Server (boot-time) ──
+      PORT: 8080                 # HTTP port; keep 8080 when behind the Coolify/Traefik proxy
+      DATA_DIR: /data            # vaults/, keys.json, config.json — mount the volume here
+      WWW_DIR: /app/www          # built frontend (read-only)
+      # ── First-boot provisioning (headless admin) ──
+      # Set BOTH to auto-create the admin and skip the setup wizard.
+      # DB_ADMIN_EMAIL: admin@example.com
+      # DB_ADMIN_PASSWORD: change-me-123
+      # ── Login / sessions (env wins over Settings → System) ──
+      # DB_SETUP_TOKEN: ""           # optional; set a secret to guard first-run
+      #                               # admin creation on public deployments
+      DB_NO_AUTH: "false"        # "1"/"true" = open access without login (pre-web behavior)
+      DB_SESSION_TTL_HOURS: "168"  # session lifetime in hours (1–8760)
+      DB_SECURE_COOKIE: "0"      # "1" when HTTPS (Coolify TLS proxy) — Secure flag on session cookie
+    restart: unless-stopped
+
+volumes:
+  docubook:

@@ -1,14 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
-import { invoke } from '@tauri-apps/api/core'
+import { invoke } from '../lib/ipc'
 import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, PanelLeftClose } from 'lucide-react'
 import { toast } from 'sonner'
 import SettingsModal from './SettingsModal'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 
-/** Search modal overlay — like Zed's command palette search. */
+/** Search modal overlay — command-palette style search. */
 function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{path:string;name:string}[]>([])

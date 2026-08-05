@@ -1,0 +1,29 @@
+[package]
+name = "docubook-server"
+version = "0.1.0-beta.1"
+edition = "2021"
+
+# Web-only server: reuses src-tauri's pure modules via #[path] includes.
+# No tauri dependency — builds as a plain Linux binary (musl-friendly).
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.13", default-features = false, features = ["stream", "json", "rustls"] }
+regex = "1"
+pulldown-cmark = "0.13"
+ammonia = "4"
+trash = "5"
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs"] }
+argon2 = "0.5"
+getrandom = "0.2"
+rand = "0.8"
+
+[profile.release]
+# Drop DWARF but keep the symbol table so RUST_BACKTRACE=1 shows function names
+# (musl binary ≈ 11 MB; strip = true would save ~2 MB but lose backtrace names).
+strip = "debuginfo"

@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Web (Docker) server
+src-tauri-server/target
+/data
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

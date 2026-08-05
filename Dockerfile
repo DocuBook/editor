@@ -1,0 +1,39 @@
+# DocuBook web — multi-stage: frontend build + Rust server, single runtime image.
+# Users never build anything: `docker pull <registry>/docubook/editor` and run.
+
+# ---- frontend (vite) ----
+FROM node:22-alpine AS web
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+# ---- server (Rust, musl) ----
+FROM rust:1.94-alpine AS server
+# cmake/clang for aws-lc-rs (reqwest TLS), build-base for ring/cc
+RUN apk add --no-cache musl-dev build-base cmake clang git
+WORKDIR /src
+# Reuse the desktop app's pure modules — the web crate includes them via #[path].
+COPY src-tauri/src/vault ./src-tauri/src/vault
+COPY src-tauri/src/git ./src-tauri/src/git
+COPY src-tauri/src/wiki ./src-tauri/src/wiki
+COPY src-tauri/src/search ./src-tauri/src/search
+COPY src-tauri/src/agent ./src-tauri/src/agent
+COPY src-tauri-server ./src-tauri-server
+RUN cd src-tauri-server && cargo build --release
+
+# ---- runtime ----
+FROM alpine:3.21
+RUN apk add --no-cache git ca-certificates \
+    && adduser -D -u 1000 docubook
+WORKDIR /app
+COPY --from=server /src/src-tauri-server/target/release/docubook-server /app/docubook-server
+COPY --from=web /app/dist /app/www
+ENV DATA_DIR=/data WWW_DIR=/app/www PORT=8080
+USER docubook
+VOLUME /data
+EXPOSE 8080
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
+  CMD wget -qO- http://127.0.0.1:8080/api/health >/dev/null || exit 1
+ENTRYPOINT ["/app/docubook-server"]

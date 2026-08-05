@@ -48,6 +48,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Web server test (src-tauri-server)
+        run: cargo test --manifest-path src-tauri-server/Cargo.toml
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
   security:
@@ -117,7 +119,7 @@ jobs:
       - name: Strip ad-hoc signature (x86_64 only — Gatekeeper "damaged" fix)
         if: matrix.arch == 'amd64'
         run: |
-          BIN="src-tauri/target/${{ matrix.target }}/release/DocuBook"
+          BIN="src-tauri/target/${{ matrix.target }}/release/docubook-desktop"
           if ! codesign -dv "$BIN" >/dev/null 2>&1; then
             echo "SKIP: $BIN is already unsigned"
           else
@@ -131,7 +133,7 @@ jobs:
       - name: Verify arm64 keeps signature (launchd spawn gate)
         if: matrix.arch == 'arm64'
         run: |
-          BIN="src-tauri/target/${{ matrix.target }}/release/DocuBook"
+          BIN="src-tauri/target/${{ matrix.target }}/release/docubook-desktop"
           if ! codesign -dv "$BIN" >/dev/null 2>&1; then
             echo "::error::$BIN is unsigned — Apple Silicon launchd will refuse spawn (POSIX 163)"
             exit 1
