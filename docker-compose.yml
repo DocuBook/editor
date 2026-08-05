@@ -17,8 +17,9 @@ services:
       # DB_ADMIN_EMAIL: admin@example.com
       # DB_ADMIN_PASSWORD: change-me-123
       # ── Login / sessions (env wins over Settings → System) ──
-      # DB_SETUP_TOKEN: ""           # optional; set a secret to guard first-run
-      #                               # admin creation on public deployments
+      # DB_SETUP_TOKEN: ""           # optional plain secret (NOT a JWT) guarding
+      #                               # first-run admin creation; wizard asks for
+      #                               # it when set (openssl rand -hex 32)
       DB_NO_AUTH: "false"        # "1"/"true" = open access without login (pre-web behavior)
       DB_SESSION_TTL_HOURS: "168"  # session lifetime in hours (1–8760)
       DB_SECURE_COOKIE: "0"      # "1" when HTTPS (Coolify TLS proxy) — Secure flag on session cookie

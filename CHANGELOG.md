@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.1.0-beta.2 — 2026-08-05
+
+### Setup-token guard completed (UI + docs)
+
+`DB_SETUP_TOKEN` now works end-to-end: the setup wizard asks for the token when the server requires it, and the token format is documented.
+
+#### 🚀 Features
+
+- **Setup wizard token field** — `setup_status` reports whether a token is required (`setupToken`); the wizard shows the "Setup token" input only then and submits it with `setup_admin`. Previously the wizard could never complete when `DB_SETUP_TOKEN` was set
+- **Token format documented** — `DB_SETUP_TOKEN` is a **plain secret string (not a JWT)**, compared verbatim; `openssl rand -hex 32` example in `.env.example` / `docker-compose.yml`
+
+#### 🔄 Version
+
+- Bumped to `0.1.0-beta.2` across `package.json`, `src-tauri/Cargo.toml`, `src-tauri-server/Cargo.toml`, `src-tauri/tauri.conf.json`, lock files (package-lock was stale at alpha.6 — synced)
+
 ## v0.1.0-beta.1 — 2026-08-05
 
 ### Web (Docker) distribution + admin account
@@ -32,10 +47,12 @@ Same codebase now ships as a self-hosted web server (`docubook/editor` image): t
 - **SPA fallback returned 404** — `not_found_service` forces `404`; switched to `fallback()` so deep links serve `index.html` with 200
 - **System tab on desktop showed endless loading** — web-only tab is now hidden in the Tauri app
 - **Deadlock on first setup** — `setup_admin` re-locked the non-reentrant config mutex; lock released before issuing the session cookie
+- **Healthcheck "connection refused" (dual-stack)** — the server bound IPv4-only (`0.0.0.0`), but `localhost` resolves to `::1` inside containers, so Coolify/Docker healthchecks probing `localhost` failed; now binds `[::]` (dual-stack, IPv4 fallback)
 
 #### 🔧 CI
 
 - **Docker image built on every PR** (push only on tags) with a `Report image size` step — Dockerfile breakage is caught before merge
+- **Multi-platform image (`linux/amd64` + `linux/arm64`)** — QEMU emulation on the runner; README ARM claim (Raspberry Pi / Apple Silicon) now accurate
 
 #### 🔄 Renames
 
