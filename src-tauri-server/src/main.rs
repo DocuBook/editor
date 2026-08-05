@@ -82,11 +82,18 @@ fn main() {
         )
         .with_state(state);
 
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("[::]:{port}");
     println!("[docubook] listening on http://{addr} (data={data_dir} www={www_dir})");
     let rt = tokio::runtime::Runtime::new().expect("tokio");
     rt.block_on(async {
-        let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind");
+        // Dual-stack ([::]): IPv4 + IPv6. Health checks (Coolify/Docker) probe
+        // `localhost`, which resolves to ::1 inside containers — an IPv4-only
+        // 0.0.0.0 bind makes them get "connection refused". Fall back to IPv4
+        // only if the host has no IPv6 stack.
+        let listener = match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(_) => tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await.expect("bind"),
+        };
         axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await
             .expect("serve");
