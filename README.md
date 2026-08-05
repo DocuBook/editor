@@ -43,6 +43,7 @@ services:
       - docubook:/data          # vaults + keys.json + config.json (0600)
     environment:
       PORT: 8080
+      # DB_SETUP_TOKEN: ""            # plain secret (not a JWT) — wizard asks for it
       # DB_ADMIN_EMAIL: admin@example.com    # set BOTH to skip the wizard
       # DB_ADMIN_PASSWORD: change-me-123
       # DB_NO_AUTH: "false"                  # "1" = open access without login
@@ -52,6 +53,23 @@ services:
 volumes:
   docubook:
 ```
+
+**Environment configuration:**
+
+All server variables are set via environment — the complete list is in [`.env.example`](./.env.example). They are read at **boot**, so set them before the first deploy; changing them means a restart/redeploy.
+
+How you set them depends on your host — a `.env` file for `docker compose`, `-e` flags for `docker run`, or the environment panel of your Docker UI (e.g. **Coolify → Configuration → Environment Variables**, Portainer, CapRover — any panel works, the variables are the same).
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `DB_SETUP_TOKEN` | empty | First-run guard: a **plain secret string (not a JWT)**, e.g. `openssl rand -hex 32`. When set, the setup wizard asks for it before creating the admin — prevents anyone else from claiming the account first. Set it *before* the first deploy on public instances; leave empty for private/LAN |
+| `DB_SECURE_COOKIE` | `false` | `1` = session cookie only over HTTPS — enable when behind TLS |
+| `DB_NO_AUTH` | `false` | `1` = open access without login (pre-web behavior) |
+| `DB_SESSION_TTL_HOURS` | `168` | Session lifetime before re-login |
+| `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | — | Set **both** to skip the wizard entirely (headless provisioning) |
+
+> [!NOTE]
+> `DB_SETUP_TOKEN` is compared verbatim — it is **not** a JWT, has no expiry beyond the setup window, and the wizard never displays it (it only asks for it). Generate one with `openssl rand -hex 32` and keep it safe.
 
 All environment variables are documented in [`.env.example`](./.env.example).
 
