@@ -136,6 +136,29 @@ docker-compose.yml       Web deployment (volume /data, env reference)
 
 The pre-commit hook runs `lint-staged` (oxlint on staged files); the pre-push hook runs the full type check + Rust + frontend tests.
 
+## Release workflow (custom — no semantic-release/changeset)
+
+```
+PR (feat:/fix:/perf:/chore:) → merge to master → CI AUDIT → tag on master → CI publishes
+```
+
+1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
+2. **Version bump + changelog** in the release commit: all **five** version files (`package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri-server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections).
+3. **Audit gate — enforced by CI, not a local script.** The version-consistency check in `ci.yml` (runs on master after merge) fails the build if: any of the five version files drift, or `CHANGELOG.md` is missing the `## vX.Y.Z —` section for the current version. Master must be green before tagging.
+4. **Tag on master — immutable, annotated:**
+   ```sh
+   git tag -a vX.Y.Z -m "vX.Y.Z — <summary>"
+   git push origin master
+   git push origin vX.Y.Z
+   ```
+   Tag push triggers CI publish (desktop DMG + multi-platform Docker image).
+
+**Rules:**
+- **Tags are immutable** — never force-move a released tag. A fix after release means a new version (bump the pre-release number, e.g. `beta.3`), then the full flow again.
+- Tag only on `master` (a tag on a branch survives squash-merge poorly: the tagged commit is not reachable from master).
+- Version bumps go together in the release commit — never bump in a feature PR.
+- Docker image: immutable version tags (`:0.1.0-beta.2`) + movable `:latest`.
+
 ## Security
 
 Found a vulnerability? See [SECURITY.md](./SECURITY.md) — report privately, not as a public issue.

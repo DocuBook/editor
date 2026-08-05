@@ -29,16 +29,18 @@ jobs:
         run: npx tsc -b
       - name: Frontend tests
         run: npx vitest run
-      - name: Check version consistency (package.json / Cargo.toml / tauri.conf.json)
+      - name: Check version consistency (all 5 files + changelog section)
         run: |
           npm_v=$(node -p "require('./package.json').version")
+          lock_v=$(node -p "require('./package-lock.json').version")
           cargo_v=$(grep '^version' src-tauri/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
+          server_v=$(grep '^version' src-tauri-server/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
           tauri_v=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          echo "package.json=$npm_v Cargo.toml=$cargo_v tauri.conf.json=$tauri_v"
-          if [ "$npm_v" != "$cargo_v" ] || [ "$npm_v" != "$tauri_v" ]; then
-            echo "::error::Version mismatch — bump all three together"
-            exit 1
-          fi
+          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v src-tauri-server=$server_v tauri.conf.json=$tauri_v"
+          for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v"; do
+            [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump all five together"; exit 1; }
+          done
+          grep -q "^## v$npm_v — " CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v —'"; exit 1; }
 
   test:
     runs-on: macos-14
