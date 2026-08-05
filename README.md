@@ -64,7 +64,7 @@ All environment variables are documented in [`.env.example`](./.env.example).
 | Storage | 1 GB free | 10 GB | vault content lives in `/data` (volume) |
 | Image size | ~20 MB compressed / ~35 MB unpacked | — | single stripped Rust binary + built frontend; verified in CI on every PR (`Report image size`) |
 
-Works on any Docker-capable host: VPS (Hetzner, DigitalOcean, Linode, AWS Lightsail, Oracle Cloud…), Docker hosting (Coolify, Portainer, CapRover, Dokku, Yunohost…), NAS (Synology, Unraid), and ARM hosts (statically-linked musl binary).
+Works on any Docker-capable host: VPS (Hetzner, DigitalOcean, Linode, AWS Lightsail, Oracle Cloud…), Docker hosting (Coolify, Portainer, CapRover, Dokku, Yunohost…), NAS (Synology, Unraid), and ARM hosts — Raspberry Pi, Apple Silicon servers, ARM cloud instances (the image ships **`linux/amd64` + `linux/arm64`**, statically-linked musl binary).
 
 **Deployment notes:**
 
