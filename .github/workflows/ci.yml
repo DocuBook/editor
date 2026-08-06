@@ -24,7 +24,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Oxlint
-        run: npx oxlint src/
+        run: npx oxlint frontend/
       - name: TypeScript type check
         run: npx tsc -b
       - name: Frontend tests
@@ -34,9 +34,9 @@ jobs:
           npm_v=$(node -p "require('./package.json').version")
           lock_v=$(node -p "require('./package-lock.json').version")
           cargo_v=$(grep '^version' src-tauri/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
-          server_v=$(grep '^version' src-tauri-server/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
+          server_v=$(grep '^version' server/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
           tauri_v=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v src-tauri-server=$server_v tauri.conf.json=$tauri_v"
+          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v tauri.conf.json=$tauri_v"
           for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v"; do
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump all five together"; exit 1; }
           done
@@ -50,8 +50,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
-      - name: Web server test (src-tauri-server)
-        run: cargo test --manifest-path src-tauri-server/Cargo.toml
+      - name: Web server test (server)
+        run: cargo test --manifest-path server/Cargo.toml
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
   security:

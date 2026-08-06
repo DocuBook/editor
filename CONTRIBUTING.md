@@ -37,11 +37,11 @@ npm run tauri build -- --target aarch64-apple-darwin
 
 ### Web server (self-host / Docker)
 
-The web distribution is a standalone Rust server (`src-tauri-server`) that serves the same frontend and reuses the desktop app's pure modules — no Tauri, no Docker required for local dev:
+The web distribution is a standalone Rust server (`server`) that serves the same frontend and reuses the desktop app's pure modules — no Tauri, no Docker required for local dev:
 
 ```text
 npm run build                                  # frontend → dist/
-cd src-tauri-server
+cd server
 DATA_DIR=./data WWW_DIR=../dist cargo run --release
 # open http://localhost:8080 → setup wizard creates the admin account
 ```
@@ -57,9 +57,10 @@ Runtime configuration (admin seeding, session TTL, open access, secure cookie) i
 ## Project Structure
 
 ```text
-src/
+frontend/
   main.tsx               Entry point (polyfills + ErrorBoundary)
   App.tsx                Root layout, auth gate, keyboard shortcuts, single git-status poller
+  index.css              Tailwind v4 + design tokens (@theme dark palette, [data-theme=light]) + ProseMirror styles
   lib/
     ipc.ts               Runtime bridge — Tauri IPC on desktop, HTTP/SSE on web (single API)
   components/
@@ -67,12 +68,14 @@ src/
     Sidebar.tsx          Vault tree, search, CRUD, context menu
     StatusBar.tsx        Git branch indicator (consumes shared poll)
     GraphView.tsx        Note graph visualization
-    SettingsModal.tsx    Settings (tabs: AI + Git; System is web-only)
+    SettingsModal.tsx    Settings (tabs: AI, Appearance, Git; System is web-only)
     SystemSettings.tsx   Web-only: account, login toggle, session TTL, env display
     GitSettings.tsx      Git identity / remotes / init in-app
     SetupWizard.tsx      Web first-run: create the admin account (or "skip")
     Login.tsx            Web login gate (rate-limited, httpOnly session cookie)
     VaultPicker.tsx      Web vault picker (modal; replaces the native folder dialog)
+    PasswordInput.tsx    Password field with show/hide toggle (login + change-password)
+    AppearanceSettings.tsx  Theme picker (named themes: Midnight / Bright Surfaces)
     ShortcutsModal.tsx   Keyboard shortcuts reference
     ErrorBoundary.tsx    Root crash recovery screen
   stores/
@@ -81,6 +84,7 @@ src/
     aiSettings.ts        Provider/model/saved-providers (persisted) — API keys live only in keychain
     auth.ts              Web auth status (setup → login → ready), 401 handling
     gitStatus.ts         Shared git status (branch + porcelain) — one poller
+    theme.ts             Named theme store (data-theme + Tauri window + meta theme-color)
   data/
     providers.ts         Auto-generated provider/model catalog (models.dev)
   hooks/
@@ -89,23 +93,36 @@ src/
     useClickOutside.ts   Click-outside detection for menus
   utils/
     aiBlocks.ts          AI text → applyDocumentOperations (suggestions)
+    setupWizard.ts       Pure setup-wizard validation + payload builder (unit-testable)
+  e2e/
+    theme-check.mjs      Playwright theme E2E (dark/light switch + picker)
+    web-smoke.mjs        Playwright full-stack smoke (setup → login)
+    screenshot/          E2E screenshots (gitignored)
 src-tauri/
-  src/
-    main.rs              Tauri entry point
-    lib.rs               Tauri commands (vault, wiki, git, search, AI, keychain)
-    keychain.rs          macOS Keychain access via `security` CLI
-    agent/               AI agent config + SSRF-guarded base-URL validation
-    vault/               File system vault (path-traversal-safe)
-    wiki/                Wikilink index
-    git/                 Git add-commit-push / clone / remotes / identity
-    search/              Filename search
-src-tauri-server/        Web distribution — standalone axum server (no Tauri)
-  src/
-    main.rs              HTTP server: /api/<cmd> dispatcher, SSE AI streaming,
+  Cargo.toml             Desktop crate (bin docubook-desktop + lib docubook)
+  tauri.conf.json        Window config (theme: Dark), CSP, bundle
+  build.rs               tauri-build (capabilities/gen)
+  main.rs                Tauri entry point
+  lib.rs                 Tauri commands (vault, wiki, git, search, AI, keychain, markdown)
+  markdown.rs            Shared markdown → safe-HTML (pulldown-cmark + ammonia)
+  keychain.rs            macOS Keychain access via `security` CLI
+  agent/                 AI agent config + SSRF-guarded base-URL validation
+  vault/                 File system vault (path-traversal-safe)
+  wiki/                  Wikilink index
+  git/                   Git add-commit-push / clone / remotes / identity
+  search/                Filename search
+  capabilities/          Tauri 2 ACL (core:default, dialog, opener, allow-* app commands)
+  permissions/           App command permission schemas (allow-*)
+server/                  Web distribution — standalone axum crate (no Tauri)
+  Cargo.toml             Bin docubook-server (musl-friendly, [[bin]] path = main.rs)
+  main.rs                HTTP server: /api/<cmd> dispatcher, SSE AI streaming,
                          auth middleware, static file serving (SPA fallback)
-    auth.rs              Argon2id passwords, in-memory sessions, login rate limit
-    config.rs            Config merge (env > /data/config.json > default)
-    keys.rs              API-key store (keys.json, 0600)
+  auth.rs                Argon2id passwords, in-memory sessions, login rate limit
+  config.rs              Config merge (env > /data/config.json > default)
+  keys.rs                API-key store (keys.json, 0600)
+dist/                    Frontend build output (gitignored; served by server + Tauri)
+public/                  Static assets (appicon.png)
+patches/                 patch-package patches for node_modules
 Dockerfile               Multi-stage web image (node → rust musl → alpine)
 docker-compose.yml       Web deployment (volume /data, env reference)
 .env.example             All server environment variables
@@ -113,12 +130,12 @@ docker-compose.yml       Web deployment (volume /data, env reference)
 
 ## Architecture Notes
 
-- **Trust boundary:** the Rust backend (desktop `src-tauri` / web `src-tauri-server`) is trusted; the frontend is not. File paths are canonicalized against the vault root, AI base URLs are allowlisted (SSRF guard), and API keys never reach the frontend — the webview cannot read them.
-- **Two runtimes, one frontend:** `src/lib/ipc.ts` abstracts Tauri IPC and HTTP/SSE behind one `invoke`/`listen` API, so components are runtime-agnostic. The web server reuses the desktop app's pure modules (`vault`, `wiki`, `git`, `search`, `agent`) via `#[path]` includes — never edit them in one place only.
+- **Trust boundary:** the Rust backend (desktop `src-tauri` / web `server`) is trusted; the frontend is not. File paths are canonicalized against the vault root, AI base URLs are allowlisted (SSRF guard), and API keys never reach the frontend — the webview cannot read them.
+- **Two runtimes, one frontend:** `frontend/lib/ipc.ts` abstracts Tauri IPC and HTTP/SSE behind one `invoke`/`listen` API, so components are runtime-agnostic. The web server reuses the desktop app's pure modules (`vault`, `wiki`, `git`, `search`, `agent`) via `#[path]` includes — never edit them in one place only.
 - **Web auth:** first run creates an admin account (Argon2id); sessions are httpOnly cookies (rate-limited login). `DB_NO_AUTH=1` keeps open access (pre-web behavior). Env vars win over the Settings → System overrides.
 - **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web. Both are resolved server-side in `ask_ai` — a frontend-supplied key is ignored.
 - **Permissions (desktop):** if you add or remove a Tauri command, regenerate `src-tauri/permissions/default.toml` and `src-tauri/capabilities/default.json` in the same change (see the header comment in the permission file).
-- **Versions:** `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces it. `src-tauri-server/Cargo.toml` is versioned independently.
+- **Versions:** `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces it. `server/Cargo.toml` is versioned independently.
 
 ## Workflow
 
@@ -129,7 +146,7 @@ docker-compose.yml       Web deployment (volume /data, env reference)
    - `npx vitest run`
    - `npm run build`
    - `cd src-tauri && cargo test`
-   - `cd src-tauri-server && cargo test`
+   - `cd server && cargo test`
 4. Open a PR against `master` using the PR template.
 
 **CI runs the full artifact matrix on every PR** (not just on release): frontend build, desktop DMG, web server binary, and a full `docker build` of the web image (which also reports the image size). If your change touches the Dockerfile, the Rust modules, or the frontend, the PR build is the fastest way to catch breakage.
@@ -143,7 +160,7 @@ PR (feat:/fix:/perf:/chore:) → merge to master → CI AUDIT → tag on master 
 ```
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
-2. **Version bump + changelog** in the release commit: all **five** version files (`package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri-server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections).
+2. **Version bump + changelog** in the release commit: all **five** version files (`package.json`, `package-lock.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections).
 3. **Audit gate — enforced by CI, not a local script.** The version-consistency check in `ci.yml` (runs on master after merge) fails the build if: any of the five version files drift, or `CHANGELOG.md` is missing the `## vX.Y.Z —` section for the current version. Master must be green before tagging.
 4. **Tag on master — immutable, annotated:**
    ```sh

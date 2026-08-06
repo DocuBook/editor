@@ -171,7 +171,7 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 - Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
 - Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
 - API keys configured in **Settings** — stored in macOS Keychain only, never localStorage
-- **100+ providers** with **1,000+ models** — auto-synced from [models.dev](https://models.dev) into `src/data/providers.ts` (the generated catalog is the single source of truth; currently 174 providers / 5,482 models)
+- **100+ providers** with **1,000+ models** — auto-synced from [models.dev](https://models.dev) into `frontend/data/providers.ts` (the generated catalog is the single source of truth; currently 174 providers / 5,482 models)
 
 > [!NOTE]\
 > **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, the majority of the 1,000+ catalog) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.

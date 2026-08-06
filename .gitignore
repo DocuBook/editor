@@ -13,7 +13,7 @@ dist-ssr
 *.local
 
 # Web (Docker) server
-src-tauri-server/target
+server/target
 /data
 
 # Editor directories and files
@@ -30,3 +30,4 @@ src-tauri/target/
 .env
 .env.*
 !.env.example
+frontend/e2e/screenshot/

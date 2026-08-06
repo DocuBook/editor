@@ -1,0 +1,293 @@
+@import "tailwindcss";
+/* hot */
+/* Named themes (Zed-style) — the default palette lives in @theme (emitted as
+   --color-* vars + utilities like bg-background). Switching themes = setting
+   <html data-theme="dark|light">; the light palette below (unlayered, so it
+   beats the @theme layer) overrides the same var names on that element. */
+@theme {
+    --color-background: #0c0c0d;
+    --color-surface: #161618;
+    --color-surface-hover: #1c1c1f;
+    --color-surface-active: #222225;
+    --color-border: #2a2a2e;
+    --color-border-subtle: #1e1e21;
+    --color-foreground: #e4e4e7;
+    --color-foreground-secondary: #a1a1aa;
+    --color-foreground-subtle: #71717a;
+    --color-foreground-quaternary: #d4d4d8;
+    --color-foreground-heading: #f4f4f5;
+    --color-muted: #52525b;
+    --color-accent: #3b82f6;
+    --color-accent-hover: #1d4ed8;
+    --color-danger: #ef4444;
+    --color-danger-hover: #f87171;
+    --color-white: #fff;
+}
+
+[data-theme="light"] {
+    --color-background: #ffffff;
+    --color-surface: #f6f6f7;
+    --color-surface-hover: #ececee;
+    --color-surface-active: #e4e4e7;
+    --color-border: #d4d4d8;
+    --color-border-subtle: #e4e4e7;
+    --color-foreground: #18181b;
+    --color-foreground-secondary: #3f3f46;
+    --color-foreground-subtle: #52525b;
+    --color-foreground-quaternary: #3f3f46;
+    --color-foreground-heading: #09090b;
+    --color-muted: #a1a1aa;
+    --color-accent: #2563eb;
+    --color-accent-hover: #1d4ed8;
+    --color-danger: #dc2626;
+    --color-danger-hover: #b91c1c;
+    --color-white: #ffffff;
+}
+/* Layered so Tailwind utilities (p-*, m-*, space-*) still win the cascade —
+ * unlayered rules beat @layer utilities regardless of specificity. */
+@layer base {
+    *,
+    *::before,
+    *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+    }
+}
+body {
+    font-family:
+        -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+    background: var(--color-background);
+    color: var(--color-foreground);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: auto;
+    /* NOTE: NO global user-select:none — in WebKit/Safari it aggressively blocks
+       interaction on descendants (text selection AND drag-and-drop) and ignores
+       child overrides. UI shells opt in via the shared .ui-shell class instead. */
+}
+/* No custom ::-webkit-scrollbar styling — styling forces classic (always-visible)
+ * scrollbars in WKWebView. Unstyled, macOS shows overlay scrollbars that only
+ * appear while the user is actually scrolling. */
+
+/* Vault tree indentation per nesting level (was inline paddingLeft: 8 + depth*20). */
+.depth-0  { padding-left: 8px; }
+.depth-1  { padding-left: 28px; }
+.depth-2  { padding-left: 48px; }
+.depth-3  { padding-left: 68px; }
+.depth-4  { padding-left: 88px; }
+.depth-5  { padding-left: 108px; }
+.depth-6  { padding-left: 128px; }
+.depth-7  { padding-left: 148px; }
+.depth-8  { padding-left: 168px; }
+.depth-9  { padding-left: 188px; }
+.depth-10 { padding-left: 208px; }
+.depth-11 { padding-left: 228px; }
+.depth-12 { padding-left: 248px; }
+.ProseMirror {
+    outline: none;
+    caret-color: var(--color-accent);
+    padding-top: 16px;
+    user-select: text;
+}
+
+/* UI shell — single source of truth for user-select on non-editor chrome.
+   Applying user-select:none globally blocks drag/selection in WebKit, so
+   UI shells opt in individually instead. */
+.ui-shell {
+    user-select: none;
+}
+.ProseMirror > * {
+    margin: 0.125rem 0;
+}
+.ProseMirror h1 {
+    font-size: 2.25rem;
+    font-weight: 800;
+    margin: 2rem 0 0.25rem;
+    line-height: 1.25;
+    color: var(--color-foreground-heading);
+    letter-spacing: -0.02em;
+}
+.ProseMirror h2 {
+    font-size: 1.65rem;
+    font-weight: 700;
+    margin: 1.75rem 0 0.25rem;
+    line-height: 1.3;
+    color: var(--color-foreground);
+    letter-spacing: -0.01em;
+}
+.ProseMirror h3 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin: 1.5rem 0 0.25rem;
+    line-height: 1.4;
+    color: var(--color-foreground-quaternary);
+}
+.ProseMirror p {
+    margin: 0.25rem 0;
+    line-height: 1.65;
+}
+.ProseMirror code {
+    background: var(--color-surface-active);
+    color: var(--color-danger-hover);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.85em;
+}
+.ProseMirror pre {
+    background: var(--color-surface);
+    padding: 14px 16px;
+    border-radius: 8px;
+    margin: 12px 0;
+    border: 1px solid var(--color-border);
+}
+/* Blocknote's code block hardcodes dark bg + white text (its CSS uses no
+   theme vars): `.bn-block-content[data-content-type=codeBlock]{color:#fff;
+   background-color:#161616}`. Override with our tokens — the .ProseMirror
+   ancestor raises specificity above Blocknote's rule regardless of stylesheet
+   order, so text + background + border follow the active theme. */
+.ProseMirror .bn-block-content[data-content-type=codeBlock] {
+    color: var(--color-foreground);
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+}
+.ProseMirror pre code {
+    background: none;
+    color: inherit;
+    padding: 0;
+    font-size: 0.82em;
+}
+.ProseMirror blockquote {
+    border-left: 3px solid var(--color-muted);
+    padding: 2px 0 2px 16px;
+    color: var(--color-foreground-secondary);
+    margin: 8px 0;
+    font-style: italic;
+}
+.ProseMirror ul,
+.ProseMirror ol {
+    padding-left: 1.5rem;
+    margin: 0.25rem 0;
+}
+.ProseMirror li {
+    margin: 0.15rem 0;
+    line-height: 1.6;
+}
+.ProseMirror ul li::marker {
+    color: var(--color-muted);
+}
+.ProseMirror ol li::marker {
+    color: var(--color-muted);
+}
+.ProseMirror hr {
+    border: none;
+    border-top: 1px solid var(--color-border);
+    margin: 1.5rem 0;
+}
+.ProseMirror > :first-child,
+.bn-inline-content > :first-child {
+    margin-top: 0.5rem;
+}
+.ProseMirror p.is-editor-empty:first-child::before {
+    color: var(--color-muted);
+    content: attr(data-placeholder);
+    float: left;
+    height: 0;
+    pointer-events: none;
+}
+
+/* Zed-style tooltips for bottom bar */
+.tip-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.tip {
+  position: absolute;
+  top: -28px;
+  left: 0;
+  transform: none;
+  background: var(--color-border);
+  color: var(--color-foreground);
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tip::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 10px;
+  transform: rotate(45deg);
+  width: 6px;
+  height: 6px;
+  background: var(--color-border);
+}
+.tip-wrap:hover .tip {
+  opacity: 1;
+}
+
+/* Toolbar tip: appears below the button, arrow points up-right */
+.tip-bar .tip {
+  top: calc(100% + 6px);
+  left: auto;
+  right: 0;
+  transform: none;
+}
+.tip-bar .tip::after {
+  top: -4px;
+  bottom: auto;
+  right: 8px;
+  left: auto;
+}
+/* Tooltip for the collapsed-sidebar expand strip: below the button, left-aligned. */
+.tip-strip .tip {
+  top: calc(100% + 6px);
+  left: 0;
+}
+.tip-strip .tip::after {
+  top: -4px;
+  bottom: auto;
+  left: 10px;
+}
+.tip-wrap:has([data-plus-popup]) .tip {
+  opacity: 0;
+  pointer-events: none;
+}
+.tip kbd {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--color-surface);
+  color: var(--color-foreground-secondary);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Tab hover effects */
+.tab-inactive:hover {
+  color: var(--color-foreground-quaternary);
+  background: var(--color-surface-active);
+}
+.tab-close-btn {
+  opacity: 0;
+}
+.tab-active:hover .tab-close-btn {
+  opacity: 1;
+}
+.tab-close-btn:hover {
+  background: var(--color-surface-active);
+  color: var(--color-foreground-quaternary);
+}
+

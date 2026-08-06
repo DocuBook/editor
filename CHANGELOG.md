@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.1.0-beta.3 — 2026-08-06
+
+### Named themes + project layout refactor
+
+Theme system migrates to Tailwind v4 `@theme` tokens with two named themes (Midnight / Bright Surfaces), the desktop titlebar finally follows the app theme, and the repository layout is reorganized (frontend/ + server/ + flattened src-tauri/).
+
+#### 🚀 Features
+
+- **Named themes (Zed-style)** — Settings → Appearance: pick **Midnight** (dark, default) or **Bright Surfaces** (light). Palettes live in `@theme` tokens (`bg-background`, `text-foreground`, …); light mode corrects the hardcoded zinc text that was invisible on white
+- **Titlebar follows the app theme** — Tauri window `theme: Dark` config + `window.setTheme()` runtime; fixed the ACL gap (`core:window:allow-set-theme`) that silently blocked theme switching; meta `theme-color` drives the web browser chrome
+- **Show/hide password** — new `PasswordInput` on the web login and change-password forms (eye toggle, `type="button"`, aria-labeled)
+- **E2E Playwright suites** — `theme-check` (12 assertions: dark/light/picker/persist) + `web-smoke` (4 assertions: health, setup wizard, logout, login against the real server)
+
+#### 🔄 Refactor
+
+- **Layout** — `src/` → `frontend/`, `src-tauri-server/` → `server/` (flattened, `[[bin]] path = main.rs`), `src-tauri/src/` flattened to crate root; all configs, CI, Dockerfile, docs updated; `server` reuses desktop modules via `#[path]`
+- **Markdown module deduped** — `markdown.rs` shared by desktop + server via `#[path]` include (was copy-pasted twice); snapshot tests lock the HTML contract for both
+- **Testing hardening** — 9 API integration tests (axum `tower::oneshot`: setup token gate, rate limits, session, path allowlist), store tests now exercise the real `useAiSettings` (was a copy), regression tests for setup-token + git-poll skip, `tsc`/clippy CI blockers fixed
+- **Zinc → tokens** — hardcoded zinc text/hover colors migrated to theme tokens (light-theme visibility)
+
 ## v0.1.0-beta.2 — 2026-08-05
 
 ### Setup-token guard completed (UI + docs)

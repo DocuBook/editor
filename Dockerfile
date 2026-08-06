@@ -15,20 +15,20 @@ FROM rust:1.94-alpine AS server
 RUN apk add --no-cache musl-dev build-base cmake clang git
 WORKDIR /src
 # Reuse the desktop app's pure modules — the web crate includes them via #[path].
-COPY src-tauri/src/vault ./src-tauri/src/vault
-COPY src-tauri/src/git ./src-tauri/src/git
-COPY src-tauri/src/wiki ./src-tauri/src/wiki
-COPY src-tauri/src/search ./src-tauri/src/search
-COPY src-tauri/src/agent ./src-tauri/src/agent
-COPY src-tauri-server ./src-tauri-server
-RUN cd src-tauri-server && cargo build --release
+COPY src-tauri/vault ./src-tauri/vault
+COPY src-tauri/git ./src-tauri/git
+COPY src-tauri/wiki ./src-tauri/wiki
+COPY src-tauri/search ./src-tauri/search
+COPY src-tauri/agent ./src-tauri/agent
+COPY server ./server
+RUN cd server && cargo build --release
 
 # ---- runtime ----
 FROM alpine:3.21
 RUN apk add --no-cache git ca-certificates \
     && adduser -D -u 1000 docubook
 WORKDIR /app
-COPY --from=server /src/src-tauri-server/target/release/docubook-server /app/docubook-server
+COPY --from=server /src/server/target/release/docubook-server /app/docubook-server
 COPY --from=web /app/dist /app/www
 ENV DATA_DIR=/data WWW_DIR=/app/www PORT=8080
 # /data must exist with docubook ownership BEFORE the USER switch: named

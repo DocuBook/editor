@@ -1,7 +1,7 @@
 .git
 node_modules
 src-tauri/target
-src-tauri-server/target
+server/target
 dist
 data
 *.log
