@@ -15,6 +15,10 @@ permissions:
 
 jobs:
   build-and-push:
+    # PRs: image build waits for admin approval. Tag push (release): builds
+    # + pushes automatically (release-auto env, no reviewers).
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
