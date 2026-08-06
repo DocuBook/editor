@@ -20,6 +20,7 @@ COPY src-tauri/git ./src-tauri/git
 COPY src-tauri/wiki ./src-tauri/wiki
 COPY src-tauri/search ./src-tauri/search
 COPY src-tauri/agent ./src-tauri/agent
+COPY src-tauri/markdown.rs ./src-tauri/markdown.rs
 COPY server ./server
 RUN cd server && cargo build --release
 
