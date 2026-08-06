@@ -53,11 +53,3 @@ jobs:
           tags: ${{ steps.meta.outputs.tags || 'docubook/editor:check' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      # Multi-platform images are only loaded locally for the native (amd64)
-      # platform — report size on PR checks where the image exists locally.
-      - name: Report image size
-        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
-        run: |
-          IMG="docubook/editor:check"
-          SIZE=$(docker image inspect --format='{{.Size}}' "$IMG" | awk '{printf "%.1f MB", $1/1024/1024}')
-          echo "::notice::docubook/editor image size (amd64) = $SIZE"
