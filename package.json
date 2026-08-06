@@ -1,7 +1,7 @@
 {
   "name": "@docubook/editor",
   "private": true,
-  "version": "0.1.0-beta.2",
+  "version": "0.1.0-beta.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,9 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky && patch-package"
+    "prepare": "husky && patch-package",
+    "test:e2e": "node frontend/e2e/theme-check.mjs",
+    "test:e2e:smoke": "node frontend/e2e/web-smoke.mjs"
   },
   "dependencies": {
     "@blocknote/core": "^0.52.1",
@@ -60,6 +62,7 @@
     "lint-staged": "^16.4.0",
     "oxlint": "^1.71.0",
     "patch-package": "^8.0.1",
+    "playwright": "1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",
