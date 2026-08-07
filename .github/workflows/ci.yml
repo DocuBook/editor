@@ -29,16 +29,18 @@ jobs:
         run: npx tsc -b
       - name: Frontend tests
         run: npx vitest run
-      - name: Check version consistency (all 5 files + changelog section)
+      - name: Check version consistency (manifests + locks + changelog section)
         run: |
           npm_v=$(node -p "require('./package.json').version")
           lock_v=$(node -p "require('./package-lock.json').version")
           cargo_v=$(grep '^version' src-tauri/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
           server_v=$(grep '^version' server/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
           tauri_v=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v tauri.conf.json=$tauri_v"
-          for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v"; do
-            [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump all five together"; exit 1; }
+          desktop_lock_v=$(grep -A1 'name = "docubook-desktop"' src-tauri/Cargo.lock | grep '^version' | head -1 | awk '{print $3}' | tr -d '"')
+          server_lock_v=$(grep -A1 'name = "docubook-server"' server/Cargo.lock | grep '^version' | head -1 | awk '{print $3}' | tr -d '"')
+          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v tauri.conf.json=$tauri_v Cargo.lock(desktop)=$desktop_lock_v Cargo.lock(server)=$server_lock_v"
+          for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v"; do
+            [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done
           grep -q "^## v$npm_v — " CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v —'"; exit 1; }
 

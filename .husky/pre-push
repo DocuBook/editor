@@ -1,4 +1,13 @@
 cd "$(dirname "$0")/.."
+
+# Sync lockfiles to manifest versions — never bump *.lock by hand. Author
+# bumps manifests (package.json, Cargo.toml, tauri.conf.json) + CHANGELOG;
+# this hook regenerates the locks from them (fast, no compilation).
+echo "🔄 Syncing lockfiles (package-lock.json, Cargo.lock ×2)..."
+npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1
+(cd src-tauri && cargo generate-lockfile >/dev/null 2>&1)
+(cd server && cargo generate-lockfile >/dev/null 2>&1)
+
 echo "🔄 Running TypeScript check..."
 npx tsc -b
 if [ $? -ne 0 ]; then
