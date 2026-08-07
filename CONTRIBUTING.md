@@ -149,6 +149,30 @@ docker-compose.yml       Web deployment (volume /data, env reference)
    - `cd server && cargo test`
 4. Open a PR against `master` using the PR template.
 
+### Commit conventions (enforced by the commit-msg hook)
+
+```
+<type>(<scope>): <subject>
+```
+
+| Type | Usage |
+|------|-------|
+| `feat` | new feature |
+| `fix` | bug fix |
+| `chore` | maintenance (release, deps) |
+| `ci` | CI / pipeline |
+| `docs` | documentation (README, CONTRIBUTING, CHANGELOG) |
+| `perf` | performance optimization |
+| `refactor` | structural change without behavior change |
+| `test` | test suite / test tooling |
+| `security` | security hardening / audit |
+
+- **Scope** is optional, kebab-case: `fix(docker):`, `ci(release):`, `feat(theme):`
+- **Subject**: concise, imperative, lowercase — add a body for the WHY when needed
+- **PR merge commits** (squash) are exempt from the hook
+- Commit messages are NOT used for auto-changelog (CHANGELOG.md is manual) — the convention keeps history readable
+- The hook rejects other formats and lists the allowed types — no commitlint needed
+
 **CI runs the full artifact matrix on every PR** (not just on release): frontend build, desktop DMG, web server binary, and a full `docker build` of the web image (which also reports the image size). If your change touches the Dockerfile, the Rust modules, or the frontend, the PR build is the fastest way to catch breakage.
 
 The pre-commit hook runs `lint-staged` (oxlint on staged files); the pre-push hook syncs lockfiles from manifests (npm + cargo generate-lockfile, no hand-editing `*.lock`) then runs the full type check + Rust + frontend tests.

@@ -1,0 +1,18 @@
+#!/bin/sh
+# Conventional Commits enforcement — lightweight, no commitlint dep.
+# Format: <type>(<scope>): <subject>
+# Types : feat | fix | chore | ci | docs | perf | refactor | test | security
+MSG_FILE="$1"
+FIRST=$(head -1 "$MSG_FILE")
+
+# Merge commits (PR squash merges) are exempt
+echo "$FIRST" | grep -qE '^Merge ' && exit 0
+
+# <type>(<scope>): <subject>
+echo "$FIRST" | grep -qE '^(feat|fix|chore|ci|docs|perf|refactor|test|security)(\([a-z0-9][a-z0-9.-]*\))?: .+' && exit 0
+
+echo "❌ Commit convention: <type>(<scope>): <subject>"
+echo "   types: feat | fix | chore | ci | docs | perf | refactor | test | security"
+echo "   example: fix(docker): copy markdown.rs into build stage"
+echo "   yours:   $FIRST"
+exit 1
