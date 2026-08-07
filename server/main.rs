@@ -55,6 +55,17 @@ fn main() {
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(8080);
     std::fs::create_dir_all(&data_dir).expect("data dir");
 
+    // Diagnose a root-owned /data volume at boot (EACCES would otherwise only
+    // surface as a confusing error at admin creation). Probe + clean up.
+    let probe = std::path::Path::new(&data_dir).join(".write-probe");
+    let writable = std::fs::write(&probe, b"")
+        .map(|_| { let _ = std::fs::remove_file(&probe); true })
+        .unwrap_or(false);
+    if !writable {
+        eprintln!("[docubook] {data_dir} is NOT writable — /data volume ownership problem.");
+        eprintln!("[docubook] fix: docker run --rm -v <volume>:/data alpine chown -R 1000:1000 /data");
+    }
+
     let state = AppState {
         vault: Arc::new(Mutex::new(None)),
         wiki: Arc::new(Mutex::new(None)),

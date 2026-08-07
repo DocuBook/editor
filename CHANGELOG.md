@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.0-beta.4 — 2026-08-07
+
+### Docker /data self-heal + server boot diagnostics
+
+The image now fixes volume ownership at every start (root entrypoint → chown → drop to the app user), so pre-created empty volumes (Coolify-style, where Docker skips image copy-up) no longer fail admin creation with EACCES. The server also diagnoses /data problems at boot instead of surfacing them only at setup time.
+
+#### 🐛 Bug Fixes
+
+- **EACCES on admin creation with pre-created volumes** — root-owned `/data` failed config.json writes. New root entrypoint (`docker-entrypoint.sh`) chowns `/data` then drops to the `docubook` user via `su-exec` — idempotent, fixes fresh/legacy volumes at every start; no manual `docker run --rm chown` needed
+
+#### 🚀 Features
+
+- **Boot-time /data diagnostics** — startup logs warn when `config.json` is missing (fresh /data — volume not persisted across redeploys) and when /data is not writable (volume ownership), each with the exact fix command
+
+#### 🧪 Testing
+
+- **E2E redeploy persistence** — `web-smoke` restarts the server with the same DATA_DIR after setup and asserts the admin survives (setupRequired=false, login page instead of the setup wizard) — covers the "admin lost after docker pull/redeploy" scenario
+
 ## v0.1.0-beta.3 — 2026-08-06
 
 ### Named themes + project layout refactor

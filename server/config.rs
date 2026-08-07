@@ -36,6 +36,9 @@ pub struct Config {
 impl Config {
     pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join("config.json");
+        if !path.exists() {
+            eprintln!("[docubook] no config.json — fresh /data (first boot, or the volume is NOT persisted across redeploys)");
+        }
         let mut c = Self::from_file(&path);
 
         // Env seeding — first boot provisioning (both values required).

@@ -32,6 +32,7 @@ const bin = spawn('server/target/debug/docubook-server', [], {
   env: { ...process.env, DATA_DIR: DATA, WWW_DIR: 'dist', PORT: String(PORT) },
   stdio: 'ignore',
 })
+let bin2
 
 let browser
 
@@ -86,6 +87,24 @@ try {
   ok('login: main UI visible', /Open a vault|Open project/i.test(afterLogin), afterLogin.slice(0, 80))
   await page.screenshot({ path: 'frontend/e2e/screenshot/login-done.png', fullPage: true })
 
+  // ── Restart persistence — redeploy must keep the admin (config.json on /data) ──
+  bin.kill()
+  await new Promise(r => setTimeout(r, 1500))
+  bin2 = spawn('server/target/debug/docubook-server', [], {
+    env: { ...process.env, DATA_DIR: DATA, WWW_DIR: 'dist', PORT: String(PORT) },
+    stdio: 'ignore',
+  })
+  await waitForServer()
+  const st = await (await fetch(`${BASE}/api/setup_status`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
+  })).text()
+  ok('redeploy: admin persisted (setupRequired=false)', /setupRequired.?.:false/.test(st), st.slice(0, 80))
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1500)
+  const afterReload = await page.locator('body').innerText()
+  ok('redeploy: login page shown, NOT setup wizard', /Sign in/i.test(afterReload) && !/Create admin account/i.test(afterReload), afterReload.slice(0, 80))
+  await page.screenshot({ path: 'frontend/e2e/screenshot/redeploy-login.png', fullPage: true })
+
   const noise = consoleErrors.filter(e => !/404|Failed to load|net::ERR|favicon|password|401/i.test(e))
   console.log(`\nconsole errors (filtered): ${noise.length ? noise.join('\n  ') : 'none'}`)
 } catch (e) {
@@ -94,6 +113,7 @@ try {
 } finally {
   await browser?.close().catch(() => {})
   bin.kill()
+  bin2?.kill()
 }
 
 console.log('\n=== WEB UI SMOKE RESULTS ===')
