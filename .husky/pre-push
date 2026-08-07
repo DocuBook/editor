@@ -1,12 +1,36 @@
 cd "$(dirname "$0")/.."
 
-# Sync lockfiles to manifest versions — never bump *.lock by hand. Author
-# bumps manifests (package.json, Cargo.toml, tauri.conf.json) + CHANGELOG;
-# this hook regenerates the locks from them (fast, no compilation).
+# Sync lockfiles to manifest versions — NEVER via `cargo generate-lockfile`
+# (it re-resolves and silently upgrades every dep). npm preserves resolutions;
+# cargo sync updates ONLY the root package version line in each Cargo.lock.
+sync_cargo_root_version() {  # $1 = crate dir, $2 = crate name
+  local dir="$1" name="$2"
+  local v=$(grep '^version' "$dir/Cargo.toml" | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+  local lock="$dir/Cargo.lock"
+  awk -v target="$name" -v ver="$v" '
+    /^\[\[package\]\]/ { in_target = 0 }
+    /^name = "/ {
+      n = $0; sub(/^name = "/, "", n); sub(/".*/, "", n)
+      in_target = (n == target) ? 1 : 0
+    }
+    in_target && /^version = / { sub(/version = ".*"/, "version = \"" ver "\"") }
+    { print }
+  ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
+}
+
 echo "🔄 Syncing lockfiles (package-lock.json, Cargo.lock ×2)..."
 npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1
-(cd src-tauri && cargo generate-lockfile >/dev/null 2>&1)
-(cd server && cargo generate-lockfile >/dev/null 2>&1)
+sync_cargo_root_version src-tauri docubook-desktop
+sync_cargo_root_version server docubook-server
+
+# Fail on drift: if a sync changed any lock, the push would ship a stale lock
+# and CI's audit gate would reject it. Require the author to commit the sync.
+if ! git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock; then
+  echo "❌ Lockfiles were out of sync with manifests — synced (root version only)."
+  echo "   Commit these changes and re-push:"
+  git diff --stat -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock
+  exit 1
+fi
 
 echo "🔄 Running TypeScript check..."
 npx tsc -b

@@ -175,7 +175,7 @@ docker-compose.yml       Web deployment (volume /data, env reference)
 
 **CI runs the full artifact matrix on every PR** (not just on release): frontend build, desktop DMG, web server binary, and a full `docker build` of the web image (which also reports the image size). If your change touches the Dockerfile, the Rust modules, or the frontend, the PR build is the fastest way to catch breakage.
 
-The pre-commit hook runs `lint-staged` (oxlint on staged files); the pre-push hook syncs lockfiles from manifests (npm + cargo generate-lockfile, no hand-editing `*.lock`) then runs the full type check + Rust + frontend tests.
+The pre-commit hook runs `lint-staged` (oxlint on staged files); the pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + a root-version-only `Cargo.lock` sync — no dep churn, no hand-editing `*.lock`), **fails the push if a lock changed** (commit the sync and re-push), then runs the full type check + Rust + frontend tests.
 
 ## Release workflow (custom — no semantic-release/changeset)
 
@@ -184,7 +184,7 @@ PR (feat:/fix:/perf:/chore:) → merge to master → CI AUDIT → tag on master 
 ```
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
-2. **Version bump + changelog** in the release commit: bump the **manifests only** (`package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections). **Never bump `*.lock` by hand** — the pre-push hook auto-syncs `package-lock.json` and both `Cargo.lock` files from the manifests (`npm install --package-lock-only` + `cargo generate-lockfile`).
+2. **Version bump + changelog** in the release commit: bump the **manifests only** (`package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections). **Never bump `*.lock` by hand** — the pre-push hook syncs `package-lock.json` (npm `--package-lock-only`) and both `Cargo.lock` files (root version only, deps untouched) from the manifests, and **rejects the push** if a lock had to change so the sync lands in its own commit before re-pushing.
 3. **Audit gate — enforced by CI, not a local script.** The version-consistency check in `ci.yml` (runs on master after merge) fails the build if: any of the **four manifests + three locks** drift, or `CHANGELOG.md` is missing the `## vX.Y.Z —` section for the current version. Master must be green before tagging.
 4. **Tag on master — immutable, annotated:**
    ```sh
