@@ -54,6 +54,26 @@ volumes:
   docubook:
 ```
 
+> [!WARNING]
+> **A persistent volume is REQUIRED — on every Docker host, without exception.**
+> Containers are ephemeral: all data lives in `/data` (vaults, `config.json` with
+> the admin account, `keys.json`). If nothing is mounted at `/data`, a redeploy,
+> image pull, or container recreate **erases everything** — including your admin
+> account — and the setup wizard reappears. This is **not Coolify-specific**:
+> `docker run` without `-v`, Portainer, CapRover, Fly.io, Docker Desktop, or any
+> hosting UI behave the same. Configure persistent storage **once**, with a
+> **stable volume name** (e.g. `docubook`) and destination `/data`.
+>
+> The image self-heals `/data` ownership at every start (root entrypoint →
+> `chown` → drop to the app user), so no manual `chown` is needed — but **the
+> mount must exist**. Verify it survives redeploys:
+>
+> ```bash
+> docker volume ls | grep docubook        # still ONE volume after several redeploys
+> docker inspect <container> | grep -A2 '"/data"'
+> #  "Type": "volume", "Source": "docubook"   ← correct, persists
+> ```
+
 **Environment configuration:**
 
 All server variables are set via environment — the complete list is in [`.env.example`](./.env.example). They are read at **boot**, so set them before the first deploy; changing them means a restart/redeploy.
