@@ -45,7 +45,7 @@ jobs:
       # PR: build-only validation of the Dockerfile (frontend + musl server +
       # runtime image). Tag: build + push.
       - name: Build (PR check / tag push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
