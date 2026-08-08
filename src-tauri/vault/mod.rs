@@ -65,6 +65,24 @@ impl Vault {
         Ok(joined)
     }
 
+    /// True if the subtree at `dir` contains at least one `.md` file (recursive,
+    /// skipping hidden/system dirs). Drives folder visibility: folders with
+    /// nothing renderable are hidden from the tree.
+    fn dir_has_md(dir: &std::path::Path) -> bool {
+        if let Ok(read) = std::fs::read_dir(dir) {
+            for e in read.flatten() {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
+                if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    if Self::dir_has_md(&e.path()) { return true; }
+                } else if name.ends_with(".md") {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     pub fn tree(&self, subpath: &str) -> Vec<FileInfo> {
         let dir = match self.safe_path(subpath) { Ok(d) => d, Err(_) => return vec![] };
         let mut dirs = vec![]; let mut files = vec![];
@@ -74,8 +92,10 @@ impl Vault {
                 if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
                 let rel = if subpath.is_empty() { name.clone() } else { format!("{}/{}", subpath, name) };
                 let ft = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) { "1" } else { "0" };
-                // Only show .md files in the tree — directories always visible
+                // Only .md files are renderable — non-md files are skipped, and
+                // folders with no .md anywhere in their subtree are hidden too.
                 if ft == "0" && !name.ends_with(".md") { continue; }
+                if ft == "1" && !Self::dir_has_md(&e.path()) { continue; } // ponytail: re-walks subtrees per folder; cache a md-count map if large vaults get slow
                 let info = FileInfo { path: rel, name, file_type: ft.to_string() };
                 if ft == "1" { dirs.push(info) } else { files.push(info) }
             }
@@ -257,6 +277,8 @@ mod tests {
         std::fs::write(dir.join("a.md"), "").unwrap();
         std::fs::create_dir(dir.join("z-dir")).unwrap();
         std::fs::create_dir(dir.join("a-dir")).unwrap();
+        std::fs::write(dir.join("z-dir/note.md"), "").unwrap();
+        std::fs::write(dir.join("a-dir/note.md"), "").unwrap();
 
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
         let tree = v.tree("");
@@ -271,6 +293,28 @@ mod tests {
         assert_eq!(tree[3].name, "b.md");
         assert_eq!(tree[3].file_type, "0");
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn tree_hides_folders_without_md_recursively() {
+        let dir = std::env::temp_dir().join("vault-test-hide-nomd");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::create_dir_all(dir.join("docs/inner")).unwrap();
+        std::fs::write(dir.join("assets/logo.png"), "x").unwrap();
+        std::fs::write(dir.join("docs/readme.md"), "").unwrap();
+        std::fs::write(dir.join("docs/inner/no-md.txt"), "x").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        let tree = v.tree("");
+        // docs has a .md (recursively) → visible; assets has none → hidden
+        assert_eq!(tree.len(), 1);
+        assert_eq!(tree[0].name, "docs");
+        // a subtree with only non-md files stays hidden even nested
+        let docs = v.tree("docs");
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].name, "readme.md");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
