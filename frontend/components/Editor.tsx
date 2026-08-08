@@ -174,7 +174,7 @@ function WelcomeScreen() {
   return (
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-[384px] text-center">
-        <div className="text-xl font-semibold text-foreground">DocuBook</div>
+        <div className="text-xl font-semibold text-foreground">DocuBook Editor</div>
         <div className="text-xs text-muted mt-1 mb-8 leading-relaxed">
           The markdown editor that thinks like a developer — Obsidian vaults, Notion blocks, Zed-speed search, and Git — all in one.
         </div>

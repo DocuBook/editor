@@ -29,7 +29,7 @@ export default function Login() {
   return (
     <div className="h-screen flex items-center justify-center p-8">
       <div className="w-full max-w-[320px]">
-        <div className="text-xl font-semibold text-foreground text-center">DocuBook</div>
+        <div className="text-xl font-semibold text-foreground text-center">DocuBook Editor</div>
         <div className="text-xs text-muted mt-1 mb-8 text-center">Sign in to your vault server</div>
         <form onSubmit={submit} className="flex flex-col gap-3">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className={input} autoFocus />

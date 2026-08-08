@@ -54,7 +54,7 @@ export default function SetupWizard() {
   return (
     <div className="h-screen flex items-center justify-center p-8">
       <div className="w-full max-w-[360px]">
-        <div className="text-xl font-semibold text-foreground text-center">DocuBook</div>
+        <div className="text-xl font-semibold text-foreground text-center">DocuBook Editor</div>
         <div className="text-xs text-muted mt-1 mb-8 text-center leading-relaxed">
           Welcome! Create the admin account to secure this server.<br />
           One account — this is a personal vault server.

@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "DocuBook",
+  "productName": "DocuBook Editor",
   "version": "0.1.0-rc.1",
   "identifier": "com.docubook.editor",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "DocuBook",
+        "title": "DocuBook Editor",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

@@ -38,7 +38,7 @@ export default function OnboardingGuide({ onDismiss }: { onDismiss: () => void }
   return (
     <div className="flex-1 flex items-center justify-center bg-background p-8">
       <div className="max-w-lg w-full">
-        <h2 className="text-lg font-semibold text-foreground mb-1">Welcome to DocuBook</h2>
+        <h2 className="text-lg font-semibold text-foreground mb-1">Welcome to DocuBook Editor</h2>
         <p className="text-sm text-zinc-500 mb-8">Your vault is ready. Here's how to get started.</p>
 
         <div className="space-y-5">
