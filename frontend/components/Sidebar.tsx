@@ -72,7 +72,7 @@ function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (pa
               openFile(item.path, item.name); onClose() }}
               className={'flex items-center gap-3 px-3 py-2 cursor-pointer text-sm rounded ' + (i === selectedIdx ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
               <FileText size={14} className="text-muted shrink-0" />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.name}</span>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.name.replace(/\.md$/i, '')}</span>
               <span className="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap ml-auto">{item.path}</span>
             </div>
           ))}
