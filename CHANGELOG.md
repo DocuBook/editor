@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.1.0-rc.1 — 2026-08-08
+
+### Release candidate — AI transport hardening + web/Docker production readiness
+
+#### 🚀 Features
+- **Vault Q&A / generation routing** — `[[wikilink]]`, questions, and generation verbs on an empty doc answer FROM vault context (no tools, plain Markdown insert); `isVaultGenerationIntent` + `buildVaultGroundingPrompt`
+- **Custom OpenAI-compatible provider via env** — `DB_OPENAI_COMPAT_BASE_URL`/`_API_KEY`/`_MODEL` provision the custom endpoint headless; the UI shows it read-only ("from env" badge). Safe backward compat: unset = in-app behavior
+- **Server-side trash (web)** — deleted files move to `.trash/` inside the vault (persistent in `/data`), excluded from tree/search/git; sidebar Trash panel with restore + empty
+- **Clickable `[[wikilink]]`** — accent + underline visual, hover hint, single-click tooltip with Open action, Cmd/Ctrl+Click navigates (Obsidian-style); merged the wikilink search into the ⌘K link popover (one icon)
+- **Persistent sessions** — `sessions.json` (SHA-256 hashed tokens) survives server restarts; no more forced re-login after redeploy
+- **Optional keys.json encryption** — `DB_KEYS_PASSPHRASE` → AES-256-GCM at rest (Argon2id KDF); plaintext migrates on first access, encrypted files never overwritten without the passphrase
+- **Consent-gated open access** — setup wizard "Skip" requires acknowledging that anyone with the URL can access
+
+#### 🐛 Bug Fixes
+- **AI transport**: probe per provider+model (not per provider); ops-only output channel (no text+ops double-write); removed Path A→B retry (text-only models no longer pay 2× generation); `crypto.randomUUID` secure-context fallback (`uuid()`)
+- **Web server**: `test_connection` camelCase args fix (was 400 + key never used); tool probe `tool_choice:"required"` + JSON `tools:false` contract
+- **Shortcuts**: ⌘⇧F/⌘⇧P no longer hijack search; canonical ⌘⇧F/⌘⌥⇧F new file/folder + native ⌘N alias
+- **Wiki**: recursive scan + content search for note-linking; `read_file` completes extension-less references to `.md` (never double-appends)
+- **Editor**: `[[wikilink]]` Cmd/Ctrl+Click intercepted inside ProseMirror's click pipeline — the built-in `selectNodeModifier` (metaKey) block selection no longer fights navigation (desktop crash fix)
+
+#### 🧪 Testing & CI
+- **E2E suite** — web-smoke, trash, theme-check, ai-debug (Path A + Path B) via one `npm run test:e2e`; CI matrix `[chromium, webkit]` with PR approval gate; logs (not screenshots) as artifacts
+- **ACL guard** — CI fails if a Tauri command lacks its `allow-*` entry
+- **test-server-linux** job — exercises `cfg(target_os="linux")` trash paths
+- Rust tests 51+, frontend 64+, e2e 39+ assertions
+
 ## v0.1.0-beta.4 — 2026-08-07
 
 ### Docker /data self-heal + server boot diagnostics

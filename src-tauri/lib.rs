@@ -10,6 +10,8 @@ use markdown::markdown_to_safe_html;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashSet;
+use regex::Regex;
 use tauri::{State, Manager, Emitter};
 
 struct AppState {
@@ -119,6 +121,14 @@ fn wiki_backlinks(path: &str, state: State<AppState>) -> Result<String, String> 
     }
 }
 
+#[tauri::command]
+fn wiki_resolve(title: String, state: State<AppState>) -> Result<String, String> {
+    Ok(match state.wiki.lock().expect("lock").as_ref() {
+        Some(w) => w.resolve(&title).unwrap_or_default(),
+        None => String::new(),
+    })
+}
+
 // ── Search ──
 #[tauri::command]
 async fn search_vault(query: String, state: State<'_, AppState>) -> Result<String, String> {
@@ -131,6 +141,67 @@ async fn search_vault(query: String, state: State<'_, AppState>) -> Result<Strin
         .await
         .map_err(|e| e.to_string())?;
     serde_json::to_string(&results).map_err(|e| e.to_string())
+}
+
+// ── AI Grounding ──
+/// Resolve wikilinks + search the vault for AI system-prompt grounding.
+/// Extracts [[links]] from the user query, resolves each via the wiki index,
+/// reads their content, also runs a filename search on the remaining text,
+/// and returns a compact markdown context block (token-budgeted).
+#[tauri::command]
+fn ai_grounding_context(query: String, active_path: String, state: State<AppState>) -> Result<String, String> {
+    let vault = state.vault.lock().expect("lock");
+    let wiki = state.wiki.lock().expect("lock");
+    let v = match vault.as_ref() { Some(v) => v, None => return Ok(String::new()) };
+    let w = match wiki.as_ref() { Some(w) => w, None => return Ok(String::new()) };
+
+    let link_re = Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
+    let mut context = String::new();
+    let mut linked: HashSet<String> = HashSet::new();
+
+    // 1. Resolve wikilinks → read content
+    for cap in link_re.captures_iter(&query) {
+        let target = &cap[1];
+        if let Some(path) = w.resolve(target) {
+            if path != active_path && linked.insert(path.clone()) {
+                if let Ok(content) = v.read_file(&path) {
+                    let name = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+                    let trimmed = trim_to_tokens(&content, 2000);
+                    context.push_str(&format!("\n\n## {name}\n(File: {path})\n{trimmed}"));
+                }
+            }
+        }
+    }
+
+    // 2. Extract search terms (non-wikilink text, min 3 chars)
+    let search_text = link_re.replace_all(&query, "").to_string();
+    let terms: Vec<&str> = search_text.split_whitespace().filter(|t| t.len() >= 3).collect();
+    if !terms.is_empty() {
+        let results = search::search_vault(v.root(), &terms.join(" "));
+        for r in results.iter().take(3) {
+            if r.path != active_path && !linked.contains(&r.path) {
+                linked.insert(r.path.clone());
+                if let Ok(content) = v.read_file(&r.path) {
+                    let trimmed = trim_to_tokens(&content, 1500);
+                    context.push_str(&format!("\n\n## {}\n(File: {})\n{trimmed}", r.name.trim_end_matches(".md"), r.path));
+                }
+            }
+        }
+    }
+
+    Ok(context)
+}
+
+/// Trim markdown to roughly `max_chars` while keeping structural integrity
+/// (break at paragraph/heading boundary, never mid-word).
+fn trim_to_tokens(content: &str, max_chars: usize) -> String {
+    if content.len() <= max_chars { return content.to_string(); }
+    let mut at = max_chars;
+    // back up to the nearest double-newline (paragraph boundary)
+    if let Some(pos) = content[..at].rfind("\n\n") { at = pos; }
+    else if let Some(pos) = content[..at].rfind('\n') { at = pos; }
+    else if let Some(pos) = content[..at].rfind(". ") { at = pos + 1; }
+    format!("{}...", &content[..at])
 }
 
 // ── Git ──
@@ -267,16 +338,43 @@ fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
     keychain::set_key(provider, key)
 }
 
+/** Save a custom OpenAI-compatible endpoint: base URL + key bound together
+ *  server-side. The stored URL is the ONLY destination the key is ever sent to
+ *  (ask_ai ignores webview-provided URLs for the custom provider), which closes
+ *  the exfiltration vector a webview-controlled URL would open. */
+#[tauri::command]
+fn set_custom_endpoint(provider: &str, base_url: &str, key: &str) -> Result<(), String> {
+    agent::validate_custom_base_url(base_url, true)?;
+    keychain::set_base_url(provider, base_url)?;
+    keychain::set_key(provider, key)
+}
+
+/** Custom-provider config for the UI. Desktop is never env-controlled — the
+ *  keychain is the source; env overrides are a Docker/web feature. */
+#[tauri::command]
+fn custom_ai_config() -> Result<String, String> {
+    let base_url = keychain::get_base_url(agent::CUSTOM_PROVIDER_ID).ok();
+    let has_key = keychain::get_key(agent::CUSTOM_PROVIDER_ID).is_ok();
+    Ok(serde_json::json!({ "source": "file", "baseUrl": base_url, "hasKey": has_key, "model": null }).to_string())
+}
+
 #[tauri::command]
 fn delete_api_key(provider: &str) -> Result<(), String> {
+    let _ = keychain::delete_base_url(provider); // best-effort — custom-endpoint entry may not exist
     keychain::delete_key(provider)
 }
 
 
 #[tauri::command]
-async fn test_connection(_provider: String, model: String, base_url: String, api_key: String) -> Result<String, String> {
+async fn test_connection(provider: String, model: String, base_url: String, api_key: String) -> Result<String, String> {
     // SSRF / exfiltration guard — the key may only be sent to an allowed host.
-    agent::validate_base_url(&base_url)?;
+    // Custom endpoints skip the allowlist (any public https host) but still pass
+    // the generic sanitize; catalog providers stay strictly allowlisted.
+    if provider == agent::CUSTOM_PROVIDER_ID {
+        agent::validate_custom_base_url(&base_url, true)?;
+    } else {
+        agent::validate_base_url(&base_url)?;
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build().map_err(|e| format!("Client error: {}", e))?;
@@ -298,10 +396,14 @@ async fn test_connection(_provider: String, model: String, base_url: String, api
         return Err(format!("API error ({}): {}", res.status(), res.text().await.unwrap_or_default()));
     }
 
-    // Test 2: tool call support — send a dummy tool definition
+    // Test 2: tool call support — send a dummy tool whose schema MIRRORS the
+    // real applyDocumentOperations payload ($defs/$ref, anyOf,
+    // additionalProperties:false) so the probe measures whether OUR payload
+    // shape passes this gateway, not just "model supports tools".
     let tool_body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": "call the test_tool"}],
+        "stream": false,
         "tools": [{
             "type": "function",
             "function": {
@@ -309,23 +411,40 @@ async fn test_connection(_provider: String, model: String, base_url: String, api
                 "description": "A test tool",
                 "parameters": {
                     "type": "object",
-                    "properties": { "ok": { "type": "boolean" } }
+                    "properties": {
+                        "operations": {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    { "type": "object", "properties": { "type": { "const": "update" }, "id": { "type": "string" } }, "required": ["type", "id"], "additionalProperties": false },
+                                    { "$ref": "#/$defs/BlockOp" }
+                                ]
+                            }
+                        }
+                    },
+                    "required": ["operations"],
+                    "additionalProperties": false,
+                    "$defs": { "BlockOp": { "type": "object", "properties": { "type": { "const": "add" } }, "required": ["type"], "additionalProperties": false } }
                 }
             }
         }],
         "tool_choice": "required",
         "max_tokens": 50,
     });
-    let tool_res = client.post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&tool_body)
-        .send()
+    let tool_req = client.post(&url)
+        .header("Authorization", format!("Bearer {}", api_key));
+    let tool_res = tool_req.json(&tool_body).send()
         .await
         .map_err(|e| format!("Tool test failed: {}", e))?;
     if !tool_res.status().is_success() {
-        // Tool call not supported — ignore error, just report no tools
-        return Ok("connection ok".to_string());
+        // Tool call not supported — ignore error, just report no tools.
+        // HTTP 400 here MEANS the gateway rejected tool_choice:"required"
+        // (e.g. DeepSeek thinking-mode models) — this is a definitive
+        // negative, not a maybe. The provider cannot do forced tool calls.
+        eprintln!("[docubook] test_connection tool probe: provider rejected tool_choice:'required' (HTTP {}) — tools disabled", tool_res.status());
+        return Ok(r#"{"status":"ok","tools":false}"#.to_string());
     }
+    // Non-streaming parse: response is a single JSON object, not SSE chunks.
     let text = tool_res.text().await.map_err(|e| e.to_string())?;
     let supports_tools = text.contains("tool_calls") || text.contains("test_tool");
     Ok(format!(r#"{{"status":"ok","tools":{}}}"#, supports_tools))
@@ -334,6 +453,17 @@ async fn test_connection(_provider: String, model: String, base_url: String, api
 #[tauri::command]
 async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, _api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
     let agent = match (&provider, &model, &base_url) {
+        // Custom OpenAI-compatible endpoint: URL is bound server-side at save time,
+        // the webview-provided base_url is IGNORED so the stored key can never be
+        // redirected to a host the user did not explicitly bind it to.
+        (Some(p), Some(m), _) if p == agent::CUSTOM_PROVIDER_ID => {
+            let b = keychain::get_base_url(p).map_err(|_| "No custom base URL saved — set it in Settings → AI")?;
+            agent::validate_custom_base_url(&b, true)?;
+            // API key is ALWAYS resolved from the keychain — a webview-provided
+            // key is ignored so it can never be exfiltrated to a non-trusted host.
+            let key = keychain::get_key(p).map_err(|_| "No API key found in keychain")?;
+            agent::Agent::new(p, m, &key, &b)
+        }
         (Some(p), Some(m), Some(b)) => {
             // SSRF / exfiltration guard: base URL must be an allowlisted provider
             // endpoint or a loopback (local LLM) server.
@@ -364,21 +494,20 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
             if let Some(arr) = tools_val.as_array() {
                 if !arr.is_empty() {
                     body_obj["tools"] = tools_val;
-                    // Force model to call applyDocumentOperations so xl-ai creates suggestions
-                    body_obj["tool_choice"] = serde_json::json!("required");
+                    // "auto": the model chooses tool or text. The test_connection
+                    // probe (tool_choice:"required") is the definitive gate — if it
+                    // says tools:false, tools are never sent. With "auto" here, even
+                    // an unprobed thinking-mode model (DeepSeek) degrades gracefully
+                    // to text → text-to-applyDocumentOperations path instead of 400.
+                    body_obj["tool_choice"] = serde_json::json!("auto");
                 }
             }
         }
     }
     let body = body_obj;
     let url = format!("{}/chat/completions", agent.base_url.trim_end_matches('/'));
-    // Gateway attribution: opencode providers route better when the client + session are identified.
-    let mut req = client.post(&url).header("Authorization", format!("Bearer {}", agent.api_key));
-    if agent.provider == "opencode-go" || agent.provider == "opencode" {
-        req = req
-            .header("x-opencode-client", "pi")
-            .header("x-opencode-session", format!("docubook-{}", std::process::id()));
-    }
+    // Neutral OpenAI-compatible request — no provider-specific attribution headers.
+    let req = client.post(&url).header("Authorization", format!("Bearer {}", agent.api_key));
     // Timeout budget (P1): 30s to get response headers AND first chunk — a
     // provider that accepts the request but never sends data errors out at 30s
     // instead of hanging on send() or the 120s read_timeout.
@@ -392,6 +521,19 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     let status = response.status();
     if !status.is_success() {
         // Do NOT surface the raw provider body — it may leak internal details.
+        // Log the EXACT request body + provider response server-side (desktop
+        // terminal / docker logs) so a gateway rejection is diagnosable without
+        // guessing: this shows what we actually sent and why it was rejected.
+        let req_snapshot = serde_json::json!({
+            "model": body.get("model"),
+            "stream": body.get("stream"),
+            "max_tokens": body.get("max_tokens"),
+            "tool_choice": body.get("tool_choice"),
+            "tools": body.get("tools"),
+            "message_roles": body.get("messages").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|x| x.get("role").and_then(|r| r.as_str()).map(String::from)).collect::<Vec<_>>()),
+        }).to_string();
+        let body = response.text().await.unwrap_or_default();
+        eprintln!("[docubook] ask_ai provider error: HTTP {} — request: {} — body: {}", status, &req_snapshot[..req_snapshot.len().min(1600)], &body[..body.len().min(800)]);
         return Err(format!("AI provider error (HTTP {})", status));
     }
     let mut stream = response;
@@ -416,6 +558,13 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     // per chunk for long generations).
     let mut pending_first = Some(first_chunk);
     loop {
+        // Total generation budget (per attempt): the per-chunk read_timeout only
+        // catches STALLS — a model that trickles tokens forever never trips it,
+        // so the whole run is bounded here. Errors cleanly (invoke rejects →
+        // xl-ai shows retry/cancel in the AI menu).
+        if started.elapsed().as_secs() >= AI_MAX_SECONDS {
+            return Err(format!("AI generation exceeded {}s — try again or use a stronger model", AI_MAX_SECONDS));
+        }
         let chunk = match pending_first.take() {
             Some(c) => Some(c),
             None => stream.chunk().await.map_err(|e| sanitize_ai_error(&e.to_string()))?,
@@ -475,6 +624,11 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
  *  `ai:done` carries `truncated: true`. */
 const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
 
+/** Total AI generation budget per attempt (seconds). A provider that streams
+ *  slowly but steadily (weak/thinking models) never trips the 120s per-chunk
+ *  read_timeout, so the entire run is bounded instead. */
+const AI_MAX_SECONDS: u64 = 180;
+
 /** Map transport errors to user-safe messages — never leak URLs, paths, or
  *  raw provider details into the UI (structured error contract). */
 fn sanitize_ai_error(err: &str) -> String {
@@ -532,9 +686,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_vault, close_vault, create_vault, git_clone, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
             git_settings, git_add_remote, git_remove_remote, git_set_identity, git_init,
-            wiki_backlinks, wiki_suggest, search_vault, git_stage, git_push, git_status,
-            markdown_preview, md_to_html, ask_ai, cancel_ai, set_api_key, delete_api_key, list_api_keys, test_connection,
-            health, app_ready_to_close,
+            wiki_backlinks, wiki_suggest, wiki_resolve, search_vault, git_stage, git_push, git_status,
+            custom_ai_config,
+            markdown_preview, md_to_html, ask_ai, cancel_ai, set_api_key, set_custom_endpoint, delete_api_key, list_api_keys, test_connection,
+            ai_grounding_context, health, app_ready_to_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -2,20 +2,63 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
 import { X, Eye, EyeOff, Check, Loader, ChevronsUpDown, Search } from 'lucide-react'
-import { useAiSettings } from '../stores/aiSettings'
+import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
 import GitSettings from './GitSettings'
 import SystemSettings from './SystemSettings'
 import AppearanceSettings from './AppearanceSettings'
 import type { ProviderInfo } from '../data/providers'
 
+/** Synthetic provider for user-configured OpenAI-compatible endpoints — NOT in the
+ *  generated catalog (providers.ts is auto-generated from models.dev and would
+ *  overwrite it). Base URL + key are bound server-side via set_custom_endpoint. */
+const CUSTOM_PROVIDER: ProviderInfo = { id: CUSTOM_PROVIDER_ID, name: 'OpenAI Compatible (Custom)', api: '', models: [] }
+
+/** Badge for providers currently on the text-only path (no tool-call
+ *  streaming). Source of truth is the measured probe (aiSettings.probeTools):
+ *  probe false → text-only; custom endpoints are text-only until probed true.
+ *  Unprobed providers show no badge — permissive default sends tools. */
+const TextOnlyBadge = () => (
+  <span title="AI writes via markdown → suggestion (no tool-call streaming)"
+    className="text-[9px] uppercase tracking-wide px-1 py-px rounded bg-surface-active text-muted border border-border-subtle shrink-0">
+    text-only
+  </span>
+)
+
+const isTextOnlyProvider = (id: string, model: string, probeTools: Record<string, Record<string, boolean>>) => {
+  const probe = model ? probeTools[id]?.[model] : undefined
+  return probe === false || (id === CUSTOM_PROVIDER_ID && probe !== true)
+}
+
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [section, setSection] = useState<'ai' | 'appearance' | 'git' | 'system'>('ai')
-  const { provider, model, savedProviders, models,
+  const { provider, model, savedProviders, models, probeTools,
     setProvider, setModel, clearApiKey, addSavedProvider, removeSavedProvider } = useAiSettings()
 
   /** API key is entered here but NEVER read back from the backend —
    *  the key stays in the keychain (SEC-5: keys are backend-only). */
   const [keyInput, setKeyInput] = useState('')
+
+  /** Custom base URL for the OpenAI-compatible provider (persisted in the store). */
+  const [baseUrlInput, setBaseUrlInput] = useState('')
+
+  /** Custom provider config from the backend — source "env" means Docker
+   *  overrides via DB_OPENAI_COMPAT_* → the UI renders read-only. */
+  const [customCfg, setCustomCfg] = useState<{ source: string; baseUrl?: string; hasKey: boolean; model?: string } | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    invoke<string>('custom_ai_config').then(s => {
+      if (cancelled) return
+      try {
+        const cfg = JSON.parse(s)
+        setCustomCfg(cfg)
+        // Env model is forced — sync the store so transport + probe align.
+        if (cfg.source === 'env' && cfg.model) useAiSettings.getState().setModel(cfg.model)
+      } catch {}
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+  const envCustom = customCfg?.source === 'env'
+  const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 ml-2">from env</span>
 
   /** Provider catalog lazy-loaded (2.17 MB — not part of the initial bundle). */
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -24,8 +67,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     let cancelled = false
     import('../data/providers').then(m => {
       if (cancelled) return
-      providersRef.current = m.PROVIDERS
-      setProviders(m.PROVIDERS)
+      providersRef.current = [CUSTOM_PROVIDER, ...m.PROVIDERS]
+      setProviders([CUSTOM_PROVIDER, ...m.PROVIDERS])
     })
     return () => { cancelled = true }
   }, [])
@@ -51,8 +94,16 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const providerListRef = useRef<HTMLDivElement>(null)
   const modelListRef = useRef<HTMLDivElement>(null)
 
-  const selectedProvider: ProviderInfo | null = provider ? providers.find(p => p.id === provider) || null : null
+  const selectedProvider: ProviderInfo | null = provider
+    ? provider === CUSTOM_PROVIDER_ID ? CUSTOM_PROVIDER : providers.find(p => p.id === provider) || null
+    : null
+  const isCustom = provider === CUSTOM_PROVIDER_ID
   const savedSet = new Set(savedProviders)
+
+  /** Keep the custom base URL input in sync with the selected provider. */
+  useEffect(() => {
+    setBaseUrlInput(useAiSettings.getState().baseUrls[provider] || '')
+  }, [provider])
 
   /** Resync which providers have saved keys — one batch call instead of one invoke per provider. */
   useEffect(() => {
@@ -96,29 +147,53 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const selectProviderFn = (p: ProviderInfo) => {
     setProvider(p.id) // restores saved apiKey + model for this provider
-    if (!models[p.id]) { import('../data/providers').then(m => { if (!useAiSettings.getState().models[p.id]) setModel(m.getDefaultModel(p.id) || '') }) } // only default if never chosen
+    if (p.id !== CUSTOM_PROVIDER_ID && !models[p.id]) { import('../data/providers').then(m => { if (!useAiSettings.getState().models[p.id]) setModel(m.getDefaultModel(p.id) || '') }) } // only default if never chosen
     setShowProviderDropdown(false)
   }
 
   const handleSave = async () => {
-    if (!provider || !keyInput) return
+    if (!provider || !keyInput || (isCustom && !baseUrlInput.trim())) return
     setSaving(true)
     try {
-      await invoke('set_api_key', { provider, key: keyInput })
+      if (isCustom) {
+        await invoke('set_custom_endpoint', { provider, baseUrl: baseUrlInput.trim(), key: keyInput })
+        useAiSettings.getState().setBaseUrl(baseUrlInput.trim())
+      } else {
+        await invoke('set_api_key', { provider, key: keyInput })
+      }
       addSavedProvider(provider)
       setKeyInput('')
       toast.success('API key saved')
     } catch (e) { toast.error('Failed to save API key'); console.error(e) }
     setSaving(false)
+    // Auto-probe right after saving so the badge + transport use MEASURED
+    // tool-call support, not the conservative default (unmeasured → text-only).
+    const p = providers.find(x => x.id === provider)
+    const testModel = model || p?.models[0]?.id || ''
+    try {
+      const result = await invoke<string>('test_connection', { provider, model: testModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
+      let tools: boolean | undefined
+      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
+      if (tools !== undefined) {
+        useAiSettings.getState().setProbeTools(provider, testModel, tools)
+        toast.success(tools === true ? 'Tool calls supported' : 'Text-only — tool calls rejected by this gateway')
+      }
+    } catch { /* probe failed — badge stays at the default; Test button remains available */ }
   }
 
   const handleTest = async () => {
-    if (!provider || !keyInput) return
+    if (!provider || (!keyInput && !envCustom) || (isCustom && !baseUrlInput.trim() && !envCustom)) return
     setTesting(true)
     try {
       const p = providers.find(x => x.id === provider)
-      await invoke<string>('test_connection', { provider, model: model || p?.models[0]?.id || '', baseUrl: p?.api || '', apiKey: keyInput })
-      toast.success('Connection OK')
+      const testModel = model || p?.models[0]?.id || ''
+      const result = await invoke<string>('test_connection', { provider, model: testModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
+      /** Persist the measured tool-call support — ground truth for the transport
+       *  (probe-based; no static exclusions). */
+      let tools: boolean | undefined
+      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
+      if (tools !== undefined) useAiSettings.getState().setProbeTools(provider, testModel, tools)
+      toast.success(tools === true ? 'Connection OK — tool calls supported' : 'Connection OK')
     } catch (e) { toast.error(String(e)) }
     setTesting(false)
   }
@@ -157,7 +232,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 setShowProviderDropdown(o => !o); setTimeout(() => searchRef.current?.focus(), 50) 
               }}
               className={'flex items-center gap-2 bg-background border border-border rounded-md px-3 py-[7px] cursor-pointer text-[13px] ' + (provider ? 'text-foreground' : 'text-muted')}>
-              <span className="flex-1">{selectedProvider ? selectedProvider.name + (savedSet.has(selectedProvider.id) ? ' ✓' : '') : '— Select a provider —'}</span>
+              <span className="flex-1 flex items-center gap-2">
+                {selectedProvider ? <span>{selectedProvider.name}</span> : '— Select a provider —'}
+                {selectedProvider && isTextOnlyProvider(selectedProvider.id, model, probeTools) && <TextOnlyBadge />}
+                {selectedProvider && savedSet.has(selectedProvider.id) && <Check size={12} />}
+              </span>
               <ChevronsUpDown size={14} className="text-muted shrink-0" />
             </div>
             {showProviderDropdown && providerDropdownPos && (
@@ -178,6 +257,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     <div key={p.id} onClick={() => selectProviderFn(p)}
                       className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-accent text-white' : i === providerHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
                       <span className="flex-1">{p.name}</span>
+                      {isTextOnlyProvider(p.id, model, probeTools) && <TextOnlyBadge />}
                       {savedSet.has(p.id) && <Check size={12} />}
                     </div>
                   ))}
@@ -186,11 +266,24 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             )}
           </div>
 
-          {/* Model */}
+          {/* Model / custom endpoint */}
           {selectedProvider && (
             <>
-              <label className="text-xs font-medium text-foreground mb-1.5 block">Model</label>
-              <div ref={modelRef} className="relative mb-3">
+              {isCustom ? (
+                <>
+                  <label className="text-xs font-medium text-foreground mb-1.5 block">Base URL{envCustom && envBadge}</label>
+                  <input type="text" value={envCustom ? customCfg?.baseUrl ?? '' : baseUrlInput} onChange={e => setBaseUrlInput(e.target.value)} readOnly={envCustom}
+                    placeholder="https://proxy.example.com/v1 — OpenAI-compatible endpoint"
+                    className="w-full bg-background border border-border rounded-md px-3 py-[7px] text-xs text-foreground outline-none font-mono mb-3 disabled:opacity-60" />
+                  <label className="text-xs font-medium text-foreground mb-1.5 block">Model{envCustom && customCfg?.model && envBadge}</label>
+                  <input type="text" value={envCustom ? customCfg?.model ?? model : model} onChange={e => setModel(e.target.value)} readOnly={envCustom}
+                    placeholder="model id, e.g. gpt-oss-20b or llama3.1:8b"
+                    className="w-full bg-background border border-border rounded-md px-3 py-[7px] text-xs text-foreground outline-none font-mono mb-3 disabled:opacity-60" />
+                </>
+              ) : (
+                <>
+                  <label className="text-xs font-medium text-foreground mb-1.5 block">Model</label>
+                  <div ref={modelRef} className="relative mb-3">
                 <div onClick={() => { 
                     const r = modelRef.current?.getBoundingClientRect()
                     if (r) setModelDropdownPos({ position: 'fixed', top: r.bottom + 4, left: r.left, right: window.innerWidth - r.right, width: r.width })
@@ -232,24 +325,26 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
               </div>
+                </>
+              )}
 
               {/* API Key */}
-              <label className="text-xs font-medium text-foreground mb-1.5 block">API Key</label>
+              <label className="text-xs font-medium text-foreground mb-1.5 block">API Key{envCustom && envBadge}</label>
               <div className="flex gap-2 mb-2">
                 <div className="relative flex-1">
-                  <input type={showKey ? 'text' : 'password'} value={keyInput} onChange={e => setKeyInput(e.target.value)} placeholder={savedSet.has(provider) ? 'Key saved — type a new key to replace it' : 'sk-...'}
-                    className="w-full bg-background border border-border rounded-md pl-3 pr-10 py-[7px] text-xs text-foreground outline-none font-mono" />
+                  <input type={showKey ? 'text' : 'password'} value={keyInput} onChange={e => setKeyInput(e.target.value)} readOnly={envCustom} placeholder={envCustom ? 'Key provided by environment' : (savedSet.has(provider) ? 'Key saved — type a new key to replace it' : 'sk-...')}
+                    className="w-full bg-background border border-border rounded-md pl-3 pr-10 py-[7px] text-xs text-foreground outline-none font-mono disabled:opacity-60" />
                   <button onClick={() => setShowKey(v => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-transparent border-none text-muted cursor-pointer p-1 hover:text-foreground-secondary">
                     {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
-                <button onClick={handleSave} disabled={!keyInput || saving}
+                <button onClick={handleSave} disabled={!keyInput || saving || envCustom || (isCustom && !baseUrlInput.trim())}
                   className="px-3.5 py-[7px] text-xs rounded-md bg-surface-hover text-foreground border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
                   {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
                   {saving ? '...' : (savedSet.has(provider) ? 'Update' : 'Save')}
                 </button>
-                <button onClick={handleTest} disabled={!keyInput || testing}
+                <button onClick={handleTest} disabled={(!keyInput && !envCustom) || testing || (isCustom && !baseUrlInput.trim() && !envCustom)}
                   className="px-3.5 py-[7px] text-xs rounded-md bg-accent text-white border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
                   {testing ? <Loader size={12} className="animate-spin" /> : null}
                   {testing ? 'Testing...' : 'Test'}
@@ -264,7 +359,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   Revoke API Key
                 </button>
               </div>}
-              {selectedProvider && <div className="text-[10px] text-muted font-mono mb-1">Base URL: {selectedProvider.api}</div>}
+              {selectedProvider.api && <div className="text-[10px] text-muted font-mono mb-1">Base URL: {selectedProvider.api}</div>}
             </>
           )}
             </>

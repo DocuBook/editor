@@ -29,6 +29,13 @@ export const useAuth = create<AuthState>((set) => ({
   },
 
   refresh: async () => {
+    // Mirror init(): a successful "Skip — keep open access" flips noAuth,
+    // which must land on 'ready' — account_get alone can't tell it apart from
+    // "never set up" (no admin exists yet on a fresh install).
+    try {
+      const s = JSON.parse(await invoke<string>('setup_status'))
+      if (s.noAuth) { set({ status: 'ready' }); return }
+    } catch { /* ignore — fall through to account_get */ }
     try {
       const a = JSON.parse(await invoke<string>('account_get'))
       set({ status: 'ready', email: a.email })

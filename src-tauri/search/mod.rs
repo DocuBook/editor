@@ -17,7 +17,7 @@ fn walk(base: &Path, dir: &Path, query: &str, results: &mut Vec<SearchResult>) {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == ".git" || name == ".DS_Store" || name == "node_modules" { continue; }
+            if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
             if path.is_dir() {
                 walk(base, &path, query, results);
             } else if name.to_lowercase().contains(query) {

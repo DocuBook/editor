@@ -1,3 +1,5 @@
+use std::net::ToSocketAddrs;
+
 /// AI agent configuration for API calls.
 pub struct Agent {
     /* used in UI to label which provider served the response */
@@ -165,10 +167,17 @@ fn is_loopback(host: &str) -> bool {
     host == "localhost" || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
 }
 
-/** Validate a base URL for the AI transport — SSRF / API-key exfiltration guard.\n *  Rules: scheme must be https (or http to loopback only); host must be in\n *  ALLOWED_API_HOSTS (provider catalog) or loopback; IP literals in\n *  private/link-local/reserved ranges are rejected. */
-pub fn validate_base_url(base_url: &str) -> Result<(), String> {
-    let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
+/** Synthetic provider id for user-configured OpenAI-compatible endpoints.
+ *  Shared with the frontend (SettingsModal) — custom base URL + model + key are
+ *  bound server-side instead of coming from the generated provider catalog. */
+pub const CUSTOM_PROVIDER_ID: &str = "openai-compatible";
+
+/** Scheme + host sanitization shared by both validators. Returns the lowercased host. */
+fn validate_scheme_and_host(url: &reqwest::Url) -> Result<String, String> {
     let host = url.host_str().unwrap_or("").to_lowercase();
+    if !url.username().is_empty() {
+        return Err("Base URL must not contain credentials (user:pass@)".into());
+    }
     match url.scheme() {
         "https" => {}
         "http" => {
@@ -178,9 +187,6 @@ pub fn validate_base_url(base_url: &str) -> Result<(), String> {
         }
         _ => return Err("Base URL must use http(s)".into()),
     }
-    if !ALLOWED_API_HOSTS.contains(&host.as_str()) && !is_loopback(&host) {
-        return Err(format!("Base URL host \"{}\" is not an allowed provider endpoint", host));
-    }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         let internal_non_loopback = match ip {
             std::net::IpAddr::V4(v) => !v.is_loopback() && (v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_multicast()),
@@ -189,6 +195,62 @@ pub fn validate_base_url(base_url: &str) -> Result<(), String> {
         if internal_non_loopback {
             return Err("Internal network addresses are not allowed".into());
         }
+    }
+    Ok(host)
+}
+
+/** Validate a user-supplied OpenAI-compatible base URL (custom provider).
+ *  Any public https host is allowed — the allowlist does not apply, that is the
+ *  point of custom endpoints — but SSRF classes are still blocked: private/
+ *  link-local/reserved IP literals, credentials in the URL, non-http(s)
+ *  schemes, and http to non-loopback.
+ *
+ *  `allow_loopback` — true on the desktop build (local LLM servers on the
+ *  user's own machine, e.g. Ollama/LM Studio); false on the web build where
+ *  loopback is the SERVER's own machine and must not be reachable by users.
+ *
+ *  Hostnames are DNS-resolved here and rejected when they point at internal
+ *  addresses — closes the hostname-resolves-to-private-IP SSRF class.
+ *  Unresolvable hosts fail closed. The key is bound to this URL server-side
+ *  (keychain/keys `{provider}:base_url`), so a webview-provided URL can never
+ *  redirect the stored key elsewhere. */
+pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<(), String> {
+    let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
+    let host = validate_scheme_and_host(&url)?;
+    if is_loopback(&host) && !allow_loopback {
+        return Err("Loopback addresses are not allowed on the server".into());
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() {
+        return Ok(()); // IP literal — already vetted by validate_scheme_and_host
+    }
+    // DNS-based SSRF guard: resolve the hostname now and reject internal targets.
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs: Vec<std::net::SocketAddr> = (host.as_str(), port)
+        .to_socket_addrs()
+        .map_err(|_| format!("Could not resolve host \"{}\" — DNS lookup failed", host))?
+        .collect();
+    if addrs.is_empty() {
+        return Err(format!("Could not resolve host \"{}\"", host));
+    }
+    for a in &addrs {
+        let ip = a.ip();
+        let internal = match ip {
+            std::net::IpAddr::V4(v) => v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_multicast() || v.is_loopback(),
+            std::net::IpAddr::V6(v) => v.is_unspecified() || v.is_multicast() || v.is_loopback() || v.is_unique_local(),
+        };
+        if internal && !(allow_loopback && ip.is_loopback()) {
+            return Err(format!("Host \"{}\" resolves to an internal address ({}) — not allowed", host, ip));
+        }
+    }
+    Ok(())
+}
+
+/** Validate a base URL for the AI transport — SSRF / API-key exfiltration guard.\n *  Rules: scheme must be https (or http to loopback only); host must be in\n *  ALLOWED_API_HOSTS (provider catalog) or loopback; IP literals in\n *  private/link-local/reserved ranges are rejected. */
+pub fn validate_base_url(base_url: &str) -> Result<(), String> {
+    let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
+    let host = validate_scheme_and_host(&url)?;
+    if !ALLOWED_API_HOSTS.contains(&host.as_str()) && !is_loopback(&host) {
+        return Err(format!("Base URL host \"{}\" is not an allowed provider endpoint", host));
     }
     Ok(())
 }
@@ -243,5 +305,41 @@ mod tests {
         // bad schemes / malformed
         assert!(validate_base_url("ftp://x/v1").is_err());
         assert!(validate_base_url("not-a-url").is_err());
+    }
+
+    #[test]
+    fn validate_custom_base_url_allows_public_https_and_loopback() {
+        // local LLM servers (desktop only) — loopback resolves offline-safe
+        assert!(validate_custom_base_url("http://localhost:11434/v1", true).is_ok());
+        assert!(validate_custom_base_url("http://127.0.0.1:8080/v1", true).is_ok());
+        assert!(validate_custom_base_url("https://localhost/v1", true).is_ok());
+        // any public https host is the point of the custom provider
+        assert!(validate_custom_base_url("https://api.openai.com/v1", true).is_ok());
+    }
+
+    #[test]
+    fn validate_custom_base_url_blocks_loopback_on_web() {
+        // on the web build loopback is the SERVER's own machine — never allowed
+        assert!(validate_custom_base_url("http://localhost:11434/v1", false).is_err());
+        assert!(validate_custom_base_url("http://127.0.0.1:8080/v1", false).is_err());
+        assert!(validate_custom_base_url("https://localhost/v1", false).is_err());
+    }
+
+    #[test]
+    fn validate_custom_base_url_blocks_ssrf_classes() {
+        // http to non-loopback (cleartext key transport)
+        assert!(validate_custom_base_url("http://llm-proxy.example.com/v1", true).is_err());
+        // metadata / internal IPs
+        assert!(validate_custom_base_url("http://169.254.169.254/latest/meta-data", true).is_err());
+        assert!(validate_custom_base_url("https://169.254.169.254/latest/meta-data", true).is_err());
+        assert!(validate_custom_base_url("https://10.0.0.5/v1", true).is_err());
+        assert!(validate_custom_base_url("https://192.168.1.10/v1", true).is_err());
+        // credentials in the URL
+        assert!(validate_custom_base_url("https://user:pass@proxy.example.com/v1", true).is_err());
+        // bad schemes / malformed
+        assert!(validate_custom_base_url("ftp://proxy.example.com/v1", true).is_err());
+        assert!(validate_custom_base_url("not-a-url", true).is_err());
+        // unresolvable hostname fails closed (RFC 2606 .invalid never resolves)
+        assert!(validate_custom_base_url("https://never-resolves.invalid/v1", true).is_err());
     }
 }

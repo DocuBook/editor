@@ -1,56 +1,42 @@
 /**
  * Web UI smoke — boots the real server, walks setup-wizard + login flow
- * through the browser, verifies the main UI renders.
+ * through the browser, verifies the main UI renders and that persistent
+ * sessions survive a server restart.
  *
- * Run: npm run build && node frontend/e2e/web-smoke.mjs
+ * Logs: test/artifacts/web-smoke.{server,browser}.log
+ * Run: npm run build && node test/web-smoke.mjs
  */
-import { spawn, execSync } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
-import { chromium } from 'playwright'
+
+import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
 
 const PORT = 4273
-// Kill any stale server from a previous run (port may be held after bin.kill)
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
 const DATA = '/tmp/docubook-e2e-data'
 const BASE = `http://localhost:${PORT}`
-const CHROMIUM = process.env.CHROMIUM_EXE
-  || '/Users/wildan/Library/Caches/ms-playwright/chromium-1091/chrome-mac/Chromium.app/Contents/MacOS/Chromium'
 
 const ADMIN = { email: 'e2e@test.dev', password: 'password1' }
 const click = (name) => `button:has-text("${name}")`
-
 const results = []
 const ok = (name, cond, extra = '') => {
   results.push([cond ? 'PASS' : 'FAIL', name, extra])
   if (!cond) process.exitCode = 1
 }
 
+mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
-mkdirSync('frontend/e2e/screenshot', { recursive: true })
 
-const bin = spawn('server/target/debug/docubook-server', [], {
-  env: { ...process.env, DATA_DIR: DATA, WWW_DIR: 'dist', PORT: String(PORT) },
-  stdio: 'ignore',
-})
-let bin2
-
+let server = startServer('web-smoke', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
+let server2
 let browser
-
-async function waitForServer() {
-  for (let i = 0; i < 80; i++) {
-    try { const r = await fetch(`${BASE}/api/health`); if (r.status < 500) return } catch {}
-    await new Promise(r => setTimeout(r, 400))
-  }
-  throw new Error('server did not start')
-}
+let page
 
 try {
-  await waitForServer()
-  browser = await chromium.launch({ executablePath: CHROMIUM, headless: true })
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
-  const consoleErrors = []
-  page.on('console', m => { if (m.type() === 'error') consoleErrors.push(m.text().slice(0, 140)) })
-  page.on('pageerror', e => consoleErrors.push('pageerror: ' + String(e).slice(0, 140)))
+  await waitForServer(BASE)
+  browser = await launchBrowser()
+  page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+  attachLogging(page, 'web-smoke')
 
   // ── Health ──
   const h = await (await fetch(`${BASE}/api/health`)).json()
@@ -59,14 +45,19 @@ try {
   // ── Setup wizard ──
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector(click('Create admin account'), { timeout: 12000 })
+  // Consent gate: "Skip — keep open access" stays disabled until acknowledged
+  const skipBtn = page.locator(click('Skip for now — keep open access'))
+  ok('consent gate: skip disabled until acknowledged', await skipBtn.isDisabled())
+  await page.locator('input[type="checkbox"]').check()
+  ok('consent gate: skip enabled after ack', await skipBtn.isEnabled())
+  await page.locator('input[type="checkbox"]').uncheck()
   await page.fill('input[type="email"]', ADMIN.email)
   await page.fill('input[placeholder="Password (min 8 chars)"]', ADMIN.password)
   await page.fill('input[placeholder="Confirm password"]', ADMIN.password)
   await page.locator(click('Create admin account')).click()
-  await page.waitForTimeout(2000)
+  await page.waitForFunction(() => /Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
   const afterSetup = await page.locator('body').innerText()
   ok('setup wizard: admin created', /Open a vault|NO VAULT|Open project/i.test(afterSetup), afterSetup.slice(0, 80))
-  await page.screenshot({ path: 'frontend/e2e/screenshot/setup-done.png', fullPage: true })
 
   // ── Logout → Login ──
   await page.keyboard.press('Meta+,')
@@ -74,7 +65,7 @@ try {
   await page.locator(click('System')).click()
   await page.waitForSelector(click('Sign out'), { timeout: 4000 })
   await page.locator(click('Sign out')).click()
-  await page.waitForTimeout(1500)
+  await page.waitForSelector('text=Sign in', { timeout: 8000 })
   const loginVisible = await page.locator('body').innerText()
   ok('logout: login page shown', /Sign in/i.test(loginVisible), loginVisible.slice(0, 60))
 
@@ -82,19 +73,16 @@ try {
   await page.fill('input[placeholder="Password"]', ADMIN.password)
   await page.waitForSelector(click('Sign in'), { timeout: 5000 })
   await page.locator(click('Sign in')).click()
-  await page.waitForTimeout(2000)
+  // Argon2id login can take >1s — wait for the main UI, not a fixed timeout.
+  await page.waitForFunction(() => /Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
   const afterLogin = await page.locator('body').innerText()
   ok('login: main UI visible', /Open a vault|Open project/i.test(afterLogin), afterLogin.slice(0, 80))
-  await page.screenshot({ path: 'frontend/e2e/screenshot/login-done.png', fullPage: true })
 
-  // ── Restart persistence — redeploy must keep the admin (config.json on /data) ──
-  bin.kill()
+  // ── Restart: admin config AND session must persist (sessions.json on /data) ──
+  server.bin.kill()
   await new Promise(r => setTimeout(r, 1500))
-  bin2 = spawn('server/target/debug/docubook-server', [], {
-    env: { ...process.env, DATA_DIR: DATA, WWW_DIR: 'dist', PORT: String(PORT) },
-    stdio: 'ignore',
-  })
-  await waitForServer()
+  server2 = startServer('web-smoke', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
+  await waitForServer(BASE)
   const st = await (await fetch(`${BASE}/api/setup_status`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
   })).text()
@@ -102,19 +90,14 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1500)
   const afterReload = await page.locator('body').innerText()
-  ok('redeploy: login page shown, NOT setup wizard', /Sign in/i.test(afterReload) && !/Create admin account/i.test(afterReload), afterReload.slice(0, 80))
-  await page.screenshot({ path: 'frontend/e2e/screenshot/redeploy-login.png', fullPage: true })
-
-  const noise = consoleErrors.filter(e => !/404|Failed to load|net::ERR|favicon|password|401/i.test(e))
-  console.log(`\nconsole errors (filtered): ${noise.length ? noise.join('\n  ') : 'none'}`)
+  ok('restart: session persists — still logged in (no login page)', /Open a vault|Open project/i.test(afterReload) && !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
   process.exitCode = 1
 } finally {
   await browser?.close().catch(() => {})
-  bin.kill()
-  bin2?.kill()
+  server.bin.kill()
+  server2?.bin.kill()
 }
 
-console.log('\n=== WEB UI SMOKE RESULTS ===')
-for (const [s, n, e] of results) console.log(` ${s}  ${n}${e ? ' — ' + e : ''}`)
+if (!summary('web-smoke', results, { serverLog: server.logPath })) process.exitCode = 1

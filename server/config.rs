@@ -146,9 +146,10 @@ impl Config {
         match key {
             "no_auth" => {
                 let v = value.as_bool().ok_or("no_auth must be a boolean")?;
-                if v && self.admin.is_none() {
-                    return Err("Cannot disable login before an admin account exists".into());
-                }
+                // No admin-guard here: "Skip — keep open access" from the setup
+                // wizard runs on a FRESH install where no admin exists yet, and
+                // disabling it with no admin can't lock anyone out either
+                // (setup_required bypasses auth until an admin is created).
                 self.no_auth = v;
             }
             "session_ttl_hours" => {
@@ -202,7 +203,7 @@ impl AuthState {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             config: Mutex::new(Config::load(data_dir)),
-            sessions: super::auth::Sessions::new(),
+            sessions: super::auth::Sessions::new(data_dir),
             limiter: super::auth::LoginLimiter::new(),
             secure_cookie: std::env::var("DB_SECURE_COOKIE").ok().is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")),
         }
@@ -238,6 +239,20 @@ mod tests {
         let c2 = Config::load(&dir);
         assert!(c2.admin.is_some());
         assert!(super::super::auth::verify_password(&c2.admin.unwrap().password_hash, "newpass1"));
+        let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn no_auth_allowed_without_admin() {
+        // "Skip for now — keep open access" on a fresh install: no admin yet,
+        // but enabling no_auth must succeed and persist.
+        let dir = tmp();
+        let mut c = Config::load(&dir);
+        assert!(c.admin.is_none());
+        c.set("no_auth", &serde_json::json!(true)).unwrap();
+        assert!(c.no_auth);
+        let c2 = Config::load(&dir);
+        assert!(c2.no_auth, "no_auth must persist to disk");
         let _ = std::fs::remove_file(dir.join("config.json"));
     }
 
@@ -278,7 +293,7 @@ mod tests {
     fn set_ui_keys_validation() {
         let dir = tmp();
         let mut c = Config::load(&dir);
-        assert!(c.set("no_auth", &serde_json::json!(true)).is_err(), "no_auth before admin");
+        assert!(c.set("no_auth", &serde_json::json!(true)).is_ok(), "no_auth allowed before admin (skip flow)");
         c.setup_admin("a@b.c", "password1", None).unwrap();
         c.set("no_auth", &serde_json::json!(true)).unwrap();
         assert!(c.no_auth);

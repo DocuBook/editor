@@ -44,6 +44,10 @@ export default function SetupWizard() {
     } catch (e) { toast.error(String(e)); setBusy(false) }
   }
 
+  /** Explicit consent gate: "keep open access" means anyone with the URL can
+   *  use this server — the skip button stays disabled until acknowledged. */
+  const [ackOpen, setAckOpen] = useState(false)
+
   const input = 'w-full bg-background border border-border rounded-md px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent'
   const btn = 'w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm cursor-pointer transition-colors disabled:opacity-40'
 
@@ -63,11 +67,16 @@ export default function SetupWizard() {
             <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Setup token (DB_SETUP_TOKEN)" className={input} />
           )}
           {err && <div className="text-xs text-red-400">{err}</div>}
-          <button disabled={busy} className={btn + ' bg-surface-active text-foreground hover:bg-surface-hover'}>
+          <button disabled={busy} className={btn + ' bg-accent hover:bg-accent-hover text-white'}>
             {busy ? 'Creating…' : 'Create admin account'}
           </button>
         </form>
-        <button disabled={busy} onClick={skip} className="w-full text-center text-[11px] text-muted hover:text-foreground-secondary cursor-pointer bg-transparent border-none mt-4">
+        <label className="flex items-start gap-2 mt-4 text-[11px] text-muted cursor-pointer select-none">
+          <input type="checkbox" checked={ackOpen} onChange={e => setAckOpen(e.target.checked)}
+            className="mt-0.5 cursor-pointer accent-amber-500" />
+          <span>I understand that <span className="text-foreground-secondary">anyone with this URL</span> can access and modify all vaults without logging in. I will enable login later in Settings.</span>
+        </label>
+        <button disabled={busy || !ackOpen} onClick={skip} className="w-full text-center text-[11px] text-muted hover:text-foreground-secondary cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 bg-transparent border-none mt-2">
           Skip for now — keep open access (enable login later in Settings)
         </button>
       </div>
