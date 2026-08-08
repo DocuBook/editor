@@ -49,6 +49,11 @@ struct AppState {
 /** Cap runaway AI responses (memory-exhaustion guard) — mirrors lib.rs. */
 const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
 
+/** Total AI generation budget per attempt (seconds). A provider that streams
+ *  slowly but steadily (weak/thinking models) never trips the 120s per-chunk
+ *  read_timeout, so the entire run is bounded instead. */
+const AI_MAX_SECONDS: u64 = 180;
+
 fn main() {
     let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".into());
     let www_dir = std::env::var("WWW_DIR").unwrap_or_else(|_| "./dist".into());
@@ -154,6 +159,9 @@ async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result<String, St
         "create_file" => sync(state, cmd, args),
         "create_directory" => sync(state, cmd, args),
         "delete_file" => sb(state, cmd, args).await,
+        "list_trash" => sync(state, cmd, args),
+        "restore_file" => sync(state, cmd, args),
+        "empty_trash" => sync(state, cmd, args),
         "rename_file" => sync(state, cmd, args),
         "git_settings" => sb(state, cmd, args).await,
         "git_add_remote" => sb(state, cmd, args).await,
@@ -164,10 +172,13 @@ async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result<String, St
         "git_status" => sb(state, cmd, args).await,
         "wiki_backlinks" => sync(state, cmd, args),
         "wiki_suggest" => sync(state, cmd, args),
+        "wiki_resolve" => sync(state, cmd, args),
+        "custom_ai_config" => sync(state, cmd, args),
         "markdown_preview" => sync(state, cmd, args),
         "md_to_html" => sync(state, cmd, args),
         "cancel_ai" => sync(state, cmd, args),
         "set_api_key" => sync(state, cmd, args),
+        "set_custom_endpoint" => sync(state, cmd, args),
         "delete_api_key" => sync(state, cmd, args),
         "list_api_keys" => sync(state, cmd, args),
         "web_vaults" => sync(state, cmd, args),
@@ -177,8 +188,9 @@ async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result<String, St
         "change_password" => sync(state, cmd, args),
         "config_get" => sync(state, cmd, args),
         "config_set" => sync(state, cmd, args),
+        "ai_grounding_context" => ai_grounding_context(state, &s("query"), &s("activePath")),
         "health" => Ok(health(state).to_string()),
-        "test_connection" => test_connection(state, &s("provider"), &s("model"), &s("base_url"), &s("api_key")).await,
+        "test_connection" => test_connection(state, &s("provider"), &s("model"), &s("baseUrl"), &s("apiKey")).await,
         _ => Err(format!("Unknown command: {cmd}")),
     }
 }
@@ -215,6 +227,18 @@ fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, String> {
         },
         "delete_file" => match state.vault.lock().expect("lock").as_ref() {
             Some(v) => v.delete_file(&s("path")).map(|_| "null".into()),
+            None => Err("No vault".into()),
+        },
+        "list_trash" => match state.vault.lock().expect("lock").as_ref() {
+            Some(v) => serde_json::to_string(&v.list_trash()).map_err(|e| e.to_string()),
+            None => Ok("[]".to_string()),
+        },
+        "restore_file" => match state.vault.lock().expect("lock").as_ref() {
+            Some(v) => v.restore_file(&s("trashName")).map(|_| "null".into()),
+            None => Err("No vault".into()),
+        },
+        "empty_trash" => match state.vault.lock().expect("lock").as_ref() {
+            Some(v) => v.empty_trash().map(|_| "null".into()),
             None => Err("No vault".into()),
         },
         "rename_file" => match state.vault.lock().expect("lock").as_ref() {
@@ -260,6 +284,24 @@ fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, String> {
             Some(w) => serde_json::to_string(&w.suggest(&s("query"))).map_err(|e| e.to_string()),
             None => Ok("[]".to_string()),
         },
+        "wiki_resolve" => match state.wiki.lock().expect("lock").as_ref() {
+            Some(w) => Ok(w.resolve(&s("title")).unwrap_or_default()),
+            None => Ok(String::new()),
+        },
+        "custom_ai_config" => {
+            let env = custom_env_config();
+            let source = if env.is_some() { "env" } else { "file" };
+            let base_url = match &env {
+                Some((eb, _, _)) => Some(eb.clone()),
+                None => keys::get_base_url(&state.data_dir, agent::CUSTOM_PROVIDER_ID).ok(),
+            };
+            let has_key = match &env {
+                Some((_, ek, _)) => ek.is_some() || keys::get_key(&state.data_dir, agent::CUSTOM_PROVIDER_ID).is_ok(),
+                None => keys::get_key(&state.data_dir, agent::CUSTOM_PROVIDER_ID).is_ok(),
+            };
+            let model = env.and_then(|(_, _, em)| em);
+            Ok(serde_json::json!({ "source": source, "baseUrl": base_url, "hasKey": has_key, "model": model }).to_string())
+        },
         "markdown_preview" => Ok(markdown::markdown_preview(&s("content"))),
         "md_to_html" => Ok(markdown::markdown_to_safe_html(&s("content"))),
         "cancel_ai" => {
@@ -267,7 +309,19 @@ fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, String> {
             Ok("null".into())
         }
         "set_api_key" => keys::set_key(&state.data_dir, &s("provider"), &s("key")).map(|_| "null".into()),
-        "delete_api_key" => keys::delete_key(&state.data_dir, &s("provider")).map(|_| "null".into()),
+        "set_custom_endpoint" => {
+            if custom_env_base_url().is_some() {
+                return Err("Custom endpoint is controlled by DB_OPENAI_COMPAT_BASE_URL — remove the env var to edit in the UI".into());
+            }
+            let url = s("baseUrl");
+            agent::validate_custom_base_url(&url, false)?;
+            keys::set_base_url(&state.data_dir, &s("provider"), &url)?;
+            keys::set_key(&state.data_dir, &s("provider"), &s("key")).map(|_| "null".into())
+        }
+        "delete_api_key" => {
+            let _ = keys::delete_base_url(&state.data_dir, &s("provider")); // best-effort — entry may not exist
+            keys::delete_key(&state.data_dir, &s("provider")).map(|_| "null".into())
+        }
         "list_api_keys" => {
             let providers: Vec<String> = args
                 .get("providers")
@@ -357,6 +411,60 @@ fn search_vault(state: &AppState, query: &str) -> Result<String, String> {
         None => return Ok("[]".to_string()),
     };
     serde_json::to_string(&search::search_vault(&root, query)).map_err(|e| e.to_string())
+}
+
+/// Resolve wikilinks + search vault for AI system-prompt grounding.
+/// Extracts [[links]] from query, resolves via wiki index, reads content,
+/// and runs a filename search on remaining text. Token-budgeted.
+fn ai_grounding_context(state: &AppState, query: &str, active_path: &str) -> Result<String, String> {
+    let vault = state.vault.lock().expect("lock");
+    let wiki = state.wiki.lock().expect("lock");
+    let v = match vault.as_ref() { Some(v) => v, None => return Ok(String::new()) };
+    let w = match wiki.as_ref() { Some(w) => w, None => return Ok(String::new()) };
+
+    let link_re = regex::Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
+    let mut context = String::new();
+    let mut linked: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for cap in link_re.captures_iter(query) {
+        let target = &cap[1];
+        if let Some(path) = w.resolve(target) {
+            if path != active_path && linked.insert(path.clone()) {
+                if let Ok(content) = v.read_file(&path) {
+                    let name = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+                    let trimmed = trim_to_tokens(&content, 2000);
+                    context.push_str(&format!("\n\n## {name}\n(File: {path})\n{trimmed}"));
+                }
+            }
+        }
+    }
+
+    let search_text = link_re.replace_all(query, "").to_string();
+    let terms: Vec<&str> = search_text.split_whitespace().filter(|t| t.len() >= 3).collect();
+    if !terms.is_empty() {
+        let results = search::search_vault(v.root(), &terms.join(" "));
+        for r in results.iter().take(3) {
+            if r.path != active_path && !linked.contains(&r.path) {
+                linked.insert(r.path.clone());
+                if let Ok(content) = v.read_file(&r.path) {
+                    let trimmed = trim_to_tokens(&content, 1500);
+                    context.push_str(&format!("\n\n## {}\n(File: {})\n{trimmed}", r.name.trim_end_matches(".md"), r.path));
+                }
+            }
+        }
+    }
+
+    Ok(context)
+}
+
+/// Trim markdown to roughly `max_chars`, breaking at paragraph boundaries.
+fn trim_to_tokens(content: &str, max_chars: usize) -> String {
+    if content.len() <= max_chars { return content.to_string(); }
+    let mut at = max_chars;
+    if let Some(pos) = content[..at].rfind("\n\n") { at = pos; }
+    else if let Some(pos) = content[..at].rfind('\n') { at = pos; }
+    else if let Some(pos) = content[..at].rfind(". ") { at = pos + 1; }
+    format!("{}...", &content[..at])
 }
 
 fn git_push(state: &AppState, message: &str) -> Result<String, String> {
@@ -603,10 +711,44 @@ async fn setup_admin(
     }
 }
 
+/** Custom OpenAI-compatible provider override via env (Docker): when
+ *  DB_OPENAI_COMPAT_BASE_URL is set, the endpoint is env-controlled and the UI
+ *  renders it read-only (source "env"). Unset → keys.json behavior (safe
+ *  backward compat). API key + default model follow the same env vars. */
+fn custom_env_config() -> Option<(String, Option<String>, Option<String>)> {
+    custom_config_from(&|k| std::env::var(k).ok().filter(|s| !s.is_empty()))
+}
+
+/** Pure variant (env-getter injectable) so the resolution logic is testable. */
+fn custom_config_from(env_get: &dyn Fn(&str) -> Option<String>) -> Option<(String, Option<String>, Option<String>)> {
+    let base = env_get("DB_OPENAI_COMPAT_BASE_URL")?;
+    Some((base, env_get("DB_OPENAI_COMPAT_API_KEY"), env_get("DB_OPENAI_COMPAT_MODEL")))
+}
+
+fn custom_env_base_url() -> Option<String> {
+    std::env::var("DB_OPENAI_COMPAT_BASE_URL").ok().filter(|s| !s.is_empty())
+}
+
 /** Mirrors lib.rs ask_ai + test_connection — streams SSE events to the browser. */
-async fn test_connection(state: &AppState, _provider: &str, model: &str, base_url: &str, api_key: &str) -> Result<String, String> {
+async fn test_connection(state: &AppState, provider: &str, model: &str, base_url: &str, api_key: &str) -> Result<String, String> {
     let _ = state;
-    agent::validate_base_url(base_url)?;
+    // Env override: a custom endpoint controlled by the environment probes the
+    // env values, not whatever the (read-only) UI happens to hold.
+    let (base_url, api_key) = if provider == agent::CUSTOM_PROVIDER_ID {
+        match custom_env_config() {
+            Some((eb, ek, _)) => (eb, ek.unwrap_or_else(|| api_key.to_string())),
+            None => (base_url.to_string(), api_key.to_string()),
+        }
+    } else {
+        (base_url.to_string(), api_key.to_string())
+    };
+    // Custom endpoints skip the allowlist (any public https host) but still pass
+    // the generic sanitize; catalog providers stay strictly allowlisted.
+    if provider == agent::CUSTOM_PROVIDER_ID {
+        agent::validate_custom_base_url(&base_url, false)?;
+    } else {
+        agent::validate_base_url(&base_url)?;
+    }
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
@@ -625,6 +767,9 @@ async fn test_connection(state: &AppState, _provider: &str, model: &str, base_ur
         return Err(format!("API error ({}): {}", res.status(), res.text().await.unwrap_or_default()));
     }
 
+    // Tool probe mirrors the real applyDocumentOperations payload shape
+    // ($defs/$ref, anyOf, additionalProperties:false) so it measures whether
+    // OUR payload passes this gateway, not just generic tool support.
     let tool_body = json!({
         "model": model,
         "messages": [{ "role": "user", "content": "call the test_tool" }],
@@ -633,21 +778,40 @@ async fn test_connection(state: &AppState, _provider: &str, model: &str, base_ur
             "function": {
                 "name": "test_tool",
                 "description": "A test tool",
-                "parameters": { "type": "object", "properties": { "ok": { "type": "boolean" } } }
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operations": {
+                            "type": "array",
+                            "items": {
+                                "anyOf": [
+                                    { "type": "object", "properties": { "type": { "const": "update" }, "id": { "type": "string" } }, "required": ["type", "id"], "additionalProperties": false },
+                                    { "$ref": "#/$defs/BlockOp" }
+                                ]
+                            }
+                        }
+                    },
+                    "required": ["operations"],
+                    "additionalProperties": false,
+                    "$defs": { "BlockOp": { "type": "object", "properties": { "type": { "const": "add" } }, "required": ["type"], "additionalProperties": false } }
+                }
             }
         }],
         "tool_choice": "required",
         "max_tokens": 50,
     });
-    let tool_res = client
+    let tool_req = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&tool_body)
-        .send()
+        .header("Authorization", format!("Bearer {}", api_key));
+    let tool_res = tool_req.json(&tool_body).send()
         .await
         .map_err(|e| format!("Tool test failed: {}", e))?;
     if !tool_res.status().is_success() {
-        return Ok("connection ok".to_string());
+        // HTTP 400 here MEANS the gateway rejected tool_choice:"required" — a
+        // definitive negative (e.g. DeepSeek thinking mode), not a maybe. Report
+        // tools:false as the JSON contract the frontend parses (mirrors lib.rs),
+        // so the per-model probe is actually persisted.
+        return Ok(r#"{"status":"ok","tools":false}"#.to_string());
     }
     let text = tool_res.text().await.map_err(|e| e.to_string())?;
     let supports_tools = text.contains("tool_calls") || text.contains("test_tool");
@@ -679,16 +843,47 @@ async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Respo
     let messages = s("messages");
     let tools = args.get("tools").and_then(|v| v.as_str()).map(|t| t.to_string());
 
-    let agent_cfg = match (provider.as_str(), model.as_str(), base_url.as_str()) {
-        (p, m, b) if !p.is_empty() && !m.is_empty() && !b.is_empty() => {
-            if let Err(e) = agent::validate_base_url(b) {
+    let agent_cfg = match (provider.as_str(), model.as_str()) {
+        // Custom OpenAI-compatible endpoint: URL is bound server-side at save time,
+        // the webview-provided baseUrl is IGNORED so the stored key can never be
+        // redirected to a host the user did not explicitly bind it to.
+        (p, m) if !p.is_empty() && !m.is_empty() && p == agent::CUSTOM_PROVIDER_ID => {
+            // Env override (Docker): DB_OPENAI_COMPAT_BASE_URL/API_KEY/MODEL win
+            // when set; otherwise the keys.json values are used (backward compat).
+            let (b, key, model) = match custom_env_config() {
+                Some((eb, ek, em)) => {
+                    let k = match ek.or_else(|| keys::get_key(&state.data_dir, p).ok()) {
+                        Some(k) => k,
+                        None => return err_response("No API key found"),
+                    };
+                    (eb, k, em.unwrap_or_else(|| m.to_string()))
+                }
+                None => {
+                    let b = match keys::get_base_url(&state.data_dir, p) {
+                        Ok(u) => u,
+                        Err(_) => return err_response("No custom base URL saved — set it in Settings → AI"),
+                    };
+                    let k = match keys::get_key(&state.data_dir, p) {
+                        Ok(k) => k,
+                        Err(_) => return err_response("No API key found"),
+                    };
+                    (b, k, m.to_string())
+                }
+            };
+            if let Err(e) = agent::validate_custom_base_url(&b, false) {
+                return err_response(&e);
+            }
+            agent::Agent::new(p, &model, &key, &b)
+        }
+        (p, m) if !p.is_empty() && !m.is_empty() && !base_url.is_empty() => {
+            if let Err(e) = agent::validate_base_url(&base_url) {
                 return err_response(&e);
             }
             let key = match keys::get_key(&state.data_dir, p) {
                 Ok(k) => k,
                 Err(_) => return err_response("No API key found"),
             };
-            agent::Agent::new(p, m, &key, b)
+            agent::Agent::new(p, m, &key, &base_url)
         }
         _ => return err_response("Provider, model, and base URL are required"),
     };
@@ -713,7 +908,9 @@ async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Respo
             if let Some(arr) = tools_val.as_array() {
                 if !arr.is_empty() {
                     body_obj["tools"] = tools_val;
-                    body_obj["tool_choice"] = json!("required");
+                    // "auto", NOT "required": thinking-mode models reject tool_choice:"required"
+                    // with HTTP 400 ("Thinking mode does not support this tool_choice").
+                    body_obj["tool_choice"] = json!("auto");
                 }
             }
         }
@@ -723,12 +920,7 @@ async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Respo
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(64);
 
     tokio::spawn(async move {
-        let mut req = client.post(&url).header("Authorization", format!("Bearer {}", agent_cfg.api_key));
-        if agent_cfg.provider == "opencode-go" || agent_cfg.provider == "opencode" {
-            req = req
-                .header("x-opencode-client", "docubook")
-                .header("x-opencode-session", format!("docubook-{}", std::process::id()));
-        }
+        let req = client.post(&url).header("Authorization", format!("Bearer {}", agent_cfg.api_key));
         let response = match tokio::time::timeout(std::time::Duration::from_secs(30), req.json(&body_obj).send()).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
@@ -744,6 +936,19 @@ async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Respo
         };
         let status = response.status();
         if !status.is_success() {
+            // Log the EXACT request body + provider response server-side (docker
+            // logs) — never to the client (it may leak internal details). This
+            // shows what we actually sent and why the gateway rejected it.
+            let req_snapshot = json!({
+                "model": body_obj.get("model"),
+                "stream": body_obj.get("stream"),
+                "max_tokens": body_obj.get("max_tokens"),
+                "tool_choice": body_obj.get("tool_choice"),
+                "tools": body_obj.get("tools"),
+                "message_roles": body_obj.get("messages").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|x| x.get("role").and_then(|r| r.as_str()).map(String::from)).collect::<Vec<_>>()),
+            }).to_string();
+            let body = response.text().await.unwrap_or_default();
+            eprintln!("[ask_ai] provider error: HTTP {} — request: {} — body: {}", status, &req_snapshot[..req_snapshot.len().min(1600)], &body[..body.len().min(800)]);
             let _ = tx.send(Ok(Event::default().event("error").data("AI provider error (HTTP {status})"))).await;
             return;
         }
@@ -781,6 +986,13 @@ async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Respo
                 Ok(Some(chunk)) => {
                     if state.ai_cancel.load(Ordering::SeqCst) {
                         break;
+                    }
+                    // Total generation budget (per attempt): the per-chunk
+                    // read_timeout only catches STALLS — a model that trickles
+                    // tokens forever never trips it, so bound the whole run.
+                    if started.elapsed().as_secs() >= AI_MAX_SECONDS {
+                        let _ = tx.send(Ok(Event::default().event("error").data(format!("AI generation exceeded {}s — try again or use a stronger model", AI_MAX_SECONDS)))).await;
+                        return;
                     }
                     byte_buf.extend_from_slice(&chunk);
                     let mut start = 0;
@@ -884,6 +1096,24 @@ fn err_response(msg: &str) -> Response {
 #[cfg(test)]
 mod api_tests {
     use super::*;
+
+    #[test]
+    fn custom_config_from_resolves_env_override() {
+        let get = |k: &str| -> Option<String> {
+            match k {
+                "DB_OPENAI_COMPAT_BASE_URL" => Some("https://x.example/v1".into()),
+                "DB_OPENAI_COMPAT_API_KEY" => Some("sk-env".into()),
+                _ => None,
+            }
+        };
+        let cfg = custom_config_from(&get).expect("base url set");
+        assert_eq!(cfg.0, "https://x.example/v1");
+        assert_eq!(cfg.1.as_deref(), Some("sk-env"));
+        assert_eq!(cfg.2, None);
+        // no env → no override (backward compat)
+        assert!(custom_config_from(&|_| None).is_none());
+    }
+
     use axum::body::Body;
     use axum::extract::connect_info::MockConnectInfo;
     use axum::http::{header, HeaderMap, Request, StatusCode};

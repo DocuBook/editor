@@ -33,6 +33,8 @@ COPY --from=server /src/server/target/release/docubook-server /app/docubook-serv
 COPY --from=web /app/dist /app/www
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Runtime config (DB_*) is passed via compose/run/panel — only static
+# defaults live here; the full variable list is in .env.example.
 ENV DATA_DIR=/data WWW_DIR=/app/www PORT=8080
 # /data must exist with docubook ownership BEFORE first start: named volumes
 # inherit the mount-point ownership, so without this the volume is root-owned

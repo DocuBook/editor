@@ -23,6 +23,12 @@ services:
       DB_NO_AUTH: "false"        # "1"/"true" = open access without login (pre-web behavior)
       DB_SESSION_TTL_HOURS: "168"  # session lifetime in hours (1–8760)
       DB_SECURE_COOKIE: "0"      # "1" when HTTPS (Coolify TLS proxy) — Secure flag on session cookie
+      # ── Custom OpenAI-compatible provider (optional env override) ──
+      # Provision/override the "openai-compatible" custom provider from env;
+      # when BASE_URL is set the UI shows it READ-ONLY ("from env" badge).
+      # DB_OPENAI_COMPAT_BASE_URL: https://proxy.example.com/v1
+      # DB_OPENAI_COMPAT_API_KEY: sk-...
+      # DB_OPENAI_COMPAT_MODEL: gpt-oss-20b
     restart: unless-stopped
 
 volumes:

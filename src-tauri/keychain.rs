@@ -51,6 +51,56 @@ pub fn delete_key(provider: &str) -> Result<(), String> {
     }
 }
 
+/** Account suffix binding a custom base URL to a provider's key
+ *  (openai-compatible custom endpoints). Kept as a separate entry so
+ *  get_key/list_keys semantics are unchanged. */
+fn base_url_account(provider: &str) -> String {
+    format!("{}:base_url", provider)
+}
+
+/** Store the base URL bound to a provider's API key. */
+pub fn set_base_url(provider: &str, url: &str) -> Result<(), String> {
+    let out = Command::new("security")
+        .args(["add-generic-password", "-s", SERVICE, "-a", &base_url_account(provider), "-w", url, "-U"])
+        .output()
+        .map_err(|e| format!("security add failed: {}", e))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
+    }
+}
+
+/** Read the base URL bound to a provider's API key (custom endpoints). */
+pub fn get_base_url(provider: &str) -> Result<String, String> {
+    let out = Command::new("security")
+        .args(["find-generic-password", "-s", SERVICE, "-a", &base_url_account(provider), "-w"])
+        .output()
+        .map_err(|e| format!("security find failed: {}", e))?;
+    if out.status.success() {
+        Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        Err("not_found".to_string())
+    }
+}
+
+/** Delete the base URL bound to a provider's key. Entry-not-found is treated as success. */
+pub fn delete_base_url(provider: &str) -> Result<(), String> {
+    let out = Command::new("security")
+        .args(["delete-generic-password", "-s", SERVICE, "-a", &base_url_account(provider)])
+        .output()
+        .map_err(|e| format!("security delete failed: {}", e))?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("could not be found") || stderr.contains("not found") {
+        Ok(())
+    } else {
+        Err(stderr.trim().to_string())
+    }
+}
+
 /** Return the subset of providers that have an API key in the login keychain.
  *  Each `security` call is a short-lived process, so checks run in bounded
  *  parallel batches (16 at a time) instead of 100+ sequential spawns.
