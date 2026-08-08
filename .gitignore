@@ -30,4 +30,4 @@ src-tauri/target/
 .env
 .env.*
 !.env.example
-frontend/e2e/screenshot/
+test/artifacts/

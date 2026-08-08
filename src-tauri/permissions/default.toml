@@ -4,6 +4,7 @@
 
 [default]
 permissions = [
+  "allow-ai-grounding-context",
   "allow-app-ready-to-close",
   "allow-ask-ai",
   "allow-cancel-ai",
@@ -11,6 +12,7 @@ permissions = [
   "allow-create-directory",
   "allow-create-file",
   "allow-create-vault",
+  "allow-custom-ai-config",
   "allow-delete-api-key",
   "allow-delete-file",
   "allow-git-add-remote",
@@ -34,9 +36,20 @@ permissions = [
   "allow-set-api-key",
   "allow-test-connection",
   "allow-wiki-backlinks",
+  "allow-wiki-resolve",
   "allow-wiki-suggest",
   "allow-write-file"
 ]
+
+[[permission]]
+identifier = "allow-ai-grounding-context"
+description = "Enables the ai_grounding_context command (wikilink + search grounding for AI prompts)."
+commands.allow = ["ai_grounding_context"]
+
+[[permission]]
+identifier = "deny-ai-grounding-context"
+description = "Denies the ai_grounding_context command."
+commands.deny = ["ai_grounding_context"]
 
 [[permission]]
 identifier = "allow-app-ready-to-close"
@@ -319,6 +332,16 @@ description = "Denies the set_api_key command."
 commands.deny = ["set_api_key"]
 
 [[permission]]
+identifier = "allow-set-custom-endpoint"
+description = "Enables the set_custom_endpoint command (custom OpenAI-compatible endpoint)."
+commands.allow = ["set_custom_endpoint"]
+
+[[permission]]
+identifier = "deny-set-custom-endpoint"
+description = "Denies the set_custom_endpoint command."
+commands.deny = ["set_custom_endpoint"]
+
+[[permission]]
 identifier = "allow-test-connection"
 description = "Enables the test_connection command."
 commands.allow = ["test_connection"]
@@ -357,4 +380,24 @@ commands.allow = ["write_file"]
 identifier = "deny-write-file"
 description = "Denies the write_file command."
 commands.deny = ["write_file"]
+
+[[permission]]
+identifier = "allow-custom-ai-config"
+description = "Enables the custom_ai_config command."
+commands.allow = ["custom_ai_config"]
+
+[[permission]]
+identifier = "deny-custom-ai-config"
+description = "Denies the custom_ai_config command."
+commands.deny = ["custom_ai_config"]
+
+[[permission]]
+identifier = "allow-wiki-resolve"
+description = "Enables the wiki_resolve command."
+commands.allow = ["wiki_resolve"]
+
+[[permission]]
+identifier = "deny-wiki-resolve"
+description = "Denies the wiki_resolve command."
+commands.deny = ["wiki_resolve"]
 

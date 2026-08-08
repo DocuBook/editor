@@ -51,9 +51,11 @@ impl Git {
         }
         Ok((branch, lines.join("\n")))
     }
-/** Stage all changes. */
+/** Stage all changes, excluding the vault `.trash/` (deleted notes must not be
+ *  committed as moves into the trash). Pathspec works for any repo, no
+ *  .gitignore required. */
     pub fn add_all(&self) -> Result<(), String> {
-        Command::new("git").args(["add", "-A"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        Command::new("git").args(["add", "-A", "--", ".", ":!.trash"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
         Ok(())
     }
 /** Commit with message. Returns commit hash. */

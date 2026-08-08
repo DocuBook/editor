@@ -35,7 +35,7 @@ export default function Login() {
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className={input} autoFocus />
           <PasswordInput value={password} onChange={setPassword} placeholder="Password" className={input} />
           {err && <div className="text-xs text-red-400">{err}</div>}
-          <button disabled={busy} className="w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm cursor-pointer bg-surface-active text-foreground hover:bg-surface-hover disabled:opacity-40">
+          <button disabled={busy} className="w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm cursor-pointer bg-accent hover:bg-accent-hover text-white disabled:opacity-40">
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>

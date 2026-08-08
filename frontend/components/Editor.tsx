@@ -1,23 +1,31 @@
 import { useEffect, useState, useRef } from 'react'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState, useBlockNoteEditor, useComponentsContext, EditLinkButton, DeleteLinkButton, LinkToolbarController, type LinkToolbarProps } from '@blocknote/react'
+import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbar, FormattingToolbarController, getFormattingToolbarItems, useExtensionState, useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, LinkToolbarController, type LinkToolbarProps } from '@blocknote/react'
+import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
-import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs } from '@blocknote/core'
+import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, createExtension } from '@blocknote/core'
+import { Plugin } from 'prosemirror-state'
+import { Decoration, DecorationSet } from 'prosemirror-view'
 import { en as baseDict } from '@blocknote/core/locales'
 import { AIExtension, AIMenuController, AIToolbarButton, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
-import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder, GitBranch, Link2, ExternalLink } from 'lucide-react'
+import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBigUp, Folder, GitBranch, Link2, Type, ExternalLink } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide, { isOnboardingDone } from './OnboardingGuide'
 import { invoke, listen, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
-import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
+import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION } from '../utils/aiBlocks'
+import { uuid } from '../utils/uuid'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { useGitStatus } from '../stores/gitStatus'
-import { useAiSettings } from '../stores/aiSettings'
+import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
 import { useTheme } from '../stores/theme'
+
+/** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
+ *  document writes while the AI types (smooth instead of janky streaming). */
+const AI_DELTA_BATCH_MS = 50
 
 /** Lazy-load the provider catalog (2.17 MB — keep it out of the initial bundle). */
 let _providersCache: typeof import('../data/providers').PROVIDERS | null = null
@@ -30,9 +38,12 @@ async function getProviders() {
  *  intentionally NOT sent — the backend resolves it from the keychain (SEC-5). */
 async function getAiConfig(): Promise<{ provider?: string; model?: string; baseUrl?: string }> {
   try {
-    const { provider, model } = useAiSettings.getState()
-    const p = provider ? (await getProviders()).find(x => x.id === provider) : undefined
-    return { provider: provider || undefined, model: model || undefined, baseUrl: p?.api }
+    const st = useAiSettings.getState()
+    const p = st.provider ? (await getProviders()).find(x => x.id === st.provider) : undefined
+    /** Custom OpenAI-compatible endpoints aren't in the catalog — their base URL
+     *  lives in the store and is bound server-side at save time. */
+    const baseUrl = p?.api || (st.provider === CUSTOM_PROVIDER_ID ? st.baseUrls[st.provider] : undefined)
+    return { provider: st.provider || undefined, model: st.model || undefined, baseUrl }
   } catch (e) { console.error('[ai] getAiConfig error:', e); return {} }
 }
 
@@ -77,6 +88,37 @@ const getSchema = () => {
   })
   return _schema
 }
+
+/** Visual indicator for `[[wikilink]]` text: accent + underline + pointer so
+ *  Cmd+Click navigation is discoverable. ProseMirror decorations only — the
+ *  stored content stays literal `[[Title]]` (markdown round-trip untouched). */
+const wikilinkStyler = createExtension({
+  key: 'wikilinkStyler',
+  prosemirrorPlugins: [
+    new Plugin({
+      props: {
+        decorations(state) {
+          const decos: Decoration[] = []
+          const re = /\[\[([^\]]+)\]\]/g
+          state.doc.descendants((node, pos) => {
+            if (node.isText) {
+              const text = node.text || ''
+              let m: RegExpExecArray | null
+              while ((m = re.exec(text)) !== null) {
+                decos.push(Decoration.inline(pos + m.index, pos + m.index + m[0].length, {
+                  'data-wikilink': '1',
+                  style: 'color: var(--color-accent); text-decoration: underline; cursor: pointer;',
+                }))
+              }
+            }
+            return true
+          })
+          return DecorationSet.create(state.doc, decos)
+        },
+      },
+    }),
+  ],
+})
 
 /** Welcome screen shown when no vault is open — launchpad (Open Folder / Create Vault / Recent). */
 function WelcomeScreen() {
@@ -189,7 +231,14 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
           const resolvedModel = config.model || st.model
           const providerInfo = (await getProviders()).find(p => p.id === resolvedProvider)
           const modelDef = providerInfo?.models.find(m => m.id === resolvedModel)
-          const supportsTools = modelDef?.toolCall === true && resolvedProvider !== 'opencode-go'
+          /** Tool-call support = model capability (catalog) AND measured gateway
+           *  compatibility (test_connection probe, stored per provider+model). No
+           *  static exclusions: a provider/model measured tools:false stays
+           *  text-only, custom endpoints unlock when the probe measures tools:true. */
+          const probe = st.probeTools[resolvedProvider]?.[resolvedModel]
+          const supportsTools = resolvedProvider === CUSTOM_PROVIDER_ID
+            ? probe === true
+            : modelDef?.toolCall === true && probe !== false
           const toolDefs = (body as any)?.toolDefinitions as Record<string, { description: string; inputSchema: any }> | undefined
           /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
           const tools = (supportsTools && toolDefs) ? Object.entries(toolDefs).map(([name, def]) => ({
@@ -200,16 +249,33 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
           const selText = sel?.blocks?.length ? editorRef.current.blocksToMarkdownLossy(sel.blocks) : '';
           const stream = new ReadableStream({
             async start(controller) {
-              const id = crypto.randomUUID()
+              const id = uuid()
               let fullText = ''
               controller.enqueue({ type: 'text-start', id })
               let closed = false
+              /** Batch token deltas and flush on a short timer: one ProseMirror doc
+               *  write per batch instead of per token is the difference between
+               *  janky and smooth AI typing. fullText still accumulates per event. */
+              let pendingDelta = ''
+              let flushTimer: ReturnType<typeof setTimeout> | undefined
+              const flushDeltas = () => {
+                flushTimer = undefined
+                if (closed || !pendingDelta) return
+                controller.enqueue({ type: 'text-delta', delta: pendingDelta, id })
+                pendingDelta = ''
+              }
               const unsubToken = await listen<string>('ai:token', e => {
                 if (abortSignal?.aborted || closed) { try { controller.close() } catch {}; return }
                 fullText += e.payload
-                controller.enqueue({ type: 'text-delta', delta: e.payload, id })
+                pendingDelta += e.payload
+                if (!bufferText && !flushTimer) flushTimer = setTimeout(flushDeltas, AI_DELTA_BATCH_MS)
               })
               const toolBuffer: any[] = []
+              /** Point 5: Path A (tools sent) can mix text+tool calls in one response.
+               *  Buffer text deltas and decide at the end — meaningful ops win
+               *  (ops-only output, buffered commentary dropped), otherwise the
+               *  buffered text is flushed. Path B (no tools) keeps live typing. */
+              let bufferText = true
               const unsubTool = await listen<any>('ai:tool_call', e => {
                 if (abortSignal?.aborted || closed) return
                 toolBuffer.push(e.payload)
@@ -223,30 +289,36 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
                 const userMsg = messages.find((m: any) => m.role === 'user')
                 const userText = (userMsg?.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || ''
                 const taskRules = buildTaskFormattingRules(userText)
-                const systemGrounding = docContext
-                  ? `You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.
-
-Document state (JSON):
-${docContext}
-
-Rules (MUST follow):
-- Output ONLY the new or modified content for the requested task.
-- NEVER echo the document state JSON or block ids back into the output.
-- NEVER repeat the user's prompt or these instructions.
-- NEVER invent block ids or content that is not in the document; if the document lacks the needed information, state that instead of fabricating.
-- Use only the exact block ids from the document above when referencing existing blocks.
-- Output must be free of spelling and grammar errors.
-- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.${taskRules}`
+                /** Resolve wikilinks + search vault for additional grounding context.
+                 *  Token-budgeted server-side (2k chars per file, 3 search results max). */
+                let vaultContext = ''
+                try {
+                  const activePath = useEditorStore.getState().activeTab || ''
+                  vaultContext = await invoke<string>('ai_grounding_context', { query: userText, activePath })
+                } catch { /* no vault or no wiki index — skip grounding */ }
+                const hasVaultContext = vaultContext.trim().length > 0
+                /** Vault-first generation: the edit rules below de-authorize vault
+                 *  content ("NEVER invent … content that is not in the document"),
+                 *  so a request referencing [[wikilinks]] / asking / generating /
+                 *  targeting an empty doc gets forced into an applyDocumentOperations
+                 *  edit with nothing to anchor on. Detect that intent → skip the
+                 *  tool path and use the vault context as the model's only source;
+                 *  output lands as plain-Markdown insert (accept/revert). */
+                const isVaultGeneration = isVaultGenerationIntent(userText, hasVaultContext, docContext)
+                const useTools = supportsTools && !!tools && !isVaultGeneration
+                bufferText = useTools
+                const systemGrounding = isVaultGeneration
+                  ? buildVaultGroundingPrompt(vaultContext)
+                  : docContext
+                  ? buildEditSystemPrompt(docContext, vaultContext, taskRules)
                   : ''
                 /** Base messages once; retry loop appends error feedback. */
                 let baseMsgs: any[]
-                if (supportsTools && tools) {
+                if (useTools) {
                   const cleanMessages = messages.map((m: any) => ({ role: m.role, content: (m.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || m.content || '' }))
                   baseMsgs = systemGrounding ? [{ role: 'system', content: systemGrounding }, ...cleanMessages] : cleanMessages
                 } else {
-                  const userContent = `${userText}${selText ? `\n\nSelected text:\n"${selText}"` : ''}
-
-Respond with the requested content using BlockNote-compatible Markdown. Use headings (##), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), blockquotes (>). No commentary.`
+                  const userContent = `${userText}${selText ? `\n\nSelected text:\n"${selText}"` : ''}\n\n${AI_MARKDOWN_INSTRUCTION}`
                   baseMsgs = systemGrounding
                     ? [{ role: 'system', content: systemGrounding }, { role: 'user', content: userContent }]
                     : [{ role: 'user', content: userContent }]
@@ -260,15 +332,20 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
                 let emitText = ''
                 while (attempts <= MAX_AI_ATTEMPTS) {
                   fullText = ''
+                  pendingDelta = ''
                   toolBuffer.length = 0
                   const msgs = errorFeedback ? [...baseMsgs, { role: 'user', content: errorFeedback }] : baseMsgs
                   await invoke('ask_ai', {
                     messages: JSON.stringify(msgs),
-                    ...(supportsTools && tools ? { tools: JSON.stringify(tools) } : {}),
+                    ...(useTools ? { tools: JSON.stringify(tools) } : {}),
                     provider: resolvedProvider,
                     model: resolvedModel,
-                    baseUrl: providerInfo?.api,
+                    baseUrl: providerInfo?.api || config.baseUrl,
                   })
+                  /** Diagnostic: this line must appear AFTER a completed ask_ai.
+                   *  If xl-ai errors but this never logs, the stream never
+                   *  resolved (stuck SSE) — not a transport branch failure. */
+                  console.info('[ai] ask_ai resolved', { chars: fullText.length, tools: toolBuffer.length })
                   /** Real correctness gate: referenced ids must exist in the document (blocking). */
                   let semanticError: string | null = null
                   for (const tc of toolBuffer) {
@@ -289,41 +366,80 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
                   attempts++
                 }
                 closed = true
+                /** Point 5: when the model produced meaningful tool ops they are the
+                 *  ONLY output channel — drop the buffered commentary text so the
+                 *  suggestion never overwrites/duplicates streamed prose. Otherwise
+                 *  flush (Path B already streamed live; Path A flushes now). */
+                const meaningfulOps = accepted
+                  ? emitToolCalls.filter((tc: any) => tc?.input && Array.isArray(tc.input.operations) && tc.input.operations.length > 0)
+                  : []
+                if (meaningfulOps.length > 0) {
+                  pendingDelta = ''
+                } else {
+                  flushDeltas()
+                }
                 if (!accepted) {
                   /** Signal the error to xl-ai so its AIMenu shows error state with retry/cancel
                    *  (built-in getDefaultAIMenuItemsForError renders retry + cancel buttons). */
                   const reason = lastReason || 'unknown'
-                  console.error('[ai] AI output failed validation:', reason)
-                  toast.error('AI output was rejected — retry or cancel in the AI menu')
+                  console.error('[ai] AI output failed validation:', { provider: resolvedProvider, model: resolvedModel, supportsTools, attempts, reason, toolCalls: toolBuffer.length, textLen: fullText.length, textSnippet: fullText.substring(0, 300) })
+                  toast.error('AI output was rejected: ' + reason)
                   controller.error(new Error(reason))
                 } else if (emitToolCalls.length > 0) {
-                  for (const tc of emitToolCalls) {
-                    /** Emit tool-input-available so xl-ai Chat creates a tool part → suggestions */
-                    controller.enqueue({ type: 'tool-input-available', toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input })
-                  }
-                  /** text-end only when a tool part was emitted (stream still open). */
-                  controller.enqueue({ type: 'text-end', id })
-                } else if (emitText && editorRef.current) {
-                  /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option A) */
-                  const input = await buildApplyDocumentInput(editorRef.current, emitText)
-                  if (input) {
-                    /** Let xl-ai create the tool part → suggestion → accept/reject flow */
-                    controller.enqueue({ type: 'tool-input-available', toolCallId: 'gen-' + crypto.randomUUID(), toolName: 'applyDocumentOperations', input })
+                  /** A model forced by tool_choice:"required" often calls with EMPTY
+                   *  operations when it decides nothing needs changing. xl-ai hard-fails
+                   *  on empty input ("No operations seen"), so filter those out and
+                   *  close gracefully instead of surfacing an error. */
+                  if (meaningfulOps.length === 0) {
+                    console.info('[ai] tool calls had no operations — treating as no change', { provider: resolvedProvider, model: resolvedModel, toolCalls: emitToolCalls.length })
+                    /** Close the AI menu instead of finishing OK — xl-ai enters
+                     *  user-reviewing (empty accept/revert) on ANY successful call,
+                     *  so a no-change result must not "succeed" normally. Access
+                     *  the extension via editor.extensions (same as openXlAiMenu). */
+                    const aiExt = editorRef.current && (editorRef.current as any).extensions && (editorRef.current as any).extensions.get('ai')
+                    if (aiExt && typeof aiExt.closeAIMenu === 'function') aiExt.closeAIMenu()
+                    toast.info('AI made no document changes')
                     controller.enqueue({ type: 'text-end', id })
                   } else {
-                    /** Let xl-ai show error state (retry/cancel in AIMenu) instead of silently closing. */
-                    console.error('[ai] could not build document operations from AI output:', emitText.substring(0, 200))
-                    controller.error(new Error('AI output could not be converted to document operations'))
+                    for (const tc of meaningfulOps) {
+                      /** Emit tool-input-available so xl-ai Chat creates a tool part → suggestions */
+                      controller.enqueue({ type: 'tool-input-available', toolCallId: tc.toolCallId, toolName: tc.toolName, input: tc.input })
+                    }
+                    /** text-end only when a tool part was emitted (stream still open). */
+                    controller.enqueue({ type: 'text-end', id })
+                  }
+                } else if (emitText && editorRef.current) {
+                  /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option A) */
+                  let input = await buildApplyDocumentInput(editorRef.current, emitText)
+                  /** Path A (tools sent) produced text but not parseable markdown —
+                   *  e.g. empty document where model explains why it can't edit.
+                   *  Retry once with Path B prompt (no tools, explicit markdown
+                   *  instruction) before surfacing an error. */
+                  if (input) {
+                    /** Let xl-ai create the tool part → suggestion → accept/reject flow */
+                    controller.enqueue({ type: 'tool-input-available', toolCallId: 'gen-' + uuid(), toolName: 'applyDocumentOperations', input })
+                    controller.enqueue({ type: 'text-end', id })
+                  } else {
+                    /** Text that can't be parsed into blocks: the streamed text is
+                     *  already written into the document (flushed above) — close
+                     *  cleanly so xl-ai enters user-reviewing (accept/revert) on it.
+                     *  No Path A→B retry: a text-only model always answers in text,
+                     *  so regenerating doubles latency and fails identically. */
+                    console.info('[ai] text kept as streamed result (not converted to blocks)', { provider: resolvedProvider, model: resolvedModel, textLen: emitText.length, textSnippet: emitText.substring(0, 200) })
+                    controller.enqueue({ type: 'text-end', id })
                   }
                 } else {
-                  /** Nothing to emit (e.g., empty accepted output) — close text part normally. */
-                  controller.enqueue({ type: 'text-end', id })
+                  /** Nothing to emit — empty output AND no tool calls = gateway
+                   *  anomaly (unlike a deliberate empty tool call, which is a
+                   *  no-change). Surface it as an error with the details logged. */
+                  console.error('[ai] empty AI result:', { provider: resolvedProvider, model: resolvedModel, supportsTools, attempts, lastReason, toolCalls: toolBuffer.length, textLen: fullText.length })
+                  controller.error(new Error('AI returned an empty response'))
                 }
               } catch (e) {
                 console.error('[ai] transport error:', e)
                 try { controller.error(e) } catch {}
               } finally {
-                closed = true; unsubToken(); unsubTool(); unsubToolsDone(); try { controller.close() } catch {} 
+                closed = true; if (flushTimer) clearTimeout(flushTimer); unsubToken(); unsubTool(); unsubToolsDone(); try { controller.close() } catch {} 
               }
             }
           })
@@ -331,10 +447,75 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
         },
         reconnectToStream: async () => null,
       },
-      agentCursor: { name: 'DocuBook AI', color: 'var(--color-accent)' },
-    })],
+      agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
+    }), wikilinkStyler],
   }, [markdown])
   useEffect(() => { editorRef.current = editor }, [editor])
+
+  /** Hover hint for [[wikilink]]: native title tooltips get cancelled by
+   *  ProseMirror's decoration re-rendering, so render a small floating hint
+   *  via event delegation (immune to span re-creation). */
+  useEffect(() => {
+    const el = editor.domElement
+    if (!el) return
+    const tip = document.createElement('div')
+    tip.setAttribute('data-wikilink-tip', '1')
+    tip.textContent = 'Cmd+Click to open'
+    tip.style.cssText = 'position:fixed;z-index:9999;display:none;pointer-events:none;padding:3px 8px;border-radius:6px;font-size:11px;white-space:nowrap;background:var(--color-surface,#2a2a2c);color:var(--color-foreground,#fafafa);border:1px solid var(--color-border,#3a3a3c);box-shadow:0 4px 12px rgba(0,0,0,0.3);'
+    document.body.appendChild(tip)
+    const show = (x: number, y: number) => { tip.style.left = `${x + 10}px`; tip.style.top = `${y + 16}px`; tip.style.display = 'block' }
+    const hide = () => { tip.style.display = 'none' }
+    const onMouseOver = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (t?.tagName === 'SPAN' && t.getAttribute('data-wikilink') === '1') show(e.clientX, e.clientY)
+      else hide()
+    }
+    el.addEventListener('mouseover', onMouseOver)
+    el.addEventListener('mouseleave', hide)
+    return () => { el.removeEventListener('mouseover', onMouseOver); el.removeEventListener('mouseleave', hide); tip.remove() }
+  }, [editor])
+
+  /** Cmd/Ctrl+Click on a `[[wikilink]]` opens the referenced note
+   *  (Obsidian-style). Plain click keeps caret positioning for editing. */
+  useEffect(() => {
+    const el = editor.domElement
+    if (!el) return
+    const onClick = (e: MouseEvent) => {
+      // Resolve the click position directly (caretRangeFromPoint) — Meta+click
+      // does not move the ProseMirror selection, so getSelection() is unreliable.
+      const range = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null
+      const node = range?.startContainer ?? null
+      const off = range?.startOffset ?? 0
+      if (!node || node.nodeType !== Node.TEXT_NODE) return
+      const text = node.textContent || ''
+      const re = /\[\[([^\]]+)\]\]/g
+      let m: RegExpExecArray | null
+      while ((m = re.exec(text)) !== null) {
+        if (off >= m.index && off <= m.index + m[0].length) {
+          const title = m[1]
+          const open = () => {
+            invoke<string>('wiki_resolve', { title })
+              .then(path => { if (path) useEditorStore.getState().openFile(path, path.split('/').pop() || path) })
+              .catch(() => {})
+          }
+          if (e.metaKey || e.ctrlKey) {
+            e.preventDefault()
+            open()
+          } else {
+            // Single click without modifier: the pointer cursor promises an
+            // action — show a tooltip with an Open action instead of silence.
+            toast('Wikilink — Cmd+Click or Open to navigate', {
+              action: { label: 'Open', onClick: open },
+              duration: 4000,
+            })
+          }
+          break
+        }
+      }
+    }
+    el.addEventListener('click', onClick)
+    return () => el.removeEventListener('click', onClick)
+  }, [editor])
 
   /** Follow the AI writing position. xl-ai's built-in auto-scroll self-disables once content
    *  outgrows the viewport (its scroll-event race kills `autoScroll` under streaming), so we
@@ -342,6 +523,19 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
   const aiMenu: any = useExtensionState<any>(AIExtension, { editor, selector: (s: any) => s.aiMenuState })
   const isAiWriting = !!aiMenu && aiMenu !== 'closed' && aiMenu.status === 'ai-writing'
   const followRef = useRef(true)
+  /** Mirrors isAiWriting for the onChange gate (avoids re-subscribing). */
+  const aiWritingRef = useRef(false)
+  const prevAiWriting = useRef(false)
+  /** Settle tab-dirty + undo state once when AI writing ends — the per-flush
+   *  onChange is gated during streaming (it fired per token write). */
+  useEffect(() => {
+    if (prevAiWriting.current && !isAiWriting) {
+      useEditorStore.getState().setTabDirty(filePath, true)
+      useEditorStore.getState().setUndoRedoState()
+    }
+    prevAiWriting.current = isAiWriting
+    aiWritingRef.current = isAiWriting
+  }, [isAiWriting, filePath])
 
   /** User scrolling (wheel/touch/scroll keys) stops the follower; re-armed on next AI run. */
   useEffect(() => {
@@ -360,19 +554,39 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
     }
   }, [isAiWriting])
 
-  /** Token-level scroll: any DOM change in the editor while AI writes re-centers the writing block. */
+  /** Token-level scroll: any DOM change in the editor while AI writes keeps the
+   *  writing block in view. rAF-throttled AND viewport-aware — it only scrolls
+   *  when the block actually leaves the visible area (minimal delta). Constant
+   *  re-centering per frame was what made AI typing look janky. */
   useEffect(() => {
     if (!isAiWriting || !aiMenu?.blockId) return
     const root = editor.domElement
     if (!root) return
+    let raf = 0
     const scroll = () => {
-      if (!followRef.current) return
-      const el = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
-      el?.scrollIntoView({ block: 'center' })
+      if (!followRef.current || raf) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        const el = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
+        if (!el) return
+        const box = el.getBoundingClientRect()
+        // Nearest scrollable ancestor — the editor's scroll container.
+        let scroller: HTMLElement | null = el.parentElement
+        while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement
+        if (!scroller) { el.scrollIntoView({ block: 'nearest' }); return }
+        const cbox = scroller.getBoundingClientRect()
+        const margin = 32
+        if (box.bottom > cbox.bottom - margin) {
+          scroller.scrollTop += box.bottom - (cbox.bottom - margin)   // scroll down
+        } else if (box.top < cbox.top + margin) {
+          scroller.scrollTop -= (cbox.top + margin) - box.top         // scroll up
+        }
+        // block fully in view — do nothing (no jump, no repaint)
+      })
     }
     const mo = new MutationObserver(scroll)
     mo.observe(root, { childList: true, subtree: true, characterData: true })
-    return () => mo.disconnect()
+    return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf) }
   }, [isAiWriting, aiMenu?.blockId, editor])
   const { setBlockEditor, setFlushEditor } = useEditorStore()
   const onSyncRef = useRef(onSync)
@@ -389,6 +603,7 @@ Respond with the requested content using BlockNote-compatible Markdown. Use head
     const sub = editor.onChange(() => {
       if (initialLoadRef.current) return
       dirtyRef.current = true
+      if (aiWritingRef.current) return // gate UI store spam during AI streaming — settled once at writing end
       useEditorStore.getState().setTabDirty(filePath, true)
       useEditorStore.getState().setUndoRedoState()
     })
@@ -469,28 +684,168 @@ async function openExternal(url: string) {
   }
 }
 
+/** Shared link URL/text form — submits AS-TYPED (no https:// forcing).
+ *  BlockNote's default EditLinkMenuItems.validateUrl prepends
+ *  DEFAULT_LINK_PROTOCOL ("https") to any URL without a known scheme, which
+ *  mangles vault-relative links: "./folder.md" → "https://./folder.md".
+ *  Vault links must round-trip verbatim; bare web domains pasted into the
+ *  editor are still https-ified by BlockNote's pasteHandler, so the form
+ *  never needs to force a protocol. */
+function LinkUrlForm({ url, text, range, showTextField, onSubmitted }: {
+  url: string
+  text: string
+  range: { from: number; to: number }
+  showTextField?: boolean
+  onSubmitted: () => void
+}) {
+  const Components = useComponentsContext()!
+  const { editLink } = useExtension(LinkToolbarExtension)
+  const [currentUrl, setCurrentUrl] = useState(url)
+  const [currentText, setCurrentText] = useState(text)
+  useEffect(() => { setCurrentUrl(url); setCurrentText(text) }, [url, text])
+  const submit = () => {
+    editLink(currentUrl.trim(), currentText, range.from)
+    onSubmitted()
+  }
+  return (
+    <Components.Generic.Form.Root>
+      <Components.Generic.Form.TextInput className="bn-text-input" name="url" icon={<Link2 size={14} />} autoFocus
+        placeholder="https://… or ./folder.md" value={currentUrl}
+        onChange={e => setCurrentUrl(e.currentTarget.value)}
+        onSubmit={submit}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
+      {showTextField !== false && (
+        <Components.Generic.Form.TextInput className="bn-text-input" name="title" icon={<Type size={14} />}
+          placeholder="Text" value={currentText}
+          onChange={e => setCurrentText(e.currentTarget.value)}
+          onSubmit={submit}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
+      )}
+    </Components.Generic.Form.Root>
+  )
+}
+
+/** LinkToolbar "Edit" — preserves the URL as-typed (vault-relative links). */
+function EditLinkButtonPreserveUrl({ url, text, range, setToolbarOpen, setToolbarPositionFrozen }: Pick<LinkToolbarProps, 'url' | 'text' | 'range' | 'setToolbarOpen' | 'setToolbarPositionFrozen'>) {
+  const Components = useComponentsContext()!
+  return (
+    <Components.Generic.Popover.Root onOpenChange={setToolbarPositionFrozen}>
+      <Components.Generic.Popover.Trigger>
+        <Components.LinkToolbar.Button className="bn-button" mainTooltip="Edit link" isSelected={false}>
+          Edit
+        </Components.LinkToolbar.Button>
+      </Components.Generic.Popover.Trigger>
+      <Components.Generic.Popover.Content className="bn-popover-content bn-form-popover" variant="form-popover">
+        <LinkUrlForm url={url} text={text} range={range}
+          onSubmitted={() => { setToolbarOpen?.(false); setToolbarPositionFrozen?.(false) }} />
+      </Components.Generic.Popover.Content>
+    </Components.Generic.Popover.Root>
+  )
+}
+
+/** Formatting-toolbar "Link" button (and Ctrl/Cmd+K) — same as-typed form.
+ *  Replaces BlockNote's CreateLinkButton, which routes through the
+ *  https-forcing EditLinkMenuItems. */
+function CreateLinkButtonPreserveUrl() {
+  const editor = useBlockNoteEditor<any, any, any>()
+  const Components = useComponentsContext()!
+  const formattingToolbar = useExtension(FormattingToolbarExtension)
+  const { showSelection } = useExtension(ShowSelectionExtension)
+  const [showPopover, setShowPopover] = useState(false)
+  /** Keep the text selection while the popover is open (correct link range). */
+  useEffect(() => {
+    showSelection(showPopover, "createLinkButton")
+    return () => showSelection(false, "createLinkButton")
+  }, [showPopover, showSelection])
+  const state = useEditorState({
+    editor,
+    selector: ({ editor }) => {
+      if (!editor.isEditable) return undefined
+      return {
+        url: editor.getSelectedLinkUrl() ?? '',
+        text: editor.getSelectedText(),
+        range: {
+          from: editor.prosemirrorState.selection.from,
+          to: editor.prosemirrorState.selection.to,
+        },
+      }
+    },
+  })
+  useEffect(() => { setShowPopover(false) }, [state])
+  /** Ctrl/Cmd+K opens the link form (same shortcut as the default button). */
+  useEffect(() => {
+    const el = editor.domElement
+    if (!el) return
+    const cb = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setShowPopover(true) }
+    }
+    el.addEventListener('keydown', cb)
+    return () => el.removeEventListener('keydown', cb)
+  }, [editor])
+  if (state === undefined) return null
+  return (
+    <Components.Generic.Popover.Root open={showPopover} onOpenChange={setShowPopover}>
+      <Components.Generic.Popover.Trigger>
+        <Components.FormattingToolbar.Button className="bn-button" label="Link" mainTooltip="Link"
+          secondaryTooltip="⌘K" icon={<Link2 size={14} />}
+          onClick={() => setShowPopover(o => !o)} />
+      </Components.Generic.Popover.Trigger>
+      <Components.Generic.Popover.Content className="bn-popover-content bn-form-popover w-[300px]" variant="form-popover">
+        <LinkUrlForm url={state.url} text={state.text} range={state.range} showTextField={false}
+          onSubmitted={() => { setShowPopover(false); formattingToolbar.store.setState(false) }} />
+        <NoteLinkSearch onPick={(title) => {
+          try { editor.insertInlineContent([{ type: 'text', text: `[[${title}]]`, styles: {} }] as any) } catch (e) { console.error('insert wikilink:', e) }
+          setShowPopover(false); formattingToolbar.store.setState(false)
+        }} />
+      </Components.Generic.Popover.Content>
+    </Components.Generic.Popover.Root>
+  )
+}
+
 /** LinkToolbar override: "open" on a link pointing to a vault note (relative
  *  path, no scheme) opens the file in the app — not a browser tab. External
  *  URLs open via the system opener (native) / new tab (web).
- *  Edit/Remove stay BlockNote defaults. */
+ *  Edit preserves the URL as-typed (vault-relative links stay intact). */
 function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPositionFrozen }: LinkToolbarProps) {
   const Components = useComponentsContext()!
   const openFile = useEditorStore(s => s.openFile)
-  const isVaultLink = !!url && !/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('#') && !url.startsWith('/')
+  const activeTab = useEditorStore(s => s.activeTab)
+  /** Vault link = no scheme and not protocol-relative (//host). Covers plain
+   *  names, ./ and ../ (resolved against the ACTIVE file's folder — Obsidian
+   *  semantics, NOT the vault root), and / (vault root). Absolute filesystem
+   *  paths are excluded (no scheme check above rejects them; the server's
+   *  safe_path also guards against any traversal). */
+  const isVaultLink = !!url && !/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('//')
+  const open = () => {
+    if (!url) return
+    if (!isVaultLink) { openExternal(url); return }
+    const target = url.split('#')[0].split('?')[0]   // strip #anchor / ?query
+    if (!target) return                              // anchor-only link
+    const curFile = activeTab ?? ''
+    const curDir = curFile.includes('/') ? curFile.substring(0, curFile.lastIndexOf('/')) : ''
+    const resolved = target.startsWith('/')
+      ? target.replace(/^\/+/, '')                   // /path → vault root
+      : (() => {
+          const parts: string[] = []
+          for (const seg of [curDir, target].filter(Boolean).join('/').split('/')) {
+            if (seg === '..') parts.pop()
+            else if (seg === '.' || seg === '') continue
+            else parts.push(seg)
+          }
+          return parts.join('/')
+        })()
+    openFile(resolved, target.split('/').pop() || resolved)
+  }
   return (
     <Components.LinkToolbar.Root className="bn-toolbar bn-link-toolbar">
       <Components.LinkToolbar.Button
         mainTooltip="Open"
         label="Open"
         isSelected={false}
-        onClick={() => {
-          if (!url) return
-          if (isVaultLink) openFile(url, url.split('/').pop() || url)
-          else openExternal(url)
-        }}
+        onClick={open}
         icon={<ExternalLink size={14} />}
       />
-      <EditLinkButton url={url} text={text} range={range} setToolbarOpen={setToolbarOpen} setToolbarPositionFrozen={setToolbarPositionFrozen} />
+      <EditLinkButtonPreserveUrl url={url} text={text} range={range} setToolbarOpen={setToolbarOpen} setToolbarPositionFrozen={setToolbarPositionFrozen} />
       <DeleteLinkButton range={range} setToolbarOpen={setToolbarOpen} />
     </Components.LinkToolbar.Root>
   )
@@ -499,69 +854,51 @@ function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPositionF
 /** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */
 const FormattingToolbarWithAI = () => (
   <FormattingToolbar>
-    {getFormattingToolbarItems()}
-    <LinkNoteButton />
+    {getFormattingToolbarItems().filter(el => (el as any).key !== 'createLinkButton')}
+    <CreateLinkButtonPreserveUrl />
     <AIToolbarButton />
   </FormattingToolbar>
 )
 
-/** "Link note" — search vault notes and insert a `[[wikilink]]` at the cursor. */
-function LinkNoteButton() {
-  const editor = useBlockNoteEditor()
-  const [open, setOpen] = useState(false)
+/** "Link a note" — search vault notes (name + content via wiki_suggest) and
+ *  pick → caller inserts a `[[wikilink]]`. Lives inside the merged link popover
+ *  (one bubble-menu icon), not a separate button. */
+function NoteLinkSearch({ onPick }: { onPick: (title: string) => void }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<{ path: string; title: string }[]>([])
   const [selected, setSelected] = useState(0)
 
   useEffect(() => {
-    if (!open || !query.trim()) { setResults([]); return }
+    if (!query.trim()) { setResults([]); return }
     const t = setTimeout(() => {
       invoke<string>('wiki_suggest', { query: query.trim() }).then(s => {
         try { setResults(JSON.parse(s)); setSelected(0) } catch {}
       }).catch(() => {})
     }, 150)
     return () => clearTimeout(t)
-  }, [query, open])
-
-  const insert = (title: string) => {
-    try {
-      editor.insertInlineContent([{ type: 'text', text: `[[${title}]]`, styles: {} }] as any)
-    } catch (e) { console.error('insert link:', e) }
-    setOpen(false); setQuery(''); setResults([])
-  }
+  }, [query])
 
   return (
-    <>
-      <button onClick={() => { setOpen(true); setQuery('') }} title="Insert note link ([[wikilink]])"
-        className="flex items-center justify-center p-1 rounded hover:bg-surface-active text-muted cursor-pointer">
-        <Link2 size={14} />
-      </button>
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[18vh]" onClick={() => setOpen(false)}>
-          <div onClick={e => e.stopPropagation()} className="bg-surface border border-border rounded-lg w-[400px] max-h-[300px] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]">
-            <input autoFocus type="text" value={query} onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && results[selected]) { e.preventDefault(); insert(results[selected].title) }
-                if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(i => Math.min(i + 1, results.length - 1)) }
-                if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(i => Math.max(i - 1, 0)) }
-                if (e.key === 'Escape') { e.preventDefault(); setOpen(false) }
-              }}
-              placeholder="Search notes to link…"
-              className="w-full bg-transparent border-b border-border px-3 py-2 text-sm text-foreground outline-none" />
-            <div className="max-h-[250px] overflow-y-auto py-1">
-              {results.length === 0 && query && <div className="px-3 py-2 text-xs text-muted">No notes found</div>}
-              {results.map((r, i) => (
-                <div key={r.path} onClick={() => insert(r.title)}
-                  onMouseEnter={() => setSelected(i)}
-                  className={'px-3 py-1.5 text-sm cursor-pointer ' + (i === selected ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
-                  {r.title}
-                </div>
-              ))}
-            </div>
+    <div className="border-t border-border-subtle px-3 py-2">
+      <div className="text-[10px] text-muted uppercase tracking-wider mb-1">or link a vault note</div>
+      <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && results[selected]) { e.preventDefault(); onPick(results[selected].title) }
+          if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(i => Math.min(i + 1, results.length - 1)) }
+          if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(i => Math.max(i - 1, 0)) }
+        }}
+        placeholder="Search notes to link…"
+        className="w-full bg-transparent border-b border-border px-1 py-1 text-sm text-foreground outline-none" />
+      <div className="max-h-[160px] overflow-y-auto mt-1">
+        {results.length === 0 && query && <div className="px-1 py-1 text-xs text-muted">No notes found</div>}
+        {results.map((r, i) => (
+          <div key={r.path} onClick={() => onPick(r.title)} onMouseEnter={() => setSelected(i)}
+            className={'px-1 py-1 text-sm cursor-pointer rounded ' + (i === selected ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
+            {r.title}
           </div>
-        </div>
-      )}
-    </>
+        ))}
+      </div>
+    </div>
   )
 }
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { invoke } from '../lib/ipc'
+import { toast } from 'sonner'
 import { undoDepth, redoDepth } from '@tiptap/pm/history'
 
 export interface Tab {
@@ -30,7 +31,8 @@ interface EditorState {
   setFlushEditor: (fn: (() => void) | null) => void
   undo: () => void
   redo: () => void
-  openFile: (path: string, name: string) => Promise<void>
+  /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it. */
+  openFile: (path: string, name: string, createIfMissing?: boolean) => Promise<void>
   switchTab: (path: string) => void
   closeTab: (path: string) => void
   setContent: (path: string, fileContent: string) => void
@@ -60,13 +62,29 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   undo: () => { try { get().blockEditor?.undo() } catch {}; get().setUndoRedoState() },
   redo: () => { try { get().blockEditor?.redo() } catch {}; get().setUndoRedoState() },
   
-  openFile: async (path, name) => {
+  openFile: async (path, name, createIfMissing = false) => {
     if (get().tabs.find(t => t.path === path)) { set({ activeTab: path }); return }
     set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }], activeTab: path })
     try {
       const raw = await invoke<string>('read_file', { path })
       get().setContent(path, raw)
-    } catch (e) { console.error(e) }
+    } catch (e) {
+      const notFound = /no such file|not found|os error 2/i.test(String(e))
+      if (createIfMissing && notFound) {
+        // Obsidian behavior: opening a wiki link to a missing note creates it.
+        try {
+          await invoke('write_file', { path, content: '' })
+          get().setContent(path, '')
+          toast.success(`Created empty note "${name}"`)
+          return
+        } catch { /* fall through to the error state below */ }
+      }
+      console.error(e)
+      // Failed read must not leave the tab stuck on "Loading…" — render an
+      // empty editor instead, and tell the user why.
+      get().setContent(path, '')
+      toast.error(notFound ? 'File not found' : 'Failed to open file')
+    }
   },
   
   switchTab: (path) => { set({ activeTab: path }) },

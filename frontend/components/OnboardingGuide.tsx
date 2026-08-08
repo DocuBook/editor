@@ -1,4 +1,5 @@
 import { FileText, Sparkles, GitBranch, Keyboard } from 'lucide-react'
+import { isTauri } from '../lib/ipc'
 
 const ONBOARDING_KEY = 'docubook-onboarding-done'
 
@@ -14,7 +15,7 @@ const steps = [
   {
     icon: FileText,
     title: 'Create your first note',
-    body: 'Click the + button in the sidebar or press ⌘N to create a new note. Name it anything — the .md extension is added automatically.',
+    body: `Click the + button in the sidebar or press ${isTauri ? '\u2318N' : '\u2318\u21E7F'} to create a new note. Name it anything — the .md extension is added automatically.`,
   },
   {
     icon: Keyboard,

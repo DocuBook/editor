@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { X, Command, ArrowBigUp, Option, ChevronUp, ArrowUp, ArrowDown } from 'lucide-react'
+import { isTauri } from '../lib/ipc'
 
 /** Render shortcut key glyphs (⌘⇧⌥⌃↑↓) as lucide icons — consistent with TabBar tooltips. */
 const KEY_ICONS: Record<string, { Icon: any; size?: number }> = {
@@ -62,8 +63,11 @@ const SHORTCUTS = [
     { keys: '``` + space', desc: 'Toggle code block' },
   ]},
   { category: 'Files', items: [
-    { keys: '\u2318N', desc: 'New file' },
-    { keys: '\u2318\u2325N', desc: 'New folder' },
+    /** Canonical ⌘⇧F / ⌘⌥⇧F work on every platform (browsers reserve ⌘N /
+     *  ⌘⇧N / ⌘⌥N — new/private window — and never deliver them to the page).
+     *  Native keeps ⌘N / ⌘⌥N as an alias, shown here per platform. */
+    { keys: isTauri ? '\u2318N / \u2318\u21E7F' : '\u2318\u21E7F', desc: 'New file' },
+    { keys: isTauri ? '\u2318\u2325N / \u2318\u2325\u21E7F' : '\u2318\u2325\u21E7F', desc: 'New folder' },
   ]},
 ]
 

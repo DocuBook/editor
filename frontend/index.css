@@ -19,6 +19,8 @@
     --color-muted: #52525b;
     --color-accent: #3b82f6;
     --color-accent-hover: #1d4ed8;
+    --color-ai-cursor: #ef4444;
+    --color-ai-cursor-text: #fafafa;
     --color-danger: #ef4444;
     --color-danger-hover: #f87171;
     --color-white: #fff;
@@ -39,6 +41,8 @@
     --color-muted: #a1a1aa;
     --color-accent: #2563eb;
     --color-accent-hover: #1d4ed8;
+    --color-ai-cursor: #ef4444;
+    --color-ai-cursor-text: #fafafa;
     --color-danger: #dc2626;
     --color-danger-hover: #b91c1c;
     --color-white: #ffffff;
@@ -89,6 +93,14 @@ body {
     caret-color: var(--color-accent);
     padding-top: 16px;
     user-select: text;
+}
+
+/* AI agent cursor label — y-prosemirror hardcodes #0d0d0d with the SAME
+   specificity as this override (.bn-editor prefix on both), and its css is
+   bundled AFTER index.css, so it won by source order. #root (id) beats it
+   regardless of order. */
+#root .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {
+    color: var(--color-ai-cursor-text);
 }
 
 /* UI shell — single source of truth for user-select on non-editor chrome.

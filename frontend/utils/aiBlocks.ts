@@ -20,6 +20,8 @@ export const AI_FORMATTING_RULES = {
 export const MAX_AI_ATTEMPTS = 2
 
 /** Check if a block id (optionally $-suffixed) exists in the editor document (recursive). */
+
+/** Check if a block id (optionally $-suffixed) exists in the editor document (recursive). */
 export function blockIdExists(editor: any, id: string): boolean {
   if (!editor?.document) return false
   const clean = String(id).replace(/\$$/, '')
@@ -49,12 +51,64 @@ export function buildTaskFormattingRules(userText: string): string {
   const rules: string[] = []
   if (/summar/.test(t)) rules.push('Output a concise summary — keep only key points, preserve the original structure (headings/lists).')
   if (/transl/.test(t)) rules.push('Translate the selected content; preserve its tone, meaning, and block formatting exactly.')
-  if (/improv|enhanc|rewrit/.test(t)) rules.push('Improve clarity and flow; preserve the original meaning and block structure.')
+  if (/improv|enhanc|rewrit/.test(t)) rules.push('Improve clarity and flow; preserve the original meaning, block structure, and inline formatting (bold/italic/links).')
   if (/spell|grammar|typo/.test(t)) rules.push('Fix spelling and grammar errors only; do not rewrite content or change meaning.')
   if (/simplif/.test(t)) rules.push('Simplify the language while keeping all key information and structure.')
   if (/continu|write/.test(t)) rules.push('Continue naturally from the cursor; match the existing tone and block style.')
   if (rules.length) return '\nTask-specific rules:\n- ' + rules.join('\n- ')
   return ''
+}
+
+/**
+ * Route intent: vault-first generation vs document edit.
+ *
+ * The edit rules ("NEVER invent content that is not in the document") de-authorize
+ * vault context, and Path A's tool call has nothing to anchor on in an empty doc.
+ * So the vault path is taken when vault context exists AND the request is a
+ * wikilink reference, a question, a generation command, or targets an empty
+ * document — the vault context then acts as the model's only source material.
+ */
+export function isVaultGenerationIntent(userText: string, hasVaultContext: boolean, docContext: string): boolean {
+  if (!hasVaultContext) return false
+  const t = (userText || '').trim()
+  if (/\[\[[^\]]+\]\]/.test(t)) return true
+  if (/^.*\?$/.test(t)) return true
+  if (/^(what|how|why|where|when|who|which|is|are|can|does|do|list|find|search|apa|bagaimana|kenapa|mengapa|kapan|siapa|di mana|dimana|cari|jelaskan|ringkas|sebutkan)\b/i.test(t)) return true
+  if (/^(buat|tulis|generate|draft|rangkum|rekap|susun|rancang|outline|kerangka|summar)/i.test(t)) return true
+  return !(docContext || '').trim()
+}
+
+/** System prompt for the vault-first path: the vault context is the ONLY source. */
+export function buildVaultGroundingPrompt(vaultContext: string): string {
+  return `You are working from the vault context below — it is your authoritative source material. Use it to fulfill the request (answer, summarize, draft, or generate content); cite the source file name(s) when you do.
+
+─── Vault context (from [[wikilinks]] and search) ───${vaultContext}
+
+Rules (MUST follow):
+- Base your output on the vault context above; it is your only source material.
+- If it does not contain what you need, say so clearly — never fabricate.
+- Output plain Markdown only. No commentary, no preamble, no block ids.`
+}
+
+/** Single shared markdown instruction for Path B / fallback user messages. */
+export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`
+
+/** Single edit-rule system prompt: document state (bekal) + vault context + rules. */
+export function buildEditSystemPrompt(docContext: string, vaultContext: string, taskRules: string): string {
+  const vault = vaultContext.trim() ? `\n\n─── Vault context (from [[wikilinks]] and search) ───${vaultContext}` : ''
+  return `You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.
+
+Document state (JSON):
+${docContext}${vault}
+
+Rules (MUST follow):
+- Output ONLY the new or modified content for the requested task.
+- NEVER echo the document state JSON or block ids back into the output.
+- NEVER repeat the user's prompt or these instructions.
+- NEVER invent block ids or content that is not in the document; if the document lacks the needed information, state that instead of fabricating.
+- Use only the exact block ids from the document above when referencing existing blocks.
+- Output must be free of spelling and grammar errors.
+- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.${taskRules}`
 }
 
 /**
