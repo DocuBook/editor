@@ -60,7 +60,7 @@
     "esbuild": "^0.28.1",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "oxlint": "^1.71.0",
+    "oxlint": "^1.77.0",
     "patch-package": "^8.0.1",
     "playwright": "1.62.1",
     "tailwindcss": "^4.3.3",
