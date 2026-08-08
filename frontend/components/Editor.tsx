@@ -115,6 +115,30 @@ const wikilinkStyler = createExtension({
           })
           return DecorationSet.create(state.doc, decos)
         },
+        /** Cmd/Ctrl+Click on a `[[wikilink]]` opens the note. Must run here
+         *  (ProseMirror prop) and return true: PM core's `selectNodeModifier`
+         *  (metaKey on mac) would otherwise select the whole paragraph block
+         *  on mouseup — conflicting with navigation and crashing the editor
+         *  when the document is swapped mid node-selection. */
+        handleClick(view, pos, event) {
+          if (!(event.metaKey || event.ctrlKey)) return false
+          const t = event.target as HTMLElement | null
+          if (!(t?.tagName === 'SPAN' && t.getAttribute('data-wikilink') === '1')) return false
+          const $pos = view.state.doc.resolve(pos)
+          const text = $pos.parent.textContent || ''
+          const local = pos - $pos.start()
+          const re = /\[\[([^\]]+)\]\]/g
+          let m: RegExpExecArray | null
+          while ((m = re.exec(text)) !== null) {
+            if (local >= m.index && local <= m.index + m[0].length) {
+              invoke<string>('wiki_resolve', { title: m[1] })
+                .then(path => { if (path) useEditorStore.getState().openFile(path, path.split('/').pop() || path) })
+                .catch(() => {})
+              return true // consumed — PM skips its own selection entirely
+            }
+          }
+          return false
+        },
       },
     }),
   ],
@@ -498,17 +522,14 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
               .then(path => { if (path) useEditorStore.getState().openFile(path, path.split('/').pop() || path) })
               .catch(() => {})
           }
-          if (e.metaKey || e.ctrlKey) {
-            e.preventDefault()
-            open()
-          } else {
-            // Single click without modifier: the pointer cursor promises an
-            // action — show a tooltip with an Open action instead of silence.
-            toast('Wikilink — Cmd+Click or Open to navigate', {
-              action: { label: 'Open', onClick: open },
-              duration: 4000,
-            })
-          }
+          // Meta/Ctrl+Click navigation is handled by the wikilinkStyler
+          // ProseMirror handleClick prop (consumes the click before PM's
+          // selectNodeModifier block selection); this listener only serves
+          // the plain-click hint.
+          toast('Wikilink — Cmd+Click or Open to navigate', {
+            action: { label: 'Open', onClick: open },
+            duration: 4000,
+          })
           break
         }
       }

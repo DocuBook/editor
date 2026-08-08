@@ -18,6 +18,7 @@
 - **Web server**: `test_connection` camelCase args fix (was 400 + key never used); tool probe `tool_choice:"required"` + JSON `tools:false` contract
 - **Shortcuts**: ⌘⇧F/⌘⇧P no longer hijack search; canonical ⌘⇧F/⌘⌥⇧F new file/folder + native ⌘N alias
 - **Wiki**: recursive scan + content search for note-linking; `read_file` completes extension-less references to `.md` (never double-appends)
+- **Editor**: `[[wikilink]]` Cmd/Ctrl+Click intercepted inside ProseMirror's click pipeline — the built-in `selectNodeModifier` (metaKey) block selection no longer fights navigation (desktop crash fix)
 
 #### 🧪 Testing & CI
 - **E2E suite** — web-smoke, trash, theme-check, ai-debug (Path A + Path B) via one `npm run test:e2e`; CI matrix `[chromium, webkit]` with PR approval gate; logs (not screenshots) as artifacts
