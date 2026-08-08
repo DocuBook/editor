@@ -21,7 +21,7 @@
     "@blocknote/react": "^0.52.1",
     "@blocknote/xl-ai": "^0.52.1",
     "@mantine/core": "^9.4.2",
-    "@mantine/hooks": "^9.4.2",
+    "@mantine/hooks": "^9.5.1",
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "2.5.4",
