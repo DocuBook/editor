@@ -284,6 +284,7 @@ jobs:
           # Keep per-artifact folders (DocuBook-arm64/, DocuBook-amd64/) so the
           # release globs resolve — merge-multiple flattens and breaks them.
       - name: Generate release notes
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -296,9 +297,11 @@ jobs:
             flag { print }
           ' CHANGELOG.md > /tmp/release-notes.md
           # Artifacts preserve their full relative path (upload-artifact v4), so
-          # locate the DMGs recursively instead of assuming a flat layout.
-          DMGS=$(find DocuBook-* -name '*.dmg')
-          echo "release assets: $DMGS"
+          # locate the DMGs recursively instead of assuming a flat layout. The
+          # product name contains a SPACE ("DocuBook Editor_*.dmg") — a plain
+          # unquoted $DMGS word-splits and gh gets a broken path.
+          mapfile -t DMGS < <(find DocuBook-* -name '*.dmg')
+          echo "release assets: ${DMGS[*]}"
           # Arm64 ad-hoc-signed download triggers Gatekeeper "app is damaged".
           # Users clear it once before first launch.
           cat >> /tmp/release-notes.md <<'EOF'
@@ -312,6 +315,6 @@ jobs:
           **macOS (Intel — `*-amd64.dmg`):** right-click the app → *Open* →
           *Open Anyway* on the Gatekeeper dialog.
           EOF
-          gh release create "$TAG" $DMGS \
+          gh release create "$TAG" "${DMGS[@]}" \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md
