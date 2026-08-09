@@ -62,7 +62,12 @@ jobs:
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
   e2e:
-    runs-on: macos-14
+    # macOS 15 required: Playwright 1.62's standard WebKit build (rev 2336)
+    # needs macOS 15+. On macos-14 runners playwright install falls back to the
+    # special mac14 build (webkit_mac14_arm64_special-2251) whose WebKit
+    # rejects the driver's PushAPIEnabled context setting — every suite fails
+    # at newPage with "Unknown setting: PushAPIEnabled".
+    runs-on: macos-15
     needs: [test]
     # Heavy matrix job: PRs wait for the same approval gate as the build job;
     # push to master / tags / manual run without approval (behavior unchanged).
