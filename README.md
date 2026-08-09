@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/DocuBook/editor/releases"><img alt="release" src="https://shieldcn.dev/github/DocuBook/editor/release.svg?split=true" /></a>
   <a href="https://github.com/DocuBook/editor/actions"><img alt="CI" src="https://shieldcn.dev/github/DocuBook/editor/ci.svg?split=true" /></a>
+  <a href="https://github.com/DocuBook/editor/blob/master/LICENSE"><img alt="license" src="https://shieldcn.dev/github/DocuBook/editor/license.svg?split=true" /></a>
 </p>
 
 > A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
