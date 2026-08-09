@@ -385,7 +385,7 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
                     accepted = true
                     break
                   }
-                  lastReason = semanticError || 'unknown'
+                  lastReason = semanticError ?? 'unknown'
                   errorFeedback = `Your previous response was rejected: ${semanticError}. Use ONLY block ids that exist in the document state above. Retry.`
                   attempts++
                 }
