@@ -188,7 +188,7 @@ rust-toolchain.toml      Pinned Rust toolchain (build reproducibility, REL-2)
        kept current: a stale pin risks regressing the browser protocol
        contract, so CI intentionally tracks the newest stable. macOS 15 is
        required for the e2e job — the standard Playwright WebKit build (1.62+)
-       needs macOS 15; on macos-14 it installs an older "special" WebKit that
+       needs macOS 15; on older runners it installs an older WebKit that
        rejects the driver's PushAPIEnabled context setting (protocol error at
        newPage). A passing CI run is a superset check, not a claim about
        macOS 12 internals; the minimum-OS claim rests on the dev machine.
