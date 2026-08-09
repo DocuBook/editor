@@ -16,10 +16,18 @@ const ARTIFACTS = 'test/artifacts'
  *  WEBKIT_EXE / BROWSER_EXE), then the standard ms-playwright cache on
  *  macOS/Linux. Undefined → Playwright auto-resolves its own pinned browser
  *  (after `npx playwright install chromium|webkit`). */
-export function browserPath(engine = process.env.BROWSER || 'chromium') {
+export function browserPath(engine = process.env.BROWSER || 'chromium', launcher) {
   const e = engine.toLowerCase()
   const envExe = process.env[`${e.toUpperCase()}_EXE`]
   if (envExe) return envExe
+  // Driver-canonical executable for the installed Playwright version — tried
+  // FIRST. GitHub macOS runners pre-install OLD playwright builds in the
+  // cache; the dir-scan below would pick those, and a stale webkit rejects
+  // the driver's `PushAPIEnabled` context setting (protocol error).
+  try {
+    const p = launcher?.executablePath?.()
+    if (p && existsSync(p)) return p
+  } catch {}
   const bases = [
     `${homedir()}/Library/Caches/ms-playwright`,
     `${homedir()}/.cache/ms-playwright`,
@@ -58,7 +66,7 @@ export async function launchBrowser() {
   const engine = (process.env.BROWSER || 'chromium').toLowerCase()
   const { chromium, webkit } = await import('playwright')
   const launcher = engine === 'webkit' ? webkit : chromium
-  const exe = browserPath(engine)
+  const exe = browserPath(engine, launcher)
   return launcher.launch({ ...(exe ? { executablePath: exe } : {}), headless: true, timeout: 60_000 })
 }
 
