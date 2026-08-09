@@ -59,7 +59,7 @@ export async function launchBrowser() {
   const { chromium, webkit } = await import('playwright')
   const launcher = engine === 'webkit' ? webkit : chromium
   const exe = browserPath(engine)
-  return launcher.launch({ ...(exe ? { executablePath: exe } : {}), headless: true })
+  return launcher.launch({ ...(exe ? { executablePath: exe } : {}), headless: true, timeout: 60_000 })
 }
 
 export function ensureArtifacts() {

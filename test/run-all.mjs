@@ -17,6 +17,9 @@ for (const suite of SUITES) {
   const r = spawnSync(process.execPath, [`test/${suite}.mjs`], {
     stdio: 'inherit',
     env: process.env,
+    // A hung suite (e.g. a browser that never connects) must fail the run,
+    // not block the CI job forever.
+    timeout: 240_000,
   })
   results.push([suite, r.status === 0])
 }
