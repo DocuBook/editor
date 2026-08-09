@@ -55,6 +55,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache cargo (registry + targets)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+            server/target
+          key: cargo-macos14-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos14-test-
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Web server test (server)
@@ -81,6 +92,15 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # Cache the Playwright browser builds (webkit/chromium ~1GB) — restored
+      # on future runs so `playwright install` only fills gaps.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ms-playwright
+          key: playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-
       # --no-install forces the LOCAL playwright (1.62.1) — without it npx can
       # resolve a pre-installed/global playwright on the runner and download a
       # mismatched webkit build (e.g. v2251 vs the v2336 our driver expects), which
@@ -88,6 +108,16 @@ jobs:
       - name: Install Playwright browsers
         run: npx --no-install playwright install chromium webkit
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache cargo (server target)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            server/target
+          key: cargo-macos15-e2e-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-macos15-e2e-
       - name: Build web server (debug — used by the e2e harness)
         run: cargo build --manifest-path server/Cargo.toml
       - name: Build frontend
@@ -112,6 +142,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache cargo (server target, Linux)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            server/target
+          key: cargo-ubuntu-test-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-ubuntu-test-
       - name: Cargo test (web server, Linux)
         run: cargo test --manifest-path server/Cargo.toml
 
@@ -160,6 +200,16 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           targets: ${{ matrix.target }}
+      - name: Cache cargo (release targets, ${{ matrix.target }})
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ matrix.target }}-
       # arm64 runners (macos-14) install only the native target by default —
       # ensure the matrix target is present for the x86_64 job.
       - name: Ensure target
