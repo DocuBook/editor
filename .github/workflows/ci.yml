@@ -78,8 +78,12 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # --no-install forces the LOCAL playwright (1.62.1) — without it npx can
+      # resolve a pre-installed/global playwright on the runner and download a
+      # mismatched webkit build (e.g. v2251 vs the v2336 our driver expects), which
+      # then rejects the driver's PushAPIEnabled context setting at newPage.
       - name: Install Playwright browsers
-        run: npx playwright install chromium webkit
+        run: npx --no-install playwright install chromium webkit
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Build web server (debug — used by the e2e harness)
         run: cargo build --manifest-path server/Cargo.toml
