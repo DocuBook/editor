@@ -176,22 +176,21 @@ rust-toolchain.toml      Pinned Rust toolchain (build reproducibility, REL-2)
      `npm run test:e2e`   # all suites, chromium (default)
      `BROWSER=webkit npm run test:e2e`   # webkit — CI only (macos-15 runner)
 
-     Note — environment matrix (no ambiguity):
-     - macOS 12 (dev machine) — the app minimum is macOS 12, validated by the
-       developer running the e2e smoke suites on their own machine. Because
-       Playwright 1.62+ ships mac14-only browser builds, local runs must use a
-       macOS-12-compatible Playwright (older than the mac14-only cutoff); the
-       chromium suite also falls back to the system Chrome. Webkit cannot run
-       locally on macOS 12 — it is CI-only.
-     - macOS 15 (CI, macos-15 runner) — the full e2e matrix (chromium AND
+     Note — environment matrix (three macOS versions, no ambiguity):
+     - macOS 12 (dev machine) — the MINIMUM supported OS, validated by the
+       developer running the e2e smoke suites on their own machine. Newest
+       Playwright browser builds target newer macOS, so local runs use the
+       system Chrome fallback for chromium; webkit cannot run on macOS 12 —
+       it is CI-only.
+     - macOS 14+ (CI) — the SUPERSET check: the full e2e matrix (chromium AND
        webkit) runs ONLY in CI, with the latest Playwright version pinned and
-       kept current: a stale pin risks regressing the browser protocol
-       contract, so CI intentionally tracks the newest stable. macOS 15 is
-       required for the e2e job — the standard Playwright WebKit build (1.62+)
-       needs macOS 15; on older runners it installs an older WebKit that
-       rejects the driver's PushAPIEnabled context setting (protocol error at
-       newPage). A passing CI run is a superset check, not a claim about
-       macOS 12 internals; the minimum-OS claim rests on the dev machine.
+       kept current (a stale pin risks regressing the browser protocol
+       contract). The e2e job itself runs on the macOS 15 runner because the
+       standard Playwright WebKit build (1.62+) needs macOS 15+; on older
+       runners it falls back to an older WebKit that rejects the driver's
+       PushAPIEnabled context setting. A passing CI run is a superset check,
+       not a claim about macOS 12 internals; the minimum-OS claim rests on
+       the dev machine.
 4. Open a PR against `master` using the PR template.
 
 ### Commit conventions (enforced by the commit-msg hook)
