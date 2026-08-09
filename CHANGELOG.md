@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.1.0-rc.1 — 2026-08-08
+## v0.1.0-rc.1 — 2026-08-09
 
 ### Release candidate — AI transport hardening + web/Docker production readiness
 
@@ -12,6 +12,7 @@
 - **Persistent sessions** — `sessions.json` (SHA-256 hashed tokens) survives server restarts; no more forced re-login after redeploy
 - **Optional keys.json encryption** — `DB_KEYS_PASSPHRASE` → AES-256-GCM at rest (Argon2id KDF); plaintext migrates on first access, encrypted files never overwritten without the passphrase
 - **Consent-gated open access** — setup wizard "Skip" requires acknowledging that anyone with the URL can access
+- **Fuzzy filename search** — `⌘F`/`⌘P` ranks prefix > substring > fuzzy subsequence (typo-tolerant), `.md`-only, extension hidden in results (consistent with the tree)
 
 #### 🐛 Bug Fixes
 - **AI transport**: probe per provider+model (not per provider); ops-only output channel (no text+ops double-write); removed Path A→B retry (text-only models no longer pay 2× generation); `crypto.randomUUID` secure-context fallback (`uuid()`)
@@ -19,12 +20,17 @@
 - **Shortcuts**: ⌘⇧F/⌘⇧P no longer hijack search; canonical ⌘⇧F/⌘⌥⇧F new file/folder + native ⌘N alias
 - **Wiki**: recursive scan + content search for note-linking; `read_file` completes extension-less references to `.md` (never double-appends)
 - **Editor**: `[[wikilink]]` Cmd/Ctrl+Click intercepted inside ProseMirror's click pipeline — the built-in `selectNodeModifier` (metaKey) block selection no longer fights navigation (desktop crash fix)
+- **Vault tree** — folders with no `.md` anywhere in their subtree are hidden (no empty asset-only folders cluttering the tree)
 
 #### 🧪 Testing & CI
 - **E2E suite** — web-smoke, trash, theme-check, ai-debug (Path A + Path B) via one `npm run test:e2e`; CI matrix `[chromium, webkit]` with PR approval gate; logs (not screenshots) as artifacts
 - **ACL guard** — CI fails if a Tauri command lacks its `allow-*` entry
 - **test-server-linux** job — exercises `cfg(target_os="linux")` trash paths
 - Rust tests 51+, frontend 64+, e2e 39+ assertions
+- **E2E webkit reliability** — hard timeouts (browser launch 60s, per-suite 240s) turn hangs into failures instead of blocking the job; `browserPath` prefers the driver-canonical executable over stale pre-installed runner builds; browsers installed with the local Playwright (`npx --no-install`); the e2e job runs on **macOS 15** (the standard Playwright WebKit build needs macOS 15+)
+
+#### 🔄 Version/Hygiene
+- **Product rename** — the desktop app is now branded **DocuBook Editor** (dock icon, titlebar, window title)
 
 ## v0.1.0-beta.4 — 2026-08-07
 
