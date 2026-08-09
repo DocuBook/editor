@@ -37,18 +37,23 @@ docker run -d --name docubook -p 8080:8080 \
 # docker-compose.yml
 services:
   docubook:
-    image: ghcr.io/docubook/editor
+    image: ghcr.io/docubook/editor   # or pin a release: ghcr.io/docubook/editor:0.1.0-rc.1
     ports:
       - "8080:8080"
     volumes:
       - docubook:/data          # vaults + keys.json + config.json (0600)
     environment:
       PORT: 8080
-      # DB_SETUP_TOKEN: ""            # plain secret (not a JWT) — wizard asks for it
+      # DB_SETUP_TOKEN: ""                  # plain secret (not a JWT) — wizard asks for it
       # DB_ADMIN_EMAIL: admin@example.com    # set BOTH to skip the wizard
       # DB_ADMIN_PASSWORD: change-me-123
-      # DB_NO_AUTH: "false"                  # "1" = open access without login
-      # DB_SECURE_COOKIE: "1"                # enable behind HTTPS
+      # DB_NO_AUTH: "false"                 # "1" = open access without login
+      # DB_SECURE_COOKIE: "1"               # enable behind HTTPS
+      # DB_SESSION_TTL_HOURS: "168"         # session lifetime in hours
+      # DB_KEYS_PASSPHRASE: ""              # AES-256-GCM encrypt keys.json at rest
+      # DB_OPENAI_COMPAT_BASE_URL: https://proxy.example.com/v1   # custom provider
+      # DB_OPENAI_COMPAT_API_KEY: sk-...                          # (read-only in UI)
+      # DB_OPENAI_COMPAT_MODEL: gpt-oss-20b
     restart: unless-stopped
 
 volumes:
@@ -87,6 +92,7 @@ How you set them depends on your host — a `.env` file for `docker compose`, `-
 | `DB_SECURE_COOKIE` | `false` | `1` = session cookie only over HTTPS — enable when behind TLS |
 | `DB_NO_AUTH` | `false` | `1` = open access without login (pre-web behavior) |
 | `DB_SESSION_TTL_HOURS` | `168` | Session lifetime before re-login |
+| `DB_KEYS_PASSPHRASE` | empty | **Encrypt `keys.json` at rest** (AES-256-GCM, key derived via Argon2id). Empty = plaintext (mode 0600, backward compatible); set = plaintext files auto-migrate on first access. Treat like a password — set from first boot, never lose it (an encrypted file without the passphrase is unreadable; writes are refused so it is never silently overwritten). Generate with `openssl rand -hex 32` |
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | — | Set **both** to skip the wizard entirely (headless provisioning) |
 | `DB_OPENAI_COMPAT_BASE_URL` (+ `_API_KEY`, `_MODEL`) | — | Provision/override the **custom OpenAI-compatible provider** from the environment. When `BASE_URL` is set, Settings → AI shows the custom endpoint **read-only** ("from env" badge) and the backend uses these values. Leave unset for the normal in-app setup |
 
