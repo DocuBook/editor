@@ -177,14 +177,18 @@ rust-toolchain.toml      Pinned Rust toolchain (build reproducibility, REL-2)
      `BROWSER=webkit npm run test:e2e`   # webkit — CI only (macos-14 runner)
 
      Note — environment matrix (no ambiguity):
-     - macOS 12 (dev machine): the app minimum is macOS 12, validated by daily
-       development on it. Playwright 1.62+ ships mac14-only browser builds, so
-       the local chromium e2e uses the system Chrome fallback; webkit runs are
-       CI-only.
-     - macOS 14 (CI, macos-14 runner): full e2e matrix (chromium + webkit) with
-       the pinned Playwright builds — behavior validation on a newer supported
-       OS. A passing CI run is a superset check, not a claim about macOS 12
-       internals; the minimum-OS claim rests on the dev machine itself.
+     - macOS 12 (dev machine) — the app minimum is macOS 12, validated by the
+       developer running the e2e smoke suites on their own machine. Because
+       Playwright 1.62+ ships mac14-only browser builds, local runs must use a
+       macOS-12-compatible Playwright (older than the mac14-only cutoff); the
+       chromium suite also falls back to the system Chrome. Webkit cannot run
+       locally on macOS 12 — it is CI-only.
+     - macOS 14 (CI, macos-14 runner) — the full e2e matrix (chromium AND
+       webkit) runs ONLY in CI, with the latest Playwright version pinned and
+       kept current: a stale pin risks regressing the browser protocol
+       contract, so CI intentionally tracks the newest stable. A passing CI
+       run is a superset check, not a claim about macOS 12 internals; the
+       minimum-OS claim rests on the dev machine itself.
 4. Open a PR against `master` using the PR template.
 
 ### Commit conventions (enforced by the commit-msg hook)
