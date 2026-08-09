@@ -19,7 +19,7 @@ Two distributions from the same codebase — **web (self-hosted Docker)** and **
 ### Option A — Web (Docker, self-host)
 
 > [!IMPORTANT]
-> Docker **pulls a prebuilt image** — no build step on your side. The image is built in CI on every release (`ghcr.io/docubook/editor`) and contains the frontend **and** the server.
+> Docker **pulls a prebuilt image** — no build step on your side. The image is built in CI on every release ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)) and contains the frontend **and** the server. Pin a release to stay on a known version: `ghcr.io/docubook/editor:v0.1.0-rc.1` (default `latest` tracks the newest tag).
 
 **Quick start:**
 
@@ -130,13 +130,13 @@ Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/ed
 
 - **Apple Silicon (`aarch64.dmg`)** — _"app is damaged"_. macOS launchd refuses to spawn an **unsigned** arm64 binary (`RBSRequestErrorDomain Code=5`), so the build keeps an **ad-hoc signature**; with the download quarantine flag still on, Gatekeeper reads that signature as invalid and reports "damaged." There is **no Open Anyway** button for this case — clear the quarantine flag once:
   ```sh
-  xattr -cr /Applications/DocuBook.app
-  open /Applications/DocuBook.app
+  xattr -cr /Applications/DocuBook\ Editor.app
+  open /Applications/DocuBook\ Editor.app
   ```
 - **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
   - Right-click **DocuBook** in Applications → **Open** → **Open**, or
   - System Settings → Privacy & Security → **Open Anyway**, or
-  - the same `xattr -cr /Applications/DocuBook.app` one-liner above.
+  - the same `xattr -cr /Applications/DocuBook\ Editor.app` one-liner above.
 
   Do the bypass once — the app opens normally afterwards.
 

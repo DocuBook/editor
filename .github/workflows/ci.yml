@@ -230,7 +230,7 @@ jobs:
       # the adhoc signature on arm64 and strip only on x86_64.
       #
       # arm64 (adhoc-signed, kept):   download+quarantine shows "app is
-      #   damaged" → user runs `xattr -cr "DocuBook.app"` once, then launches.
+      #   damaged" → user runs `xattr -cr "DocuBook Editor.app"` once, then launches.
       # x86_64 (stripped, unsigned):  shows "developer cannot be verified"
       #   → Open Anyway → launches. launchd tolerates unsigned x86_64.
       - name: Strip ad-hoc signature (x86_64 only — Gatekeeper "damaged" fix)
@@ -310,7 +310,7 @@ jobs:
           **macOS (Apple Silicon — `*-arm64.dmg`):** first run may show “app
           is damaged.” Clear the quarantine flag once:
           ```bash
-          xattr -cr "/Applications/DocuBook.app"
+          xattr -cr "/Applications/DocuBook Editor.app"
           ```
           **macOS (Intel — `*-amd64.dmg`):** right-click the app → *Open* →
           *Open Anyway* on the Gatekeeper dialog.
