@@ -307,12 +307,19 @@ jobs:
           cat >> /tmp/release-notes.md <<'EOF'
 
           ---
-          **macOS (Apple Silicon — `*-arm64.dmg`):** first run may show “app
+          **Web (Docker):** self-host via the container image
+          ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)):
+          ```bash
+          docker run -d --name docubook -p 8080:8080 -v docubook:/data ghcr.io/docubook/editor:${{ github.ref_name }}
+          ```
+
+          ---
+          **macOS (Apple Silicon — `*_aarch64.dmg`):** first run may show “app
           is damaged.” Clear the quarantine flag once:
           ```bash
           xattr -cr "/Applications/DocuBook Editor.app"
           ```
-          **macOS (Intel — `*-amd64.dmg`):** right-click the app → *Open* →
+          **macOS (Intel — `*_x64.dmg`):** right-click the app → *Open* →
           *Open Anyway* on the Gatekeeper dialog.
           EOF
           gh release create "$TAG" "${DMGS[@]}" \
