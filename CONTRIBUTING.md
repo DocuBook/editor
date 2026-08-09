@@ -77,27 +77,46 @@ frontend/
     PasswordInput.tsx    Password field with show/hide toggle (login + change-password)
     AppearanceSettings.tsx  Theme picker (named themes: Midnight / Bright Surfaces)
     ShortcutsModal.tsx   Keyboard shortcuts reference
+    OnboardingGuide.tsx  First-run guide for new vaults
     ErrorBoundary.tsx    Root crash recovery screen
   stores/
     editor.ts            Tabs, file content, edited content, undo/redo state
     vault.ts             Vault state, tree, folder expansion, recent vaults
-    aiSettings.ts        Provider/model/saved-providers (persisted) — API keys live only in keychain
+    aiSettings.ts        Provider/model/saved-providers (persisted) — API keys
+                         live only backend-side (Keychain / keys.json, never the webview)
     auth.ts              Web auth status (setup → login → ready), 401 handling
     gitStatus.ts         Shared git status (branch + porcelain) — one poller
     theme.ts             Named theme store (data-theme + Tauri window + meta theme-color)
   data/
-    providers.ts         Auto-generated provider/model catalog (models.dev)
+    providers.ts         Generated provider/model catalog — regenerate with
+                         `node frontend/data/fetch-providers.mjs` (models.dev api.json)
+    fetch-providers.mjs  Catalog generator script (fetches models.dev, writes providers.ts)
   hooks/
     useKeyboard.ts       Keyboard shortcut handling
     usePolling.ts        Interval polling
     useClickOutside.ts   Click-outside detection for menus
   utils/
-    aiBlocks.ts          AI text → applyDocumentOperations (suggestions)
+    aiBlocks.ts          Markdown → applyDocumentOperations; normalization, semantic
+                         validation, prompt builders (edit/vault-first), vault-intent routing
     setupWizard.ts       Pure setup-wizard validation + payload builder (unit-testable)
-  e2e/
-    theme-check.mjs      Playwright theme E2E (dark/light switch + picker)
-    web-smoke.mjs        Playwright full-stack smoke (setup → login)
-    screenshot/          E2E screenshots (gitignored)
+    iteratorPolyfill.ts  Safari ES2023 iterator polyfills
+    uuid.ts              Secure-context-safe UUID v4 (crypto.randomUUID with
+                         getRandomValues/Math.random fallback — plain-HTTP/IP access)
+test/
+  lib.mjs                Shared CI-friendly harness: server + browser logs to
+                         artifacts/, browser engine resolution (chromium/webkit,
+                         system-Chrome fallback), pass/fail summary
+  run-all.mjs            One entry point for all suites (npm run test:e2e;
+                         BROWSER env picks the engine)
+  web-smoke.mjs          Full-stack smoke: setup wizard → login → persistent
+                         session across server restart
+  trash.mjs              Trash UI: empty state (disabled) → restore → back in tree
+  theme-check.mjs        Theme E2E (dark/light switch + picker in Settings)
+  ai-debug.mjs           AI transport e2e (mock provider: Path A tools + Path B
+                         text-only, selection + markdown)
+  check-acl.mjs          ACL guard: every Tauri command has an allow-* entry
+                         (run in CI lint)
+  artifacts/             Run logs (server + browser console) + results (gitignored)
 src-tauri/
   Cargo.toml             Desktop crate (bin docubook-desktop + lib docubook)
   tauri.conf.json        Window config (theme: Dark), CSP, bundle
@@ -117,14 +136,17 @@ server/                  Web distribution — standalone axum crate (no Tauri)
   Cargo.toml             Bin docubook-server (musl-friendly, [[bin]] path = main.rs)
   main.rs                HTTP server: /api/<cmd> dispatcher, SSE AI streaming,
                          auth middleware, static file serving (SPA fallback)
-  auth.rs                Argon2id passwords, in-memory sessions, login rate limit
+  auth.rs                Argon2id passwords, persistent sessions (sessions.json,
+                         SHA-256 hashed tokens, survive restarts), login rate limit
   config.rs              Config merge (env > /data/config.json > default)
-  keys.rs                API-key store (keys.json, 0600)
+  keys.rs                API-key store (keys.json, 0600; optional AES-256-GCM
+                         encryption at rest via DB_KEYS_PASSPHRASE, Argon2id KDF)
 dist/                    Frontend build output (gitignored; served by server + Tauri)
 public/                  Static assets (appicon.png)
-patches/                 patch-package patches for node_modules
 Dockerfile               Multi-stage web image (node → rust musl → alpine)
 docker-compose.yml       Web deployment (volume /data, env reference)
+docker-entrypoint.sh     Container entrypoint (data-dir self-heal + boot diagnostics)
+rust-toolchain.toml      Pinned Rust toolchain (build reproducibility, REL-2)
 .env.example             All server environment variables
 ```
 
@@ -132,8 +154,8 @@ docker-compose.yml       Web deployment (volume /data, env reference)
 
 - **Trust boundary:** the Rust backend (desktop `src-tauri` / web `server`) is trusted; the frontend is not. File paths are canonicalized against the vault root, AI base URLs are allowlisted (SSRF guard), and API keys never reach the frontend — the webview cannot read them.
 - **Two runtimes, one frontend:** `frontend/lib/ipc.ts` abstracts Tauri IPC and HTTP/SSE behind one `invoke`/`listen` API, so components are runtime-agnostic. The web server reuses the desktop app's pure modules (`vault`, `wiki`, `git`, `search`, `agent`) via `#[path]` includes — never edit them in one place only.
-- **Web auth:** first run creates an admin account (Argon2id); sessions are httpOnly cookies (rate-limited login). `DB_NO_AUTH=1` keeps open access (pre-web behavior). Env vars win over the Settings → System overrides.
-- **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web. Both are resolved server-side in `ask_ai` — a frontend-supplied key is ignored.
+- **Web auth:** first run creates an admin account (Argon2id); sessions are httpOnly cookies (rate-limited login) persisted in `sessions.json` (SHA-256 hashed tokens — they survive server restarts, so redeploys don't log users out). `DB_NO_AUTH=1` keeps open access (pre-web behavior); the setup wizard's "Skip — keep open access" is consent-gated (acknowledgement checkbox). Env vars win over the Settings → System overrides.
+- **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web, optionally AES-256-GCM encrypted at rest via the `DB_KEYS_PASSPHRASE` env var (Argon2id-derived key; plaintext files auto-migrate, encrypted files are never overwritten without the passphrase). Both are resolved server-side in `ask_ai` — a frontend-supplied key is ignored.
 - **Permissions (desktop):** if you add or remove a Tauri command, regenerate `src-tauri/permissions/default.toml` and `src-tauri/capabilities/default.json` in the same change (see the header comment in the permission file).
 - **Versions:** `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces it. `server/Cargo.toml` is versioned independently.
 
@@ -147,6 +169,28 @@ docker-compose.yml       Web deployment (volume /data, env reference)
    - `npm run build`
    - `cd src-tauri && cargo test`
    - `cd server && cargo test`
+   - Build the web server + frontend, then the Playwright suites
+     (run logs land in `test/artifacts/` — server stdout/stderr,
+     browser console, and per-run results):
+     `cargo build --manifest-path server/Cargo.toml && npm run build`
+     `npm run test:e2e`   # all suites, chromium (default)
+     `BROWSER=webkit npm run test:e2e`   # webkit — CI only (macos-15 runner)
+
+     Note — environment matrix (three macOS versions, no ambiguity):
+     - macOS 12 (dev machine) — the MINIMUM supported OS, validated by the
+       developer running the e2e smoke suites on their own machine. Newest
+       Playwright browser builds target newer macOS, so local runs use the
+       system Chrome fallback for chromium; webkit cannot run on macOS 12 —
+       it is CI-only.
+     - macOS 14+ (CI) — the SUPERSET check: the full e2e matrix (chromium AND
+       webkit) runs ONLY in CI, with the latest Playwright version pinned and
+       kept current (a stale pin risks regressing the browser protocol
+       contract). The e2e job itself runs on the macOS 15 runner because the
+       standard Playwright WebKit build (1.62+) needs macOS 15+; on older
+       runners it falls back to an older WebKit that rejects the driver's
+       PushAPIEnabled context setting. A passing CI run is a superset check,
+       not a claim about macOS 12 internals; the minimum-OS claim rests on
+       the dev machine.
 4. Open a PR against `master` using the PR template.
 
 ### Commit conventions (enforced by the commit-msg hook)
@@ -155,22 +199,24 @@ docker-compose.yml       Web deployment (volume /data, env reference)
 <type>(<scope>): <subject>
 ```
 
-| Type | Usage |
-|------|-------|
-| `feat` | new feature |
-| `fix` | bug fix |
-| `chore` | maintenance (release, deps) |
-| `ci` | CI / pipeline |
-| `docs` | documentation (README, CONTRIBUTING, CHANGELOG) |
-| `perf` | performance optimization |
-| `refactor` | structural change without behavior change |
-| `test` | test suite / test tooling |
-| `security` | security hardening / audit |
+**DRY mapping — the commit subject IS the changelog line.** Each type maps 1:1 to a CHANGELOG category; a release section is assembled by grouping the merged PR subjects by type (no rewriting):
 
-- **Scope** is optional, kebab-case: `fix(docker):`, `ci(release):`, `feat(theme):`
-- **Subject**: concise, imperative, lowercase — add a body for the WHY when needed
+| Type | CHANGELOG category | Usage |
+|------|--------------------|-------|
+| `feat` | 🚀 Features | new feature |
+| `fix` | 🐛 Bug Fixes | bug fix |
+| `security` | 🛡️ Security | security hardening / audit |
+| `perf` | ⚡ Performance | performance optimization |
+| `refactor` | 🔄 Refactor | structural change without behavior change |
+| `docs` | 📚 Documentation | documentation (README, CONTRIBUTING) |
+| `test` | 🧪 Testing & CI | test suite / test tooling |
+| `ci` | 🔧 CI | CI / pipeline |
+| `chore` | 🔄 Version / Hygiene | maintenance (release, deps) |
+
+- **Scope** is optional, kebab-case: `fix(docker):`, `ci(release):`, `feat(theme):` — when it adds signal, keep it as a prefix on the changelog bullet (`feat(theme):` → "theme: …")
+- **Subject**: concise, imperative, lowercase — write it as the changelog line it will become
 - **PR merge commits** (squash) are exempt from the hook
-- Commit messages are NOT used for auto-changelog (CHANGELOG.md is manual) — the convention keeps history readable
+- **Release changelog = the merged PR subjects grouped by type** — each subject lands verbatim under its category in `CHANGELOG.md`; the section is assembled from commits, not rewritten (DRY)
 - The hook rejects other formats and lists the allowed types — no commitlint needed
 
 **CI runs the full artifact matrix on every PR** (not just on release): frontend build, desktop DMG, web server binary, and a full `docker build` of the web image (which also reports the image size). If your change touches the Dockerfile, the Rust modules, or the frontend, the PR build is the fastest way to catch breakage.

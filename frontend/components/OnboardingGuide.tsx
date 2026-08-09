@@ -1,4 +1,5 @@
 import { FileText, Sparkles, GitBranch, Keyboard } from 'lucide-react'
+import { isTauri } from '../lib/ipc'
 
 const ONBOARDING_KEY = 'docubook-onboarding-done'
 
@@ -14,7 +15,7 @@ const steps = [
   {
     icon: FileText,
     title: 'Create your first note',
-    body: 'Click the + button in the sidebar or press ⌘N to create a new note. Name it anything — the .md extension is added automatically.',
+    body: `Click the + button in the sidebar or press ${isTauri ? '\u2318N' : '\u2318\u21E7F'} to create a new note. Name it anything — the .md extension is added automatically.`,
   },
   {
     icon: Keyboard,
@@ -37,7 +38,7 @@ export default function OnboardingGuide({ onDismiss }: { onDismiss: () => void }
   return (
     <div className="flex-1 flex items-center justify-center bg-background p-8">
       <div className="max-w-lg w-full">
-        <h2 className="text-lg font-semibold text-foreground mb-1">Welcome to DocuBook</h2>
+        <h2 className="text-lg font-semibold text-foreground mb-1">Welcome to DocuBook Editor</h2>
         <p className="text-sm text-zinc-500 mb-8">Your vault is ready. Here's how to get started.</p>
 
         <div className="space-y-5">

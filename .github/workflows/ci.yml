@@ -13,6 +13,9 @@ env:
   CARGO_TERM_COLORS: always
   NODE_VERSION: '22'
 
+permissions:
+  contents: read
+
 jobs:
   lint:
     runs-on: macos-14
@@ -27,6 +30,8 @@ jobs:
         run: npx oxlint frontend/
       - name: TypeScript type check
         run: npx tsc -b
+      - name: ACL guard (every Tauri command has an allow entry)
+        run: node test/check-acl.mjs
       - name: Frontend tests
         run: npx vitest run
       - name: Check version consistency (manifests + locks + changelog section)
@@ -56,6 +61,60 @@ jobs:
         run: cargo test --manifest-path server/Cargo.toml
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+  e2e:
+    # macOS 15 required: the standard Playwright WebKit build (1.62+) needs
+    # macOS 15+ — older runners can only run an older WebKit that rejects the
+    # driver's PushAPIEnabled context setting.
+    runs-on: macos-15
+    needs: [test]
+    # Heavy matrix job: PRs wait for the same approval gate as the build job;
+    # push to master / tags / manual run without approval (behavior unchanged).
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
+    strategy:
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # --no-install forces the LOCAL playwright (1.62.1) — without it npx can
+      # resolve a pre-installed/global playwright on the runner and download a
+      # mismatched webkit build (e.g. v2251 vs the v2336 our driver expects), which
+      # then rejects the driver's PushAPIEnabled context setting at newPage.
+      - name: Install Playwright browsers
+        run: npx --no-install playwright install chromium webkit
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Build web server (debug — used by the e2e harness)
+        run: cargo build --manifest-path server/Cargo.toml
+      - name: Build frontend
+        run: npm run build
+      - name: "E2E — all suites (web-smoke, trash, theme, AI transport)"
+        run: npm run test:e2e
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - name: Upload e2e logs (server + browser console)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs-${{ matrix.browser }}
+          path: test/artifacts/
+          if-no-files-found: ignore
+
+  test-server-linux:
+    # Server-only on Linux: exercises cfg(target_os="linux") paths (delete →
+    # .trash server-side trash) that never run on the macos-14 test job.
+    runs-on: ubuntu-22.04
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cargo test (web server, Linux)
+        run: cargo test --manifest-path server/Cargo.toml
+
   security:
     runs-on: ubuntu-22.04
     needs: [lint]

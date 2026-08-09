@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/DocuBook/editor/releases"><img alt="release" src="https://shieldcn.dev/github/DocuBook/editor/release.svg?split=true" /></a>
   <a href="https://github.com/DocuBook/editor/actions"><img alt="CI" src="https://shieldcn.dev/github/DocuBook/editor/ci.svg?split=true" /></a>
+  <a href="https://github.com/DocuBook/editor/blob/master/LICENSE"><img alt="license" src="https://shieldcn.dev/github/DocuBook/editor/license.svg?split=true" /></a>
 </p>
 
 > A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
@@ -87,11 +88,10 @@ How you set them depends on your host — a `.env` file for `docker compose`, `-
 | `DB_NO_AUTH` | `false` | `1` = open access without login (pre-web behavior) |
 | `DB_SESSION_TTL_HOURS` | `168` | Session lifetime before re-login |
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | — | Set **both** to skip the wizard entirely (headless provisioning) |
+| `DB_OPENAI_COMPAT_BASE_URL` (+ `_API_KEY`, `_MODEL`) | — | Provision/override the **custom OpenAI-compatible provider** from the environment. When `BASE_URL` is set, Settings → AI shows the custom endpoint **read-only** ("from env" badge) and the backend uses these values. Leave unset for the normal in-app setup |
 
 > [!NOTE]
 > `DB_SETUP_TOKEN` is compared verbatim — it is **not** a JWT, has no expiry beyond the setup window, and the wizard never displays it (it only asks for it). Generate one with `openssl rand -hex 32` and keep it safe.
-
-All environment variables are documented in [`.env.example`](./.env.example).
 
 **Requirements (web):**
 
@@ -150,9 +150,9 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 
 ### First run (both)
 
-- **Web**: open the URL → the setup wizard creates the admin account (or provision headless with `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`, both required). Data lives in the `/data` volume — back it up.
-- **Desktop**: open the app → welcome screen → **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL). Vaults are plain local folders — no lock-in.
-- **Connect AI**: Settings → **AI** — pick a provider, paste your API key. Keys are stored **backend-side only** (macOS Keychain on desktop, a 0600 file in `/data` on web) and never leave the machine.
+- **Web**: open the URL → the setup wizard creates the admin account (or provision headless with `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`, both required). Back up the `/data` volume — see the persistence warning in [Option A](#option-a--web-docker-self-host).
+- **Desktop**: open the app → welcome screen → **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL).
+- **Connect AI**: Settings → **AI** — pick a provider, paste your API key (stored backend-side, never in the browser). Docker: optionally provision the custom endpoint headless with `DB_OPENAI_COMPAT_BASE_URL` + `_API_KEY` (+ `_MODEL`) — the UI then shows it read-only ("from env" badge).
 - **Publish with Git**: Settings → **Git** — set commit name/email and add a remote. Private repos use your Keychain / SSH keys on desktop; the container's git identity on web.
 - **Start writing**: click a file in the sidebar, type `/` for slash commands, use the **Code** button to toggle WYSIWYG/markdown. See [Usage](#usage).
 
@@ -166,6 +166,9 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 
 ## Features
 
+> [!NOTE]
+> Only **`.md` files** open in the WYSIWYG block editor (standard CommonMark). Other extensions (`.mdx`, `.markdown`, JSON, TOML, YAML, `.txt`, …) open in **view-only** mode.
+
 ### Vault System (Obsidian-like)
 
 - Open any folder as a vault — your files stay local, no lock-in
@@ -173,8 +176,6 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 - CRUD — create files/folders, rename, delete via right-click context menu
 - Search files by filename (like Zed/Obsidian Cmd+F)
 - Frontmatter (YAML) auto-extracted, preserved during edits
-- **.md** files open in WYSIWYG editor (fully supported)
-- All other file types (`.mdx`, `.markdown`, JSON, TOML, YAML, etc.) open in view-only mode
 
 ### WYSIWYG Block Editor (Notion-like)
 
@@ -182,16 +183,14 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 - Slash command menu (`/`) to insert headings, lists, quotes, code blocks, dividers
 - Bubble menu for inline formatting (bold, italic, code, link, highlight)
 - Markdown source mode — toggle between WYSIWYG and raw markdown (code mode)
-- **.md files only** — WYSIWYG mode supports standard CommonMark markdown
-- Non-`.md` files (`.mdx`, `.markdown`, etc.) open in view-only mode
 
 ### AI Assistant
 
 - Inline AI powered by BlockNote XL (`@blocknote/xl-ai`) + custom Rust backend
 - Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
 - Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
-- API keys configured in **Settings** — stored in macOS Keychain only, never localStorage
-- **100+ providers** with **1,000+ models** — auto-synced from [models.dev](https://models.dev) into `frontend/data/providers.ts` (the generated catalog is the single source of truth; currently 174 providers / 5,482 models)
+- API keys configured in **Settings** — stored **backend-side only** (macOS Keychain on desktop, a 0600 file in `/data` on web), never in localStorage
+- **100+ providers** with **1,000+ models** — provider catalog generated from [models.dev](https://models.dev) via `node frontend/data/fetch-providers.mjs` (single source of truth; `--cache` reuses the last fetch offline)
 
 > [!NOTE]\
 > **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, the majority of the 1,000+ catalog) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
@@ -208,8 +207,6 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 | Groq          | llama-3.1-8b, llama-3.3-70b          |
 | Cohere        | command-r7b, command-a               |
 | Perplexity    | sonar, sonar-pro                     |
-
-**Provider data** is auto-generated from [models.dev/api.json](https://models.dev/api.json) — an open-source database of AI model specs, pricing, and capabilities. Run `curl https://models.dev/api.json` to get the latest data.
 
 ### Git Integration
 
@@ -233,7 +230,7 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 | -------- | ------------------------------- |
 | Frontend | React 19, TypeScript 6, Zustand |
 | UI       | Tailwind CSS v4, Lucide icons   |
-| Editor   | BlockNoteJS 0.52 (ProseMirror)  |
+| Editor   | BlockNoteJS 0.53 (ProseMirror)  |
 | Backend  | Rust with Tauri v2              |
 | Build    | Vite 8 + Rolldown               |
 | Markdown | pulldown-cmark (Rust)           |
@@ -251,12 +248,9 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 1. Launch the app — click Open Vault (folder icon in sidebar)
 2. Select a folder containing .md files
 3. Click a file in the sidebar tree — opens in WYSIWYG editor
-4. Type `/` for slash commands, select text for bubble formatting
-5. Use Code button to toggle between editor / markdown source
-6. Save — stages changes, Publish — commit + push
-7. Toggle AI in toolbar for AI assistance
-
-> **Note:** Only `.md` files are fully supported in WYSIWYG mode. Other extensions (`.mdx`, `.markdown`, `.txt`, etc.) open in view-only mode.
+4. Edit: `/` for slash commands, select text for bubble formatting, Code button toggles WYSIWYG/markdown (see [Features](#features) and [Keyboard Shortcuts](#keyboard-shortcuts))
+5. Save — stages changes, Publish — commit + push
+6. Toggle AI in toolbar for AI assistance
 
 ### Keyboard Shortcuts
 
@@ -267,8 +261,8 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-comp
 | `Ctrl/Cmd+O`                     | Open vault / project folder                      |
 | `Ctrl/Cmd+Shift+E`               | Toggle WYSIWYG / Markdown                        |
 | `Ctrl/Cmd+Z` / `+Shift+Z` / `+Y` | Undo / Redo                                      |
-| `Ctrl/Cmd+N`                     | New file                                         |
-| `Ctrl/Cmd+Alt+N`                 | New folder                                       |
+| `Ctrl/Cmd+Shift+F` (native also `Ctrl/Cmd+N`) | New file                                         |
+| `Ctrl/Cmd+Alt+Shift+F` (native also `Ctrl/Cmd+Alt+N`) | New folder                                       |
 | `Ctrl+Alt+L`                     | Ask AI / Write with AI (opens AI menu at cursor) |
 | `Ctrl/Cmd+,`                     | Settings (AI + Git)                              |
 | `/` (in editor)                  | Slash command menu                               |

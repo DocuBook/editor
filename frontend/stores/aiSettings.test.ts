@@ -196,4 +196,28 @@ describe('aiSettings store', () => {
     expect(useAiSettings.getState().apiKeys['openai']).toBeUndefined()
     expect(useAiSettings.getState().apiKey).toBe('')
   })
+
+  it('custom base URL persists per-provider (openai-compatible)', () => {
+    useAiSettings.getState().setProvider('openai-compatible')
+    useAiSettings.getState().setBaseUrl('https://proxy.example.com/v1')
+    expect(useAiSettings.getState().baseUrls['openai-compatible']).toBe('https://proxy.example.com/v1')
+
+    useAiSettings.getState().setProvider('openai')
+    expect(useAiSettings.getState().baseUrls['openai-compatible']).toBe('https://proxy.example.com/v1')
+
+    // switching back restores the custom URL input source
+    useAiSettings.getState().setProvider('openai-compatible')
+    expect(useAiSettings.getState().baseUrls['openai-compatible']).toBe('https://proxy.example.com/v1')
+  })
+
+  it('probeTools persist per-provider+model (measured tool-call support)', () => {
+    useAiSettings.getState().setProbeTools('test-provider', 'model-a', false)
+    expect(useAiSettings.getState().probeTools['test-provider']?.['model-a']).toBe(false)
+    useAiSettings.getState().setProbeTools('openai-compatible', 'gpt-4o', true)
+    expect(useAiSettings.getState().probeTools['openai-compatible']?.['gpt-4o']).toBe(true)
+    /** a different model on the same provider keeps its own measurement */
+    useAiSettings.getState().setProbeTools('openai-compatible', 'gpt-4o-mini', false)
+    expect(useAiSettings.getState().probeTools['openai-compatible']?.['gpt-4o']).toBe(true)
+    expect(useAiSettings.getState().probeTools['openai-compatible']?.['gpt-4o-mini']).toBe(false)
+  })
 })

@@ -19,6 +19,8 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import './stores/theme' // applies <html data-theme> before first paint
+import { installIteratorFilterPolyfill } from './utils/iteratorPolyfill'
+installIteratorFilterPolyfill()
 
 // Prototype-pollution hardening (replaces Tauri's freezePrototype, which is
 // injected before app load and breaks zod/xl-ai: they assign

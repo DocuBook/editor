@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION } from '../utils/aiBlocks'
 
 describe('inheritFormatOnReplace', () => {
   it('inherits heading format onto plain paragraph output', () => {
@@ -179,5 +179,58 @@ describe('normalizeMarkdown', () => {
   it('leaves balanced fences unchanged', () => {
     const md = '```js\nx\n```\nmore'
     expect(normalizeMarkdown(md)).toBe(md)
+  })
+})
+
+describe('isVaultGenerationIntent', () => {
+  it('false without vault context', () => {
+    expect(isVaultGenerationIntent('Apa isi vault?', false, '')).toBe(false)
+  })
+  it('true for wikilink reference', () => {
+    expect(isVaultGenerationIntent('Ringkas [[roadmap]]', true, 'doc')).toBe(true)
+  })
+  it('true for question', () => {
+    expect(isVaultGenerationIntent('Apa isi vault?', true, 'doc')).toBe(true)
+  })
+  it('true for generation command', () => {
+    expect(isVaultGenerationIntent('Buat draft rencana kerja', true, 'doc')).toBe(true)
+    expect(isVaultGenerationIntent('Generate ringkasan rapat', true, 'doc')).toBe(true)
+  })
+  it('true on empty document with vault context', () => {
+    expect(isVaultGenerationIntent('Lanjutkan catatan', true, '')).toBe(true)
+  })
+  it('false for edit request on non-empty doc', () => {
+    expect(isVaultGenerationIntent('Perbaiki typo di sini', true, 'ada konten')).toBe(false)
+  })
+})
+
+describe('buildVaultGroundingPrompt', () => {
+  it('embeds vault context and forbids fabrication', () => {
+    const p = buildVaultGroundingPrompt('## notes\n(File: x.md)\nisi')
+    expect(p).toContain('## notes')
+    expect(p).toContain('never fabricate')
+    expect(p).toContain('authoritative source material')
+  })
+})
+
+describe('buildEditSystemPrompt', () => {
+  it('includes doc state, vault context, and edit rules', () => {
+    const p = buildEditSystemPrompt('konten doc', '## vault\nisi', '- summarize rule')
+    expect(p).toContain('Document state (JSON):')
+    expect(p).toContain('konten doc')
+    expect(p).toContain('## vault')
+    expect(p).toContain('reference block ids EXACTLY as shown')
+    expect(p).toContain('summarize rule')
+  })
+  it('omits vault section when vault context empty', () => {
+    const p = buildEditSystemPrompt('doc', '', '')
+    expect(p).not.toContain('Vault context')
+  })
+})
+
+describe('AI_MARKDOWN_INSTRUCTION', () => {
+  it('is a non-empty markdown instruction', () => {
+    expect(AI_MARKDOWN_INSTRUCTION).toContain('BlockNote-compatible Markdown')
+    expect(AI_MARKDOWN_INSTRUCTION).toContain('No commentary')
   })
 })

@@ -27,18 +27,28 @@ impl WikiIndex {
     pub fn new(root: &Path) -> Self {
         Self { root: root.to_path_buf(), links: HashMap::new(), files: Vec::new(), name_to_path: HashMap::new() }
     }
-/** Walk all .md files and build the wikilink graph + name→path resolution map. */
+/** Walk all .md files (recursive, skipping hidden dirs) and build the wikilink
+ *  graph + name→path resolution map. */
     pub fn scan(&mut self) {
         self.links.clear(); self.files.clear(); self.name_to_path.clear();
         let link_re = Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
-        if let Ok(entries) = std::fs::read_dir(&self.root) {
+        let root = self.root.clone();
+        self.scan_dir(&root, &link_re);
+    }
+
+    fn scan_dir(&mut self, dir: &Path, link_re: &Regex) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
-                if e.path().extension().and_then(|e| e.to_str()) != Some("md") { continue; }
-                let rel = self.rel(&e.path());
-                self.files.push(e.path());
-                let stem = e.path().file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                let p = e.path();
+                let name = e.file_name().to_string_lossy().to_string();
+                if name == ".git" || name == ".trash" || name == "node_modules" || name == ".DS_Store" { continue; }
+                if p.is_dir() { self.scan_dir(&p, link_re); continue; }
+                if p.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+                let rel = self.rel(&p);
+                self.files.push(p.clone());
+                let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                 self.name_to_path.entry(normalize(&stem)).or_insert_with(|| rel.clone());
-                if let Ok(c) = std::fs::read_to_string(e.path()) {
+                if let Ok(c) = std::fs::read_to_string(&p) {
                     let targets: Vec<String> = link_re.captures_iter(&c).map(|m| normalize(&m[1])).collect();
                     self.links.insert(rel, targets);
                 }
@@ -75,10 +85,22 @@ impl WikiIndex {
 /** Suggest files matching a query (fuzzy by filename stem). */
     pub fn suggest(&self, query: &str) -> Vec<Suggestion> {
         let q = query.to_lowercase();
-        self.files.iter().filter_map(|f| {
+        let mut by_name: Vec<Suggestion> = Vec::new();
+        let mut by_content: Vec<Suggestion> = Vec::new();
+        for f in &self.files {
             let name = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-            if name.to_lowercase().contains(&q) { Some(Suggestion { path: self.rel(f), title: name }) } else { None }
-        }).take(20).collect()
+            if name.to_lowercase().contains(&q) {
+                by_name.push(Suggestion { path: self.rel(f), title: name });
+            } else if let Ok(c) = std::fs::read_to_string(f) {
+                // Content match — lets you link a note by what's IN it, not just
+                // its filename. Reads are bounded: stops once 20 total found.
+                if c.to_lowercase().contains(&q) {
+                    by_content.push(Suggestion { path: self.rel(f), title: name });
+                }
+            }
+            if by_name.len() + by_content.len() >= 20 { break; }
+        }
+        by_name.into_iter().chain(by_content).take(20).collect()
     }
     fn rel(&self, path: &Path) -> String { path.strip_prefix(&self.root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default() }
 /** Extract the first line containing a wikilink whose text normalizes to `lt`. */
@@ -142,9 +164,35 @@ mod tests {
         assert_eq!(bl.len(), 1);
         assert_eq!(bl[0].path, "beta-note.md");
         assert!(bl[0].snippet.contains("back to [[alpha]]"));
-        // suggest by stem
-        assert_eq!(w.suggest("gam").len(), 1);
-        assert_eq!(w.suggest("gam")[0].path, "gamma.md");
+        // suggest by stem — name matches first; content match ("Gamma" in
+        // alpha.md) follows after
+        let gam = w.suggest("gam");
+        assert_eq!(gam[0].path, "gamma.md");
+        assert!(gam.iter().any(|s| s.path == "alpha.md"), "content match must also be suggested");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn scan_is_recursive_and_suggests_content() {
+        let dir = std::env::temp_dir().join(format!("docubook-wiki-rec-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("projects")).unwrap();
+        std::fs::create_dir_all(dir.join(".trash")).unwrap();
+        std::fs::write(dir.join("projects/roadmap.md"), "# Roadmap\n\nlaunch q3").unwrap();
+        std::fs::write(dir.join(".trash/old.md"), "# Old").unwrap();
+        std::fs::write(dir.join("notes.md"), "# Notes").unwrap();
+
+        let mut w = WikiIndex::new(&dir);
+        w.scan();
+        // recursive: nested note indexed; .trash excluded
+        assert!(w.resolve("roadmap").as_deref() == Some("projects/roadmap.md"), "nested note must resolve");
+        assert!(w.resolve("old").is_none(), ".trash must be excluded");
+        // content search: query matches words INSIDE the note, not its filename
+        let hits = w.suggest("launch");
+        assert!(hits.iter().any(|s| s.path == "projects/roadmap.md"), "content match must be found");
+        // filename match still wins the ordering (first)
+        let by_name = w.suggest("road");
+        assert_eq!(by_name[0].path, "projects/roadmap.md");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

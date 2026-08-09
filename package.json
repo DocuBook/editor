@@ -1,7 +1,7 @@
 {
   "name": "@docubook/editor",
   "private": true,
-  "version": "0.1.0-beta.4",
+  "version": "0.1.0-rc.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,15 +11,18 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepare": "husky && patch-package",
-    "test:e2e": "node frontend/e2e/theme-check.mjs",
-    "test:e2e:smoke": "node frontend/e2e/web-smoke.mjs"
+    "prepare": "husky",
+    "test:e2e": "node test/run-all.mjs",
+    "test:e2e:smoke": "node test/web-smoke.mjs",
+    "test:e2e:trash": "node test/trash.mjs",
+    "test:e2e:theme": "node test/theme-check.mjs",
+    "test:e2e:ai": "node test/ai-debug.mjs"
   },
   "dependencies": {
-    "@blocknote/core": "^0.52.1",
-    "@blocknote/mantine": "^0.52.1",
-    "@blocknote/react": "^0.52.1",
-    "@blocknote/xl-ai": "^0.52.1",
+    "@blocknote/core": "0.53.0",
+    "@blocknote/mantine": "0.53.0",
+    "@blocknote/react": "0.53.0",
+    "@blocknote/xl-ai": "0.53.0",
     "@mantine/core": "^9.4.2",
     "@mantine/hooks": "^9.4.2",
     "@tauri-apps/api": "^2.11.1",
@@ -61,7 +64,6 @@
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "oxlint": "^1.77.0",
-    "patch-package": "^8.0.1",
     "playwright": "1.62.1",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",

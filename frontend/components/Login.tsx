@@ -29,13 +29,13 @@ export default function Login() {
   return (
     <div className="h-screen flex items-center justify-center p-8">
       <div className="w-full max-w-[320px]">
-        <div className="text-xl font-semibold text-foreground text-center">DocuBook</div>
+        <div className="text-xl font-semibold text-foreground text-center">DocuBook Editor</div>
         <div className="text-xs text-muted mt-1 mb-8 text-center">Sign in to your vault server</div>
         <form onSubmit={submit} className="flex flex-col gap-3">
           <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className={input} autoFocus />
           <PasswordInput value={password} onChange={setPassword} placeholder="Password" className={input} />
           {err && <div className="text-xs text-red-400">{err}</div>}
-          <button disabled={busy} className="w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm cursor-pointer bg-surface-active text-foreground hover:bg-surface-hover disabled:opacity-40">
+          <button disabled={busy} className="w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm cursor-pointer bg-accent hover:bg-accent-hover text-white disabled:opacity-40">
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
