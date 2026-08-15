@@ -37,7 +37,7 @@
     "@tiptap/extension-mention": "^3.29.0",
     "@tiptap/extension-placeholder": "^3.29.0",
     "@tiptap/extension-table": "^3.29.0",
-    "@tiptap/extension-table-cell": "^3.29.0",
+    "@tiptap/extension-table-cell": "^3.30.0",
     "@tiptap/extension-table-header": "^3.29.0",
     "@tiptap/extension-table-row": "^3.29.0",
     "@tiptap/extension-task-item": "^3.29.0",
