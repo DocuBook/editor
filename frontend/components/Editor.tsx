@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
-import OnboardingGuide, { isOnboardingDone } from './OnboardingGuide'
+import OnboardingGuide, { isOnboardingDone, markOnboardingDone } from './OnboardingGuide'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { editorFileKind } from '../utils/fileKind'
 import { WelcomeScreen } from './editor/WelcomeScreen'
@@ -20,6 +20,13 @@ export default function Editor() {
   useEffect(() => {
     if (vaultOpen && !isOnboardingDone()) setOnboardingDone(false)
   }, [vaultOpen])
+
+  /** Completion is set by REAL progress, not by clicking the onboarding button:
+   *  opening a file proves step 1 (create a note) is done. The button only
+   *  dismisses — a reload/new vault still shows the guide until a note exists. */
+  useEffect(() => {
+    if (file) markOnboardingDone()
+  }, [file])
 
   const openXlAiMenu = () => {
     const editor = useEditorStore.getState().blockEditor
