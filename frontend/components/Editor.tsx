@@ -1048,6 +1048,27 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
 
+  /** Keep the active tab visible — when switching to a tab beyond the visible
+   *  edge (overflow-x), auto-scroll it into view instead of forcing the user
+   *  to manually scroll the tab strip. A small end-margin keeps the tab from
+   *  sitting flush against the strip edge. */
+  const tabStripRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const strip = tabStripRef.current
+    if (!strip || !curTab) return
+    const el = strip.querySelector(`[data-tab-path="${CSS.escape(curTab)}"]`) as HTMLElement | null
+    if (!el) return
+    const sl = strip.scrollLeft
+    const sr = strip.getBoundingClientRect()
+    const er = el.getBoundingClientRect()
+    const left = er.left - sr.left
+    const right = er.right - sr.left
+    if (right > sr.width - 8) {
+      strip.scrollLeft = sl + (right - sr.width) + 8   // scroll right, +8 margin
+    } else if (left < 8) {
+      strip.scrollLeft = Math.max(0, sl + left - 8)    // scroll left, -8 margin
+    }
+  }, [curTab])
   useEffect(() => {
     /** Reset disk-dirty on tab switch; next git poll corrects it */
     setHasDiskChanges(false)
@@ -1092,9 +1113,9 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
         <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2"><Redo2 size={16} /></button>
         <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
       </span>
-      <div className="flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
+      <div ref={tabStripRef} className="flex-1 flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
         {tabs.length === 0 ? <span className="text-zinc-500 italic self-center">No file open</span> : tabs.map(tab => (
-          <div key={tab.path} onClick={() => switchTab(tab.path)}
+          <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
             className={'tab-item flex items-center justify-center relative px-8 cursor-pointer border-r border-border-subtle whitespace-nowrap shrink-0 ' + (activeTab === tab.path ? 'tab-active bg-background text-foreground shadow-[inset_0_-1px_0_var(--color-accent)]' : 'tab-inactive text-foreground-subtle')}>
             <span className={tab.deleted ? 'line-through opacity-50' : undefined}>{tab.name}</span>
             {activeTab === tab.path && (
@@ -1103,7 +1124,6 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
           </div>
         ))}
       </div>
-      <div className="flex-1" />
       <span className="tip-wrap tip-bar">
         <button onClick={onAiToggle} disabled={!aiAvailable}
         className="rounded text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer enabled:text-foreground-subtle enabled:hover:text-foreground enabled:hover:bg-surface-active p-2"><Sparkles size={14} /></button>
