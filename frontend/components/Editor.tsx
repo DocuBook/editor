@@ -18,7 +18,8 @@ import { useVaultStore } from '../stores/vault'
 import OnboardingGuide, { isOnboardingDone } from './OnboardingGuide'
 import { invoke, listen, openDir, fileUrl } from '../lib/ipc'
 import { toast } from 'sonner'
-import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION } from '../utils/aiBlocks'
+import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, buildToolSystemPrompt, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+import { resolveProbeModel, isTextOnly } from '../utils/aiProbe'
 import { uuid } from '../utils/uuid'
 import { mathDollarToMathML } from '../utils/mathMarkdown'
 import { fileKind as classifyFile } from '../utils/fileKind'
@@ -306,11 +307,11 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
           /** Tool-call support = model capability (catalog) AND measured gateway
            *  compatibility (test_connection probe, stored per provider+model). No
            *  static exclusions: a provider/model measured tools:false stays
-           *  text-only, custom endpoints unlock when the probe measures tools:true. */
-          const probe = st.probeTools[resolvedProvider]?.[resolvedModel]
-          const supportsTools = resolvedProvider === CUSTOM_PROVIDER_ID
-            ? probe === true
-            : modelDef?.toolCall === true && probe !== false
+           *  text-only, custom endpoints unlock when the probe measures tools:true.
+           *  For env-controlled custom endpoints the probe is keyed by the env
+           *  model (the one the backend actually sends), so resolve it here. */
+          const probeModel = resolveProbeModel(resolvedProvider, resolvedModel)
+          const supportsTools = !isTextOnly(resolvedProvider, probeModel, st.probeTools, modelDef?.toolCall === true)
           const toolDefs = (body as any)?.toolDefinitions as Record<string, { description: string; inputSchema: any }> | undefined
           /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
           const tools = (supportsTools && toolDefs) ? Object.entries(toolDefs).map(([name, def]) => ({
@@ -356,8 +357,8 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
               /** Propagate xl-ai abort → Rust cancel (stops the in-flight reqwest stream). */
               abortSignal?.addEventListener?.('abort', () => { invoke('cancel_ai').catch(() => {}) })
               try {
-                /** Ground the model with actual document state so output is doc-specific, not generic */
-                const docContext = buildDocumentContext()
+                /** Ground the model with actual document state so output is doc-specific, not generic. */
+                let docContext = buildDocumentContext()
                 const userMsg = messages.find((m: any) => m.role === 'user')
                 const userText = (userMsg?.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || ''
                 const taskRules = buildTaskFormattingRules(userText)
@@ -378,9 +379,29 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
                  *  output lands as plain-Markdown insert (accept/revert). */
                 const isVaultGeneration = isVaultGenerationIntent(userText, hasVaultContext, docContext)
                 const useTools = supportsTools && !!tools && !isVaultGeneration
+                /** Tool path: reuse xl-ai's OWN document state (already on the last
+                 *  user message as metadata.documentState — ids suffixed with `$`,
+                 *  HTML blocks). Rebuilding it as markdown is what made models
+                 *  hallucinate referenceIds ("referenceId not found"). */
+                if (useTools) {
+                  const lastUser = messages[messages.length - 1]
+                  const ds = (lastUser as any)?.metadata?.documentState
+                  if (ds?.blocks) {
+                    const MAX = AI_FORMATTING_RULES.maxContextChars
+                    const full = JSON.stringify(ds.blocks)
+                    const state = ds.selectedBlocks?.length
+                      ? `SELECTED blocks (edit these when the user refers to the selection):\n${JSON.stringify(ds.selectedBlocks)}\n\nFull document:\n${full}`
+                      : full
+                    docContext = state.length > MAX ? state.substring(0, MAX) + '...[truncated]' : state
+                  } else {
+                    docContext = ''
+                  }
+                }
                 bufferText = useTools
                 const systemGrounding = isVaultGeneration
                   ? buildVaultGroundingPrompt(vaultContext)
+                  : useTools
+                  ? buildToolSystemPrompt(docContext, vaultContext, taskRules)
                   : docContext
                   ? buildEditSystemPrompt(docContext, vaultContext, taskRules)
                   : ''
@@ -414,13 +435,13 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
                     model: resolvedModel,
                     baseUrl: providerInfo?.api || config.baseUrl,
                   })
-                  /** Diagnostic: this line must appear AFTER a completed ask_ai.
-                   *  If xl-ai errors but this never logs, the stream never
-                   *  resolved (stuck SSE) — not a transport branch failure. */
-                  console.info('[ai] ask_ai resolved', { chars: fullText.length, tools: toolBuffer.length })
-                  /** Real correctness gate: referenced ids must exist in the document (blocking). */
+                  /** Real correctness gate: referenced ids must exist in the document (blocking).
+                   *  Normalize model-echoed ids: BlockNote expects a trailing `$`
+                   *  (idsSuffixed), but models like GLM sometimes strip it. Fix
+                   *  before validation AND before emit to xl-ai. */
                   let semanticError: string | null = null
                   for (const tc of toolBuffer) {
+                    tc.input = suffixOperationIds(tc.input)
                     semanticError = validateOperationsSemantics(editorRef.current, tc.input)
                     if (semanticError) break
                   }

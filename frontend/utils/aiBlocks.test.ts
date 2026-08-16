@@ -1,5 +1,40 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+
+describe('suffixOperationIds', () => {
+  it('adds $ to id and referenceId', () => {
+    const out = suffixOperationIds({
+      type: 'applyDocumentOperations',
+      operations: [
+        { type: 'update', id: 'abc' },
+        { type: 'add', referenceId: 'root', blocks: [{ id: 'new' }] },
+      ],
+    })
+    expect(out.operations[0].id).toBe('abc$')
+    expect(out.operations[1].referenceId).toBe('root$')
+    expect(out.operations[1].blocks[0].id).toBe('new') // nested block ids NOT touched (only op id/referenceId)
+  })
+  it('leaves already-suffixed ids unchanged', () => {
+    const out = suffixOperationIds({ type: 'applyDocumentOperations', operations: [{ type: 'update', id: 'abc$' }] })
+    expect(out.operations[0].id).toBe('abc$')
+  })
+  it('leaves input without operations array unchanged', () => {
+    const input = { type: 'other', foo: 'bar' }
+    expect(suffixOperationIds(input)).toBe(input)
+    expect(suffixOperationIds(null)).toBeNull()
+    expect(suffixOperationIds('str')).toBe('str')
+  })
+  it('handles tool args without type field (model sends {operations} only)', () => {
+    const out = suffixOperationIds({ operations: [{ type: 'update', id: 'ref2' }, { type: 'add', referenceId: 'root' }] })
+    expect(out.operations[0].id).toBe('ref2$')
+    expect(out.operations[1].referenceId).toBe('root$')
+  })
+  it('handles missing/empty id', () => {
+    const out = suffixOperationIds({ type: 'applyDocumentOperations', operations: [{ type: 'delete', id: '' }, { type: 'add' }] })
+    expect(out.operations[0].id).toBe('')
+    expect(out.operations[1]).toEqual({ type: 'add' })
+  })
+})
 
 describe('inheritFormatOnReplace', () => {
   it('inherits heading format onto plain paragraph output', () => {
@@ -148,6 +183,16 @@ describe('validateOperationsSemantics', () => {
 
   it('returns null for non-applyDocumentOperations input', () => {
     expect(validateOperationsSemantics(editor, { type: 'other' })).toBeNull()
+  })
+
+  it('validates tool args without type field (model sends {operations} only)', () => {
+    expect(validateOperationsSemantics(editor, {
+      operations: [{ type: 'add', referenceId: 'b1$', position: 'after', blocks: ['<p>x</p>'] }],
+    })).toBeNull()
+    const err = validateOperationsSemantics(editor, {
+      operations: [{ type: 'add', referenceId: 'fake$', position: 'after', blocks: ['<p>x</p>'] }],
+    })
+    expect(err).toContain('does not exist')
   })
 })
 

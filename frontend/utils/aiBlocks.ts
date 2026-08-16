@@ -31,14 +31,48 @@ export function blockIdExists(editor: any, id: string): boolean {
 }
 
 /** Semantic anti-hallucination: referenced ids in applyDocumentOperations must exist in the doc. */
+/**
+ * Ensure every operation id/referenceId carries the trailing `$` that
+ * BlockNote's applyDocumentOperations expects (idsSuffixed). The document
+ * state in the AI prompt has suffixed ids, but some models (e.g. GLM) strip
+ * the `$` when echoing them back — xl-ai then rejects with
+ * "referenceId must end with $". Fix at the transport boundary.
+ *
+ * The model's tool args are `{ "operations": [...] }` — there is NO `type`
+ * field (the tool name lives on the tool call itself), so accept either shape.
+ */
+export function suffixOperationIds(input: any): any {
+  if (!input || typeof input !== 'object') return input
+  const ops = input.operations
+  if (!Array.isArray(ops)) return input
+  const fix = (v: unknown): unknown =>
+    typeof v === 'string' && v.length > 0 && !v.endsWith('$') ? v + '$' : v
+  return {
+    ...input,
+    operations: ops.map(op => {
+      if (!op || typeof op !== 'object') return op
+      const out: Record<string, unknown> = { ...op }
+      if (typeof out.id === 'string') out.id = fix(out.id)
+      if (typeof out.referenceId === 'string') out.referenceId = fix(out.referenceId)
+      return out
+    }),
+  }
+}
+
+/** Strip a trailing `$` suffix if present (operation ids are suffixed for the
+ *  model; editor block ids are not). */
+const stripSuffix = (id: string) => id.endsWith('$') ? id.slice(0, -1) : id
+
 export function validateOperationsSemantics(editor: any, input: any): string | null {
-  if (!input || input.type !== 'applyDocumentOperations' || !Array.isArray(input.operations)) return null
+  // Model tool args are `{ "operations": [...] }` — there is NO `type` field
+  // (the tool name lives on the tool call itself), so don't require one here.
+  if (!input || !Array.isArray(input.operations)) return null
   for (const op of input.operations) {
     if (!op) continue
-    if (op.type === 'add' && op.referenceId && !blockIdExists(editor, op.referenceId)) {
+    if (op.type === 'add' && op.referenceId && !blockIdExists(editor, stripSuffix(op.referenceId))) {
       return `referenceId "${op.referenceId}" does not exist in the document`
     }
-    if ((op.type === 'update' || op.type === 'delete') && op.id && !blockIdExists(editor, op.id)) {
+    if ((op.type === 'update' || op.type === 'delete') && op.id && !blockIdExists(editor, stripSuffix(op.id))) {
       return `block id "${op.id}" does not exist in the document`
     }
   }
@@ -92,6 +126,25 @@ Rules (MUST follow):
 
 /** Single shared markdown instruction for Path B / fallback user messages. */
 export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`
+
+/** System prompt for the tool path: doc state carries real block ids (see
+ *  buildToolDocumentContext) and the model must route edits through
+ *  applyDocumentOperations — ids EXACTLY as shown, including the trailing $. */
+export function buildToolSystemPrompt(docContext: string, vaultContext: string, taskRules: string): string {
+  const vault = vaultContext.trim() ? `\n\n─── Vault context (from [[wikilinks]] and search) ───${vaultContext}` : ''
+  return `You are editing the document below. Use the "applyDocumentOperations" tool to make changes; do NOT output the new content as text. Reference block ids EXACTLY as shown — including the trailing $.
+
+Document state (JSON):
+${docContext}${vault}
+
+Rules (MUST follow):
+- Call applyDocumentOperations with an \`operations\` array (add / update / delete).
+- Prefer updating existing blocks over removing and adding.
+- NEVER invent block ids — use only the ids from the document state above.
+- NEVER echo the document state JSON back.
+- Blocks are HTML strings (single valid HTML element per block).
+- When editing or replacing selected blocks, PRESERVE each block's type and formatting.${taskRules}`
+}
 
 /** Single edit-rule system prompt: document state (bekal) + vault context + rules. */
 export function buildEditSystemPrompt(docContext: string, vaultContext: string, taskRules: string): string {
