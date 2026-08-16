@@ -4,9 +4,9 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct SearchResult { pub path: String, pub name: String }
 
-/// Search .md files by filename stem — no content reads. Case-insensitive,
+/// Search .md/.mdx files by filename stem — no content reads. Case-insensitive,
 /// ranked: prefix match (3) > substring (2) > fuzzy subsequence (1). The
-/// `.md` extension is stripped before matching, so a query like "md" only
+/// markdown extension is stripped before matching, so a query like "md" only
 /// hits stems that actually contain it (e.g. "md-notes"), never every file.
 pub fn search_vault(root: &Path, query: &str) -> Vec<SearchResult> {
     let q = query.trim().to_lowercase();
@@ -25,8 +25,8 @@ fn walk(base: &Path, dir: &Path, q: &str, scored: &mut Vec<(i32, SearchResult)>)
             if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
             if path.is_dir() {
                 walk(base, &path, q, scored);
-            } else if name.ends_with(".md") {
-                let stem = &name[..name.len() - 3];
+            } else if crate::markdown::is_markdown_name(&name) {
+                let stem = crate::markdown::strip_markdown_ext(&name);
                 let score = fuzzy_score(stem, q);
                 if score > 0 {
                     let rel = path.strip_prefix(base).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
@@ -89,6 +89,19 @@ mod tests {
         let r = search_vault(&dir, "md");
         let names: Vec<&str> = r.iter().map(|x| x.name.as_str()).collect();
         assert_eq!(names, vec!["md-tools.md"]); // stem "md-tools" starts with md; "notes"/"design" don't
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn search_includes_mdx() {
+        let dir = vault("mdx", &["guide.md".to_string(), "changelog.mdx".to_string(), "readme.txt".to_string()]);
+        // .mdx must be indexed like .md; .txt stays excluded
+        let r = search_vault(&dir, "change");
+        let names: Vec<&str> = r.iter().map(|x| x.name.as_str()).collect();
+        assert_eq!(names, vec!["changelog.mdx"], "search harus index .mdx");
+        // stem "changelog" (bukan "changelog.mdx") dipakai utk matching
+        let r2 = search_vault(&dir, "mdx");
+        assert!(r2.is_empty(), "query mdx tidak boleh match semua .mdx");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
