@@ -644,12 +644,12 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
  *  beyond any legitimate document. When exceeded the stream is stopped and
  *  `ai:done` carries `truncated: true`. */
 const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
-
-/** Total AI generation budget per attempt (seconds). A provider that streams
- *  slowly but steadily (weak/thinking models) never trips the 120s per-chunk
- *  read_timeout, so the entire run is bounded instead. */
-const AI_MAX_SECONDS: u64 = 180;
-
+/** Total AI generation budget per attempt (seconds) — a pure backstop.
+ *  Failure detection is the PI pattern: 30s first-chunk + 120s per-chunk stall
+ *  timeout kill hung streams fast, and the user can always Abort (cancel_ai).
+ *  A model that streams slowly but steadily (weak/thinking models) is allowed
+ *  to finish; this cap only guards against a runaway generation. */
+const AI_MAX_SECONDS: u64 = 900;
 /** Map transport errors to user-safe messages — never leak URLs, paths, or
  *  raw provider details into the UI (structured error contract). */
 fn sanitize_ai_error(err: &str) -> String {
