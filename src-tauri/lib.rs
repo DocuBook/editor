@@ -382,6 +382,20 @@ async fn test_connection(provider: String, model: String, base_url: String, api_
     } else {
         agent::validate_base_url(&base_url)?;
     }
+    // API key: prefer the explicit arg (just-entered key), fall back to the
+    // stored keychain key so auto-probe works without re-typing the key
+    // (mirrors ask_ai, which always resolves from the keychain). Custom
+    // endpoints also fall back to the stored base URL.
+    let api_key = if api_key.is_empty() {
+        keychain::get_key(&provider).map_err(|_| "No API key found in keychain".to_string())?
+    } else {
+        api_key
+    };
+    let base_url = if base_url.is_empty() && provider == agent::CUSTOM_PROVIDER_ID {
+        keychain::get_base_url(&provider).map_err(|_| "No custom base URL saved — set it in Settings → AI".to_string())?
+    } else {
+        base_url
+    };
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build().map_err(|e| format!("Client error: {}", e))?;

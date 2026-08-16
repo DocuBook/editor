@@ -3,6 +3,7 @@ import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
 import { X, Eye, EyeOff, Check, Loader, ChevronsUpDown, Search } from 'lucide-react'
 import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
+import { resolveProbeModel, autoProbe } from '../utils/aiProbe'
 import GitSettings from './GitSettings'
 import SystemSettings from './SystemSettings'
 import AppearanceSettings from './AppearanceSettings'
@@ -59,6 +60,29 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [])
   const envCustom = customCfg?.source === 'env'
   const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 ml-2">from env</span>
+
+  /** Auto-probe when the selected model changes and has no stored probe yet.
+   *  Custom endpoints are text-only until measured true — a model switch would
+   *  otherwise silently drop tool calls until a manual Test. Env-controlled
+   *  custom endpoints probe the ENV model (backend uses it regardless). */
+  useEffect(() => {
+    if (!provider || !model) return
+    const p = providers.find(x => x.id === provider)
+    const probeModel = resolveProbeModel(provider, model, envCustom ? customCfg?.model : undefined)
+    if (!probeModel) return
+    // Skip env-controlled custom: the probe must run against the env key/baseUrl
+    // which the backend resolves — invoke with empty UI values lets it do that.
+    void autoProbe(provider, probeModel, probeTools, useAiSettings.getState().setProbeTools, async () => {
+      const result = await invoke<string>('test_connection', {
+        provider,
+        model: probeModel,
+        baseUrl: provider === CUSTOM_PROVIDER_ID ? (envCustom ? '' : baseUrlInput.trim()) : p?.api || '',
+        apiKey: envCustom ? '' : keyInput,
+      })
+      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') return { tools: parsed.tools } } catch {}
+      return undefined
+    })
+  }, [model, provider])
 
   /** Provider catalog lazy-loaded (2.17 MB — not part of the initial bundle). */
   const [providers, setProviders] = useState<ProviderInfo[]>([])
@@ -169,13 +193,15 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     // Auto-probe right after saving so the badge + transport use MEASURED
     // tool-call support, not the conservative default (unmeasured → text-only).
     const p = providers.find(x => x.id === provider)
-    const testModel = model || p?.models[0]?.id || ''
+    // For env-controlled custom endpoints the probe must target the ENV model
+    // (the backend sends it regardless of the UI value).
+    const probeModel = resolveProbeModel(provider, model || p?.models[0]?.id || '', envCustom ? customCfg?.model : undefined)
     try {
-      const result = await invoke<string>('test_connection', { provider, model: testModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
+      const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
       let tools: boolean | undefined
       try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
       if (tools !== undefined) {
-        useAiSettings.getState().setProbeTools(provider, testModel, tools)
+        useAiSettings.getState().setProbeTools(provider, probeModel, tools)
         toast.success(tools === true ? 'Tool calls supported' : 'Text-only — tool calls rejected by this gateway')
       }
     } catch { /* probe failed — badge stays at the default; Test button remains available */ }
@@ -186,13 +212,13 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setTesting(true)
     try {
       const p = providers.find(x => x.id === provider)
-      const testModel = model || p?.models[0]?.id || ''
-      const result = await invoke<string>('test_connection', { provider, model: testModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
-      /** Persist the measured tool-call support — ground truth for the transport
-       *  (probe-based; no static exclusions). */
+      const probeModel = resolveProbeModel(provider, model || p?.models[0]?.id || '', envCustom ? customCfg?.model : undefined)
+      // Test ONLY checks connectivity + measures tool support for the toast.
+      // It does NOT persist the probe — saving is the responsibility of
+      // handleSave (auto-probe) and the model-switch autoProbe effect.
+      const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
       let tools: boolean | undefined
       try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
-      if (tools !== undefined) useAiSettings.getState().setProbeTools(provider, testModel, tools)
       toast.success(tools === true ? 'Connection OK — tool calls supported' : 'Connection OK')
     } catch (e) { toast.error(String(e)) }
     setTesting(false)

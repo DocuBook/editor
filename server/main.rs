@@ -757,7 +757,6 @@ fn custom_env_base_url() -> Option<String> {
 
 /** Mirrors lib.rs ask_ai + test_connection — streams SSE events to the browser. */
 async fn test_connection(state: &AppState, provider: &str, model: &str, base_url: &str, api_key: &str) -> Result<String, String> {
-    let _ = state;
     // Env override: a custom endpoint controlled by the environment probes the
     // env values, not whatever the (read-only) UI happens to hold.
     let (base_url, api_key) = if provider == agent::CUSTOM_PROVIDER_ID {
@@ -767,6 +766,18 @@ async fn test_connection(state: &AppState, provider: &str, model: &str, base_url
         }
     } else {
         (base_url.to_string(), api_key.to_string())
+    };
+    // Fall back to the stored key/base URL (data dir) so auto-probe works
+    // without re-entering the key in the UI — mirrors ask_ai.
+    let api_key = if api_key.is_empty() {
+        keys::get_key(&state.data_dir, provider).map_err(|_| "No API key found".to_string())?
+    } else {
+        api_key
+    };
+    let base_url = if base_url.is_empty() && provider == agent::CUSTOM_PROVIDER_ID {
+        keys::get_base_url(&state.data_dir, provider).map_err(|_| "No custom base URL saved".to_string())?
+    } else {
+        base_url
     };
     // Custom endpoints skip the allowlist (any public https host) but still pass
     // the generic sanitize; catalog providers stay strictly allowlisted.
