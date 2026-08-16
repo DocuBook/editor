@@ -7,6 +7,9 @@ import { toast } from 'sonner'
 import SettingsModal from './SettingsModal'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
+import { MARKDOWN_EXTENSIONS } from '../utils/fileKind'
+const stripMarkdownExt = (name: string) =>
+  MARKDOWN_EXTENSIONS.some(e => name.toLowerCase().endsWith(e)) ? name.replace(/\.(md|mdx)$/i, '') : name
 
 /** Search modal overlay — command-palette style search. */
 function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void }) {
@@ -72,7 +75,7 @@ function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (pa
               openFile(item.path, item.name); onClose() }}
               className={'flex items-center gap-3 px-3 py-2 cursor-pointer text-sm rounded ' + (i === selectedIdx ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
               <FileText size={14} className="text-muted shrink-0" />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.name.replace(/\.md$/i, '')}</span>
+              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{stripMarkdownExt(item.name)}</span>
               <span className="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap ml-auto">{item.path}</span>
             </div>
           ))}
@@ -249,13 +252,13 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
             {!trashOpen && loading && <div className="text-zinc-500 text-xs p-2">Loading...</div>}
             {!trashOpen && !loading && visibleItems.length === 0 && !creating && <div className="text-zinc-500 italic text-xs p-2">Empty vault</div>}
             {!trashOpen && renaming && (
-              <input ref={renameRef} type="text" defaultValue={renaming.name.replace(/\.md$/i, '')}
+              <input ref={renameRef} type="text" defaultValue={stripMarkdownExt(renaming.name)}
                 className="w-full bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none mb-1"
                 onKeyDown={async e => {
                   if (e.key === 'Enter') {
                     const dir = renaming.path.substring(0, renaming.path.lastIndexOf('/') + 1)
                     let target = (e.target as HTMLInputElement).value
-                    if (/\.md$/i.test(renaming.path) && !/\.\w{1,10}$/i.test(target)) target = target + '.md'
+                    if (MARKDOWN_EXTENSIONS.some(e => renaming.path.toLowerCase().endsWith(e)) && !/\.\w{1,10}$/i.test(target)) target = target + '.md'
                     const newPath = dir + target
                     try { await invoke('rename_file', { from: renaming.path, to: newPath }); loadTree() } catch(err) { console.error(err); toast.error('Failed to rename') }
                     setRenaming(null)
@@ -281,7 +284,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
                   <div onClick={() => { openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '') }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
                     className={'depth-' + Math.min(item.depth || 0, 12) + ' flex items-center gap-2 py-1 pr-2 rounded hover:bg-surface-active cursor-pointer text-foreground-secondary'}>
                     <FileText size={14} className="text-zinc-500 shrink-0" />
-                    <span className="truncate">{item.name.replace(/\.md$/i, '')}</span>
+                    <span className="truncate">{stripMarkdownExt(item.name)}</span>
                   </div>
                 )}
               </div>

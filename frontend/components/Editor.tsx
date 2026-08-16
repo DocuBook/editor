@@ -16,11 +16,12 @@ import { X, Undo2, Redo2, Sparkles, EyeOff, Command, Option, ChevronUp, ArrowBig
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide, { isOnboardingDone } from './OnboardingGuide'
-import { invoke, listen, openDir } from '../lib/ipc'
+import { invoke, listen, openDir, fileUrl } from '../lib/ipc'
 import { toast } from 'sonner'
 import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION } from '../utils/aiBlocks'
 import { uuid } from '../utils/uuid'
 import { mathDollarToMathML } from '../utils/mathMarkdown'
+import { fileKind as classifyFile } from '../utils/fileKind'
 // Mermaid is a singleton — wrapping render here also patches the instance
 // @blocknote/diagram-block uses. Serialize renders (mermaid keeps global
 // state; parallel renders race on slow engines like WKWebView) and surface
@@ -85,7 +86,24 @@ function buildDocumentContext(): string {
 }
 
 /** ── Non-text preview fallback ── */
-const BINARY_EXTENSIONS = ['.png','.jpg','.jpeg','.gif','.webp','.ico','.svg','.pdf','.mp3','.mp4','.mov','.avi','.zip','.tar','.gz','.rar','.exe','.dmg','.pkg','.bin']
+
+/** Image file preview — render the image inline instead of the EyeOff placeholder. */
+function ImagePreview({ fileName, vaultPath, relPath }: { fileName: string; vaultPath: string; relPath: string }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let alive = true
+    fileUrl(vaultPath, relPath).then(u => { if (alive) setSrc(u) }).catch(() => { if (alive) setFailed(true) })
+    return () => { alive = false }
+  }, [vaultPath, relPath])
+  if (failed) return <PreviewFallback fileName={fileName} />
+  if (!src) return <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading...</div>
+  return (
+    <div className="h-full w-full flex items-center justify-center p-6 overflow-auto">
+      <img src={src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => setFailed(true)} />
+    </div>
+  )
+}
 
 /** Fallback UI for binary file types that can't be previewed as text. */
 function PreviewFallback({ fileName }: { fileName: string }) {
@@ -1125,18 +1143,21 @@ function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
 }
 
 /** ── Main layout ── */
-/** Extensions that support Editor + Code modes (toggleable). */
-const MD_EXTENSION = '.md'
-/** Classify a file: 'wysiwyg' (.md — toggleable), 'preview' (others). */
-const fileKind = (path: string): 'wysiwyg' | 'preview' => {
-  if (path.endsWith(MD_EXTENSION)) return 'wysiwyg'
-  return 'preview'
-}
+/**
+ * Classify a file into one of three tiers (single source of truth in
+ * frontend/utils/fileKind.ts):
+ * - 'wysiwyg' — markdown family (.md/.mdx): Editor/Code toggle + AI
+ * - 'binary'  — image etc: inline preview (read-only)
+ * - 'text'    — everything else readable: plain text viewer (read-only)
+ */
+const fileKind = (path: string): 'wysiwyg' | 'binary' | 'text' =>
+  classifyFile(path) === 'binary' ? 'binary' : classifyFile(path) === 'markdown' ? 'wysiwyg' : 'text'
 
 export default function Editor() {
   const { editMode } = useEditorStore()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const vaultOpen = useVaultStore(s => s.isOpen)
+  const vaultPath = useVaultStore(s => s.vaultPath)
   const [onboardingDone, setOnboardingDone] = useState(() => isOnboardingDone())
 
   // Re-check when vault first opens
@@ -1188,15 +1209,14 @@ export default function Editor() {
   }
 
   const kind = fileKind(file.path)
-  const isBinary = BINARY_EXTENSIONS.some(ext => file.path.endsWith(ext))
 
   /** Shared scroll container — all modes use the same container. */
   let inner: React.ReactNode
-  if (isBinary) {
-    inner = <PreviewFallback fileName={file.name} />
+  if (kind === 'binary') {
+    inner = <ImagePreview fileName={file.name} vaultPath={vaultPath} relPath={file.path} />
   } else if (file.content == null) {
     inner = <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading...</div>
-  } else if (kind === 'preview') {
+  } else if (kind === 'text') {
     inner = <PlainTextViewer content={file.content} fileName={file.name} />
   } else if (editMode === 'code') {
     inner = <MarkdownEditor content={file.frontmatter + (file.editedContent ?? file.content.replace(file.frontmatter, ''))} onChange={v => {

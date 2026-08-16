@@ -27,8 +27,8 @@ impl WikiIndex {
     pub fn new(root: &Path) -> Self {
         Self { root: root.to_path_buf(), links: HashMap::new(), files: Vec::new(), name_to_path: HashMap::new() }
     }
-/** Walk all .md files (recursive, skipping hidden dirs) and build the wikilink
- *  graph + name→path resolution map. */
+/** Walk all markdown files (`.md`/`.mdx`, recursive, skipping hidden dirs) and
+ *  build the wikilink graph + name→path resolution map. */
     pub fn scan(&mut self) {
         self.links.clear(); self.files.clear(); self.name_to_path.clear();
         let link_re = Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
@@ -43,7 +43,8 @@ impl WikiIndex {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name == ".git" || name == ".trash" || name == "node_modules" || name == ".DS_Store" { continue; }
                 if p.is_dir() { self.scan_dir(&p, link_re); continue; }
-                if p.extension().and_then(|e| e.to_str()) != Some("md") { continue; }
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
+                if ext != "md" && ext != "mdx" { continue; }
                 let rel = self.rel(&p);
                 self.files.push(p.clone());
                 let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();

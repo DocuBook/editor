@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { undoDepth, redoDepth } from '@tiptap/pm/history'
+import { isBinaryPath } from '../utils/fileKind'
 
 export interface Tab {
   path: string
@@ -65,6 +66,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   openFile: async (path, name, createIfMissing = false) => {
     if (get().tabs.find(t => t.path === path)) { set({ activeTab: path }); return }
     set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }], activeTab: path })
+    // Binary/image files are previewed via asset URL, never read as UTF-8 text.
+    if (isBinaryPath(path)) return
     try {
       const raw = await invoke<string>('read_file', { path })
       get().setContent(path, raw)
