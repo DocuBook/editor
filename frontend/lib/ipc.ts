@@ -146,3 +146,18 @@ export async function openDir(opts?: { title?: string; defaultPath?: string }): 
   const { pickServerVault } = await import('../components/VaultPicker')
   return pickServerVault()
 }
+
+/**
+ * Resolve an absolute vault file path to a loadable URL:
+ * - Tauri: `convertFileSrc` (asset protocol) — binary files can't go through IPC.
+ * - Web:   relative vault path (server serves vault files under the vault root).
+ */
+export async function fileUrl(vaultPath: string, relPath: string): Promise<string> {
+  if (isTauri) {
+    try {
+      const { convertFileSrc } = await import('@tauri-apps/api/core')
+      return convertFileSrc(`${vaultPath}/${relPath}`)
+    } catch { /* fall through to relative */ }
+  }
+  return relPath
+}

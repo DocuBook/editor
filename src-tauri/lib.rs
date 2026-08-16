@@ -183,7 +183,7 @@ fn ai_grounding_context(query: String, active_path: String, state: State<AppStat
                 linked.insert(r.path.clone());
                 if let Ok(content) = v.read_file(&r.path) {
                     let trimmed = trim_to_tokens(&content, 1500);
-                    context.push_str(&format!("\n\n## {}\n(File: {})\n{trimmed}", r.name.trim_end_matches(".md"), r.path));
+                    context.push_str(&format!("\n\n## {}\n(File: {})\n{trimmed}", r.name.trim_end_matches(".md").trim_end_matches(".mdx"), r.path));
                 }
             }
         }

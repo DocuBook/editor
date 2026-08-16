@@ -65,17 +65,31 @@ impl Vault {
         Ok(joined)
     }
 
-    /// True if the subtree at `dir` contains at least one `.md` file (recursive,
-    /// skipping hidden/system dirs). Drives folder visibility: folders with
-    /// nothing renderable are hidden from the tree.
-    fn dir_has_md(dir: &std::path::Path) -> bool {
+    /// Markdown-family extensions — WYSIWYG editable (common markdown + frontmatter).
+    fn is_markdown(name: &str) -> bool {
+        let lower = name.to_ascii_lowercase();
+        lower.ends_with(".md") || lower.ends_with(".mdx")
+    }
+
+    /// Extensions shown in the tree: markdown (editable) + images (previewable).
+    /// Everything else (pdf/audio/zip/…) is skipped — no way to open them yet.
+    fn is_renderable(name: &str) -> bool {
+        if Self::is_markdown(name) { return true; }
+        let lower = name.to_ascii_lowercase();
+        [".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".bmp", ".avif"]
+            .iter().any(|e| lower.ends_with(e))
+    }
+
+    /// True if the subtree at `dir` contains at least one renderable file
+    /// (recursive, skipping hidden/system dirs). Drives folder visibility.
+    fn dir_has_renderable(dir: &std::path::Path) -> bool {
         if let Ok(read) = std::fs::read_dir(dir) {
             for e in read.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
                 if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    if Self::dir_has_md(&e.path()) { return true; }
-                } else if name.ends_with(".md") {
+                    if Self::dir_has_renderable(&e.path()) { return true; }
+                } else if Self::is_renderable(&name) {
                     return true;
                 }
             }
@@ -92,10 +106,10 @@ impl Vault {
                 if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
                 let rel = if subpath.is_empty() { name.clone() } else { format!("{}/{}", subpath, name) };
                 let ft = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) { "1" } else { "0" };
-                // Only .md files are renderable — non-md files are skipped, and
-                // folders with no .md anywhere in their subtree are hidden too.
-                if ft == "0" && !name.ends_with(".md") { continue; }
-                if ft == "1" && !Self::dir_has_md(&e.path()) { continue; } // ponytail: re-walks subtrees per folder; cache a md-count map if large vaults get slow
+                // Show markdown (editable) + images (previewable) in the tree;
+                // folders with nothing renderable are hidden.
+                if ft == "0" && !Self::is_renderable(&name) { continue; }
+                if ft == "1" && !Self::dir_has_renderable(&e.path()) { continue; } // ponytail: re-walks subtrees per folder; cache a md-count map if large vaults get slow
                 let info = FileInfo { path: rel, name, file_type: ft.to_string() };
                 if ft == "1" { dirs.push(info) } else { files.push(info) }
             }
@@ -107,13 +121,15 @@ impl Vault {
 /** Read file content as UTF-8 string. */
     pub fn read_file(&self, path: &str) -> Result<String, String> {
         // Reference-completing fallback: an extension-less path that names a
-        // `.md` vault file opens it (e.g. links written as `roadmap` instead of
-        // `roadmap.md`) — never appends twice (only when no extension present).
+        // markdown vault file opens it (e.g. links written as `roadmap` instead
+        // of `roadmap.md`) — never appends twice (only when no extension present).
         let f = self.safe_path(path)?;
         let data = match std::fs::read(&f) {
             Ok(d) => d,
-            Err(_) if !path.ends_with(".md") && !path.contains('.') => {
-                std::fs::read(self.safe_path(&format!("{path}.md"))?).map_err(|e| format!("Read: {}", e))?
+            Err(_) if !path.contains('.') => {
+                let md = self.safe_path(&format!("{path}.md"));
+                let mdx = self.safe_path(&format!("{path}.mdx"));
+                std::fs::read(md.or(mdx)?).map_err(|e| format!("Read: {}", e))?
             }
             Err(e) => return Err(format!("Read: {}", e)),
         };
