@@ -1,5 +1,80 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+
+describe('buildDocumentContext', () => {
+  const editor: any = {
+    document: [{ id: 'b1', type: 'heading', content: [{ type: 'text', text: 'Title' }] }],
+    blocksToMarkdownLossy: () => '# Title\n',
+    getSelection: () => null,
+  }
+  it('returns markdown without ids (non-tool path)', () => {
+    expect(buildDocumentContext(editor)).toContain('# Title')
+  })
+  it('appends selection block types', () => {
+    const ed: any = { ...editor, getSelection: () => ({ blocks: [{ id: 'b1', type: 'heading', level: 1 }] }) }
+    expect(buildDocumentContext(ed)).toContain('b1: heading level 1')
+  })
+  it('returns empty for missing editor', () => {
+    expect(buildDocumentContext(null)).toBe('')
+  })
+})
+
+describe('buildToolDocContext', () => {
+  it('serializes blocks with suffixed ids (xl-ai metadata.documentState)', () => {
+    const ds = { blocks: [{ id: 'abc$', block: '<h2>T</h2>' }], isEmptyDocument: false }
+    const s = buildToolDocContext(ds)
+    expect(s).toContain('"id":"abc$"')
+    expect(s).toContain('<h2>T</h2>')
+  })
+  it('puts selected blocks first when a selection is active', () => {
+    const ds = { selectedBlocks: [{ id: 'sel$', block: '<p>x</p>' }], blocks: [{ id: 'a$', block: '<p>a</p>' }] }
+    const s = buildToolDocContext(ds)
+    expect(s.indexOf('SELECTED')).toBeLessThan(s.indexOf('"id":"a$"'))
+    expect(s.indexOf('sel$')).toBeLessThan(s.indexOf('a$'))
+  })
+  it('returns empty when no blocks', () => {
+    expect(buildToolDocContext({})).toBe('')
+    expect(buildToolDocContext(null)).toBe('')
+  })
+})
+
+describe('buildBaseMessages', () => {
+  const base = { system: 'SYS', messages: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any[], userText: 'hi', selText: '', useTools: false }
+  it('text-only: system + user with markdown instruction', () => {
+    const msgs = buildBaseMessages(base)
+    expect(msgs.length).toBe(2)
+    expect(msgs[0]).toEqual({ role: 'system', content: 'SYS' })
+    expect(msgs[1].content).toContain('hi')
+    expect(msgs[1].content).toContain('BlockNote-compatible Markdown')
+  })
+  it('text-only without system: single user message', () => {
+    const msgs = buildBaseMessages({ ...base, system: '' })
+    expect(msgs.length).toBe(1)
+  })
+  it('tools: system + clean history (parts flattened, metadata dropped)', () => {
+    const msgs = buildBaseMessages({ ...base, useTools: true, messages: [
+      { role: 'user', parts: [{ type: 'text', text: 'hello' }, { type: 'text', text: ' world' }], metadata: { documentState: {} } },
+      { role: 'assistant', content: 'prev' },
+    ] as any[] })
+    expect(msgs.length).toBe(3)
+    expect(msgs[1]).toEqual({ role: 'user', content: 'hello world' })
+    expect(msgs[2]).toEqual({ role: 'assistant', content: 'prev' })
+  })
+  it('appends selection text for text-only', () => {
+    const msgs = buildBaseMessages({ ...base, selText: 'selected' })
+    expect(msgs[1].content).toContain('Selected text:\n"selected"')
+  })
+})
+
+describe('isMeaningfulOps', () => {
+  it('true only for tool calls with non-empty operations array', () => {
+    expect(isMeaningfulOps({ input: { operations: [{ type: 'add' }] } })).toBe(true)
+    expect(isMeaningfulOps({ input: { operations: [] } })).toBe(false)
+    expect(isMeaningfulOps({ input: {} })).toBe(false)
+    expect(isMeaningfulOps({})).toBe(false)
+    expect(isMeaningfulOps(null)).toBe(false)
+  })
+})
 
 describe('suffixOperationIds', () => {
   it('adds $ to id and referenceId', () => {

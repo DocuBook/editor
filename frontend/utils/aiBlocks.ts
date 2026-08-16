@@ -127,6 +127,65 @@ Rules (MUST follow):
 /** Single shared markdown instruction for Path B / fallback user messages. */
 export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`
 
+/** Grounding context for non-tool paths: full document as markdown (the
+ *  model-native format) + selection block types. The AI transport uses this
+ *  for text-only and vault-generation routing. */
+export function buildDocumentContext(editor: any): string {
+  if (!editor) return ''
+  try {
+    const md = editor.blocksToMarkdownLossy(editor.document)
+    const sel = editor.getSelection()
+    const selCtx = sel?.blocks?.length
+      ? `\n\nSelection (preserve these block types on edit):\n${sel.blocks.map((b: any) => `- ${b.id}: ${b.type}${b.level ? ' level ' + b.level : ''}`).join('\n')}`
+      : ''
+    const MAX = AI_FORMATTING_RULES.maxContextChars
+    const trimmed = md.length > MAX ? md.substring(0, MAX) + '\n...[truncated]' : md
+    return trimmed + selCtx
+  } catch { return '' }
+}
+
+/** Tool-path doc state: reuse xl-ai's OWN document state (already attached to
+ *  the last user message as metadata.documentState — ids suffixed with `$`,
+ *  HTML blocks). Rebuilding it as markdown is what made models hallucinate
+ *  referenceIds ("referenceId not found"). Selection blocks go first. */
+export function buildToolDocContext(ds: any): string {
+  if (!ds?.blocks) return ''
+  const MAX = AI_FORMATTING_RULES.maxContextChars
+  const full = JSON.stringify(ds.blocks)
+  const state = ds.selectedBlocks?.length
+    ? `SELECTED blocks (edit these when the user refers to the selection):\n${JSON.stringify(ds.selectedBlocks)}\n\nFull document:\n${full}`
+    : full
+  return state.length > MAX ? state.substring(0, MAX) + '...[truncated]' : state
+}
+
+/** True when a tool call carries at least one operation — the only channel that
+ *  writes through xl-ai. Empty operations = model decided no change. */
+export const isMeaningfulOps = (tc: any): boolean =>
+  !!tc?.input && Array.isArray(tc.input.operations) && tc.input.operations.length > 0
+
+/** Base messages for ask_ai — differs by path:
+ *  - tools: system prompt + clean chat history (doc state lives in the prompt)
+ *  - text-only: system prompt + single user message (selection + markdown rules) */
+export function buildBaseMessages(p: {
+  system: string
+  messages: any[]
+  userText: string
+  selText: string
+  useTools: boolean
+}): any[] {
+  if (p.useTools) {
+    const clean = p.messages.map((m: any) => ({
+      role: m.role,
+      content: (m.parts || []).map((x: any) => x.type === 'text' ? x.text : '').join('') || m.content || '',
+    }))
+    return p.system ? [{ role: 'system', content: p.system }, ...clean] : clean
+  }
+  const userContent = `${p.userText}${p.selText ? `\n\nSelected text:\n"${p.selText}"` : ''}\n\n${AI_MARKDOWN_INSTRUCTION}`
+  return p.system
+    ? [{ role: 'system', content: p.system }, { role: 'user', content: userContent }]
+    : [{ role: 'user', content: userContent }]
+}
+
 /** System prompt for the tool path: doc state carries real block ids (see
  *  buildToolDocumentContext) and the model must route edits through
  *  applyDocumentOperations — ids EXACTLY as shown, including the trailing $. */
