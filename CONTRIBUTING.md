@@ -58,16 +58,29 @@ Runtime configuration (admin seeding, session TTL, open access, secure cookie) i
 
 ```text
 frontend/
-  main.tsx               Entry point (polyfills + ErrorBoundary)
+  main.tsx               Entry point (Safari15 polyfills + ErrorBoundary)
   App.tsx                Root layout, auth gate, keyboard shortcuts, single git-status poller
   index.css              Tailwind v4 + design tokens (@theme dark palette, [data-theme=light]) + ProseMirror styles
   lib/
     ipc.ts               Runtime bridge — Tauri IPC on desktop, HTTP/SSE on web (single API)
   components/
-    Editor.tsx           WYSIWYG + Markdown modes, AI transport (xl-ai ↔ Rust)
-    Sidebar.tsx          Vault tree, search, CRUD, context menu
+    Editor.tsx           Main layout — routes the active file to the right view
+                         (wysiwyg / image preview / plain text), keyboard shortcuts,
+                         shared scroll container. The heavy pieces live in ./editor.
+    editor/
+      WysiwygEditor.tsx  BlockNote editor lifecycle: markdown load/sync, dirty tracking,
+                         AI scroll-follow, wikilink hover/click hints, slash menu (math,
+                         diagram, AI). Hosts the xl-ai extension.
+      TabBar.tsx         Tab strip (auto-scroll), undo/redo, Editor/Code toggle,
+                         Save (stage), Publish (commit+push), AI toggle
+      WelcomeScreen.tsx  Launchpad when no vault is open (open/create/clone vault)
+      linkToolbar.tsx    Link toolbar overrides — vault-relative links keep as-typed
+                         URLs (no https:// forcing) + vault-note linker in one popover
+      previews.tsx       Image inline preview + plain-text viewer + Markdown textarea
+      setup.ts           Shared schema (heading 1-5, math, diagram) + [[wikilink]]
+                         ProseMirror decoration/click handling
+    Sidebar.tsx          Vault tree, search, CRUD, context menu, trash
     StatusBar.tsx        Git branch indicator (consumes shared poll)
-    GraphView.tsx        Note graph visualization
     SettingsModal.tsx    Settings (tabs: AI, Appearance, Git; System is web-only)
     SystemSettings.tsx   Web-only: account, login toggle, session TTL, env display
     GitSettings.tsx      Git identity / remotes / init in-app
@@ -82,8 +95,10 @@ frontend/
   stores/
     editor.ts            Tabs, file content, edited content, undo/redo state
     vault.ts             Vault state, tree, folder expansion, recent vaults
-    aiSettings.ts        Provider/model/saved-providers (persisted) — API keys
-                         live only backend-side (Keychain / keys.json, never the webview)
+    aiSettings.ts        Provider/model/saved-providers (persisted) + probeTools
+                         (measured tool-call support per provider+model — set by
+                         Save / model-switch auto-probe). API keys live only
+                         backend-side (Keychain / keys.json, never the webview)
     auth.ts              Web auth status (setup → login → ready), 401 handling
     gitStatus.ts         Shared git status (branch + porcelain) — one poller
     theme.ts             Named theme store (data-theme + Tauri window + meta theme-color)
@@ -96,12 +111,21 @@ frontend/
     usePolling.ts        Interval polling
     useClickOutside.ts   Click-outside detection for menus
   utils/
-    aiBlocks.ts          Markdown → applyDocumentOperations; normalization, semantic
-                         validation, prompt builders (edit/vault-first), vault-intent routing
+    aiTransport.ts       xl-ai Chat transport — the ONLY window between xl-ai and Rust:
+                         streaming SSE → ai-sdk parts, retry/gate loop, output routing
+    aiBlocks.ts          Markdown → applyDocumentOperations; suffixOperationIds, semantic
+                         validation, prompt builders (edit/vault-first/tool), doc context
+    aiProbe.ts           Auto-probe tool-call support (test_connection), model-agnostic
+                         text-only decision (custom endpoints measure-then-unlock)
+    wikilink.ts          [[wikilink]] parse (findWikilinkAt) + resolve/open — one source
+    mathMarkdown.ts      Math $/$$ → MathML pre-processor (BlockNote has no $ parsing)
+    fileKind.ts          File extension contract — .md/.mdx wysiwyg, binary, text
     setupWizard.ts       Pure setup-wizard validation + payload builder (unit-testable)
-    iteratorPolyfill.ts  Safari ES2023 iterator polyfills
     uuid.ts              Secure-context-safe UUID v4 (crypto.randomUUID with
                          getRandomValues/Math.random fallback — plain-HTTP/IP access)
+    iteratorPolyfill.ts  Safari ES2023 iterator polyfills
+    webkitCssStyleSheet.ts  Safari 15 CSSStyleSheet polyfill (mermaid needs it)
+    webkitStructuredClone.ts Safari 15 structuredClone polyfill
 test/
   lib.mjs                Shared CI-friendly harness: server + browser logs to
                          artifacts/, browser engine resolution (chromium/webkit,
@@ -117,6 +141,7 @@ test/
   check-acl.mjs          ACL guard: every Tauri command has an allow-* entry
                          (run in CI lint)
   artifacts/             Run logs (server + browser console) + results (gitignored)
+
 src-tauri/
   Cargo.toml             Desktop crate (bin docubook-desktop + lib docubook)
   tauri.conf.json        Window config (theme: Dark), CSP, bundle
