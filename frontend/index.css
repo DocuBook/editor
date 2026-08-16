@@ -105,9 +105,19 @@ body {
 
 /* UI shell — single source of truth for user-select on non-editor chrome.
    Applying user-select:none globally blocks drag/selection in WebKit, so
-   UI shells opt in individually instead. */
+   UI shells opt in individually instead. The -webkit- prefix is REQUIRED on
+   WKWebView macOS 12 (Safari 15) — unprefixed user-select isn't honored there,
+   so taps/double-clicks still select the row text. */
 .ui-shell {
+    -webkit-user-select: none;
     user-select: none;
+}
+/* WebKit belt-and-suspenders: even with user-select:none, some WKWebView
+   versions still paint a selection highlight on rapid taps. Make any
+   selection inside the shell invisible instead of leaving a blue block. */
+.ui-shell ::selection {
+    background: transparent;
+    color: inherit;
 }
 .ProseMirror > * {
     margin: 0.125rem 0;
