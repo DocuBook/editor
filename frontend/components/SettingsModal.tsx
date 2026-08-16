@@ -213,13 +213,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     try {
       const p = providers.find(x => x.id === provider)
       const probeModel = resolveProbeModel(provider, model || p?.models[0]?.id || '', envCustom ? customCfg?.model : undefined)
-      // Test ONLY checks connectivity + measures tool support for the toast.
-      // It does NOT persist the probe — saving is the responsibility of
-      // handleSave (auto-probe) and the model-switch autoProbe effect.
-      const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
-      let tools: boolean | undefined
-      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
-      toast.success(tools === true ? 'Connection OK — tool calls supported' : 'Connection OK')
+      // Test ONLY checks connectivity — it does not measure or persist tool-call
+      // support (that's handleSave auto-probe and the model-switch effect).
+      await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
+      toast.success('Connection OK')
     } catch (e) { toast.error(String(e)) }
     setTesting(false)
   }
