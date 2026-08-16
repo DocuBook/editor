@@ -21,12 +21,20 @@ import ErrorBoundary from './components/ErrorBoundary'
 import './stores/theme' // applies <html data-theme> before first paint
 import { installIteratorFilterPolyfill } from './utils/iteratorPolyfill'
 installIteratorFilterPolyfill()
+// WKWebView macOS 12 lacks structuredClone (Safari 15.4+) — see polyfill file.
+import { installWebkitStructuredClone } from './utils/webkitStructuredClone'
+installWebkitStructuredClone()
+// WKWebView macOS 12 can't construct CSSStyleSheet (Safari 16.4+) — mermaid
+// needs it to render. See polyfill file.
+import { installWebkitCssStyleSheet } from './utils/webkitCssStyleSheet'
+installWebkitCssStyleSheet()
 
-// Prototype-pollution hardening (replaces Tauri's freezePrototype, which is
-// injected before app load and breaks zod/xl-ai: they assign
-// Object.prototype.toString during module evaluation). Freezing AFTER all
-// imports have evaluated keeps the hardening without the load-time crash.
-Object.freeze(Object.prototype)
+// NOTE: no Object.prototype hardening here. Tauri's freezePrototype broke
+// zod/xl-ai (they assign Object.prototype.toString during module eval), and
+// freezing __proto__ breaks rope-sequence (prosemirror dep used by xl-ai,
+// does `Child.__proto__ = Parent` inheritance) — so any Object.prototype
+// mutation kills the AI stack. Prototype-pollution protection belongs at
+// input boundaries (JSON.parse reviver), not on built-in prototypes.
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -19,10 +19,12 @@
     "test:e2e:ai": "node test/ai-debug.mjs"
   },
   "dependencies": {
-    "@blocknote/core": "0.53.0",
-    "@blocknote/mantine": "0.53.0",
-    "@blocknote/react": "0.53.0",
-    "@blocknote/xl-ai": "0.53.0",
+    "@blocknote/core": "0.54.0",
+    "@blocknote/diagram-block": "0.54.0",
+    "@blocknote/mantine": "0.54.0",
+    "@blocknote/math-block": "0.54.0",
+    "@blocknote/react": "0.54.0",
+    "@blocknote/xl-ai": "0.54.0",
     "@mantine/core": "^9.4.2",
     "@mantine/hooks": "^9.4.2",
     "@tauri-apps/api": "^2.11.1",
