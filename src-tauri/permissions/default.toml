@@ -31,6 +31,7 @@ permissions = [
   "allow-md-to-html",
   "allow-open-vault",
   "allow-read-file",
+  "allow-read-file-binary",
   "allow-rename-file",
   "allow-search-vault",
   "allow-set-api-key",
@@ -300,6 +301,16 @@ commands.allow = ["read_file"]
 identifier = "deny-read-file"
 description = "Denies the read_file command."
 commands.deny = ["read_file"]
+
+[[permission]]
+identifier = "allow-read-file-binary"
+description = "Enables the read_file_binary command (base64 binary previews)."
+commands.allow = ["read_file_binary"]
+
+[[permission]]
+identifier = "deny-read-file-binary"
+description = "Denies the read_file_binary command."
+commands.deny = ["read_file_binary"]
 
 [[permission]]
 identifier = "allow-rename-file"

@@ -24,7 +24,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use axum::extract::{ConnectInfo, Path as AxPath, State};
+use axum::extract::{ConnectInfo, Path as AxPath, Query, State};
+use std::collections::HashMap;
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -107,6 +108,7 @@ fn build_router(state: AppState, www_dir: PathBuf) -> Router {
     let index = www_dir.join("index.html");
     Router::new()
         .route("/api/health", get(health_route))
+        .route("/api/file", get(file_route))
         .route("/api/ask_ai", post(ask_ai))
         .route("/api/login", post(login))
         .route("/api/logout", post(logout))
@@ -568,6 +570,30 @@ async fn security_headers(req: Request, next: Next) -> Response {
 
 async fn health_route(state: State<AppState>) -> Response {
     Json(json!({ "result": health(&state) })).into_response()
+}
+
+/**
+ * Serve a vault file (images, etc) to the browser. Path must live under the
+ * data dir; auth is handled by the shared auth_mw (the /api route gate). Binary files
+ * can't go through the JSON read_file command, so this is the web counterpart
+ * of Tauri's asset protocol.
+ */
+async fn file_route(state: State<AppState>, Query(params): Query<HashMap<String, String>>) -> Response {
+    let Some(path) = params.get("path") else {
+        return (StatusCode::BAD_REQUEST, "missing path").into_response();
+    };
+    let Ok(abs) = ensure_within_data(&state, path) else {
+        return (StatusCode::FORBIDDEN, "path outside data dir").into_response();
+    };
+    let Ok(bytes) = tokio::fs::read(&abs).await else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    let mime = mime_guess::from_path(&abs).first_or_octet_stream();
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, mime.as_ref())],
+        bytes,
+    ).into_response()
 }
 
 // ── auth: setup wizard + safe login ──

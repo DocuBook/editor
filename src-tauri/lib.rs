@@ -70,6 +70,13 @@ fn read_file(path: &str, state: State<AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn read_file_binary(path: &str, state: State<AppState>) -> Result<String, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.read_file_binary(path), None => Err("No vault".to_string())
+    }
+}
+
+#[tauri::command]
 fn write_file(path: &str, content: &str, state: State<AppState>) -> Result<(), String> {
     match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.write_file(path, content), None => Err("No vault".to_string())
@@ -684,7 +691,7 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            open_vault, close_vault, create_vault, git_clone, list_tree, read_file, write_file, create_file, delete_file, rename_file, create_directory,
+            open_vault, close_vault, create_vault, git_clone, list_tree, read_file, read_file_binary, write_file, create_file, delete_file, rename_file, create_directory,
             git_settings, git_add_remote, git_remove_remote, git_set_identity, git_init,
             wiki_backlinks, wiki_suggest, wiki_resolve, search_vault, git_stage, git_push, git_status,
             custom_ai_config,
