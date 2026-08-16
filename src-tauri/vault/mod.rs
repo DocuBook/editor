@@ -1,4 +1,6 @@
 
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use serde::Serialize;
 
@@ -19,14 +21,22 @@ pub struct TrashEntry {
 
 /// Filesystem-based vault that wraps a directory path.
 #[derive(Debug)]
-pub struct Vault { root: PathBuf }
+pub struct Vault {
+    root: PathBuf,
+    /// Cache: dir → whether its subtree contains any renderable file.
+    /// Built once per vault, invalidated on mutations. Turns the O(n²) tree
+    /// walk into O(n) build + O(1) lookups.
+    renderable: RefCell<HashMap<PathBuf, bool>>,
+}
 
 impl Vault {
 /** Create a new vault from a directory path. */
     pub fn new(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         if !root.is_dir() { return Err(format!("Not a directory: {}", path)); }
-        Ok(Self { root })
+        let v = Self { root, renderable: RefCell::new(HashMap::new()) };
+        v.build_renderable_cache();
+        Ok(v)
     }
 /** Get the vault root path. */
     pub fn root(&self) -> &Path { &self.root }
@@ -82,19 +92,45 @@ impl Vault {
 
     /// True if the subtree at `dir` contains at least one renderable file
     /// (recursive, skipping hidden/system dirs). Drives folder visibility.
-    fn dir_has_renderable(dir: &std::path::Path) -> bool {
-        if let Ok(read) = std::fs::read_dir(dir) {
-            for e in read.flatten() {
-                let name = e.file_name().to_string_lossy().to_string();
-                if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
-                if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                    if Self::dir_has_renderable(&e.path()) { return true; }
-                } else if Self::is_renderable(&name) {
-                    return true;
+    /// Uses the cached map — O(1) after build_renderable_cache().
+    fn dir_has_renderable(&self, dir: &Path) -> bool {
+        *self.renderable.borrow().get(dir).unwrap_or(&false)
+    }
+
+    /// Build the `dir → has_renderable` map bottom-up in one walk. Each dir
+    /// is renderable if it holds a renderable file directly or any subdir is.
+    fn build_renderable_cache(&self) {
+        let mut map: HashMap<PathBuf, bool> = HashMap::new();
+        let mut stack: Vec<PathBuf> = vec![self.root.clone()];
+        let mut post: Vec<PathBuf> = Vec::new();
+        while let Some(d) = stack.pop() {
+            post.push(d.clone());
+            if let Ok(read) = std::fs::read_dir(&d) {
+                for e in read.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
+                    if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                        stack.push(e.path());
+                    } else if Self::is_renderable(&name) {
+                        map.insert(d.clone(), true);
+                    }
                 }
             }
         }
-        false
+        // Bottom-up: a dir is renderable if itself or any child is.
+        while let Some(d) = post.pop() {
+            let has = map.get(&d).copied().unwrap_or(false);
+            if has {
+                if let Some(p) = d.parent() { map.entry(p.to_path_buf()).or_insert(true); }
+            }
+        }
+        *self.renderable.borrow_mut() = map;
+    }
+
+    /// Drop the cache after filesystem mutations so the next tree() rebuilds.
+    fn invalidate_renderable_cache(&self) {
+        self.renderable.borrow_mut().clear();
+        self.build_renderable_cache();
     }
 
     pub fn tree(&self, subpath: &str) -> Vec<FileInfo> {
@@ -109,7 +145,7 @@ impl Vault {
                 // Show markdown (editable) + images (previewable) in the tree;
                 // folders with nothing renderable are hidden.
                 if ft == "0" && !Self::is_renderable(&name) { continue; }
-                if ft == "1" && !Self::dir_has_renderable(&e.path()) { continue; } // ponytail: re-walks subtrees per folder; cache a md-count map if large vaults get slow
+                if ft == "1" && !self.dir_has_renderable(&e.path()) { continue; }
                 let info = FileInfo { path: rel, name, file_type: ft.to_string() };
                 if ft == "1" { dirs.push(info) } else { files.push(info) }
             }
@@ -137,6 +173,7 @@ impl Vault {
     }
 /** Read a binary file as base64 (images etc). Same path-traversal protection
  *  as read_file; used for previews where the raw bytes must round-trip intact. */
+    #[allow(dead_code)] // wired only in the desktop crate (web serves via /api/file)
     pub fn read_file_binary(&self, path: &str) -> Result<String, String> {
         use base64::Engine;
         let f = self.safe_path(path)?;
@@ -147,19 +184,23 @@ impl Vault {
     pub fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
         let f = self.safe_path(path)?;
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
-        std::fs::write(&f, content).map_err(|e| e.to_string())
+        std::fs::write(&f, content).map_err(|e| e.to_string())?;
+        self.invalidate_renderable_cache();
+        Ok(())
     }
 /** Create an empty file, creating parent directories if needed. */
     pub fn create_file(&self, path: &str) -> Result<String, String> {
         let f = self.safe_path(path)?;
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         if !f.exists() { std::fs::write(&f, "").map_err(|e| e.to_string())?; }
+        self.invalidate_renderable_cache();
         Ok(path.to_string())
     }
 
 /** Create an empty directory (and parents). */
     pub fn create_directory(&self, path: &str) -> Result<(), String> {
         std::fs::create_dir_all(self.safe_path(path)?).map_err(|e| format!("Create dir: {}", e))?;
+        self.invalidate_renderable_cache();
         Ok(())
     }
 
@@ -225,6 +266,7 @@ impl Vault {
         let dst = self.safe_path(&original)?;
         if dst.exists() { return Err(format!("A file named \"{original}\" already exists")); }
         std::fs::rename(&src, &dst).map_err(|e| format!("Restore: {}", e))?;
+        self.invalidate_renderable_cache();
         Ok(())
     }
 
@@ -237,6 +279,7 @@ impl Vault {
                 if p.is_dir() { let _ = std::fs::remove_dir_all(&p); } else { let _ = std::fs::remove_file(&p); }
             }
         }
+        self.invalidate_renderable_cache();
         Ok(())
     }
 
@@ -246,6 +289,7 @@ impl Vault {
         let dst = self.safe_path(to)?;
         if let Some(p) = dst.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         std::fs::rename(&src, &dst).map_err(|e| format!("Rename: {}", e))?;
+        self.invalidate_renderable_cache();
         Ok(())
     }
 }
@@ -256,14 +300,14 @@ mod tests {
 
     #[test]
     fn vault_name_from_directory() {
-        let v = Vault { root: PathBuf::from("/some/path/my-vault") };
+        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(HashMap::new()) };
         assert_eq!(v.name(), "my-vault");
     }
 
     #[test]
     fn vault_name_root() {
-        let v = Vault { root: PathBuf::from("/") };
         // root's file_name is None on some platforms, empty on others
+        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(HashMap::new()) };
         assert_eq!(v.name(), "");
     }
 
@@ -344,6 +388,27 @@ mod tests {
         let docs = v.tree("docs");
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].name, "readme.md");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn renderable_cache_invalidates_after_create() {
+        let dir = std::env::temp_dir().join("vault-test-cache-invalidate");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("empty")).unwrap();
+        std::fs::write(dir.join("a.md"), "").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        // empty/ has no renderable → hidden initially
+        assert_eq!(v.tree("").len(), 1);
+        assert_eq!(v.tree("")[0].name, "a.md");
+
+        // create a renderable file inside empty/ → cache must refresh
+        v.create_file("empty/note.md").unwrap();
+        let tree = v.tree("");
+        assert_eq!(tree.len(), 2, "empty/ harus muncul setelah ada .md");
+        let names: Vec<&str> = tree.iter().map(|f| f.name.as_str()).collect();
+        assert!(names.contains(&"empty"), "tree: {:?}", names);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
