@@ -303,3 +303,12 @@ body {
   color: var(--color-foreground-quaternary);
 }
 
+/* BlockNote source popup (math/diagram): blocknote hides the closed popup
+   with `overflow: clip` (Safari 16+) + width/height 0 — Safari 15 (Tauri
+   WKWebView) drops `overflow: clip`, so the <pre> source + OK button stay
+   visible and the flex row collapses vertically. Force full removal when
+   closed; the open state restores blocknote's own styles. #root id beats
+   blocknote's class specificity regardless of bundle order. */
+#root .bn-preview-with-source-popup:not([data-open="true"]) .bn-source-block-popup {
+    display: none;
+}

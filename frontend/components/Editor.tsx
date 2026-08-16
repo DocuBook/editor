@@ -4,7 +4,9 @@ import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtensio
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
-import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, createExtension } from '@blocknote/core'
+import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension, combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
+import { createReactMathBlockSpec, createReactInlineMathSpec, getMathSlashMenuItems, locales as mathLocales } from '@blocknote/math-block'
+import { createReactDiagramBlockSpec, getDiagramSlashMenuItems, locales as diagramLocales } from '@blocknote/diagram-block'
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { en as baseDict } from '@blocknote/core/locales'
@@ -18,6 +20,24 @@ import { invoke, listen, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
 import { buildApplyDocumentInput, AI_FORMATTING_RULES, MAX_AI_ATTEMPTS, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, AI_MARKDOWN_INSTRUCTION } from '../utils/aiBlocks'
 import { uuid } from '../utils/uuid'
+import { mathDollarToMathML } from '../utils/mathMarkdown'
+// Mermaid is a singleton — wrapping render here also patches the instance
+// @blocknote/diagram-block uses. Serialize renders (mermaid keeps global
+// state; parallel renders race on slow engines like WKWebView) and surface
+// the real error instead of blocknote's generic "Invalid diagram".
+import mermaid from 'mermaid'
+const _mermaidRender = mermaid.render.bind(mermaid)
+let _mermaidQueue: Promise<unknown> = Promise.resolve()
+;(mermaid as any).render = (id: string, text: string) => {
+  const run = _mermaidQueue.then(() =>
+    _mermaidRender(id, text).catch((e: unknown) => {
+      console.error('[mermaid render]', id, e)
+      throw e
+    }),
+  )
+  _mermaidQueue = run.catch(() => {})
+  return run
+}
 import { useKeyboard } from '../hooks/useKeyboard'
 import { useGitStatus } from '../stores/gitStatus'
 import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
@@ -84,6 +104,12 @@ const getSchema = () => {
     blockSpecs: {
       ...defaultBlockSpecs,
       heading: createHeadingBlockSpec({ levels: [1, 2, 3, 4, 5], allowToggleHeadings: false }),
+      mathBlock: createReactMathBlockSpec(),
+      diagram: createReactDiagramBlockSpec(),
+    },
+    inlineContentSpecs: {
+      ...defaultInlineContentSpecs,
+      math: createReactInlineMathSpec(),
     },
   })
   return _schema
@@ -242,7 +268,7 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
   const editorRef = useRef<any>(null)
   const editor = useCreateBlockNote({
     schema: getSchema(),
-    dictionary: { ...baseDict, ai: aiDict },
+    dictionary: { ...baseDict, ai: aiDict, math: mathLocales.en, diagram: diagramLocales.en },
     extensions: [AIExtension({
       transport: {
         sendMessages: async (args: any) => {
@@ -657,20 +683,31 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
 
   useEffect(() => {
     if (!clean) return
-    try { const blocks = editor.tryParseMarkdownToBlocks(clean); editor.transact(tr => { tr.setMeta('addToHistory', false); editor.replaceBlocks(editor.document, blocks) }); useEditorStore.getState().setUndoRedoState() }
+    try {
+      /** Math blocks export as $/$$ but blocknote's markdown parser has no
+       *  $ handling — pre-convert to <math> HTML so saved math re-renders. */
+      const blocks = editor.tryParseMarkdownToBlocks(mathDollarToMathML(clean))
+      editor.transact(tr => { tr.setMeta('addToHistory', false); editor.replaceBlocks(editor.document, blocks) }); useEditorStore.getState().setUndoRedoState() }
     catch (e) { console.error('BlockNote load:', e); toast.error('Failed to load editor') }
   }, [editor, clean])
 
   useEffect(() => () => {
     if (!dirtyRef.current) return
-    try {
-      const md = editor.blocksToMarkdownLossy(editor.document)
-        .trim()
-        .replace(/^\n+/, '')
-        .replace(/\n+$/, '')
-        .replace(/^(\s*)\* /gm, '$1- ')
-      if (md !== markdownRef.current) onSyncRef.current(md)
-    } catch {}
+    /** Flush on unmount. Must NOT run synchronously: blocksToMarkdownLossy →
+     *  exportBlocks → toExternalHTML uses flushSync internally, and React
+     *  forbids flushSync from inside a lifecycle method (unmount cleanup runs
+     *  during commit). Defer to a microtask so the unmount commit finishes
+     *  first. */
+    queueMicrotask(() => {
+      try {
+        const md = editor.blocksToMarkdownLossy(editor.document)
+          .trim()
+          .replace(/^\n+/, '')
+          .replace(/\n+$/, '')
+          .replace(/^(\s*)\* /gm, '$1- ')
+        if (md !== markdownRef.current) onSyncRef.current(md)
+      } catch {}
+    })
   }, [])
 
   return <BlockNoteView editor={editor} theme={useTheme(s => s.name)} slashMenu={false} formattingToolbar={false} linkToolbar={false}>
@@ -682,9 +719,29 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
       getItems={async (query) => {
         const defaultItems = getDefaultReactSlashMenuItems(editor)
         const aiItems = getAISlashMenuItems(editor)
-        if (!query) return [...defaultItems, ...aiItems]
+        const mathItems = getMathSlashMenuItems(editor)
+        const diagramItems = getDiagramSlashMenuItems(editor).map(item => ({
+          ...item,
+          /** The diagram-block package inserts the block but leaves the popup
+           *  closed — the user types into the document instead of the source
+           *  editor and the diagram never saves. Parity with the math block:
+           *  open the source popup right after insert. */
+          onItemClick: () => {
+            const block = insertOrUpdateBlockForSlashMenu(editor as any, {
+              type: 'diagram',
+              content: 'graph TD\n    A[Start] --> B[Stop]',
+            } as any)
+            editor.getExtension(SourceBlockWithPreviewExtension)
+              ?.store.setState(state => ({ ...state, popupOpen: block.id }))
+            requestAnimationFrame(() => {
+              editor.setTextCursorPosition(block.id, 'end')
+              editor.focus()
+            })
+          },
+        }))
+        if (!query) return combineByGroup(defaultItems, mathItems, diagramItems, aiItems)
         const q = query.toLowerCase()
-        return [...defaultItems, ...aiItems].filter(i =>
+        return combineByGroup(defaultItems, mathItems, diagramItems, aiItems).filter(i =>
           i.title?.toLowerCase().includes(q) ||
           (i.aliases || []).some((a: string) => a.includes(q))
         )
