@@ -56,11 +56,14 @@ export default function OnboardingGuide({ onDismiss }: { onDismiss: () => void }
         </div>
 
         <button
-          onClick={() => { markOnboardingDone(); onDismiss() }}
+          onClick={onDismiss}
           className="mt-8 px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg cursor-pointer border-none transition-colors"
         >
           Got it — start writing
         </button>
+        <p className="mt-2 text-xs text-zinc-600 leading-relaxed">
+          This guide returns until your vault has a note — create one with the + button in the sidebar ({isTauri ? '⌘N' : '⌘⇧F'}).
+        </p>
       </div>
     </div>
   )
