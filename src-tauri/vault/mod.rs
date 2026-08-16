@@ -77,8 +77,7 @@ impl Vault {
 
     /// Markdown-family extensions — WYSIWYG editable (common markdown + frontmatter).
     fn is_markdown(name: &str) -> bool {
-        let lower = name.to_ascii_lowercase();
-        lower.ends_with(".md") || lower.ends_with(".mdx")
+        crate::markdown::is_markdown_name(name)
     }
 
     /// Extensions shown in the tree: markdown (editable) + images (previewable).

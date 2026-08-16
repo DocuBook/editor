@@ -43,8 +43,9 @@ impl WikiIndex {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name == ".git" || name == ".trash" || name == "node_modules" || name == ".DS_Store" { continue; }
                 if p.is_dir() { self.scan_dir(&p, link_re); continue; }
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
-                if ext != "md" && ext != "mdx" { continue; }
+                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
+                // markdown family — .md/.mdx (single source in markdown.rs)
+                if !crate::markdown::is_markdown_name(ext) { continue; }
                 let rel = self.rel(&p);
                 self.files.push(p.clone());
                 let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
