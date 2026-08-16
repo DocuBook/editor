@@ -866,6 +866,7 @@ name = "docubook-desktop"
 version = "0.1.0-rc.1"
 dependencies = [
  "ammonia",
+ "base64 0.22.1",
  "pulldown-cmark",
  "regex",
  "reqwest",

@@ -284,9 +284,13 @@ function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSyn
   const [clean, setClean] = useState('')
   useEffect(() => { setClean(markdown) }, [markdown])
   const editorRef = useRef<any>(null)
+  const vaultPath = useVaultStore(s => s.vaultPath)
   const editor = useCreateBlockNote({
     schema: getSchema(),
     dictionary: { ...baseDict, ai: aiDict, math: mathLocales.en, diagram: diagramLocales.en },
+    /** Resolve relative file URLs (images etc) to a loadable URL for this
+     *  runtime: base64 data: URL via IPC (Tauri), or /api/file (web). */
+    resolveFileUrl: async (url: string) => (vaultPath ? await fileUrl(vaultPath, url) : url),
     extensions: [AIExtension({
       transport: {
         sendMessages: async (args: any) => {

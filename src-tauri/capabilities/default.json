@@ -34,6 +34,7 @@
     "allow-md-to-html",
     "allow-open-vault",
     "allow-read-file",
+    "allow-read-file-binary",
     "allow-rename-file",
     "allow-search-vault",
     "allow-set-api-key",

@@ -135,6 +135,14 @@ impl Vault {
         };
         Ok(String::from_utf8_lossy(&data).to_string())
     }
+/** Read a binary file as base64 (images etc). Same path-traversal protection
+ *  as read_file; used for previews where the raw bytes must round-trip intact. */
+    pub fn read_file_binary(&self, path: &str) -> Result<String, String> {
+        use base64::Engine;
+        let f = self.safe_path(path)?;
+        let data = std::fs::read(&f).map_err(|e| format!("Read: {}", e))?;
+        Ok(base64::engine::general_purpose::STANDARD.encode(data))
+    }
 /** Write content to a file, creating parent directories if needed. */
     pub fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
         let f = self.safe_path(path)?;
@@ -279,6 +287,9 @@ mod tests {
         assert!(v.safe_path("notes.md").is_ok());
         assert!(v.safe_path("folder/sub.md").is_ok());
         assert!(v.safe_path("newfile.md").is_ok());
+        // "./" prefix (GFM-relative links like ![x](./img.png)) resolves fine
+        assert!(v.safe_path("./folder/sub.md").is_ok());
+        assert!(v.safe_path("./notes.md").is_ok());
         // filename containing ".." is not a traversal component
         assert!(v.safe_path("a..b.md").is_ok());
         let _ = std::fs::remove_dir_all(&dir);
@@ -324,10 +335,12 @@ mod tests {
 
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
         let tree = v.tree("");
-        // docs has a .md (recursively) → visible; assets has none → hidden
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].name, "docs");
-        // a subtree with only non-md files stays hidden even nested
+        // docs has a .md (recursively) → visible; assets has an image → visible
+        // too (images are previewable); no-md.txt alone is not renderable.
+        assert_eq!(tree.len(), 2);
+        assert_eq!(tree[0].name, "assets");
+        assert_eq!(tree[1].name, "docs");
+        // a subtree with only non-renderable files stays hidden even nested
         let docs = v.tree("docs");
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].name, "readme.md");

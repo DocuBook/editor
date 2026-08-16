@@ -148,16 +148,27 @@ export async function openDir(opts?: { title?: string; defaultPath?: string }): 
 }
 
 /**
- * Resolve an absolute vault file path to a loadable URL:
- * - Tauri: `convertFileSrc` (asset protocol) — binary files can't go through IPC.
- * - Web:   relative vault path (server serves vault files under the vault root).
+ * Resolve a vault-relative path to a loadable URL:
+ * - Tauri: reads the file via IPC (path-traversal protected) and returns a
+ *   base64 data: URL — no asset protocol, no whole-filesystem webview access.
+ * - Web:   `/api/file?path=…` (server endpoint, behind the same auth gate).
  */
 export async function fileUrl(vaultPath: string, relPath: string): Promise<string> {
+  const abs = `${vaultPath}/${relPath}`
   if (isTauri) {
-    try {
-      const { convertFileSrc } = await import('@tauri-apps/api/core')
-      return convertFileSrc(`${vaultPath}/${relPath}`)
-    } catch { /* fall through to relative */ }
+    const b64 = await invoke<string>('read_file_binary', { path: relPath })
+    return `data:${mimeFromPath(relPath)};base64,${b64}`
   }
-  return relPath
+  return `/api/file?path=${encodeURIComponent(abs)}`
+}
+
+/** Minimal MIME map for previewed binary files (images etc). */
+const MIME_BY_EXT: Record<string, string> = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.avif': 'image/avif',
+  '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.mp4': 'video/mp4', '.mov': 'video/quicktime',
+}
+function mimeFromPath(path: string): string {
+  const ext = path.slice(path.lastIndexOf('.')).toLowerCase()
+  return MIME_BY_EXT[ext] || 'application/octet-stream'
 }
