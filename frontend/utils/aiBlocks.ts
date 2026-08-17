@@ -104,14 +104,23 @@ export function buildTaskFormattingRules(userText: string): string {
  * wikilink reference, a question, a generation command, or targets an empty
  * document — the vault context then acts as the model's only source material.
  */
-export function isVaultGenerationIntent(userText: string, hasVaultContext: boolean, docContext: string): boolean {
-  if (!hasVaultContext) return false
+
+/** Prompt-side hints that a request may need vault grounding — no knowledge of
+ *  whether vault context actually exists. Shared by the transport's grounding
+ *  pre-filter (skip the ai_grounding_context RTT when false) and the intent
+ *  router below, so the two can never disagree. */
+export function vaultPromptHints(userText: string, docContext: string): boolean {
   const t = (userText || '').trim()
   if (/\[\[[^\]]+\]\]/.test(t)) return true
   if (/^.*\?$/.test(t)) return true
   if (/^(what|how|why|where|when|who|which|is|are|can|does|do|list|find|search|apa|bagaimana|kenapa|mengapa|kapan|siapa|di mana|dimana|cari|jelaskan|ringkas|sebutkan)\b/i.test(t)) return true
   if (/^(buat|tulis|generate|draft|rangkum|rekap|susun|rancang|outline|kerangka|summar)/i.test(t)) return true
   return !(docContext || '').trim()
+}
+
+export function isVaultGenerationIntent(userText: string, hasVaultContext: boolean, docContext: string): boolean {
+  if (!hasVaultContext) return false
+  return vaultPromptHints(userText, docContext)
 }
 
 /** System prompt for the vault-first path: the vault context is the ONLY source. */
@@ -191,12 +200,14 @@ export function buildBaseMessages(p: {
 /** System prompt for the tool path: doc state carries real block ids (see
  *  buildToolDocumentContext) and the model must route edits through
  *  applyDocumentOperations — ids EXACTLY as shown, including the trailing $. */
-export function buildToolSystemPrompt(docContext: string, vaultContext: string, taskRules: string): string {
-  const vault = vaultContext.trim() ? `\n\n─── Vault context (from [[wikilinks]] and search) ───${vaultContext}` : ''
+/** Tool-path system prompt: doc state (real block ids) + rules. Vault context is
+ *  intentionally NOT included — vault-gen is routed to buildVaultGroundingPrompt
+ *  (vault as the ONLY source), and edit rules de-authorize outside content. */
+export function buildToolSystemPrompt(docContext: string, taskRules: string): string {
   return `You are editing the document below. Use the "applyDocumentOperations" tool to make changes; do NOT output the new content as text. Reference block ids EXACTLY as shown — including the trailing $.
 
 Document state (JSON):
-${docContext}${vault}
+${docContext}
 
 Rules (MUST follow):
 - Call applyDocumentOperations with an \`operations\` array (add / update / delete).
@@ -209,13 +220,14 @@ Rules (MUST follow):
 - When editing or replacing selected blocks, PRESERVE each block's type and formatting.${taskRules}`
 }
 
-/** Single edit-rule system prompt: document state (bekal) + vault context + rules. */
-export function buildEditSystemPrompt(docContext: string, vaultContext: string, taskRules: string): string {
-  const vault = vaultContext.trim() ? `\n\n─── Vault context (from [[wikilinks]] and search) ───${vaultContext}` : ''
+/** Single edit-rule system prompt: document state + rules (no vault context —
+ *  vault-gen is routed to buildVaultGroundingPrompt; edit rules de-authorize
+ *  content that is not in the document). */
+export function buildEditSystemPrompt(docContext: string, taskRules: string): string {
   return `You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.
 
 Document state (JSON):
-${docContext}${vault}
+${docContext}
 
 Rules (MUST follow):
 - Output ONLY the new or modified content for the requested task.
