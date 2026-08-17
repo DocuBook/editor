@@ -1,3 +1,5 @@
+import { mathDollarToMathML } from './mathMarkdown'
+
 /** Close an unbalanced code fence so markdown parses cleanly (low-level models often forget the closing ```). */
 export function normalizeMarkdown(text: string): string {
   const fences = (text || '').match(/```/g)?.length ?? 0
@@ -235,8 +237,12 @@ Rules (MUST follow):
 export async function buildApplyDocumentInput(editor: any, fullText: string): Promise<any | null> {
   if (!editor || !fullText?.trim()) return null
   try {
-    /** Close unbalanced code fences before parsing (low-level models often forget the closing ```). */
-    const parsed = await editor.tryParseMarkdownToBlocks(normalizeMarkdown(fullText))
+    /** Math parity with the markdown LOAD path: BlockNote's parser has no `$`
+     *  handling, so model-written $$…$$ would land as literal text (and the
+     *  exporter re-escapes $ → \$ , corrupting the block). Restore model-escaped
+     *  \$ then run the same $$ → <math> conversion as WysiwygEditor's load. */
+    const text = normalizeMarkdown(fullText).replace(/\\\$/g, '$')
+    const parsed = await editor.tryParseMarkdownToBlocks(mathDollarToMathML(text))
     if (!parsed?.length) return null
     const sel = editor.getSelection()
     if (sel?.blocks?.length) {

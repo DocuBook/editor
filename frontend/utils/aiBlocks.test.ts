@@ -174,6 +174,38 @@ describe('buildApplyDocumentInput', () => {
     getTextCursorPosition: () => ({ block: { id: opts.cursorBlockId } }),
   })
 
+  it('converts model math to mathBlock via mathDollarToMathML (parity with load path)', async () => {
+    let received = ''
+    const editor = mockEditor({
+      cursorBlockId: 'b-cursor',
+      parse: async (md: string) => {
+        received = md
+        // simulate BlockNote converting the <math> HTML into a mathBlock
+        return md.includes('<math display="block">')
+          ? [{ id: 'new-1', type: 'mathBlock', content: [{ type: 'text', text: 'm_e = 9.11' }] }]
+          : [{ id: 'new-1', type: 'paragraph', content: [{ type: 'text', text: md }] }]
+      },
+    })
+    const input = await buildApplyDocumentInput(editor, '$$ m_e = 9.11 \\times 10^{-31} $$')
+    expect(received).toContain('<math display="block">')
+    expect(received).toContain('application/x-tex')
+    expect(input.operations[0].blocks[0]).toContain('m_e = 9.11')
+  })
+
+  it('restores model-escaped \\$ before math parsing', async () => {
+    let received = ''
+    const editor = mockEditor({
+      cursorBlockId: 'b',
+      parse: async (md: string) => {
+        received = md
+        return [{ id: 'n', type: 'paragraph', content: [{ type: 'text', text: md }] }]
+      },
+    })
+    await buildApplyDocumentInput(editor, '\\$ a = b \\$')
+    // escaped dollars restored → single $$ pair reaches the math converter
+    expect(received).not.toContain('\\\\$')
+  })
+
   it('builds add operation after cursor with $-suffixed referenceId and HTML blocks', async () => {
     const editor = mockEditor({ cursorBlockId: 'b-cursor' })
     const input = await buildApplyDocumentInput(editor, 'Hello world')
