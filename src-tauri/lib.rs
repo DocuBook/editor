@@ -345,6 +345,24 @@ fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
     keychain::set_key(provider, key)
 }
 
+/** Runtime model discovery — GET {baseUrl}/models with the stored key, so the
+ *  frontend never holds API keys (SEC-5). SSRF-guarded and no redirects (same
+ *  policy as ask_ai). */
+#[tauri::command]
+async fn list_models(provider: String, base_url: String) -> Result<String, String> {
+    if base_url.is_empty() {
+        return Err("Base URL is required".into());
+    }
+    agent::validate_base_url(&base_url)?;
+    let key = keychain::get_key(&provider).map_err(|_| "No API key found — save one in Settings -> AI".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
+    let models = agent::fetch_models(&client, &base_url, &key).await?;
+    serde_json::to_string(&models).map_err(|e| e.to_string())
+}
+
 /** Save a custom OpenAI-compatible endpoint: base URL + key bound together
  *  server-side. The stored URL is the ONLY destination the key is ever sent to
  *  (ask_ai ignores webview-provided URLs for the custom provider), which closes
@@ -709,7 +727,7 @@ pub fn run() {
             git_settings, git_add_remote, git_remove_remote, git_set_identity, git_init,
             wiki_backlinks, wiki_suggest, wiki_resolve, search_vault, git_stage, git_push, git_status,
             custom_ai_config,
-            markdown_preview, md_to_html, ask_ai, cancel_ai, set_api_key, set_custom_endpoint, delete_api_key, list_api_keys, test_connection,
+            markdown_preview, md_to_html, ask_ai, cancel_ai, set_api_key, set_custom_endpoint, delete_api_key, list_api_keys, test_connection, list_models,
             ai_grounding_context, health, app_ready_to_close,
         ])
         .run(tauri::generate_context!())

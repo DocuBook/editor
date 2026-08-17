@@ -192,6 +192,7 @@ async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result<String, St
         "config_set" => sync(state, cmd, args),
         "ai_grounding_context" => ai_grounding_context(state, &s("query"), &s("activePath")),
         "health" => Ok(health(state).to_string()),
+        "list_models" => list_models(state, &s("provider"), &s("baseUrl")).await,
         "test_connection" => test_connection(state, &s("provider"), &s("model"), &s("baseUrl"), &s("apiKey")).await,
         _ => Err(format!("Unknown command: {cmd}")),
     }
@@ -756,6 +757,22 @@ fn custom_env_base_url() -> Option<String> {
 }
 
 /** Mirrors lib.rs ask_ai + test_connection — streams SSE events to the browser. */
+/** Runtime model discovery — GET {baseUrl}/models with the stored key (data dir),
+ *  so the frontend never holds API keys. SSRF-guarded + no redirects. */
+async fn list_models(state: &AppState, provider: &str, base_url: &str) -> Result<String, String> {
+    if base_url.is_empty() {
+        return Err("Base URL is required".into());
+    }
+    agent::validate_base_url(base_url)?;
+    let api_key = keys::get_key(&state.data_dir, provider).map_err(|_| "No API key found".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("Client error: {}", e))?;
+    let models = agent::fetch_models(&client, base_url, &api_key).await?;
+    serde_json::to_string(&models).map_err(|e| e.to_string())
+}
+
 async fn test_connection(state: &AppState, provider: &str, model: &str, base_url: &str, api_key: &str) -> Result<String, String> {
     // Env override: a custom endpoint controlled by the environment probes the
     // env values, not whatever the (read-only) UI happens to hold.

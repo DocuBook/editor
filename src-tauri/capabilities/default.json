@@ -40,6 +40,7 @@
     "allow-set-api-key",
     "allow-set-custom-endpoint",
     "allow-test-connection",
+    "allow-list-models",
     "allow-ai-grounding-context",
     "allow-wiki-backlinks",
     "allow-wiki-resolve",
