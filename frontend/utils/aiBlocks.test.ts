@@ -326,7 +326,7 @@ describe('validateOperationsSemantics', () => {
 })
 
 describe('buildToolSystemPrompt', () => {
-  const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]', '')
+  const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]')
   it('instructs the tool call and id suffixing', () => {
     expect(base).toContain('applyDocumentOperations')
     expect(base).toContain('trailing $')
@@ -341,6 +341,15 @@ describe('buildToolSystemPrompt', () => {
   })
   it('does NOT embed vault context (vault-gen uses buildVaultGroundingPrompt)', () => {
     expect(base).not.toContain('Vault context')
+  })
+  it('adds scaffold guidance only for an EMPTY document (no taskRules)', () => {
+    expect(base).not.toContain('document is EMPTY')
+    const empty = buildToolSystemPrompt('[]')
+    expect(empty).toContain('document is EMPTY')
+    expect(empty).toContain('single valid HTML element')
+    // steering is separate from taskRules
+    expect(empty).not.toContain('Task-specific rules')
+    expect(buildToolSystemPrompt('')).toContain('document is EMPTY')
   })
 })
 
