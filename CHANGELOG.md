@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.1.0-rc.2 — 2026-08-17
+
+### Release candidate — BlockNote 0.54 + xl-ai tool-call pipeline, math/diagram blocks, Safari 15 compatibility
+
+- **BlockNote 0.53 → 0.54** — math (`mathBlock`) and mermaid diagram blocks, `@blocknote/xl-ai` integration
+- **AI tool-call pipeline (Path A)** — model `applyDocumentOperations` calls grounded with real block ids; ids normalized (`$` suffix) at the transport boundary
+- **AI text-only path (Path B)** — suggestions anchored on the previous block when the cursor block is empty; math `$$…$$` from the model rendered as real math blocks
+- **Tool-call probe** — auto-probe on model switch (`test_connection`), model-agnostic text-only decision; Test button checks connectivity only
+- **Safari 15 / WKWebView compat** — CSSStyleSheet + structuredClone polyfills, marked lookbehind compat, mermaid rendering fixes
+- **Perf** — wikilink decoration scan paused during AI streaming; scroll-follow watches only the writing block; vault grounding fetched only on vault hints
+- **File contract** — `.md`/`.mdx` open in the WYSIWYG editor; vault images served via `read_file_binary` + ACL
+
 ## v0.1.0-rc.1 — 2026-08-09
 
 ### Release candidate — AI transport hardening + web/Docker production readiness

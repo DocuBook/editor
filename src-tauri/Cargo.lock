@@ -863,7 +863,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-desktop"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 dependencies = [
  "ammonia",
  "base64 0.22.1",
