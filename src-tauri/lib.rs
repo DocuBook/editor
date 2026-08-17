@@ -10,8 +10,6 @@ use markdown::markdown_to_safe_html;
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::collections::HashSet;
-use regex::Regex;
 use tauri::{State, Manager, Emitter};
 
 struct AppState {
@@ -158,44 +156,31 @@ async fn search_vault(query: String, state: State<'_, AppState>) -> Result<Strin
 #[tauri::command]
 fn ai_grounding_context(query: String, active_path: String, state: State<AppState>) -> Result<String, String> {
     let vault = state.vault.lock().expect("lock");
-    let wiki = state.wiki.lock().expect("lock");
     let v = match vault.as_ref() { Some(v) => v, None => return Ok(String::new()) };
-    let w = match wiki.as_ref() { Some(w) => w, None => return Ok(String::new()) };
 
-    let link_re = Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
+    // Read-per-file grounding (PI-style): keyword terms from the prompt find
+    // related .md files (OR match), then read a token-budgeted slice. No
+    // wikilink index / semantic search — just grep-for-related + read.
+    let stop = ["the","and","for","with","from","into","about","that","this","what","how","why","when","where","using","make","write","create","like",];
+    let text = query.replace("[[", " ").replace("]]", " ");
+    let terms: Vec<String> = text
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| t.len() >= 3 && !stop.contains(t))
+        .map(|t| t.to_lowercase())
+        .collect();
+    if terms.is_empty() { return Ok(String::new()); }
+    let refs: Vec<&str> = terms.iter().map(String::as_str).collect();
+    let results = search::search_vault_terms(v.root(), &refs);
+
     let mut context = String::new();
-    let mut linked: HashSet<String> = HashSet::new();
-
-    // 1. Resolve wikilinks → read content
-    for cap in link_re.captures_iter(&query) {
-        let target = &cap[1];
-        if let Some(path) = w.resolve(target) {
-            if path != active_path && linked.insert(path.clone()) {
-                if let Ok(content) = v.read_file(&path) {
-                    let name = std::path::Path::new(&path).file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
-                    let trimmed = trim_to_tokens(&content, 2000);
-                    context.push_str(&format!("\n\n## {name}\n(File: {path})\n{trimmed}"));
-                }
-            }
+    for r in results.iter().take(3) {
+        if r.path == active_path { continue; }
+        if let Ok(content) = v.read_file(&r.path) {
+            let trimmed = trim_to_tokens(&content, 2000);
+            let name = std::path::Path::new(&r.path).file_stem().map(|s| s.to_string_lossy()).unwrap_or_default();
+            context.push_str(&format!("\n\n## {name}\n(File: {})\n{trimmed}", r.path));
         }
     }
-
-    // 2. Extract search terms (non-wikilink text, min 3 chars)
-    let search_text = link_re.replace_all(&query, "").to_string();
-    let terms: Vec<&str> = search_text.split_whitespace().filter(|t| t.len() >= 3).collect();
-    if !terms.is_empty() {
-        let results = search::search_vault(v.root(), &terms.join(" "));
-        for r in results.iter().take(3) {
-            if r.path != active_path && !linked.contains(&r.path) {
-                linked.insert(r.path.clone());
-                if let Ok(content) = v.read_file(&r.path) {
-                    let trimmed = trim_to_tokens(&content, 1500);
-                    context.push_str(&format!("\n\n## {}\n(File: {})\n{trimmed}", r.name.trim_end_matches(".md").trim_end_matches(".mdx"), r.path));
-                }
-            }
-        }
-    }
-
     Ok(context)
 }
 
