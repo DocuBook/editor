@@ -30,19 +30,16 @@ import { uuid } from './uuid'
  *  document writes while the AI types (smooth instead of janky streaming). */
 const AI_DELTA_BATCH_MS = 50
 
-/** Lazy-load the provider catalog (2.17 MB — keep it out of the initial bundle). */
-let _providersCache: typeof import('../data/providers').PROVIDERS | null = null
-async function getProviders() {
-  if (!_providersCache) _providersCache = (await import('../data/providers')).PROVIDERS
-  return _providersCache
-}
+/** Provider catalog — small manual list (was a 2.17 MB generated file); model
+ *  lists are discovered at runtime via backend `list_models`. Import statically. */
+import { PROVIDERS } from '../data/providers'
 
 /** Read saved AI config from persisted store for Rust backend. The API key is
  *  intentionally NOT sent — the backend resolves it from the keychain (SEC-5). */
 async function getAiConfig(): Promise<{ provider?: string; model?: string; baseUrl?: string }> {
   try {
     const st = useAiSettings.getState()
-    const p = st.provider ? (await getProviders()).find(x => x.id === st.provider) : undefined
+    const p = st.provider ? PROVIDERS.find(x => x.id === st.provider) : undefined
     /** Custom OpenAI-compatible endpoints aren't in the catalog — their base URL
      *  lives in the store and is bound server-side at save time. */
     const baseUrl = p?.api || (st.provider === CUSTOM_PROVIDER_ID ? st.baseUrls[st.provider] : undefined)
@@ -73,16 +70,14 @@ async function runSendMessages(args: any, deps: AiTransportDeps): Promise<Readab
   const st = useAiSettings.getState()
   const provider = config.provider || st.provider
   const model = config.model || st.model
-  const providerInfo = (await getProviders()).find(p => p.id === provider)
-  const modelDef = providerInfo?.models.find(m => m.id === model)
-  /** Tool-call support = model capability (catalog) AND measured gateway
-   *  compatibility (test_connection probe, stored per provider+model). No
-   *  static exclusions: a provider/model measured tools:false stays
-   *  text-only, custom endpoints unlock when the probe measures tools:true.
-   *  For env-controlled custom endpoints the probe is keyed by the env
-   *  model (the one the backend actually sends), so resolve it here. */
+  const providerInfo = PROVIDERS.find(p => p.id === provider)
+  /** Tool-call support = measured gateway compatibility (test_connection probe,
+   *  stored per provider+model). The generated catalog's toolCall flag is gone —
+   *  the probe is the single source of truth; unmeasured → text-only until
+   *  auto-probe measures true. For env-controlled custom endpoints the probe is
+   *  keyed by the env model (the one the backend actually sends). */
   const probeModel = resolveProbeModel(provider, model)
-  const supportsTools = !isTextOnly(provider, probeModel, st.probeTools, modelDef?.toolCall === true)
+  const supportsTools = !isTextOnly(provider, probeModel, st.probeTools)
   const toolDefs = (body as any)?.toolDefinitions as Record<string, { description: string; inputSchema: any }> | undefined
   /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
   const tools = (supportsTools && toolDefs) ? Object.entries(toolDefs).map(([name, def]) => ({

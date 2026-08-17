@@ -13,21 +13,17 @@ describe('resolveProbeModel', () => {
 })
 
 describe('isTextOnly', () => {
-  it('custom provider: text-only until probed true', () => {
-    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'm', {}, true)).toBe(true)   // unmeasured → text-only
-    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'm', { [CUSTOM_PROVIDER_ID]: { m: true } }, true)).toBe(false)
-    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'm', { [CUSTOM_PROVIDER_ID]: { m: false } }, true)).toBe(true)
-  })
-  it('catalog provider: permissive unless measured false', () => {
-    expect(isTextOnly('anthropic', 'm', {}, true)).toBe(false)          // unmeasured → tools
-    expect(isTextOnly('anthropic', 'm', { anthropic: { m: false } }, true)).toBe(true) // measured no
-    expect(isTextOnly('anthropic', 'm', { anthropic: { m: false } }, false)).toBe(false) // catalog no-tools + probe false → text-only (probe irrelevant)
+  it('text-only until probed true — same rule for every provider', () => {
+    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'm', {})).toBe(true)   // unmeasured → text-only
+    expect(isTextOnly('anthropic', 'm', {})).toBe(true)          // catalog unmeasured → text-only too
+    expect(isTextOnly('anthropic', 'm', { anthropic: { m: true } })).toBe(false)
+    expect(isTextOnly('anthropic', 'm', { anthropic: { m: false } })).toBe(true)
   })
   it('probe keyed by resolved model', () => {
     // transport resolves env model, so probe must live under env-model
     const probeTools = { [CUSTOM_PROVIDER_ID]: { 'env-model': true } }
-    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'env-model', probeTools, true)).toBe(false)
-    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'ui-model', probeTools, true)).toBe(true)
+    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'env-model', probeTools)).toBe(false)
+    expect(isTextOnly(CUSTOM_PROVIDER_ID, 'ui-model', probeTools)).toBe(true)
   })
 })
 

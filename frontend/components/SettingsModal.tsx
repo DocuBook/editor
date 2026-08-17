@@ -7,12 +7,13 @@ import { resolveProbeModel, autoProbe } from '../utils/aiProbe'
 import GitSettings from './GitSettings'
 import SystemSettings from './SystemSettings'
 import AppearanceSettings from './AppearanceSettings'
+import { PROVIDERS } from '../data/providers'
 import type { ProviderInfo } from '../data/providers'
+import { fetchProviderModels, type DiscoveredModel } from '../utils/modelDiscovery'
 
 /** Synthetic provider for user-configured OpenAI-compatible endpoints — NOT in the
- *  generated catalog (providers.ts is auto-generated from models.dev and would
- *  overwrite it). Base URL + key are bound server-side via set_custom_endpoint. */
-const CUSTOM_PROVIDER: ProviderInfo = { id: CUSTOM_PROVIDER_ID, name: 'OpenAI Compatible (Custom)', api: '', models: [] }
+ *  manual provider list. Base URL + key are bound server-side via set_custom_endpoint. */
+const CUSTOM_PROVIDER: ProviderInfo = { id: CUSTOM_PROVIDER_ID, name: 'OpenAI Compatible (Custom)', api: '' }
 
 /** Badge for providers currently on the text-only path (no tool-call
  *  streaming). Source of truth is the measured probe (aiSettings.probeTools):
@@ -32,7 +33,7 @@ const isTextOnlyProvider = (id: string, model: string, probeTools: Record<string
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [section, setSection] = useState<'ai' | 'appearance' | 'git' | 'system'>('ai')
-  const { provider, model, savedProviders, models, probeTools,
+  const { provider, model, savedProviders, probeTools,
     setProvider, setModel, clearApiKey, addSavedProvider, removeSavedProvider } = useAiSettings()
 
   /** API key is entered here but NEVER read back from the backend —
@@ -84,18 +85,32 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     })
   }, [model, provider])
 
-  /** Provider catalog lazy-loaded (2.17 MB — not part of the initial bundle). */
-  const [providers, setProviders] = useState<ProviderInfo[]>([])
-  const providersRef = useRef<ProviderInfo[]>([])
+  /** Provider catalog — small manual list (no more generated 2.17 MB file). */
+  const providers = [CUSTOM_PROVIDER, ...PROVIDERS]
+
+  /** Runtime model discovery — fetched from the provider's /models via the
+   *  backend (keyed server-side). Loading/error states drive the dropdown. */
+  const [modelOptions, setModelOptions] = useState<DiscoveredModel[]>([])
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsError, setModelsError] = useState<string | null>(null)
   useEffect(() => {
+    if (!provider || provider === CUSTOM_PROVIDER_ID) { setModelOptions([]); setModelsError(null); return }
+    const p = providers.find(x => x.id === provider)
+    if (!p?.api) { setModelOptions([]); setModelsError(null); return }
     let cancelled = false
-    import('../data/providers').then(m => {
-      if (cancelled) return
-      providersRef.current = [CUSTOM_PROVIDER, ...m.PROVIDERS]
-      setProviders([CUSTOM_PROVIDER, ...m.PROVIDERS])
-    })
+    setModelsLoading(true); setModelsError(null)
+    fetchProviderModels(p.id, p.api)
+      .then(models => {
+        if (cancelled) return
+        setModelOptions(models)
+        // Default to the first discovered model only if the user never chose one.
+        const st = useAiSettings.getState()
+        if (models.length && !st.models[provider]) setModel(models[0].id)
+      })
+      .catch(e => { if (!cancelled) setModelsError(String(e)) })
+      .finally(() => { if (!cancelled) setModelsLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [provider])
 
   const [providerSearch, setProviderSearch] = useState('')
   const [showProviderDropdown, setShowProviderDropdown] = useState(false)
@@ -170,8 +185,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   )
 
   const selectProviderFn = (p: ProviderInfo) => {
-    setProvider(p.id) // restores saved apiKey + model for this provider
-    if (p.id !== CUSTOM_PROVIDER_ID && !models[p.id]) { import('../data/providers').then(m => { if (!useAiSettings.getState().models[p.id]) setModel(m.getDefaultModel(p.id) || '') }) } // only default if never chosen
+    setProvider(p.id) // restores saved apiKey + model for this provider (model default is picked by the discovery effect above)
     setShowProviderDropdown(false)
   }
 
@@ -195,7 +209,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     const p = providers.find(x => x.id === provider)
     // For env-controlled custom endpoints the probe must target the ENV model
     // (the backend sends it regardless of the UI value).
-    const probeModel = resolveProbeModel(provider, model || p?.models[0]?.id || '', envCustom ? customCfg?.model : undefined)
+    const probeModel = resolveProbeModel(provider, model || modelOptions[0]?.id || '', envCustom ? customCfg?.model : undefined)
     try {
       const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
       let tools: boolean | undefined
@@ -212,7 +226,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setTesting(true)
     try {
       const p = providers.find(x => x.id === provider)
-      const probeModel = resolveProbeModel(provider, model || p?.models[0]?.id || '', envCustom ? customCfg?.model : undefined)
+      const probeModel = resolveProbeModel(provider, model || modelOptions[0]?.id || '', envCustom ? customCfg?.model : undefined)
       // Test ONLY checks connectivity — it does not measure or persist tool-call
       // support (that's handleSave auto-probe and the model-switch effect).
       await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
@@ -306,6 +320,14 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <>
                   <label className="text-xs font-medium text-foreground mb-1.5 block">Model</label>
+                  {modelsError ? (
+                    <>
+                      <input type="text" value={model} onChange={e => setModel(e.target.value)}
+                        placeholder={'model id, e.g. gpt-4o (models endpoint unavailable: ' + modelsError + ')'}
+                        className="w-full bg-background border border-border rounded-md px-3 py-[7px] text-xs text-foreground outline-none font-mono mb-1 disabled:opacity-60" />
+                      <div className="text-[10px] text-danger mb-3">Could not list models — type the model id manually.</div>
+                    </>
+                  ) : (
                   <div ref={modelRef} className="relative mb-3">
                 <div onClick={() => { 
                     const r = modelRef.current?.getBoundingClientRect()
@@ -313,9 +335,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     setShowModelDropdown(o => !o); setTimeout(() => modelSearchRef.current?.focus(), 50) 
                   }}
                   className="flex items-center gap-2 bg-background border border-border rounded-md px-3 py-[7px] cursor-pointer text-[13px] text-foreground">
-                  {model ? (() => {
-                    const m = selectedProvider.models.find(x => x.id === model)
-                    return m ? `${m.name} ($${m.costInput}/$${m.costOutput}, ${(m.context/1000).toFixed(0)}K ctx)` : model
+                  {modelsLoading ? <span className="text-muted">Loading models…</span> : model ? (() => {
+                    const m = modelOptions.find(x => x.id === model)
+                    return m ? m.name : model
                   })() : <span className="text-muted">— Select a model —</span>}
                   <ChevronsUpDown size={14} className="text-muted shrink-0 ml-auto" />
                 </div>
@@ -325,7 +347,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                       <Search size={14} className="text-muted shrink-0" />
                       <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}
                         onKeyDown={e => {
-                          const filtered = selectedProvider.models.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
+                          const filtered = modelOptions.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
                           if (e.key === 'ArrowDown') { e.preventDefault(); setModelHighlightIdx(i => Math.min(i + 1, filtered.length - 1)) }
                           if (e.key === 'ArrowUp') { e.preventDefault(); setModelHighlightIdx(i => Math.max(i - 1, 0)) }
                           if (e.key === 'Enter' && filtered[modelHighlightIdx]) { e.preventDefault(); setModel(filtered[modelHighlightIdx].id); setShowModelDropdown(false) }
@@ -335,12 +357,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
                     <div ref={modelListRef} className="max-h-[200px] overflow-y-auto">
                       {(() => {
-                        const filtered = selectedProvider.models.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
+                        const filtered = modelOptions.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
                         return filtered.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">No models found</div> : filtered.map((m, i) => (
                           <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
                             className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-accent text-white' : i === modelHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
                             <span className="flex-1">{m.id}</span>
-                            <span className="text-[10px] opacity-70">${m.costInput}/${m.costOutput} · {(m.context/1000).toFixed(0)}K</span>
                           </div>
                         ))
                       })()}
@@ -348,6 +369,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   </div>
                 )}
               </div>
+                  )}
                 </>
               )}
 
