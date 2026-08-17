@@ -230,14 +230,13 @@ async function runSendMessages(args: any, deps: AiTransportDeps): Promise<Readab
            *  close gracefully instead of surfacing an error. */
           if (meaningfulOps.length === 0) {
             console.info('[ai] tool calls had no operations — treating as no change', { provider, model, toolCalls: emitToolCalls.length })
-            /** Close the AI menu instead of finishing OK — xl-ai enters
-             *  user-reviewing (empty accept/revert) on ANY successful call,
-             *  so a no-change result must not "succeed" normally. Access
-             *  the extension via editor.extensions (same as openXlAiMenu). */
-            const aiExt = editor?.extensions?.get?.('ai')
-            if (aiExt && typeof aiExt.closeAIMenu === 'function') aiExt.closeAIMenu()
-            toast.info('AI made no document changes')
-            controller.enqueue({ type: 'text-end', id })
+            /** Route through xl-ai's ERROR surface: it renders retry + cancel
+             *  (ai.retry() / ai.rejectChanges()), so the user can rephrase or
+             *  dismiss. The toast carries the clear message — xl-ai only shows a
+             *  generic "Error" label. The old force-close + toast fought each
+             *  other (menu vanished while the toast claimed something happened). */
+            toast.info('AI made no document changes — retry with a different prompt or cancel')
+            controller.error(new Error('AI made no document changes'))
           } else {
             for (const tc of meaningfulOps) {
               /** Emit tool-input-available so xl-ai Chat creates a tool part → suggestions */
