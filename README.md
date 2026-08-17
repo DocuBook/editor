@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="DocuBook" src="https://shieldcn.dev/header/graph.svg?title=DocuBook+Editor&amp;subtitle=The+markdown+editor+that+thinks+like+a+developer+%E2%80%94+Obsidian+vaults%2C+Notion+blocks%2C+Zed-speed+search%2C+and+Git+%E2%80%94+all+in+one.&amp;logo=lu%3AWandSparkles&amp;mode=dark" />
+  <img alt="DocuBook Editor" src="https://shieldcn.dev/header/graph.svg?title=DocuBook+Editor&amp;subtitle=The+markdown+editor+that+thinks+like+a+developer+%E2%80%94+Obsidian+vaults%2C+Notion+blocks%2C+Zed-speed+search%2C+and+Git+%E2%80%94+all+in+one.&amp;logo=lu%3AWandSparkles&amp;mode=dark" />
 </p>
 
 <p align="center">
@@ -19,7 +19,7 @@ Two distributions from the same codebase — **web (self-hosted Docker)** and **
 ### Option A — Web (Docker, self-host)
 
 > [!IMPORTANT]
-> Docker **pulls a prebuilt image** — no build step on your side. The image is built in CI on every release ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)) and contains the frontend **and** the server. Pin a release to stay on a known version: `ghcr.io/docubook/editor:v0.1.0-rc.1` (default `latest` tracks the newest tag).
+> Docker **pulls a prebuilt image** — no build step on your side. The image is built in CI on every release ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)) and contains the frontend **and** the server. Pin a release to stay on a known version: `ghcr.io/docubook/editor:v0.1.0-rc.2` (default `latest` tracks the newest tag).
 
 **Quick start:**
 
@@ -37,7 +37,7 @@ docker run -d --name docubook -p 8080:8080 \
 # docker-compose.yml
 services:
   docubook:
-    image: ghcr.io/docubook/editor   # or pin a release: ghcr.io/docubook/editor:0.1.0-rc.1
+    image: ghcr.io/docubook/editor   # or pin a release: ghcr.io/docubook/editor:0.1.0-rc.2
     ports:
       - "8080:8080"
     volumes:
@@ -112,19 +112,19 @@ Works on any Docker-capable host: VPS (Hetzner, DigitalOcean, Linode, AWS Lights
 
 **Deployment notes:**
 
-- **Persistence**: everything lives in the `/data` volume (`vaults/`, `keys.json`, `config.json`). Back up that volume; the container is stateless and can be recreated any time.
+- **Persistence**: see the [persistence warning](#option-a--web-docker-self-host) — back up the `/data` volume; the container is stateless and can be recreated any time.
 - **HTTPS**: run behind a reverse proxy (Coolify/Traefik/Caddy/Nginx). Set `DB_SECURE_COOKIE=1` so the session cookie is only sent over HTTPS.
 - **Upgrades**: `docker compose pull && docker compose up -d` — data is untouched. Sessions reset on restart (re-login required).
 - **Health**: the image ships a Docker `HEALTHCHECK` against `/api/health` — Coolify/Portainer show container health automatically.
 
 ### Option B — Desktop (macOS)
 
-Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook into Applications:
+Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook Editor into Applications:
 
 | DMG                              | Architecture | Mac                                   |
 | -------------------------------- | ------------ | ------------------------------------- |
-| `DocuBook_<version>_aarch64.dmg` | arm64        | Apple Silicon (M1/M2/M3/M4…) — native |
-| `DocuBook_<version>_x64.dmg`     | x86_64       | Intel; Apple Silicon via Rosetta 2    |
+| `DocuBook Editor_<version>_aarch64.dmg` | arm64 | Apple Silicon (M1/M2/M3/M4…) — native |
+| `DocuBook Editor_<version>_x64.dmg`     | x86_64 | Intel; Apple Silicon via Rosetta 2    |
 
 **First launch** — builds are **not notarized** (until the project sponsors Apple Developer signing/notarization), so Gatekeeper blocks the first open. The dialog differs by arch (not a malware warning):
 
@@ -134,7 +134,7 @@ Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/ed
   open /Applications/DocuBook\ Editor.app
   ```
 - **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
-  - Right-click **DocuBook** in Applications → **Open** → **Open**, or
+  - Right-click **DocuBook Editor** in Applications → **Open** → **Open**, or
   - System Settings → Privacy & Security → **Open Anyway**, or
   - the same `xattr -cr /Applications/DocuBook\ Editor.app` one-liner above.
 
@@ -158,7 +158,7 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 
 - **Web**: open the URL → the setup wizard creates the admin account (or provision headless with `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`, both required). Back up the `/data` volume — see the persistence warning in [Option A](#option-a--web-docker-self-host).
 - **Desktop**: open the app → welcome screen → **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL).
-- **Connect AI**: Settings → **AI** — pick a provider, paste your API key (stored backend-side, never in the browser). Docker: optionally provision the custom endpoint headless with `DB_OPENAI_COMPAT_BASE_URL` + `_API_KEY` (+ `_MODEL`) — the UI then shows it read-only ("from env" badge).
+- **Connect AI**: Settings → **AI** — pick a provider, paste your API key (stored backend-side — see [AI Assistant](#ai-assistant)). Docker: provision the custom provider headless via `DB_OPENAI_COMPAT_*` (see [Environment configuration](#environment-configuration)) — shown read-only in the UI.
 - **Publish with Git**: Settings → **Git** — set commit name/email and add a remote. Private repos use your Keychain / SSH keys on desktop; the container's git identity on web.
 - **Start writing**: click a file in the sidebar, type `/` for slash commands, use the **Code** button to toggle WYSIWYG/markdown. See [Usage](#usage).
 
@@ -173,7 +173,7 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 ## Features
 
 > [!NOTE]
-> Only **`.md` files** open in the WYSIWYG block editor (standard CommonMark). Other extensions (`.mdx`, `.markdown`, JSON, TOML, YAML, `.txt`, …) open in **view-only** mode.
+> Only **`.md` and `.mdx` files** open in the WYSIWYG block editor (standard CommonMark). Other extensions (`.markdown`, JSON, TOML, YAML, `.txt`, …) open in **view-only** mode.
 
 ### Vault System (Obsidian-like)
 
@@ -201,7 +201,7 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 > [!NOTE]\
 > **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, the majority of the 1,000+ catalog) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
 
-**Popular Providers** (all support the accept/reject suggestion flow):
+**Popular Providers** (catalog generated from [models.dev](https://models.dev)):
 
 | Provider      | Notable models                       |
 | ------------- | ------------------------------------ |
@@ -236,7 +236,7 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 | -------- | ------------------------------- |
 | Frontend | React 19, TypeScript 6, Zustand |
 | UI       | Tailwind CSS v4, Lucide icons   |
-| Editor   | BlockNoteJS 0.53 (ProseMirror)  |
+| Editor   | BlockNoteJS 0.54 (ProseMirror)  |
 | Backend  | Rust with Tauri v2              |
 | Build    | Vite 8 + Rolldown               |
 | Markdown | pulldown-cmark (Rust)           |
@@ -303,7 +303,7 @@ Writing shortcuts (built-in, no setup needed):
 
 ## License
 
-[GPL-3.0](./LICENSE) — DocuBook now integrates BlockNote XL package (`@blocknote/xl-ai`) which is licensed under GPL-3.0. The GPL ensures that modified versions of the app remain free and open — if you distribute the app, you must share your changes under the same license.
+[GPL-3.0](./LICENSE) — DocuBook Editor now integrates BlockNote XL package (`@blocknote/xl-ai`) which is licensed under GPL-3.0. The GPL ensures that modified versions of the app remain free and open — if you distribute the app, you must share your changes under the same license.
 
 ### Commercial Use
 
@@ -311,7 +311,7 @@ Writing shortcuts (built-in, no setup needed):
 
 The **optional cooperation clause** below is a separate, voluntary arrangement — it is NOT a GPL requirement and does not restrict what the license already permits:
 
-> If you would like to work with the author directly — for example, running DocuBook as a dedicated managed service or building an AI gateway/provider on top of it — reach out to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
+> If you would like to work with the author directly — for example, running DocuBook Editor as a dedicated managed service or building an AI gateway/provider on top of it — reach out to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
 
 > [!NOTE]
-> **Personal and community use remains free forever.** Using DocuBook for yourself, your studies, or your community — on your own devices or your own server — always stays free and open source.
+> **Personal and community use remains free forever.** Using DocuBook Editor for yourself, your studies, or your community — on your own devices or your own server — always stays free and open source.
