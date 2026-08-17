@@ -1,0 +1,396 @@
+// AI pipeline — grounding, probe, ask_ai SSE streaming. Isolated into its own
+// module; shared state/imports come from the parent via `use super::*`.
+use super::*;
+
+fn sanitize_ai_error(err: &str) -> String {
+    let e = err.to_lowercase();
+    if e.contains("dns")
+        || e.contains("resolve")
+        || e.contains("connection")
+        || e.contains("refused")
+        || e.contains("connect")
+    {
+        "Could not reach the AI provider — check your connection".into()
+    } else if e.contains("timeout") || e.contains("timed out") {
+        "The AI provider timed out".into()
+    } else if e.contains("tls") || e.contains("ssl") || e.contains("certificate") {
+        "Secure connection to the AI provider failed".into()
+    } else if e.contains("body") || e.contains("json") || e.contains("parse") {
+        "The AI provider returned an unreadable response".into()
+    } else {
+        "AI request failed".into()
+    }
+}
+
+pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Response {
+    eprintln!("[ask_ai] handler entry");
+    let s = |k: &str| {
+        args.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string()
+    };
+    let provider = s("provider");
+    let model = s("model");
+    let base_url = s("baseUrl");
+    let messages = s("messages");
+    let tools = args
+        .get("tools")
+        .and_then(|v| v.as_str())
+        .map(|t| t.to_string());
+
+    let agent_cfg = match (provider.as_str(), model.as_str()) {
+        // Custom OpenAI-compatible endpoint: URL is bound server-side at save time,
+        // the webview-provided baseUrl is IGNORED so the stored key can never be
+        // redirected to a host the user did not explicitly bind it to.
+        (p, m) if !p.is_empty() && !m.is_empty() && p == agent::CUSTOM_PROVIDER_ID => {
+            // Env override (Docker): DB_OPENAI_COMPAT_BASE_URL/API_KEY/MODEL win
+            // when set; otherwise the keys.json values are used (backward compat).
+            let (b, key, model) = match probe::custom_env_config() {
+                Some((eb, ek, em)) => {
+                    let k = match ek.or_else(|| keys::get_key(&state.data_dir, p).ok()) {
+                        Some(k) => k,
+                        None => return err_response("No API key found"),
+                    };
+                    (eb, k, em.unwrap_or_else(|| m.to_string()))
+                }
+                None => {
+                    let b = match keys::get_base_url(&state.data_dir, p) {
+                        Ok(u) => u,
+                        Err(_) => {
+                            return err_response(
+                                "No custom base URL saved — set it in Settings → AI",
+                            )
+                        }
+                    };
+                    let k = match keys::get_key(&state.data_dir, p) {
+                        Ok(k) => k,
+                        Err(_) => return err_response("No API key found"),
+                    };
+                    (b, k, m.to_string())
+                }
+            };
+            if let Err(e) = agent::validate_custom_base_url(&b, false) {
+                return err_response(&e);
+            }
+            agent::Agent::new(p, &model, &key, &b)
+        }
+        (p, m) if !p.is_empty() && !m.is_empty() && !base_url.is_empty() => {
+            if let Err(e) = agent::validate_base_url(&base_url) {
+                return err_response(&e);
+            }
+            let key = match keys::get_key(&state.data_dir, p) {
+                Ok(k) => k,
+                Err(_) => return err_response("No API key found"),
+            };
+            agent::Agent::new(p, m, &key, &base_url)
+        }
+        _ => return err_response("Provider, model, and base URL are required"),
+    };
+
+    state.ai_cancel.store(false, Ordering::SeqCst);
+    let started = std::time::Instant::now();
+    let client = match reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return err_response(&format!("Client error: {}", e)),
+    };
+
+    let mut body_obj = match serde_json::from_str::<Value>(&messages) {
+        Ok(msgs) => json!({ "model": agent_cfg.model, "messages": msgs, "stream": true }),
+        Err(_) => return err_response("Invalid messages"),
+    };
+    if let Some(ref tools_str) = tools {
+        if let Ok(tools_val) = serde_json::from_str::<Value>(tools_str) {
+            if let Some(arr) = tools_val.as_array() {
+                if !arr.is_empty() {
+                    body_obj["tools"] = tools_val;
+                    // "auto", NOT "required": thinking-mode models reject tool_choice:"required"
+                    // with HTTP 400 ("Thinking mode does not support this tool_choice").
+                    body_obj["tool_choice"] = json!("auto");
+                }
+            }
+        }
+    }
+
+    let url = format!(
+        "{}/chat/completions",
+        agent_cfg.base_url.trim_end_matches('/')
+    );
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(64);
+
+    tokio::spawn(async move {
+        let req = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", agent_cfg.api_key));
+        let response = match tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            req.json(&body_obj).send(),
+        )
+        .await
+        {
+            Ok(Ok(r)) => r,
+            Ok(Err(e)) => {
+                eprintln!(
+                    "[ask_ai] send error at {:.0}s: {}",
+                    started.elapsed().as_secs_f32(),
+                    e
+                );
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("error")
+                        .data(sanitize_ai_error(&e.to_string()))))
+                    .await;
+                return;
+            }
+            Err(_) => {
+                eprintln!(
+                    "[ask_ai] send timeout at {:.0}s — provider never responded",
+                    started.elapsed().as_secs_f32()
+                );
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("error")
+                        .data("AI provider did not respond — try again")))
+                    .await;
+                return;
+            }
+        };
+        let status = response.status();
+        if !status.is_success() {
+            // Log the EXACT request body + provider response server-side (docker
+            // logs) — never to the client (it may leak internal details). This
+            // shows what we actually sent and why the gateway rejected it.
+            let req_snapshot = json!({
+                "model": body_obj.get("model"),
+                "stream": body_obj.get("stream"),
+                "max_tokens": body_obj.get("max_tokens"),
+                "tool_choice": body_obj.get("tool_choice"),
+                "tools": body_obj.get("tools"),
+                "message_roles": body_obj.get("messages").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|x| x.get("role").and_then(|r| r.as_str()).map(String::from)).collect::<Vec<_>>()),
+            }).to_string();
+            let body = response.text().await.unwrap_or_default();
+            eprintln!(
+                "[ask_ai] provider error: HTTP {} — request: {} — body: {}",
+                status,
+                &req_snapshot[..req_snapshot.len().min(1600)],
+                &body[..body.len().min(800)]
+            );
+            let _ = tx
+                .send(Ok(Event::default()
+                    .event("error")
+                    .data("AI provider error (HTTP {status})")))
+                .await;
+            return;
+        }
+        let mut stream = response;
+        // First-chunk budget (P1): a provider that accepts the request but never
+        // sends data gets 30s, not the 120s stall timeout. After the first chunk
+        // arrives, inter-chunk stalls keep the 120s read_timeout.
+        let first =
+            match tokio::time::timeout(std::time::Duration::from_secs(30), stream.chunk()).await {
+                Ok(Ok(Some(c))) => c,
+                Ok(Ok(None)) => {
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("error")
+                            .data("AI provider returned an empty response")))
+                        .await;
+                    return;
+                }
+                Ok(Err(e)) => {
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("error")
+                            .data(sanitize_ai_error(&e.to_string()))))
+                        .await;
+                    return;
+                }
+                Err(_) => {
+                    eprintln!(
+                        "[ask_ai] P1 first-chunk timeout fired at {:.0}s",
+                        started.elapsed().as_secs_f32()
+                    );
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("error")
+                            .data("AI provider did not respond — try again")))
+                        .await;
+                    return;
+                }
+            };
+        let mut full = String::new();
+        let mut tool_calls: Vec<(i64, String, String, String)> = Vec::new();
+        let mut byte_buf: Vec<u8> = Vec::new();
+        let mut truncated = false;
+        let mut first_chunk = Some(first);
+        loop {
+            let chunk = match first_chunk.take() {
+                Some(c) => Ok(Some(c)),
+                None => stream.chunk().await,
+            };
+            match chunk {
+                Ok(Some(chunk)) => {
+                    if state.ai_cancel.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    // Total generation budget (per attempt): the per-chunk
+                    // read_timeout only catches STALLS — a model that trickles
+                    // tokens forever never trips it, so bound the whole run.
+                    if started.elapsed().as_secs() >= AI_MAX_SECONDS {
+                        let _ = tx
+                            .send(Ok(Event::default().event("error").data(format!(
+                                "AI generation exceeded {}s — try again or use a stronger model",
+                                AI_MAX_SECONDS
+                            ))))
+                            .await;
+                        return;
+                    }
+                    byte_buf.extend_from_slice(&chunk);
+                    let mut start = 0;
+                    while let Some(pos) = byte_buf[start..].iter().position(|&b| b == b'\n') {
+                        let line_end = start + pos;
+                        let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
+                        let data = line
+                            .trim_end_matches('\r')
+                            .strip_prefix("data: ")
+                            .unwrap_or("");
+                        if !data.is_empty() {
+                            let out = process_sse_data(data, &mut full, &mut tool_calls, &tx).await;
+                            if let Err(e) = out {
+                                let _ = tx.send(Ok(Event::default().event("error").data(e))).await;
+                                return;
+                            }
+                            if full.len() >= MAX_AI_BUFFER {
+                                truncated = true;
+                                break;
+                            }
+                        }
+                        start = line_end + 1;
+                    }
+                    byte_buf.drain(..start);
+                    if truncated {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!(
+                        "[ask_ai] stream read error at {:.0}s: {}",
+                        started.elapsed().as_secs_f32(),
+                        e
+                    );
+                    let _ = tx
+                        .send(Ok(Event::default()
+                            .event("error")
+                            .data(sanitize_ai_error(&e.to_string()))))
+                        .await;
+                    return;
+                }
+            }
+        }
+        if !byte_buf.is_empty() {
+            let line = String::from_utf8_lossy(&byte_buf);
+            let data = line
+                .trim_end_matches('\r')
+                .strip_prefix("data: ")
+                .unwrap_or("");
+            if !data.is_empty() {
+                let _ = process_sse_data(data, &mut full, &mut tool_calls, &tx).await;
+            }
+        }
+        for (_, id, name, args_json) in &tool_calls {
+            if !id.is_empty() && !name.is_empty() {
+                let input: Value = serde_json::from_str(args_json).unwrap_or(Value::Null);
+                let _ = tx
+                    .send(Ok(Event::default().event("ai:tool_call").data(
+                        json!({
+                            "toolCallId": id, "toolName": name, "input": input,
+                        })
+                        .to_string(),
+                    )))
+                    .await;
+            }
+        }
+        let _ = tx
+            .send(Ok(Event::default().event("ai:tools_done").data("\"\"")))
+            .await;
+        if full.is_empty() && tool_calls.is_empty() {
+            let _ = tx
+                .send(Ok(Event::default()
+                    .event("error")
+                    .data("AI returned empty response")))
+                .await;
+            return;
+        }
+        eprintln!(
+            "[docubook] ask_ai done: elapsed={:.1}s chars={} tools={} truncated={}",
+            started.elapsed().as_secs_f32(),
+            full.len(),
+            tool_calls.len(),
+            truncated
+        );
+        let _ = tx
+            .send(Ok(Event::default().event("ai:done").data(
+                json!({ "provider": agent_cfg.provider, "truncated": truncated }).to_string(),
+            )))
+            .await;
+    });
+
+    Sse::new(ReceiverStream::new(rx))
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+type SseTx = tokio::sync::mpsc::Sender<Result<Event, axum::Error>>;
+
+/** One complete SSE `data:` payload from the provider → forward as events. */
+pub(crate) async fn process_sse_data(
+    data: &str,
+    full: &mut String,
+    tool_calls: &mut Vec<(i64, String, String, String)>,
+    tx: &SseTx,
+) -> Result<(), String> {
+    if data == "[DONE]" {
+        return Ok(());
+    }
+    let Ok(val) = serde_json::from_str::<Value>(data) else {
+        return Ok(());
+    };
+    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
+        full.push_str(content);
+        let _ = tx
+            .send(Ok(Event::default().event("ai:token").data(
+                serde_json::to_string(content).map_err(|e| e.to_string())?,
+            )))
+            .await;
+    }
+    if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
+        for tc in tcs {
+            let idx = tc["index"].as_i64().unwrap_or(0);
+            let id = tc["id"].as_str().unwrap_or("").to_string();
+            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
+            let args = tc["function"]["arguments"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            if let Some(pos) = tool_calls.iter().position(|(i, _, _, _)| *i == idx) {
+                if !id.is_empty() {
+                    tool_calls[pos].1 = id;
+                }
+                if !name.is_empty() {
+                    tool_calls[pos].2 = name;
+                }
+                tool_calls[pos].3.push_str(&args);
+            } else {
+                tool_calls.push((idx, id, name, args));
+            }
+        }
+    }
+    Ok(())
+}
