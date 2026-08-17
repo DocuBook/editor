@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, vaultPromptHints, buildVaultGroundingPrompt, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
 
 describe('buildDocumentContext', () => {
   const editor: any = {
@@ -326,7 +326,7 @@ describe('validateOperationsSemantics', () => {
 })
 
 describe('buildToolSystemPrompt', () => {
-  const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]', '', '')
+  const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]', '')
   it('instructs the tool call and id suffixing', () => {
     expect(base).toContain('applyDocumentOperations')
     expect(base).toContain('trailing $')
@@ -339,9 +339,26 @@ describe('buildToolSystemPrompt', () => {
     expect(base).toContain('language-mermaid')
     expect(base).toContain('data-language="mermaid"')
   })
-  it('includes vault context when present', () => {
-    expect(buildToolSystemPrompt('doc', 'VAULT', '')).toContain('Vault context')
-    expect(buildToolSystemPrompt('doc', '', '')).not.toContain('Vault context')
+  it('does NOT embed vault context (vault-gen uses buildVaultGroundingPrompt)', () => {
+    expect(base).not.toContain('Vault context')
+  })
+})
+
+describe('vaultPromptHints', () => {
+  it('matches wikilink, question, generate verb and empty doc', () => {
+    expect(vaultPromptHints('lihat [[roadmap]]', 'doc')).toBe(true)
+    expect(vaultPromptHints('Apa isi vault?', 'doc')).toBe(true)
+    expect(vaultPromptHints('Buat draft rencana', 'doc')).toBe(true)
+    expect(vaultPromptHints('apa pun', '')).toBe(true) // empty doc
+  })
+  it('misses plain edit prompts on a non-empty doc', () => {
+    expect(vaultPromptHints('perbaiki kalimat ini', 'doc content')).toBe(false)
+    expect(vaultPromptHints('jadikan lebih pendek', 'doc content')).toBe(false)
+  })
+  it('agrees with isVaultGenerationIntent when vault context exists', () => {
+    for (const [t, doc] of [['lihat [[roadmap]]', 'doc'], ['Apa isi vault?', 'doc'], ['Buat draft', 'doc'], ['perbaiki ini', 'doc'], ['x', '']]) {
+      expect(isVaultGenerationIntent(t, true, doc)).toBe(vaultPromptHints(t, doc))
+    }
   })
 })
 
@@ -408,16 +425,12 @@ describe('buildVaultGroundingPrompt', () => {
 })
 
 describe('buildEditSystemPrompt', () => {
-  it('includes doc state, vault context, and edit rules', () => {
-    const p = buildEditSystemPrompt('konten doc', '## vault\nisi', '- summarize rule')
+  it('includes doc state and edit rules (no vault — vault-gen is separate)', () => {
+    const p = buildEditSystemPrompt('konten doc', '- summarize rule')
     expect(p).toContain('Document state (JSON):')
     expect(p).toContain('konten doc')
-    expect(p).toContain('## vault')
     expect(p).toContain('reference block ids EXACTLY as shown')
     expect(p).toContain('summarize rule')
-  })
-  it('omits vault section when vault context empty', () => {
-    const p = buildEditSystemPrompt('doc', '', '')
     expect(p).not.toContain('Vault context')
   })
 })

@@ -19,9 +19,9 @@ import { useEditorStore } from '../stores/editor'
 import {
   buildApplyDocumentInput, MAX_AI_ATTEMPTS, validateOperationsSemantics,
   buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent,
-  buildVaultGroundingPrompt, buildEditSystemPrompt, buildToolSystemPrompt,
-  buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps,
-  suffixOperationIds,
+  vaultPromptHints, buildVaultGroundingPrompt, buildEditSystemPrompt,
+  buildToolSystemPrompt, buildDocumentContext, buildToolDocContext,
+  buildBaseMessages, isMeaningfulOps, suffixOperationIds,
 } from './aiBlocks'
 import { resolveProbeModel, isTextOnly } from './aiProbe'
 import { uuid } from './uuid'
@@ -131,13 +131,18 @@ async function runSendMessages(args: any, deps: AiTransportDeps): Promise<Readab
         const userMsg = messages.find((m: any) => m.role === 'user')
         const userText = (userMsg?.parts || []).map((p: any) => p.type === 'text' ? p.text : '').join('') || ''
         const taskRules = buildTaskFormattingRules(userText)
-        /** Resolve wikilinks + search vault for additional grounding context.
-         *  Token-budgeted server-side (2k chars per file, 3 search results max). */
+        /** Resolve wikilinks + search vault for additional grounding context —
+         *  ONLY when the prompt shows vault hints (wikilink / question /
+         *  generate verb / empty doc), so plain edits skip the RTT + index
+         *  lookup entirely. Token-budgeted server-side (2k chars per file,
+         *  3 search results max). */
         let vaultContext = ''
-        try {
-          const activePath = useEditorStore.getState().activeTab || ''
-          vaultContext = await invoke<string>('ai_grounding_context', { query: userText, activePath })
-        } catch { /* no vault or no wiki index — skip grounding */ }
+        if (vaultPromptHints(userText, docContext)) {
+          try {
+            const activePath = useEditorStore.getState().activeTab || ''
+            vaultContext = await invoke<string>('ai_grounding_context', { query: userText, activePath })
+          } catch { /* no vault or no wiki index — skip grounding */ }
+        }
         const hasVaultContext = vaultContext.trim().length > 0
         /** Vault-first generation: the edit rules below de-authorize vault
          *  content ("NEVER invent … content that is not in the document"),
@@ -156,9 +161,9 @@ async function runSendMessages(args: any, deps: AiTransportDeps): Promise<Readab
         const systemGrounding = isVaultGeneration
           ? buildVaultGroundingPrompt(vaultContext)
           : useTools
-          ? buildToolSystemPrompt(docContext, vaultContext, taskRules)
+          ? buildToolSystemPrompt(docContext, taskRules)
           : docContext
-          ? buildEditSystemPrompt(docContext, vaultContext, taskRules)
+          ? buildEditSystemPrompt(docContext, taskRules)
           : ''
         /** Base messages once; retry loop appends error feedback. */
         const baseMsgs = buildBaseMessages({ system: systemGrounding, messages, userText, selText, useTools })
