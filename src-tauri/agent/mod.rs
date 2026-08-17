@@ -10,23 +10,23 @@ pub struct Agent {
 }
 
 impl Agent {
-/** Create a new AI agent with explicit config. */
+    /** Create a new AI agent with explicit config. */
     pub fn new(provider: &str, model: &str, api_key: &str, base_url: &str) -> Self {
         Self { provider: provider.to_string(), model: model.to_string(), api_key: api_key.to_string(), base_url: base_url.to_string() }
     }
-
 }
 
 /** Hosts allowed as AI API base URLs — mirrors the models.dev provider catalog
  *  (src/data/providers.ts `api` field, auto-extracted). Loopback hosts
  *  (localhost/127.0.0.1/::1) are accepted for local LLM servers. */
 pub const ALLOWED_API_HOSTS: &[&str] = &[
-    // Loopback — local OpenAI-compatible gateways (e.g. opencode-go).
+    // Loopback — local OpenAI-compatible gateways.
     "127.0.0.1",
     "localhost",
+    "opencode.ai",
     // First-party endpoints only — mirrors the frontend catalog
     // (frontend/data/providers.ts); every host is a verified provider on
-    // https://models.dev/providers/. Anything else goes through the Custom
+
     // provider (validate_custom_base_url skips this list).
     "api.anthropic.com",
     "generativelanguage.googleapis.com",
@@ -35,7 +35,11 @@ pub const ALLOWED_API_HOSTS: &[&str] = &[
 
 /** True if the host is a loopback address (localhost, 127.0.0.1, ::1). */
 fn is_loopback(host: &str) -> bool {
-    host == "localhost" || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false)
+    host == "localhost"
+        || host
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
 }
 
 /** Synthetic provider id for user-configured OpenAI-compatible endpoints.
@@ -60,7 +64,13 @@ fn validate_scheme_and_host(url: &reqwest::Url) -> Result<String, String> {
     }
     if let Ok(ip) = host.parse::<std::net::IpAddr>() {
         let internal_non_loopback = match ip {
-            std::net::IpAddr::V4(v) => !v.is_loopback() && (v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_multicast()),
+            std::net::IpAddr::V4(v) => {
+                !v.is_loopback()
+                    && (v.is_private()
+                        || v.is_link_local()
+                        || v.is_unspecified()
+                        || v.is_multicast())
+            }
             std::net::IpAddr::V6(v) => !v.is_loopback() && (v.is_unspecified() || v.is_multicast()),
         };
         if internal_non_loopback {
@@ -86,7 +96,8 @@ fn validate_scheme_and_host(url: &reqwest::Url) -> Result<String, String> {
  *  (keychain/keys `{provider}:base_url`), so a webview-provided URL can never
  *  redirect the stored key elsewhere. */
 pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<(), String> {
-    let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
+    let url =
+        reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
     let host = validate_scheme_and_host(&url)?;
     if is_loopback(&host) && !allow_loopback {
         return Err("Loopback addresses are not allowed on the server".into());
@@ -106,11 +117,22 @@ pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<
     for a in &addrs {
         let ip = a.ip();
         let internal = match ip {
-            std::net::IpAddr::V4(v) => v.is_private() || v.is_link_local() || v.is_unspecified() || v.is_multicast() || v.is_loopback(),
-            std::net::IpAddr::V6(v) => v.is_unspecified() || v.is_multicast() || v.is_loopback() || v.is_unique_local(),
+            std::net::IpAddr::V4(v) => {
+                v.is_private()
+                    || v.is_link_local()
+                    || v.is_unspecified()
+                    || v.is_multicast()
+                    || v.is_loopback()
+            }
+            std::net::IpAddr::V6(v) => {
+                v.is_unspecified() || v.is_multicast() || v.is_loopback() || v.is_unique_local()
+            }
         };
         if internal && !(allow_loopback && ip.is_loopback()) {
-            return Err(format!("Host \"{}\" resolves to an internal address ({}) — not allowed", host, ip));
+            return Err(format!(
+                "Host \"{}\" resolves to an internal address ({}) — not allowed",
+                host, ip
+            ));
         }
     }
     Ok(())
@@ -123,7 +145,7 @@ pub async fn fetch_models(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<Vec<serde_json::Value>, String> {
     let url = format!("{}/models", base_url.trim_end_matches('/'));
     let res = client
         .get(&url)
@@ -132,28 +154,51 @@ pub async fn fetch_models(
         .await
         .map_err(|e| format!("Models request failed: {}", e))?;
     let status = res.status();
-    let body = res.text().await.map_err(|e| format!("Models read failed: {}", e))?;
+    let body = res
+        .text()
+        .await
+        .map_err(|e| format!("Models read failed: {}", e))?;
     if !status.is_success() {
         return Err(format!("Models endpoint returned {}", status));
     }
-    let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| "Invalid models response".to_string())?;
-    let data = v.get("data").and_then(|d| d.as_array()).ok_or("No data array in models response")?;
-    Ok(data
-        .iter()
+    let v: serde_json::Value =
+        serde_json::from_str(&body).map_err(|_| "Invalid models response".to_string())?;
+    // Tolerate the two common OpenAI-compatible /models shapes:
+    // { "data": [...] } or a bare array. Returns (id, name).
+    let entries: Vec<&serde_json::Value> = v
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|a| a.iter().collect())
+        .or_else(|| v.as_array().map(|a| a.iter().collect()))
+        .unwrap_or_default();
+    Ok(entries
+        .into_iter()
         .filter_map(|m| {
-            let id = m.get("id")?.as_str()?.to_string();
-            let name = m.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()).unwrap_or_else(|| id.clone());
-            Some((id, name))
+            let id = if let Some(s) = m.get("id").and_then(|x| x.as_str()) {
+                s.to_string()
+            } else {
+                return None;
+            };
+            let name = m
+                .get("name")
+                .and_then(|n| n.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| id.clone());
+            Some(serde_json::json!({ "id": id, "name": name }))
         })
         .collect())
 }
 
 /** Validate a base URL for the AI transport — SSRF / API-key exfiltration guard.\n *  Rules: scheme must be https (or http to loopback only); host must be in\n *  ALLOWED_API_HOSTS (provider catalog) or loopback; IP literals in\n *  private/link-local/reserved ranges are rejected. */
 pub fn validate_base_url(base_url: &str) -> Result<(), String> {
-    let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
+    let url =
+        reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
     let host = validate_scheme_and_host(&url)?;
     if !ALLOWED_API_HOSTS.contains(&host.as_str()) && !is_loopback(&host) {
-        return Err(format!("Base URL host \"{}\" is not an allowed provider endpoint", host));
+        return Err(format!(
+            "Base URL host \"{}\" is not an allowed provider endpoint",
+            host
+        ));
     }
     Ok(())
 }
@@ -164,7 +209,12 @@ mod tests {
 
     #[test]
     fn agent_new_constructs_struct() {
-        let a = Agent::new("test-provider", "test-model", "sk-test-key", "https://test.com/v1");
+        let a = Agent::new(
+            "test-provider",
+            "test-model",
+            "sk-test-key",
+            "https://test.com/v1",
+        );
         assert_eq!(a.provider, "test-provider");
         assert_eq!(a.model, "test-model");
         assert_eq!(a.api_key, "sk-test-key");
@@ -234,7 +284,9 @@ mod tests {
         assert!(validate_custom_base_url("http://llm-proxy.example.com/v1", true).is_err());
         // metadata / internal IPs
         assert!(validate_custom_base_url("http://169.254.169.254/latest/meta-data", true).is_err());
-        assert!(validate_custom_base_url("https://169.254.169.254/latest/meta-data", true).is_err());
+        assert!(
+            validate_custom_base_url("https://169.254.169.254/latest/meta-data", true).is_err()
+        );
         assert!(validate_custom_base_url("https://10.0.0.5/v1", true).is_err());
         assert!(validate_custom_base_url("https://192.168.1.10/v1", true).is_err());
         // credentials in the URL

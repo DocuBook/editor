@@ -20,7 +20,7 @@ export interface ProviderInfo {
 }
 
 export const PROVIDERS: ProviderInfo[] = [
-  { id: 'opencode-go', name: 'Opencode Go', api: 'http://localhost:1337/v1' },
+  { id: 'opencode-go', name: 'Opencode Go', api: 'https://opencode.ai/zen/go/v1' },
   { id: 'anthropic', name: 'Anthropic', api: 'https://api.anthropic.com/v1' },
   { id: 'google', name: 'Google Gemini', api: 'https://generativelanguage.googleapis.com/v1beta/openai' },
   { id: 'deepseek', name: 'DeepSeek', api: 'https://api.deepseek.com' },

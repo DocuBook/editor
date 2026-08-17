@@ -192,7 +192,19 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const handleSave = async () => {
     if (!provider || !keyInput || (isCustom && !baseUrlInput.trim())) return
     setSaving(true)
+    const p = providers.find(x => x.id === provider)
+    const baseUrl = isCustom ? baseUrlInput.trim() : p?.api || ''
+    // For env-controlled custom endpoints the probe must target the ENV model
+    // (the backend sends it regardless of the UI value).
+    const probeModel = resolveProbeModel(provider, model || modelOptions[0]?.id || '', envCustom ? customCfg?.model : undefined)
     try {
+      /** Validate BEFORE persisting: the key must actually work against the
+       *  SELECTED provider. Otherwise picking provider A + pasting provider B's
+       *  key stores a dead key that fails at ask_ai time. */
+      const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: keyInput })
+      let tools: boolean | undefined
+      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
+      // test_connection resolved → key is valid for this provider. Persist.
       if (isCustom) {
         await invoke('set_custom_endpoint', { provider, baseUrl: baseUrlInput.trim(), key: keyInput })
         useAiSettings.getState().setBaseUrl(baseUrlInput.trim())
@@ -202,23 +214,19 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       addSavedProvider(provider)
       setKeyInput('')
       toast.success('API key saved')
-    } catch (e) { toast.error('Failed to save API key'); console.error(e) }
-    setSaving(false)
-    // Auto-probe right after saving so the badge + transport use MEASURED
-    // tool-call support, not the conservative default (unmeasured → text-only).
-    const p = providers.find(x => x.id === provider)
-    // For env-controlled custom endpoints the probe must target the ENV model
-    // (the backend sends it regardless of the UI value).
-    const probeModel = resolveProbeModel(provider, model || modelOptions[0]?.id || '', envCustom ? customCfg?.model : undefined)
-    try {
-      const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl: isCustom ? baseUrlInput.trim() : p?.api || '', apiKey: keyInput })
-      let tools: boolean | undefined
-      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
+      // Persist measured tool-call support so the badge + transport use it
+      // (not the conservative unmeasured default).
       if (tools !== undefined) {
         useAiSettings.getState().setProbeTools(provider, probeModel, tools)
         toast.success(tools === true ? 'Tool calls supported' : 'Text-only — tool calls rejected by this gateway')
       }
-    } catch { /* probe failed — badge stays at the default; Test button remains available */ }
+    } catch (e) {
+      /** Key rejected — do NOT persist. test_connection throws on auth/network
+       *  failure, which means this key is wrong for the selected provider. */
+      toast.error('API key rejected for this provider — check the key')
+      console.error(e)
+    }
+    setSaving(false)
   }
 
   const handleTest = async () => {
@@ -323,9 +331,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   {modelsError ? (
                     <>
                       <input type="text" value={model} onChange={e => setModel(e.target.value)}
-                        placeholder={'model id, e.g. gpt-4o (models endpoint unavailable: ' + modelsError + ')'}
+                        placeholder="model id, e.g. gpt-4o"
                         className="w-full bg-background border border-border rounded-md px-3 py-[7px] text-xs text-foreground outline-none font-mono mb-1 disabled:opacity-60" />
-                      <div className="text-[10px] text-danger mb-3">Could not list models — type the model id manually.</div>
+                      <div className="text-[10px] text-danger mb-3">Could not list models ({modelsError}) — type the model id manually.</div>
                     </>
                   ) : (
                   <div ref={modelRef} className="relative mb-3">

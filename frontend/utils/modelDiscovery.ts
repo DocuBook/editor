@@ -19,6 +19,15 @@ export async function fetchProviderModels(provider: string, baseUrl: string): Pr
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.models
   const models = JSON.parse(await invoke<string>('list_models', { provider, baseUrl })) as DiscoveredModel[]
-  cache.set(key, { at: Date.now(), models })
-  return models
+  // Dedupe by id — some /models endpoints return the same id with different
+  // casing/duplicates, which breaks React list keys (duplicate-key warning).
+  const seen = new Set<string>()
+  const unique = models.filter(m => {
+    const k = m.id.toLowerCase()
+    if (seen.has(k)) return false
+    seen.add(k)
+    return true
+  })
+  cache.set(key, { at: Date.now(), models: unique })
+  return unique
 }

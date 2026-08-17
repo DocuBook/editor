@@ -443,7 +443,7 @@ async fn test_connection(provider: String, model: String, base_url: String, api_
     // real applyDocumentOperations payload ($defs/$ref, anyOf,
     // additionalProperties:false) so the probe measures whether OUR payload
     // shape passes this gateway, not just "model supports tools".
-    let tool_body = serde_json::json!({
+    let mut tool_body = serde_json::json!({
         "model": model,
         "messages": [{"role": "user", "content": "call the test_tool"}],
         "stream": false,
@@ -480,11 +480,27 @@ async fn test_connection(provider: String, model: String, base_url: String, api_
         .await
         .map_err(|e| format!("Tool test failed: {}", e))?;
     if !tool_res.status().is_success() {
-        // Tool call not supported — ignore error, just report no tools.
-        // HTTP 400 here MEANS the gateway rejected tool_choice:"required"
-        // (e.g. DeepSeek thinking-mode models) — this is a definitive
-        // negative, not a maybe. The provider cannot do forced tool calls.
-        eprintln!("[docubook] test_connection tool probe: provider rejected tool_choice:'required' (HTTP {}) — tools disabled", tool_res.status());
+        // Some gateways REJECT forced tool_choice:"required" (HTTP 400) yet still
+        // support tool calls in "auto" mode (e.g. opencode.ai, DeepSeek thinking).
+        // Retry once with "auto" before concluding tools:false.
+        tool_body["tool_choice"] = serde_json::json!("auto");
+        let client2 = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(15))
+            .build().map_err(|e| format!("Client error: {}", e))?;
+        let r2 = client2
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&tool_body)
+            .send().await;
+        if let Ok(resp2) = r2 {
+            if resp2.status().is_success() {
+                let t2 = resp2.text().await.map_err(|e| e.to_string())?;
+                if t2.contains("tool_calls") || t2.contains("test_tool") {
+                    return Ok(r#"{"status":"ok","tools":true}"#.to_string());
+                }
+            }
+        }
         return Ok(r#"{"status":"ok","tools":false}"#.to_string());
     }
     // Non-streaming parse: response is a single JSON object, not SSE chunks.
