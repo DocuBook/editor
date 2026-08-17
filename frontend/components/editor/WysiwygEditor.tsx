@@ -19,7 +19,7 @@ import { useVaultStore } from '../../stores/vault'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { createAiTransport } from '../../utils/aiTransport'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
-import { getSchema, wikilinkStyler } from './setup'
+import { getSchema, wikilinkStyler, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 // Mermaid is a singleton — wrapping render here also patches the instance
 // @blocknote/diagram-block uses. Serialize renders (mermaid keeps global
@@ -118,6 +118,15 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
    *  scroll the writing block ourselves and stop only on real user input (wheel/touch/keys). */
   const aiMenu: any = useExtensionState<any>(AIExtension, { editor, selector: (s: any) => s.aiMenuState })
   const isAiWriting = !!aiMenu && aiMenu !== 'closed' && aiMenu.status === 'ai-writing'
+  /** Pause the full-doc wikilink decoration scan while AI streams (it runs on
+   *  every transaction = one O(document) regex scan per 50ms batch otherwise).
+   *  On unpause, nudge an empty transaction so decorations rescan immediately
+   *  (they only recompute on state change). */
+  useEffect(() => {
+    setWikilinkStylerPaused(isAiWriting)
+    if (!isAiWriting) (editor as any).prosemirrorView?.dispatch((editor as any).prosemirrorView.state.tr)
+    return () => setWikilinkStylerPaused(false)
+  }, [isAiWriting, editor])
   const followRef = useRef(true)
   /** Mirrors isAiWriting for the onChange gate (avoids re-subscribing). */
   const aiWritingRef = useRef(false)
@@ -153,23 +162,30 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
   /** Token-level scroll: any DOM change in the editor while AI writes keeps the
    *  writing block in view. rAF-throttled AND viewport-aware — it only scrolls
    *  when the block actually leaves the visible area (minimal delta). Constant
-   *  re-centering per frame was what made AI typing look janky. */
+   *  re-centering per frame was what made AI typing look janky.
+   *
+   *  The observer watches ONLY the writing block, not the whole document — a
+   *  subtree observer on the editor root fires on every mutation anywhere and
+   *  the old code re-ran a full-document querySelector per frame (O(doc)). The
+   *  block element is cached; if it's not rendered yet (streaming start), the
+   *  observer falls back to the root until the block appears. */
   useEffect(() => {
     if (!isAiWriting || !aiMenu?.blockId) return
     const root = editor.domElement
     if (!root) return
     let raf = 0
+    let blockEl: HTMLElement | null = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
     const scroll = () => {
       if (!followRef.current || raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
-        const el = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
-        if (!el) return
-        const box = el.getBoundingClientRect()
+        if (!blockEl) blockEl = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
+        if (!blockEl) return
+        const box = blockEl.getBoundingClientRect()
         // Nearest scrollable ancestor — the editor's scroll container.
-        let scroller: HTMLElement | null = el.parentElement
+        let scroller: HTMLElement | null = blockEl.parentElement
         while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement
-        if (!scroller) { el.scrollIntoView({ block: 'nearest' }); return }
+        if (!scroller) { blockEl.scrollIntoView({ block: 'nearest' }); return }
         const cbox = scroller.getBoundingClientRect()
         const margin = 32
         if (box.bottom > cbox.bottom - margin) {
@@ -181,7 +197,11 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
       })
     }
     const mo = new MutationObserver(scroll)
-    mo.observe(root, { childList: true, subtree: true, characterData: true })
+    if (blockEl) {
+      mo.observe(blockEl, { childList: true, subtree: true, characterData: true })
+    } else {
+      mo.observe(root, { childList: true, subtree: true, characterData: true })
+    }
     return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf) }
   }, [isAiWriting, aiMenu?.blockId, editor])
   const { setBlockEditor, setFlushEditor } = useEditorStore()
