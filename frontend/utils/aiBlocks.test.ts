@@ -206,6 +206,28 @@ describe('buildApplyDocumentInput', () => {
     expect(received).not.toContain('\\\\$')
   })
 
+  it('anchors add on prevBlock when cursor block is empty (xl-ai deletes it)', async () => {
+    const editor = mockEditor({ cursorBlockId: 'b-empty' })
+    editor.getTextCursorPosition = () => ({ block: { id: 'b-empty' }, prevBlock: { id: 'b-prev' } })
+    const input = await buildApplyDocumentInput(editor, 'Hello world')
+    expect(input.operations[0].referenceId).toBe('b-prev$')
+    expect(input.operations[0].position).toBe('after')
+  })
+
+  it('keeps cursor anchor when cursor block has content', async () => {
+    const editor = mockEditor({ cursorBlockId: 'b-full' })
+    editor.getTextCursorPosition = () => ({ block: { id: 'b-full', content: [{ type: 'text', text: 'x' }] }, prevBlock: { id: 'b-prev' } })
+    const input = await buildApplyDocumentInput(editor, 'Hello world')
+    expect(input.operations[0].referenceId).toBe('b-full$')
+  })
+
+  it('keeps cursor anchor on single empty block (xl-ai does not delete it)', async () => {
+    const editor = mockEditor({ cursorBlockId: 'b-only' })
+    editor.getTextCursorPosition = () => ({ block: { id: 'b-only' } })
+    const input = await buildApplyDocumentInput(editor, 'Hello world')
+    expect(input.operations[0].referenceId).toBe('b-only$')
+  })
+
   it('builds add operation after cursor with $-suffixed referenceId and HTML blocks', async () => {
     const editor = mockEditor({ cursorBlockId: 'b-cursor' })
     const input = await buildApplyDocumentInput(editor, 'Hello world')

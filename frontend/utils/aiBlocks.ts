@@ -266,11 +266,19 @@ export async function buildApplyDocumentInput(editor: any, fullText: string): Pr
       return { type: 'applyDocumentOperations', operations }
     }
     const cursor = editor.getTextCursorPosition()
+    /** xl-ai deletes the empty cursor block before executing (deleteEmptyCursorBlock
+     *  in onStart, when the doc has other content) — anchoring on it fails
+     *  validation with "referenceId not found". Anchor on the previous block
+     *  instead when the cursor block is empty (exactly the block xl-ai removes).
+     *  Single-empty-block docs are safe: there xl-ai does NOT delete it. */
+    const cursorBlock = cursor?.block
+    const cursorEmpty = !!cursorBlock && (!cursorBlock.content || cursorBlock.content.length === 0)
+    const refBlock = cursorEmpty && cursor.prevBlock ? cursor.prevBlock : cursorBlock
     return {
       type: 'applyDocumentOperations',
       operations: [{
         type: 'add',
-        referenceId: cursor?.block?.id + '$',
+        referenceId: refBlock?.id + '$',
         position: 'after',
         blocks: parsed.map((b: any) => editor.blocksToHTMLLossy([b])),
       }],
