@@ -21,145 +21,16 @@ impl Agent {
  *  (src/data/providers.ts `api` field, auto-extracted). Loopback hosts
  *  (localhost/127.0.0.1/::1) are accepted for local LLM servers. */
 pub const ALLOWED_API_HOSTS: &[&str] = &[
+    // Loopback — local OpenAI-compatible gateways (e.g. opencode-go).
     "127.0.0.1",
-    "api.anthropic.com",
-    "api.openai.com",
-    "generativelanguage.googleapis.com",
-    "ai-gateway.helicone.ai",
-    "ai.zenifra.com",
-    "aki.io",
-    "api-inference.modelscope.cn",
-    "api-sherlock.cloudferro.com",
-    "api.302.ai",
-    "api.abliteration.ai",
-    "api.ai-router.dev",
-    "api.aiand.com",
-    "api.ambient.xyz",
-    "api.anyapi.ai",
-    "api.auriko.ai",
-    "api.berget.ai",
-    "api.clarifai.com",
-    "api.claudin.io",
-    "api.cline.bot",
-    "api.cloudflare.com",
-    "api.code.umans.ai",
-    "api.cortecs.ai",
-    "api.crossmodel.ai",
-    "api.deepseek.com",
-    "api.dinference.com",
-    "api.empiriolabs.ai",
-    "api.fireworks.ai",
-    "api.friendli.ai",
-    "api.getlilac.com",
-    "api.githubcopilot.com",
-    "api.gmi-serving.com",
-    "api.hpc-ai.com",
-    "api.inceptionlabs.ai",
-    "api.inceptron.io",
-    "api.inference.wandb.ai",
-    "api.intelligence.io.solutions",
-    "api.jiekou.ai",
-    "api.kilo.ai",
-    "api.kimi.com",
-    "api.lkeap.cloud.tencent.com",
-    "api.llama.com",
-    "api.llmgateway.io",
-    "api.longcat.chat",
-    "api.lucidquery.com",
-    "api.meganova.ai",
-    "api.meta.ai",
-    "api.minimax.io",
-    "api.minimaxi.com",
-    "api.modeloracle.com",
-    "api.moonshot.ai",
-    "api.moonshot.cn",
-    "api.morphllm.com",
-    "api.neuralwatt.com",
-    "api.nova.amazon.com",
-    "api.novita.ai",
-    "api.ofox.ai",
-    "api.openai-compat.model-serving.eu01.onstackit.cloud",
-    "api.orcarouter.ai",
-    "api.perplexity.ai",
-    "api.pioneer.ai",
-    "api.poe.com",
-    "api.qhaigc.net",
-    "api.qnaigc.com",
-    "api.regolo.ai",
-    "api.routing.run",
-    "api.sakana.ai",
-    "api.sarvam.ai",
-    "api.scaleway.ai",
-    "api.siliconflow.cn",
-    "api.siliconflow.com",
-    "api.stepfun.ai",
-    "api.stepfun.com",
-    "api.subconscious.dev",
-    "api.synthetic.new",
-    "api.tbox.cn",
-    "api.thegrid.ai",
-    "api.tokenfactory.nebius.com",
-    "api.trustedrouter.com",
-    "api.unorouter.com",
-    "api.upstage.ai",
-    "api.vivgrid.com",
-    "api.vultrinference.com",
-    "api.xiaomimimo.com",
-    "api.z.ai",
-    "api.zeldoc.ai",
-    "apis.iflow.cn",
-    "app.frogbot.ai",
-    "cc.freemodel.dev",
-    "chat.d.run",
-    "cloud-api.near.ai",
-    "coding-intl.dashscope.aliyuncs.com",
-    "coding-plan-endpoint.kuaecloud.net",
-    "coding.dashscope.aliyuncs.com",
-    "crof.ai",
-    "daoxe.com",
-    "dashscope-intl.aliyuncs.com",
-    "dashscope.aliyuncs.com",
-    "go.fastrouter.ai",
-    "hyper.charm.land",
-    "inference.baseten.co",
-    "inference.do-ai.run",
-    "inference.hetzner.com",
-    "inference.net",
-    "inference.poolside.ai",
-    "inference.tinfoil.sh",
-    "inference.us-west.modal.direct",
-    "integrate.api.nvidia.com",
-    "kenari.id",
-    "llm.chutes.ai",
-    "llm.submodel.ai",
-    "llmtr.com",
     "localhost",
-    "maas-api.ebcloud.com",
-    "moark.com",
-    "model.inferx.net",
-    "models.github.ai",
-    "models.mixlayer.ai",
-    "models.think.evroc.com",
-    "nano-gpt.com",
-    "oai.endpoints.kepler.ai.cloud.ovh.net",
-    "ollama.com",
-    "open.bigmodel.cn",
-    "openai.blueclaw.network",
-    "opencode.ai",
-    "openrouter.ai",
-    "pass.wafer.ai",
-    "routellm.abacus.ai",
-    "router.huggingface.co",
-    "router.requesty.ai",
-    "tinker.thinkingmachines.dev",
-    "token-plan-ams.xiaomimimo.com",
-    "token-plan-cn.xiaomimimo.com",
-    "token-plan-sgp.xiaomimimo.com",
-    "token-plan.ap-southeast-1.maas.aliyuncs.com",
-    "token-plan.cn-beijing.maas.aliyuncs.com",
-    "tokenhub.tencentmaas.com",
-    "www.xpersona.co",
-    "zenmux.ai",
+    // First-party endpoints only — mirrors the frontend catalog
+    // (frontend/data/providers.ts); every host is a verified provider on
+    // https://models.dev/providers/. Anything else goes through the Custom
+    // provider (validate_custom_base_url skips this list).
+    "api.anthropic.com",
+    "generativelanguage.googleapis.com",
+    "api.deepseek.com",
 ];
 
 /** True if the host is a loopback address (localhost, 127.0.0.1, ::1). */
@@ -245,6 +116,38 @@ pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<
     Ok(())
 }
 
+/** Fetch the model list from an OpenAI-compatible endpoint (GET /models).
+ *  Used for runtime model discovery — the frontend catalog carries NO model list.
+ *  Caller must pass a client WITHOUT redirects (SSRF) and a resolved API key. */
+pub async fn fetch_models(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let res = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await
+        .map_err(|e| format!("Models request failed: {}", e))?;
+    let status = res.status();
+    let body = res.text().await.map_err(|e| format!("Models read failed: {}", e))?;
+    if !status.is_success() {
+        return Err(format!("Models endpoint returned {}", status));
+    }
+    let v: serde_json::Value = serde_json::from_str(&body).map_err(|_| "Invalid models response".to_string())?;
+    let data = v.get("data").and_then(|d| d.as_array()).ok_or("No data array in models response")?;
+    Ok(data
+        .iter()
+        .filter_map(|m| {
+            let id = m.get("id")?.as_str()?.to_string();
+            let name = m.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()).unwrap_or_else(|| id.clone());
+            Some((id, name))
+        })
+        .collect())
+}
+
 /** Validate a base URL for the AI transport — SSRF / API-key exfiltration guard.\n *  Rules: scheme must be https (or http to loopback only); host must be in\n *  ALLOWED_API_HOSTS (provider catalog) or loopback; IP literals in\n *  private/link-local/reserved ranges are rejected. */
 pub fn validate_base_url(base_url: &str) -> Result<(), String> {
     let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
@@ -274,7 +177,7 @@ mod tests {
             ("openai", "gpt-4o"),
             ("anthropic", "claude-sonnet-4-20250514"),
             ("google", "gemini-2.0-flash"),
-            ("openrouter", "openai/gpt-4o"),
+            ("groq", "llama-3.3-70b-versatile"),
         ] {
             let cfg = Agent::new(provider, model, "key", "");
             assert_eq!(cfg.provider, provider);
@@ -285,8 +188,8 @@ mod tests {
 
     #[test]
     fn validate_base_url_allows_providers_and_loopback() {
-        assert!(validate_base_url("https://api.openai.com/v1").is_ok());
-        assert!(validate_base_url("https://openrouter.ai/api/v1").is_ok());
+        assert!(validate_base_url("https://api.anthropic.com/v1").is_ok());
+        assert!(validate_base_url("https://api.deepseek.com/v1").is_ok());
         assert!(validate_base_url("https://api.deepseek.com/v1").is_ok());
         assert!(validate_base_url("http://localhost:11434/v1").is_ok());
         assert!(validate_base_url("http://127.0.0.1:8080/v1").is_ok());

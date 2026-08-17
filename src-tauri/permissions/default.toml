@@ -363,6 +363,16 @@ description = "Denies the test_connection command."
 commands.deny = ["test_connection"]
 
 [[permission]]
+identifier = "allow-list-models"
+description = "Enables the list_models command (runtime model discovery)."
+commands.allow = ["list_models"]
+
+[[permission]]
+identifier = "deny-list-models"
+description = "Denies the list_models command."
+commands.deny = ["list_models"]
+
+[[permission]]
 identifier = "allow-wiki-backlinks"
 description = "Enables the wiki_backlinks command."
 commands.allow = ["wiki_backlinks"]
