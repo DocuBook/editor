@@ -828,7 +828,7 @@ async fn test_connection(state: &AppState, provider: &str, model: &str, base_url
     // Tool probe mirrors the real applyDocumentOperations payload shape
     // ($defs/$ref, anyOf, additionalProperties:false) so it measures whether
     // OUR payload passes this gateway, not just generic tool support.
-    let tool_body = json!({
+    let mut tool_body = json!({
         "model": model,
         "messages": [{ "role": "user", "content": "call the test_tool" }],
         "tools": [{
