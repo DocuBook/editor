@@ -27,13 +27,25 @@ export const getSchema = () => {
 
 /** Visual indicator for `[[wikilink]]` text: accent + underline + pointer so
  *  Cmd+Click navigation is discoverable. ProseMirror decorations only — the
- *  stored content stays literal `[[Title]]` (markdown round-trip untouched). */
+ *  stored content stays literal `[[Title]]` (markdown round-trip untouched).
+ *
+ *  The full-doc regex scan runs on EVERY transaction — during AI typing that
+ *  is one O(document) scan per 50ms batch. WysiwygEditor pauses it while the
+ *  AI writes (setWikilinkStylerPaused); the underline returns on unpause via
+ *  the empty-transaction nudge (decorations only recompute on state change). */
+let _decosPaused = false
+export const setWikilinkStylerPaused = (paused: boolean) => { _decosPaused = paused }
 export const wikilinkStyler = createExtension({
   key: 'wikilinkStyler',
   prosemirrorPlugins: [
     new Plugin({
       props: {
         decorations(state) {
+          if (_decosPaused) {
+            // Skip the O(document) scan while streaming — no underline during
+            // AI typing is a fine trade for not rescanning per 50ms batch.
+            return DecorationSet.empty
+          }
           const decos: Decoration[] = []
           const re = /\[\[([^\]]+)\]\]/g
           state.doc.descendants((node, pos) => {
