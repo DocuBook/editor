@@ -356,6 +356,8 @@ async fn list_models(provider: String, base_url: String) -> Result<String, Strin
     agent::validate_base_url(&base_url)?;
     let key = keychain::get_key(&provider).map_err(|_| "No API key found — save one in Settings -> AI".to_string())?;
     let client = reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
@@ -415,6 +417,8 @@ async fn test_connection(provider: String, model: String, base_url: String, api_
         base_url
     };
     let client = reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(15))
         .build().map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -519,6 +523,8 @@ async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String
     let started = std::time::Instant::now();
     state.ai_cancel.store(false, Ordering::SeqCst);
     let client = reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
         // Streaming: no total deadline (long generations) — read_timeout resets per chunk, only stalls abort.
         .read_timeout(std::time::Duration::from_secs(120))
