@@ -187,16 +187,16 @@ async function runSendMessages(args: any, deps: AiTransportDeps): Promise<Readab
             model,
             baseUrl: providerInfo?.api || config.baseUrl,
           })
-          /** Real correctness gate: referenced ids must exist in the document (blocking). */
-          let semanticError: string | null = null
-          for (const tc of toolBuffer) {
-            /** Normalize model-echoed ids: BlockNote expects a trailing `$`
-             *  (idsSuffixed), but models like GLM sometimes strip it. Fix
-             *  before validation AND before emit to xl-ai. */
-            tc.input = suffixOperationIds(tc.input)
-            semanticError = validateOperationsSemantics(editor, tc.input)
-            if (semanticError) break
-          }
+          /** Real correctness gate: referenced ids must exist in the document (blocking).
+           *  Normalize model-echoed ids (BlockNote expects a trailing `$`; models like
+           *  GLM strip it), validate each call, keep the FIRST error. Immutable form —
+           *  no loop reassignment, so the accept/retry branch is unambiguous. */
+          const semanticError = toolBuffer
+            .map((tc: any) => {
+              tc.input = suffixOperationIds(tc.input)
+              return validateOperationsSemantics(editor, tc.input)
+            })
+            .find((e: string | null) => e !== null) ?? null
           /** Quality is intentionally NOT gated — the transport fix (byte-buffered SSE + UTF-8)
            *  is the real guard against corruption. Content is always written; user reviews via accept/reject. */
           const normText = normalizeMarkdown(fullText)
