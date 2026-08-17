@@ -57,122 +57,46 @@ Runtime configuration (admin seeding, session TTL, open access, secure cookie) i
 ## Project Structure
 
 ```text
-frontend/
-  main.tsx               Entry point (Safari15 polyfills + ErrorBoundary)
-  App.tsx                Root layout, auth gate, keyboard shortcuts, single git-status poller
-  index.css              Tailwind v4 + design tokens (@theme dark palette, [data-theme=light]) + ProseMirror styles
-  lib/
-    ipc.ts               Runtime bridge — Tauri IPC on desktop, HTTP/SSE on web (single API)
-  components/
-    Editor.tsx           Main layout — routes the active file to the right view
-                         (wysiwyg / image preview / plain text), keyboard shortcuts,
-                         shared scroll container. The heavy pieces live in ./editor.
-    editor/
-      WysiwygEditor.tsx  BlockNote editor lifecycle: markdown load/sync, dirty tracking,
-                         AI scroll-follow, wikilink hover/click hints, slash menu (math,
-                         diagram, AI). Hosts the xl-ai extension.
-      TabBar.tsx         Tab strip (auto-scroll), undo/redo, Editor/Code toggle,
-                         Save (stage), Publish (commit+push), AI toggle
-      WelcomeScreen.tsx  Launchpad when no vault is open (open/create/clone vault)
-      linkToolbar.tsx    Link toolbar overrides — vault-relative links keep as-typed
-                         URLs (no https:// forcing) + vault-note linker in one popover
-      previews.tsx       Image inline preview + plain-text viewer + Markdown textarea
-      setup.ts           Shared schema (heading 1-5, math, diagram) + [[wikilink]]
-                         ProseMirror decoration/click handling
-    Sidebar.tsx          Vault tree, search, CRUD, context menu, trash
-    StatusBar.tsx        Git branch indicator (consumes shared poll)
-    SettingsModal.tsx    Settings (tabs: AI, Appearance, Git; System is web-only)
-    SystemSettings.tsx   Web-only: account, login toggle, session TTL, env display
-    GitSettings.tsx      Git identity / remotes / init in-app
-    SetupWizard.tsx      Web first-run: create the admin account (or "skip")
-    Login.tsx            Web login gate (rate-limited, httpOnly session cookie)
-    VaultPicker.tsx      Web vault picker (modal; replaces the native folder dialog)
-    PasswordInput.tsx    Password field with show/hide toggle (login + change-password)
-    AppearanceSettings.tsx  Theme picker (named themes: Midnight / Bright Surfaces)
-    ShortcutsModal.tsx   Keyboard shortcuts reference
-    OnboardingGuide.tsx  First-run guide for new vaults
-    ErrorBoundary.tsx    Root crash recovery screen
-  stores/
-    editor.ts            Tabs, file content, edited content, undo/redo state
-    vault.ts             Vault state, tree, folder expansion, recent vaults
-    aiSettings.ts        Provider/model/saved-providers (persisted) + probeTools
-                         (measured tool-call support per provider+model — set by
-                         Save / model-switch auto-probe). API keys live only
-                         backend-side (Keychain / keys.json, never the webview)
-    auth.ts              Web auth status (setup → login → ready), 401 handling
-    gitStatus.ts         Shared git status (branch + porcelain) — one poller
-    theme.ts             Named theme store (data-theme + Tauri window + meta theme-color)
-  data/
-    providers.ts         Manual provider list (id/name/baseUrl) — model lists are
-                         discovered at runtime from each endpoint's /models via the
-                         backend `list_models` command (SSRF-guarded, keyed server-side)
-  hooks/
-    useKeyboard.ts       Keyboard shortcut handling
-    usePolling.ts        Interval polling
-    useClickOutside.ts   Click-outside detection for menus
-  utils/
-    aiTransport.ts       xl-ai Chat transport — the ONLY window between xl-ai and Rust:
-                         streaming SSE → ai-sdk parts, retry/gate loop, output routing
-    aiBlocks.ts          Markdown → applyDocumentOperations; suffixOperationIds, semantic
-                         validation, prompt builders (edit/vault-first/tool), doc context
-    aiProbe.ts           Auto-probe tool-call support (test_connection), model-agnostic
-                         text-only decision (custom endpoints measure-then-unlock)
-    wikilink.ts          [[wikilink]] parse (findWikilinkAt) + resolve/open — one source
-    mathMarkdown.ts      Math $/$$ → MathML pre-processor (BlockNote has no $ parsing)
-    fileKind.ts          File extension contract — .md/.mdx wysiwyg, binary, text
-    setupWizard.ts       Pure setup-wizard validation + payload builder (unit-testable)
-    uuid.ts              Secure-context-safe UUID v4 (crypto.randomUUID with
-                         getRandomValues/Math.random fallback — plain-HTTP/IP access)
-    iteratorPolyfill.ts  Safari ES2023 iterator polyfills
-    webkitCssStyleSheet.ts  Safari 15 CSSStyleSheet polyfill (mermaid needs it)
-    webkitStructuredClone.ts Safari 15 structuredClone polyfill
-test/
-  lib.mjs                Shared CI-friendly harness: server + browser logs to
-                         artifacts/, browser engine resolution (chromium/webkit,
-                         system-Chrome fallback), pass/fail summary
-  run-all.mjs            One entry point for all suites (npm run test:e2e;
-                         BROWSER env picks the engine)
-  web-smoke.mjs          Full-stack smoke: setup wizard → login → persistent
-                         session across server restart
-  trash.mjs              Trash UI: empty state (disabled) → restore → back in tree
-  theme-check.mjs        Theme E2E (dark/light switch + picker in Settings)
-  ai-debug.mjs           AI transport e2e (mock provider: Path A tools + Path B
-                         text-only, selection + markdown)
-  check-acl.mjs          ACL guard: every Tauri command has an allow-* entry
-                         (run in CI lint)
-  artifacts/             Run logs (server + browser console) + results (gitignored)
-
-src-tauri/
-  Cargo.toml             Desktop crate (bin docubook-desktop + lib docubook)
-  tauri.conf.json        Window config (theme: Dark), CSP, bundle
-  build.rs               tauri-build (capabilities/gen)
-  main.rs                Tauri entry point
-  lib.rs                 Tauri commands (vault, wiki, git, search, AI, keychain, markdown)
-  markdown.rs            Shared markdown → safe-HTML (pulldown-cmark + ammonia)
-  keychain.rs            macOS Keychain access via `security` CLI
-  agent/                 AI agent config + SSRF-guarded base-URL validation
-  vault/                 File system vault (path-traversal-safe)
-  wiki/                  Wikilink index
-  git/                   Git add-commit-push / clone / remotes / identity
-  search/                Filename search
-  capabilities/          Tauri 2 ACL (core:default, dialog, opener, allow-* app commands)
-  permissions/           App command permission schemas (allow-*)
-server/                  Web distribution — standalone axum crate (no Tauri)
-  Cargo.toml             Bin docubook-server (musl-friendly, [[bin]] path = main.rs)
-  main.rs                HTTP server: /api/<cmd> dispatcher, SSE AI streaming,
-                         auth middleware, static file serving (SPA fallback)
-  auth.rs                Argon2id passwords, persistent sessions (sessions.json,
-                         SHA-256 hashed tokens, survive restarts), login rate limit
-  config.rs              Config merge (env > /data/config.json > default)
-  keys.rs                API-key store (keys.json, 0600; optional AES-256-GCM
-                         encryption at rest via DB_KEYS_PASSPHRASE, Argon2id KDF)
-dist/                    Frontend build output (gitignored; served by server + Tauri)
-public/                  Static assets (appicon.png)
-Dockerfile               Multi-stage web image (node → rust musl → alpine)
-docker-compose.yml       Web deployment (volume /data, env reference)
-docker-entrypoint.sh     Container entrypoint (data-dir self-heal + boot diagnostics)
-rust-toolchain.toml      Pinned Rust toolchain (build reproducibility, REL-2)
-.env.example             All server environment variables
+editor/
+├── frontend/                         UI — single runtime, Tauri or web
+│   ├── main.tsx                      Entry (Safari polyfills + ErrorBoundary)
+│   ├── App.tsx                       Root layout, auth gate, shortcuts, git poller
+│   ├── index.css                     Tailwind v4 + design tokens
+│   ├── lib/ipc.ts                    Runtime bridge (Tauri IPC ↔ HTTP/SSE)
+│   ├── data/providers.ts             Manual 4-endpoint catalog (model list runtime via /models)
+│   ├── components/
+│   │   ├── Editor.tsx                Layout/routing per file kind
+│   │   ├── editor/                   WYSIWYG internals (block editor)
+│   │   │   ├── WysiwygEditor.tsx     BlockNote lifecycle + xl-ai host
+│   │   │   ├── TabBar.tsx            Tabs, undo/redo, save/publish, AI toggle
+│   │   │   ├── linkToolbar.tsx       Link toolbar (as-typed URLs) + note linker
+│   │   │   ├── previews.tsx          Image / plain-text / markdown viewers
+│   │   │   ├── WelcomeScreen.tsx     Launchpad
+│   │   │   └── setup.ts              Schema (math/diagram) + wikilink extension
+│   │   ├── Sidebar.tsx               Vault tree, search, CRUD, backlinks, trash
+│   │   ├── SettingsModal.tsx         AI / Appearance / Git / System tabs
+│   │   └── (StatusBar, OnboardingGuide, SetupWizard, Login, …)
+│   ├── stores/                       Zustand (editor, vault, aiSettings, auth, gitStatus, theme)
+│   ├── hooks/                        useKeyboard, usePolling, useClickOutside
+│   └── utils/                        aiTransport, aiBlocks, aiProbe, modelDiscovery,
+│                                      mathMarkdown, wikilink, fileKind, polyfills
+├── src-tauri/                        Desktop (Tauri v2) — monolithic lib.rs commands
+│   ├── main.rs / lib.rs              Entry + all Tauri commands (vault/wiki/git/search/AI/keychain)
+│   ├── markdown.rs                   Shared .md/.mdx extension contract
+│   ├── keychain.rs                   macOS Keychain access
+│   ├── vault/ wiki/ git/ search/ agent/
+│   ├── capabilities/ permissions/    Tauri 2 ACL (allow-* per command)
+├── server/                           Web distribution — axum, modules by responsibility
+│   ├── main.rs                       Router glue + main
+│   ├── handlers.rs                   Command dispatch (sync/sb/api)
+│   ├── cmds.rs                       Vault/git/search/health + read-per-file grounding
+│   ├── ai.rs / probe.rs              AI streaming / tool-call probe + list_models
+│   ├── httpm.rs / auth_routes.rs     HTTP middleware / login/logout/setup_admin
+│   ├── auth.rs / config.rs / keys.rs Persistence & auth building blocks
+│   └── tests.rs                      API integration tests
+├── test/                             CI e2e harness (lib.mjs, run-all.mjs, ai-debug.mjs…)
+├── dist/  public/                    Build output / static assets
+└── Dockerfile · docker-compose.yml · rust-toolchain.toml · .env.example
 ```
 
 ## Architecture Notes
