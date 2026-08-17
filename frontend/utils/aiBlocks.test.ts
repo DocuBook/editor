@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, buildVaultGroundingPrompt, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
 
 describe('buildDocumentContext', () => {
   const editor: any = {
@@ -268,6 +268,26 @@ describe('validateOperationsSemantics', () => {
       operations: [{ type: 'add', referenceId: 'fake$', position: 'after', blocks: ['<p>x</p>'] }],
     })
     expect(err).toContain('does not exist')
+  })
+})
+
+describe('buildToolSystemPrompt', () => {
+  const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]', '', '')
+  it('instructs the tool call and id suffixing', () => {
+    expect(base).toContain('applyDocumentOperations')
+    expect(base).toContain('trailing $')
+  })
+  it('documents the math block HTML encoding', () => {
+    expect(base).toContain('math display="block"')
+    expect(base).toContain('application/x-tex')
+  })
+  it('documents the mermaid diagram HTML encoding', () => {
+    expect(base).toContain('language-mermaid')
+    expect(base).toContain('data-language="mermaid"')
+  })
+  it('includes vault context when present', () => {
+    expect(buildToolSystemPrompt('doc', 'VAULT', '')).toContain('Vault context')
+    expect(buildToolSystemPrompt('doc', '', '')).not.toContain('Vault context')
   })
 })
 
