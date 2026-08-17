@@ -170,15 +170,6 @@ export function vaultPromptHints(
   return !(docContext || "").trim();
 }
 
-export function isVaultGenerationIntent(
-  userText: string,
-  hasVaultContext: boolean,
-  docContext: string,
-): boolean {
-  if (!hasVaultContext) return false;
-  return vaultPromptHints(userText, docContext);
-}
-
 /** System prompt for the vault-first path: the vault context is the ONLY source. */
 /** Single shared markdown instruction for Path B / fallback user messages. */
 export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;

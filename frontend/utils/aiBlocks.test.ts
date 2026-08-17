@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, vaultPromptHints, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, vaultPromptHints, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
 
 describe('buildDocumentContext', () => {
   const editor: any = {
@@ -364,11 +364,6 @@ describe('vaultPromptHints', () => {
     expect(vaultPromptHints('perbaiki kalimat ini', 'doc content')).toBe(false)
     expect(vaultPromptHints('jadikan lebih pendek', 'doc content')).toBe(false)
   })
-  it('agrees with isVaultGenerationIntent when vault context exists', () => {
-    for (const [t, doc] of [['lihat [[roadmap]]', 'doc'], ['Apa isi vault?', 'doc'], ['Buat draft', 'doc'], ['perbaiki ini', 'doc'], ['x', '']]) {
-      expect(isVaultGenerationIntent(t, true, doc)).toBe(vaultPromptHints(t, doc))
-    }
-  })
 })
 
 describe('buildTaskFormattingRules', () => {
@@ -402,27 +397,6 @@ describe('normalizeMarkdown', () => {
   })
 })
 
-describe('isVaultGenerationIntent', () => {
-  it('false without vault context', () => {
-    expect(isVaultGenerationIntent('Apa isi vault?', false, '')).toBe(false)
-  })
-  it('true for wikilink reference', () => {
-    expect(isVaultGenerationIntent('Ringkas [[roadmap]]', true, 'doc')).toBe(true)
-  })
-  it('true for question', () => {
-    expect(isVaultGenerationIntent('Apa isi vault?', true, 'doc')).toBe(true)
-  })
-  it('true for generation command', () => {
-    expect(isVaultGenerationIntent('Buat draft rencana kerja', true, 'doc')).toBe(true)
-    expect(isVaultGenerationIntent('Generate ringkasan rapat', true, 'doc')).toBe(true)
-  })
-  it('true on empty document with vault context', () => {
-    expect(isVaultGenerationIntent('Lanjutkan catatan', true, '')).toBe(true)
-  })
-  it('false for edit request on non-empty doc', () => {
-    expect(isVaultGenerationIntent('Perbaiki typo di sini', true, 'ada konten')).toBe(false)
-  })
-})
 
 describe('grounding (bekal) in prompts', () => {
   it('tool prompt embeds reference material when provided', () => {

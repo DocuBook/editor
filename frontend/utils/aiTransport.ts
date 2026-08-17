@@ -22,7 +22,6 @@ import {
   validateOperationsSemantics,
   buildTaskFormattingRules,
   normalizeMarkdown,
-  isVaultGenerationIntent,
   vaultPromptHints,
   buildEditSystemPrompt,
   buildToolSystemPrompt,
@@ -193,7 +192,6 @@ async function runSendMessages(
             /* no vault or no wiki index — skip grounding */
           }
         }
-        const hasVaultContext = vaultContext.trim().length > 0;
         /** Vault-first generation: the edit rules below de-authorize vault
          *  content ("NEVER invent … content that is not in the document"),
          *  so a request referencing [[wikilinks]] / asking / generating /
@@ -201,12 +199,10 @@ async function runSendMessages(
          *  edit with nothing to anchor on. Detect that intent → skip the
          *  tool path and use the vault context as the model's only source;
          *  output lands as plain-Markdown insert (accept/revert). */
-        const isVaultGeneration = isVaultGenerationIntent(
-          userText,
-          hasVaultContext,
-          docContext,
-        );
-        const useTools = supportsTools && !!tools && !isVaultGeneration;
+        /** A tool-capable model ALWAYS uses Path A (tool call) — grounding from
+         *  the vault is injected into the system prompt below; we never switch
+         *  to text-only just because the document is empty or vault is present. */
+        const useTools = supportsTools && !!tools;
         /** Tool path: reuse xl-ai's OWN document state (ids suffixed `$`, HTML
          *  blocks) — markdown without ids makes models hallucinate referenceIds.
          *  Always overrides the markdown context above when tools are used. */
@@ -216,8 +212,8 @@ async function runSendMessages(
           );
         bufferText = useTools;
         /** Grounding (read-per-file related vault files) feeds BOTH paths: the
-         *  tool call (buildToolSystemPrompt) and text-only (buildEditSystemPrompt).
-         *  isVaultGeneration still routes tool-vs-text, but the shared grounding is shared. */
+         *  tool call (buildToolSystemPrompt) and, for text-only models,
+         *  buildEditSystemPrompt. Grounding never changes Path A behaviour. */
         const systemGrounding = useTools
           ? buildToolSystemPrompt(docContext, vaultContext)
           : buildEditSystemPrompt(docContext, vaultContext, taskRules);
