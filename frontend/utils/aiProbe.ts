@@ -42,16 +42,16 @@ export function resolveRequestModel(
   return resolveProbeModel(provider, uiModel, envModel)
 }
 
-/** Whether a provider+model is text-only (no tool calls) given probe state. */
+/** Whether a provider+model is text-only (no tool calls) given probe state. The
+ *  probe is the SINGLE source of truth for every provider (the generated catalog's
+ *  toolCall flag is gone): unmeasured → text-only until auto-probe measures true. */
 export function isTextOnly(
   provider: string,
   model: string,
   probeTools: Record<string, Record<string, boolean>>,
-  catalogToolCall: boolean,
 ): boolean {
   const probe = model ? probeTools[provider]?.[model] : undefined
-  if (provider === CUSTOM_PROVIDER_ID) return probe !== true // text-only until measured true
-  return catalogToolCall === true && probe === false
+  return probe !== true
 }
 
 /**

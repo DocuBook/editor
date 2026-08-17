@@ -103,9 +103,9 @@ frontend/
     gitStatus.ts         Shared git status (branch + porcelain) — one poller
     theme.ts             Named theme store (data-theme + Tauri window + meta theme-color)
   data/
-    providers.ts         Generated provider/model catalog — regenerate with
-                         `node frontend/data/fetch-providers.mjs` (models.dev api.json)
-    fetch-providers.mjs  Catalog generator script (fetches models.dev, writes providers.ts)
+    providers.ts         Manual provider list (id/name/baseUrl) — model lists are
+                         discovered at runtime from each endpoint's /models via the
+                         backend `list_models` command (SSRF-guarded, keyed server-side)
   hooks/
     useKeyboard.ts       Keyboard shortcut handling
     usePolling.ts        Interval polling

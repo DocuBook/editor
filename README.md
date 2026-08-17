@@ -196,12 +196,12 @@ spctl -a -t exec -vv /Applications/DocuBook.app
 - Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
 - Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
 - API keys configured in **Settings** — stored **backend-side only** (macOS Keychain on desktop, a 0600 file in `/data` on web), never in localStorage
-- **100+ providers** with **1,000+ models** — provider catalog generated from [models.dev](https://models.dev) via `node frontend/data/fetch-providers.mjs` (single source of truth; `--cache` reuses the last fetch offline)
+- **Built-in providers** (Opencode Go local gateway, Anthropic, Google Gemini, DeepSeek — first-party/local endpoints only) with **runtime model discovery** — model lists are fetched live from each endpoint's `/models` (backend `list_models`, keyed server-side, SSRF-guarded); anything else — aggregators (302.AI, OpenRouter) or any OpenAI-compatible endpoint — works via the Custom provider (base URL + key + model entered directly)
 
 > [!NOTE]\
 > **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (`toolCall: true` models, the majority of the 1,000+ catalog) or generated from plain-text output (models without tool-call support, incl. `opencode-go`). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
 
-**Popular Providers** (catalog generated from [models.dev](https://models.dev)):
+**Popular Providers** (all via runtime model discovery):
 
 | Provider      | Notable models                       |
 | ------------- | ------------------------------------ |

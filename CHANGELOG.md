@@ -1,6 +1,15 @@
 # Changelog
 
-## v0.1.0-rc.2 — 2026-08-17
+## Unreleased (next: v0.1.0-rc.3)
+
+### Runtime model discovery — drop the generated provider catalog
+
+- **`frontend/data/providers.ts` reworked** — 7,300-line generated catalog (models.dev) replaced with a small manual list (4 verified endpoints); `fetch-providers.mjs` generator removed
+- **Model lists discovered at runtime** — `GET {baseUrl}/v1/models` via new backend `list_models` command (desktop + web), keyed server-side (SEC-5), SSRF-guarded, no redirects; Settings dropdown fetches live with 5-minute cache + manual-input fallback
+- **Probe is the single source of tool-call support** — generated catalog's `toolCall` flag removed; `isTextOnly` is probe-only for every provider
+- **SSRF hardening** — AI reqwest clients (desktop + web) now use `redirect::Policy::none()` (the validated host is the only target an API key may reach); `ALLOWED_API_HOSTS` trimmed to the 4-catalog endpoints + loopback (mirrors `providers.ts`)
+
+## v0.1.0-rc.2 — 2026-08-17 — 2026-08-17
 
 ### Release candidate — BlockNote 0.54 + xl-ai tool-call pipeline, math/diagram blocks, Safari 15 compatibility
 
