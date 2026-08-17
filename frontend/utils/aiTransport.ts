@@ -156,7 +156,7 @@ async function runSendMessages(args: any, deps: AiTransportDeps): Promise<Readab
         const systemGrounding = isVaultGeneration
           ? buildVaultGroundingPrompt(vaultContext)
           : useTools
-          ? buildToolSystemPrompt(docContext, taskRules)
+          ? buildToolSystemPrompt(docContext)
           : docContext
           ? buildEditSystemPrompt(docContext, taskRules)
           : ''
