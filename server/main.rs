@@ -766,6 +766,8 @@ async fn list_models(state: &AppState, provider: &str, base_url: &str) -> Result
     agent::validate_base_url(base_url)?;
     let api_key = keys::get_key(&state.data_dir, provider).map_err(|_| "No API key found".to_string())?;
     let client = reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
@@ -804,6 +806,8 @@ async fn test_connection(state: &AppState, provider: &str, model: &str, base_url
         agent::validate_base_url(&base_url)?;
     }
     let client = reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
@@ -945,6 +949,8 @@ async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Respo
     state.ai_cancel.store(false, Ordering::SeqCst);
     let started = std::time::Instant::now();
     let client = match reqwest::Client::builder()
+        // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
         .read_timeout(std::time::Duration::from_secs(120))
         .build()
