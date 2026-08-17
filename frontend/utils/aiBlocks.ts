@@ -180,17 +180,6 @@ export function isVaultGenerationIntent(
 }
 
 /** System prompt for the vault-first path: the vault context is the ONLY source. */
-export function buildVaultGroundingPrompt(vaultContext: string): string {
-  return `You are working from the vault context below — it is your authoritative source material. Use it to fulfill the request (answer, summarize, draft, or generate content); cite the source file name(s) when you do.
-
-─── Vault context (from [[wikilinks]] and search) ───${vaultContext}
-
-Rules (MUST follow):
-- Base your output on the vault context above; it is your only source material.
-- If it does not contain what you need, say so clearly — never fabricate.
-- Output plain Markdown only. No commentary, no preamble, no block ids.`;
-}
-
 /** Single shared markdown instruction for Path B / fallback user messages. */
 export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
 
@@ -277,12 +266,20 @@ export function buildBaseMessages(p: {
 /** Build the tool-call (Path A) system prompt — tool-mill: doc state + how to
  *  call applyDocumentOperations + math/diagram HTML encodings. NO task
  *  rules (those steer Path B text output) and NO vault (vault-gen is Path B). */
-export function buildToolSystemPrompt(docContext: string): string {
-  /** Empty document = no anchor ids and no grounding to reference. Give the
-   *  model explicit scaffolding so it CREATES from the prompt
-   *  instead of guessing — steering for the blank case only, separate from
-   *  taskRules. Constrained to blocks BlockNote parses from HTML (CommonMark/
-   *  GFM round-trip), so generated content renders/export correctly. */
+/** Shared: related vault files (grounding) injected into both paths. */
+const referenceMaterial = (grounding: string): string =>
+  grounding.trim()
+    ? `\n\n─── Reference material (related vault files) ───\n${grounding}`
+    : "";
+
+/** Build the tool-call (Path A) system prompt — doc state + grounding (related vault files)
+ *  + how to call applyDocumentOperations + math/diagram HTML encodings.
+ *  NO taskRules (those steer Path B). When the document is empty it gains
+ *  explicit scaffolding so the model CREATES structured blocks (PI-style) instead of guessing. */
+export function buildToolSystemPrompt(
+  docContext: string,
+  grounding = "",
+): string {
   const isEmpty = !docContext?.trim() || docContext.trim() === "[]";
   const steer = isEmpty
     ? `
@@ -295,7 +292,7 @@ ONLY invent content the user asked for — structure it clearly.`
   return `You are editing the document below. Use the "applyDocumentOperations" tool to make changes; do NOT output the new content as text. Reference block ids EXACTLY as shown — including the trailing $.
 
 Document state (JSON):
-${docContext}${steer}
+${docContext}${referenceMaterial(grounding)}${steer}
 
 Rules (MUST follow):
 - Call applyDocumentOperations with an \`operations\` array (add / update / delete).
@@ -308,26 +305,27 @@ Rules (MUST follow):
 - When editing or replacing selected blocks, PRESERVE each block's type and formatting.`;
 }
 
-/** Single edit-rule system prompt: document state + rules (no vault context —
- *  vault-gen is routed to buildVaultGroundingPrompt; edit rules de-authorize
- *  content that is not in the document). */
+/** Single text-only (Path B) system prompt — doc state + grounding +
+ *  taskRules. Empty doc = generate new content from the reference material;
+ *  non-empty = edit existing blocks. Replaces the old buildVaultGroundingPrompt
+ *  (one grounding concept, one prompt). */
 export function buildEditSystemPrompt(
   docContext: string,
-  taskRules: string,
+  grounding = "",
+  taskRules = "",
 ): string {
-  return `You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.
-
-Document state (JSON):
-${docContext}
-
-Rules (MUST follow):
-- Output ONLY the new or modified content for the requested task.
-- NEVER echo the document state JSON or block ids back into the output.
-- NEVER repeat the user's prompt or these instructions.
-- NEVER invent block ids or content that is not in the document; if the document lacks the needed information, state that instead of fabricating.
-- Use only the exact block ids from the document above when referencing existing blocks.
-- Output must be free of spelling and grammar errors.
-- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.${taskRules}`;
+  const isEmpty = !docContext?.trim();
+  const intro = isEmpty
+    ? "You are writing new content. Use the reference material below when it supports the request; generate well-structured Markdown, no commentary or preamble."
+    : "You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.";
+  const docBlock = isEmpty
+    ? ""
+    : "Document state (JSON):\n" + docContext + "\n";
+  const source = isEmpty ? "the reference material" : "the document";
+  const sourceRule = isEmpty
+    ? "- Base content on the reference material when relevant; if it lacks what you need, say so instead of fabricating.\n- Structure clearly with headings and lists where natural.\n- Output plain Markdown."
+    : "- Output ONLY the new or modified content for the requested task.\n- Use only the exact block ids from the document above when referencing existing blocks.\n- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.";
+  return `${intro}\n\n${docBlock}${referenceMaterial(grounding)}\n\nRules (MUST follow):\n${sourceRule}\n- NEVER echo the user\'s prompt or instructions.\n- NEVER invent block ids or content that is not in ${source}; if the needed information is missing, state that instead of fabricating.\n- Output must be free of spelling and grammar errors.${taskRules}`;
 }
 
 /**

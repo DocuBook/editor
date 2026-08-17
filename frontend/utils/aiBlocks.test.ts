@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, vaultPromptHints, buildVaultGroundingPrompt, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
+import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, isVaultGenerationIntent, vaultPromptHints, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
 
 describe('buildDocumentContext', () => {
   const editor: any = {
@@ -339,8 +339,8 @@ describe('buildToolSystemPrompt', () => {
     expect(base).toContain('language-mermaid')
     expect(base).toContain('data-language="mermaid"')
   })
-  it('does NOT embed vault context (vault-gen uses buildVaultGroundingPrompt)', () => {
-    expect(base).not.toContain('Vault context')
+  it('tool prompt has no reference material unless supplied', () => {
+    expect(base).not.toContain('Reference material')
   })
   it('adds scaffold guidance only for an EMPTY document (no taskRules)', () => {
     expect(base).not.toContain('document is EMPTY')
@@ -424,23 +424,30 @@ describe('isVaultGenerationIntent', () => {
   })
 })
 
-describe('buildVaultGroundingPrompt', () => {
-  it('embeds vault context and forbids fabrication', () => {
-    const p = buildVaultGroundingPrompt('## notes\n(File: x.md)\nisi')
+describe('grounding (bekal) in prompts', () => {
+  it('tool prompt embeds reference material when provided', () => {
+    const p = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]', '## notes\n(File: x.md)\nisi')
+    expect(p).toContain('Reference material')
     expect(p).toContain('## notes')
-    expect(p).toContain('never fabricate')
-    expect(p).toContain('authoritative source material')
+  })
+  it('edit prompt (empty doc) generates from reference material', () => {
+    const p = buildEditSystemPrompt('', '## notes\n(File: x.md)\nisi')
+    expect(p).toContain('writing new content')
+    expect(p).toContain('Reference material')
+    expect(p).toContain('## notes')
+  })
+  it('tool prompt has no reference material when none', () => {
+    expect(buildToolSystemPrompt('[{"id":"a$"}]')).not.toContain('Reference material')
   })
 })
 
 describe('buildEditSystemPrompt', () => {
-  it('includes doc state and edit rules (no vault — vault-gen is separate)', () => {
-    const p = buildEditSystemPrompt('konten doc', '- summarize rule')
+  it('includes doc state, grounding and task rules', () => {
+    const p = buildEditSystemPrompt('konten doc', '## notes\nisi', '- summarize rule')
     expect(p).toContain('Document state (JSON):')
     expect(p).toContain('konten doc')
-    expect(p).toContain('reference block ids EXACTLY as shown')
+    expect(p).toContain('Reference material')
     expect(p).toContain('summarize rule')
-    expect(p).not.toContain('Vault context')
   })
 })
 
