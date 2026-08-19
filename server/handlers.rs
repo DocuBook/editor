@@ -119,39 +119,63 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Some(v) => v.read_file(&s("path")),
             None => Err("No vault".into()),
         },
-        "write_file" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v
-                .write_file(&s("path"), &s("content"))
-                .map(|_| "null".into()),
-            None => Err("No vault".into()),
+        "write_file" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v
+                    .write_file(&s("path"), &s("content"))
+                    .map(|_| "null".into()),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() { cmds::rescan_wiki(state); }
+            r
         },
-        "create_file" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.create_file(&s("path")),
-            None => Err("No vault".into()),
+        "create_file" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.create_file(&s("path")),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() { cmds::rescan_wiki(state); }
+            r
         },
         "create_directory" => match state.vault.lock().expect("lock").as_ref() {
             Some(v) => v.create_directory(&s("path")).map(|_| "null".into()),
             None => Err("No vault".into()),
         },
-        "delete_file" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.delete_file(&s("path")).map(|_| "null".into()),
-            None => Err("No vault".into()),
+        "delete_file" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.delete_file(&s("path")).map(|_| "null".into()),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() { cmds::rescan_wiki(state); }
+            r
         },
         "list_trash" => match state.vault.lock().expect("lock").as_ref() {
             Some(v) => serde_json::to_string(&v.list_trash()).map_err(|e| e.to_string()),
             None => Ok("[]".to_string()),
         },
-        "restore_file" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.restore_file(&s("trashName")).map(|_| "null".into()),
-            None => Err("No vault".into()),
+        "restore_file" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.restore_file(&s("trashName")).map(|_| "null".into()),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() { cmds::rescan_wiki(state); }
+            r
         },
-        "empty_trash" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.empty_trash().map(|_| "null".into()),
-            None => Err("No vault".into()),
+        "empty_trash" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.empty_trash().map(|_| "null".into()),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() { cmds::rescan_wiki(state); }
+            r
         },
-        "rename_file" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.rename_file(&s("from"), &s("to")).map(|_| "null".into()),
-            None => Err("No vault".into()),
+        "rename_file" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.rename_file(&s("from"), &s("to")).map(|_| "null".into()),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() { cmds::rescan_wiki(state); }
+            r
         },
         "git_settings" => cmds::git_settings(state),
         "git_add_remote" => match state.git.lock().expect("lock").as_ref() {

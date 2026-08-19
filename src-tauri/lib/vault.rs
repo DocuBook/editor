@@ -7,6 +7,15 @@
 use tauri::State;
 use crate::AppState;
 
+/** Rebuild the wiki index after a file mutation. The index is a snapshot taken
+ *  at open_vault — without this, suggest/backlinks/resolve stay stale until a
+ *  hard refresh (reopen) reads new files. Cheap enough per save on desktop. */
+fn rescan_wiki(state: &State<'_, AppState>) {
+    if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
+        w.scan();
+    }
+}
+
 /** Validate a vault folder name (no separators, no traversal). */
 fn valid_vault_name(name: &str) -> bool {
     !name.is_empty() && name != "." && !name.contains("..") && !name.contains('/') && !name.contains('\\')
@@ -62,16 +71,20 @@ pub fn read_file_binary(path: &str, state: State<AppState>) -> Result<String, St
 
 #[tauri::command]
 pub fn write_file(path: &str, content: &str, state: State<AppState>) -> Result<(), String> {
-    match state.vault.lock().expect("lock").as_ref() {
+    let r = match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.write_file(path, content), None => Err("No vault".to_string())
-    }
+    };
+    if r.is_ok() { rescan_wiki(&state); }
+    r
 }
 
 #[tauri::command]
 pub fn create_file(path: &str, state: State<AppState>) -> Result<String, String> {
-    match state.vault.lock().expect("lock").as_ref() {
+    let r = match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.create_file(path), None => Err("No vault".to_string())
-    }
+    };
+    if r.is_ok() { rescan_wiki(&state); }
+    r
 }
 
 #[tauri::command]
@@ -83,16 +96,20 @@ pub fn create_directory(path: &str, state: State<AppState>) -> Result<(), String
 
 #[tauri::command]
 pub fn delete_file(path: &str, state: State<AppState>) -> Result<(), String> {
-    match state.vault.lock().expect("lock").as_ref() {
+    let r = match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.delete_file(path), None => Err("No vault".to_string())
-    }
+    };
+    if r.is_ok() { rescan_wiki(&state); }
+    r
 }
 
 #[tauri::command]
 pub fn rename_file(from: &str, to: &str, state: State<AppState>) -> Result<(), String> {
-    match state.vault.lock().expect("lock").as_ref() {
+    let r = match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.rename_file(from, to), None => Err("No vault".to_string())
-    }
+    };
+    if r.is_ok() { rescan_wiki(&state); }
+    r
 }
 
 #[cfg(test)]

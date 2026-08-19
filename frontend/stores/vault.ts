@@ -107,7 +107,12 @@ export const useVaultStore = create<VaultState>()(
             try { const s = await invoke<string>('list_tree', { subpath: folderPath }); cc[folderPath] = JSON.parse(s) } catch {}
           }
         }
-        set({ childrenCache: cc, visibleItems: get().flattenTree(tree, 0) })
+        // Two `set`s ON PURPOSE: zustand applies each synchronously, so the
+        // flatten below must read the UPDATED cache (computing visibleItems in
+        // the same set that writes childrenCache would flatten stale data and
+        // hide newly created/renamed files until the next tree op).
+        set({ childrenCache: cc })
+        set({ visibleItems: get().flattenTree(tree, 0) })
       },
       /** Toggle folder expansion, fetching children on first open. */
       toggleFolder: async (item: FileInfo) => {
