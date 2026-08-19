@@ -51,8 +51,34 @@ function blocknoteMathWhitespaceCompat(): import('vite').Plugin {
   }
 }
 
+/**
+ * Tiptap's `get view()` returns a Proxy that THROWS on property access (e.g.
+ * `domAtPos`) when the editor view is not mounted. With keep-alive tab
+ * instances, a detached view can be re-rendered (BlockPopover/useMemo,
+ * AIExtension scroll) before/after remount — the throw propagates into React's
+ * render phase and hits the error boundary. Patch the proxy to return a safe
+ * placeholder for `domAtPos` instead: callers that need a real element simply
+ * get an undefined node and skip their work.
+ *
+ * Applied to every tiptap copy (@blocknote/core, react, xl-ai) — the dist is
+ * readable ESM with identical shape, so one regex covers all.
+ */
+function tiptapViewProxyCompat(): import('vite').Plugin {
+  const pattern = /if \(key in obj\) \{\s+return Reflect\.get\(obj, key\);\s*\}\s*throw new Error\(/;
+  return {
+    name: 'tiptap-view-proxy-compat',
+    transform(code) {
+      if (!pattern.test(code)) return
+      return code.replace(
+        pattern,
+        `if (key in obj) {\n        return Reflect.get(obj, key);\n      }\n      if (key === \"domAtPos\") {\n        return () => ({ node: { scrollIntoView() {} }, text: undefined });\n      }\n      throw new Error(`,
+      )
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), markedLookbehindCompat(), blocknoteMathWhitespaceCompat()],
+  plugins: [react(), tailwindcss(), markedLookbehindCompat(), blocknoteMathWhitespaceCompat(), tiptapViewProxyCompat()],
   clearScreen: false,
   server: { port: 5173, strictPort: true, proxy: { '/api': 'http://localhost:4282' } },
   envPrefix: ['VITE_', 'TAURI_'],
@@ -61,9 +87,18 @@ export default defineConfig({
   // the build, not to the dev optimizer. Without this, mermaid's `static {`
   // blocks survive into the pre-bundle and WKWebView (Safari 15) chokes.
   optimizeDeps: {
-    exclude: ['marked'], // served via transform pipeline → markedLookbehindCompat runs
+    // marked must flow through the dev transform pipeline (its lookbehind
+    // detection needs the runtime rewrite), so it is excluded from the
+    // pre-bundle. The @blocknote/tiptap compat transforms below run DURING the
+    // rolldown optimize pass instead — deps stay pre-bundled (fast dev cold
+    // start) and the patches land in the bundled output (verified: the fresh
+    // prebundle contains the domAtPos guard + MATH whitespace preserve).
+    exclude: ['marked'],
     rolldownOptions: {
       transform: { target: ['es2021', 'chrome105', 'safari15'] },
+      // Merged with Vite's own dep plugin: our transform hooks run on the dep
+      // sources before bundling, so the patched code is what gets cached.
+      plugins: [blocknoteMathWhitespaceCompat() as any, tiptapViewProxyCompat() as any] as any,
     },
   },
 })

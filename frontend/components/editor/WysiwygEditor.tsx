@@ -232,7 +232,18 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
 
   useEffect(() => {
     setBlockEditor(editor)
-    return () => setBlockEditor(null)
+    return () => {
+      setBlockEditor(null)
+      /** Cancel in-flight AI before the view detaches. The streamed tool
+       *  execution touches the ProseMirror view (transact/domAtPos); running
+       *  it against an unmounted editor throws "editor view is not available"
+       *  and crashes the tree (keep-alive keeps the INSTANCE alive, so the
+       *  stream would otherwise complete into a detached view). Abort is a
+       *  no-op unless the AI is actually thinking/ai-writing. */
+      try {
+        ;(editor as any).getExtension?.(AIExtension)?.abort?.('view detached')
+      } catch {}
+    }
   }, [editor, setBlockEditor])
 
   /** Register flush-to-store for Save button + explicit switchTab flush. */
