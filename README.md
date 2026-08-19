@@ -288,6 +288,26 @@ Writing shortcuts (built-in, no setup needed):
 
 ---
 
+## Credits
+
+DocuBook Editor isn't built from nothing — it stands on the shoulders of a few thoughtful open-source projects. Every note you open, every keystroke in the WYSIWYG canvas, flows through them:
+
+- **[BlockNote](https://www.blocknotejs.org/)** — the block editor that powers the writing experience. The `/`-menu, math blocks, diagrams, and the AI writing layer all live here. The editor you type into *is* BlockNote.
+- **[TipTap](https://tiptap.dev/)** — the headless editor framework underneath. It handles the plumbing — extensions, keyboard shortcuts, undo/redo, editor lifecycle — so BlockNote and you can focus on ideas instead of boilerplate.
+- **[ProseMirror](https://prosemirror.net/)** — the engine at the foundation. It's the document model and collaborative-editing core that both TipTap and BlockNote are built on, and the reason your undo history and document state behave so predictably.
+
+These aren't dependencies we take for granted — they're years of patient work done by people who genuinely care about good tools. If DocuBook has made your notes, research, or docs a little better, consider giving a little back so the ecosystem keeps thriving:
+
+- **ProseMirror** · [marijnhaverbeke.nl/fund](https://marijnhaverbeke.nl/fund/) — by Marijn Haverbeke
+- **TipTap** · [github.com/sponsors/ueberdosis](https://github.com/sponsors/ueberdosis)
+- **BlockNote** · [github.com/sponsors/YousefED](https://github.com/sponsors/YousefED)
+
+And if DocuBook itself has earned a place in your workflow — every star, thoughtful issue, and contribution makes a real difference, and so does [sponsoring the author on GitHub](https://github.com/sponsors/gitfromwildan). It helps keep development moving forward, feature by feature, and lets us keep this project free and open for everyone.
+
+Whatever you choose, thank you for reading this far — and welcome to the neighborhood. 💛
+
+---
+
 ## License
 
 [GPL-3.0](./LICENSE) — DocuBook Editor now integrates BlockNote XL package (`@blocknote/xl-ai`) which is licensed under GPL-3.0. The GPL ensures that modified versions of the app remain free and open — if you distribute the app, you must share your changes under the same license.
