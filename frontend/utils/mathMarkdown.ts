@@ -29,7 +29,7 @@ export function mathDollarToMathML(markdown: string): string {
   out = out.replace(
     /(^|\n)\s*\$\$(.*?)\$\$\s*(?=\n|$)/gs,
     (_m, lead: string, latex: string) =>
-      `${lead}<div><math display="block"><annotation encoding="application/x-tex">${latex.trim()}</annotation></math></div>`,
+      `${lead}<div><math display="block"><annotation encoding="application/x-tex">${latex.trim()}</annotation></math></div>\n`,
   )
 
   // Inline math: $...$ — no newlines inside, $ not adjacent to another $.

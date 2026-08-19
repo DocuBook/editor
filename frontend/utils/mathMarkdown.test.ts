@@ -33,4 +33,16 @@ describe('mathDollarToMathML', () => {
     const r = mathDollarToMathML('Use $x_i$ here')
     expect(r).toContain('x_i')
   })
+  it('block followed by paragraph has blank line (no stray \\ spacing)', () => {
+    const r = mathDollarToMathML('$$a = b$$\nAfter')
+    expect(r).toContain('</div>\n')
+    expect(r).toContain('</div>\n\nAfter')
+  })
+
+  it('multiline block preserves newlines', () => {
+    const r = mathDollarToMathML('$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\n\nAfter')
+    expect(r).toContain('a &= b')
+    expect(r).toContain('c &= d')
+    expect(r).toMatch(/a &= b \\.*\nc &= d/s)
+  })
 })
