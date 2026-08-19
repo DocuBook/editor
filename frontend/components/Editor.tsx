@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide, { isOnboardingDone, markOnboardingDone } from './OnboardingGuide'
@@ -8,9 +8,27 @@ import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
 import { WysiwygEditor } from './editor/WysiwygEditor'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
+import { createBlockEditor, KeepAliveCache, type CachedEditor } from '../utils/editorFactory'
+
+/** Keep-alive cache: one BlockNote instance per open file. Survives tab
+ *  switches — only the view remounts, the instance (doc, undo history, AI
+ *  stream) persists. Reset when the vault changes (rel paths are
+ *  vault-scoped). */
+function useEditorCache() {
+  const cacheRef = useRef<KeepAliveCache<CachedEditor> | null>(null)
+  const vaultPath = useVaultStore(s => s.vaultPath)
+  if (!cacheRef.current) cacheRef.current = new KeepAliveCache(path => createBlockEditor(vaultPath, path))
+  useEffect(() => {
+    // Vault changed: stale instances must go (rel paths collide across vaults).
+    cacheRef.current!.clear()
+  }, [vaultPath])
+  const get = (path: string): CachedEditor => cacheRef.current!.get(path)
+  return get
+}
 
 export default function Editor() {
   const { editMode } = useEditorStore()
+  const getCachedEditor = useEditorCache()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const vaultOpen = useVaultStore(s => s.isOpen)
   const vaultPath = useVaultStore(s => s.vaultPath)
@@ -91,7 +109,8 @@ export default function Editor() {
       useEditorStore.getState().setTabDirty(file.path, true)
     }} />
   } else {
-    inner = <WysiwygEditor key={file.path} filePath={file.path} markdown={(file.editedContent ?? file.content).replace(file.frontmatter, '')} onSync={md => useEditorStore.getState().setEditedContent(file.path, md)} />
+    const cached = getCachedEditor(file.path)
+    inner = <WysiwygEditor key={file.path} cached={cached} filePath={file.path} markdown={(file.editedContent ?? file.content).replace(file.frontmatter, '')} onSync={md => useEditorStore.getState().setEditedContent(file.path, md)} />
   }
 
   return (

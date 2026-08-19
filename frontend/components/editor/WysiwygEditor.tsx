@@ -1,26 +1,27 @@
 /** WYSIWYG block editor powered by BlockNoteJS. Loads markdown, syncs changes back,
- *  and hosts the xl-ai extension (transport lives in utils/aiTransport). */
-import { useEffect, useState, useRef } from 'react'
-import { useCreateBlockNote, SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, useExtensionState } from '@blocknote/react'
+ *  and hosts the xl-ai extension (transport lives in utils/aiTransport).
+ *
+ *  Keep-alive host: the `cached` editor INSTANCE is created once per file
+ *  (utils/editorFactory) and survives tab switches — only the view
+ *  (BlockNoteView) remounts. Markdown is parsed once; undo history and
+ *  in-flight AI streams persist across switches. */
+import { useEffect, useRef } from 'react'
+import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, useExtensionState } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
-import { en as baseDict } from '@blocknote/core/locales'
 import { combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
-import { getMathSlashMenuItems, locales as mathLocales } from '@blocknote/math-block'
-import { getDiagramSlashMenuItems, locales as diagramLocales } from '@blocknote/diagram-block'
-import { en as aiDict } from '@blocknote/xl-ai/locales'
+import { getMathSlashMenuItems } from '@blocknote/math-block'
+import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
 import { AIExtension, AIMenuController, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { useEditorStore } from '../../stores/editor'
 import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
-import { fileUrl } from '../../lib/ipc'
-import { useVaultStore } from '../../stores/vault'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
-import { createAiTransport } from '../../utils/aiTransport'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
-import { getSchema, wikilinkStyler, setWikilinkStylerPaused } from './setup'
+import { setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
+import type { CachedEditor } from '../../utils/editorFactory'
 // Mermaid is a singleton — wrapping render here also patches the instance
 // @blocknote/diagram-block uses. Serialize renders (mermaid keeps global
 // state; parallel renders race on slow engines like WKWebView) and surface
@@ -40,24 +41,9 @@ let _mermaidQueue: Promise<unknown> = Promise.resolve()
 }
 
 /** ── Inner content components (no container — shared scroll in Editor) ── */
-/** WYSIWYG block editor powered by BlockNoteJS. Loads markdown, syncs changes back. */
-export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string; onSync: (md: string) => void; filePath: string }) {
-  const [clean, setClean] = useState('')
-  useEffect(() => { setClean(markdown) }, [markdown])
-  const editorRef = useRef<any>(null)
-  const vaultPath = useVaultStore(s => s.vaultPath)
-  const editor = useCreateBlockNote({
-    schema: getSchema(),
-    dictionary: { ...baseDict, ai: aiDict, math: mathLocales.en, diagram: diagramLocales.en },
-    /** Resolve relative file URLs (images etc) to a loadable URL for this
-     *  runtime: base64 data: URL via IPC (Tauri), or /api/file (web). */
-    resolveFileUrl: async (url: string) => (vaultPath ? await fileUrl(vaultPath, url) : url),
-    extensions: [AIExtension({
-      transport: createAiTransport({ getEditor: () => editorRef.current }),
-      agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
-    }), wikilinkStyler],
-  }, [markdown])
-  useEffect(() => { editorRef.current = editor }, [editor])
+/** WYSIWYG block editor powered by BlockNoteJS (keep-alive instance from editorFactory). */
+export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string }) {
+  const { editor } = cached
 
   /** Hover hint for [[wikilink]]: native title tooltips get cancelled by
    *  ProseMirror's decoration re-rendering, so render a small floating hint
@@ -207,6 +193,10 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
   const { setBlockEditor, setFlushEditor } = useEditorStore()
   const onSyncRef = useRef(onSync)
   onSyncRef.current = onSync
+  /** Baseline markdown this instance was loaded from — flushing only writes
+   *  when serialized output actually differs (serialization is not idempotent,
+   *  it rewrites list formatting). Kept per-mount; the instance itself is
+   *  shared across mounts via the cache. */
   const markdownRef = useRef(markdown)
   markdownRef.current = markdown
   const dirtyRef = useRef(false)
@@ -225,7 +215,8 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
     } catch { return '' }
   }
 
-  /** Track editor changes — skip initial load (filePath stable, remount on file change) */
+  /** Track editor changes — skip initial load (the parse below fires replaceBlocks
+   *  before the user has typed anything). */
   useEffect(() => {
     /** After current synchronous ops (replaceBlocks), mark initial load as done */
     queueMicrotask(() => { initialLoadRef.current = false })
@@ -244,7 +235,7 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
     return () => setBlockEditor(null)
   }, [editor, setBlockEditor])
 
-  /** Register flush-to-store for Save button */
+  /** Register flush-to-store for Save button + explicit switchTab flush. */
   useEffect(() => {
     const sync = () => {
       /** Only flush when there are real WYSIWYG edits — serialization is not
@@ -252,34 +243,39 @@ export function WysiwygEditor({ markdown, onSync, filePath }: { markdown: string
        *  would disturb the original markdown on every mode switch. */
       if (!dirtyRef.current) return
       const md = serializeMarkdown(editor)
-      if (md && md !== markdownRef.current) onSyncRef.current(md)
+      if (md && md !== markdownRef.current) {
+        // The instance now holds `md` — sync the load baseline so a later
+        // remount (tab switch back) sees loadedMarkdown === markdown and skips
+        // re-parsing, preserving undo history.
+        cached.loadedMarkdown = md
+        onSyncRef.current(md)
+      }
     }
     setFlushEditor(sync)
     return () => setFlushEditor(null)
   }, [editor, setFlushEditor])
 
+  /** Load markdown into this editor instance when it first mounts OR when the
+   *  incoming markdown actually changed (code-mode edits, external changes).
+   *  Keep-alive: a plain tab switch passes the SAME markdown (the tab was
+   *  flushed on exit), so the instance is not re-parsed — undo history and
+   *  cursor survive. */
   useEffect(() => {
-    if (!clean) return
+    if (cached.loaded && cached.loadedMarkdown === markdown) return
+    cached.loaded = true
+    cached.loadedMarkdown = markdown
+    /** Re-parse must not mark the tab dirty: gate onChange until the load
+     *  transaction settles (same guard as the initial mount). */
+    initialLoadRef.current = true
     try {
       /** Math blocks export as $/$$ but blocknote's markdown parser has no
        *  $ handling — pre-convert to <math> HTML so saved math re-renders. */
-      const blocks = editor.tryParseMarkdownToBlocks(mathDollarToMathML(clean))
+      const blocks = editor.tryParseMarkdownToBlocks(mathDollarToMathML(markdown))
       editor.transact(tr => { tr.setMeta('addToHistory', false); editor.replaceBlocks(editor.document, blocks) }); useEditorStore.getState().setUndoRedoState() }
     catch (e) { console.error('BlockNote load:', e); toast.error('Failed to load editor') }
-  }, [editor, clean])
-
-  useEffect(() => () => {
-    if (!dirtyRef.current) return
-    /** Flush on unmount. Must NOT run synchronously: serialization →
-     *  exportBlocks → toExternalHTML uses flushSync internally, and React
-     *  forbids flushSync from inside a lifecycle method (unmount cleanup runs
-     *  during commit). Defer to a microtask so the unmount commit finishes
-     *  first. */
-    queueMicrotask(() => {
-      const md = serializeMarkdown(editor)
-      if (md && md !== markdownRef.current) onSyncRef.current(md)
-    })
-  }, [])
+    queueMicrotask(() => { initialLoadRef.current = false })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by loadedMarkdown comparison
+  }, [editor, markdown])
 
   return <BlockNoteView editor={editor} theme={useTheme(s => s.name)} slashMenu={false} formattingToolbar={false} linkToolbar={false}>
     <AIMenuController />
