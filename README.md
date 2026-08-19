@@ -304,7 +304,7 @@ These aren't dependencies we take for granted — they're years of patient work 
 
 And if DocuBook itself has earned a place in your workflow — every star, thoughtful issue, and contribution makes a real difference, and so does [sponsoring the author on GitHub](https://github.com/sponsors/gitfromwildan). It helps keep development moving forward, feature by feature, and lets us keep this project free and open for everyone.
 
-Whatever you choose, thank you for reading this far — and welcome to the neighborhood. 💛
+Whatever you choose, thank you for reading this far — and welcome to the neighborhood. ❤️
 
 ---
 
