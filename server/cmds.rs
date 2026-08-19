@@ -26,6 +26,16 @@ fn valid_vault_name(name: &str) -> bool {
         && !name.contains('\\')
 }
 
+/** Rebuild the wiki index after a file mutation — same staleness fix as the
+ *  desktop command layer (lib/vault.rs). The index is a snapshot taken at
+ *  open_vault; without this, suggest/backlinks/resolve stay stale until the
+ *  vault is reopened. */
+pub(crate) fn rescan_wiki(state: &AppState) {
+    if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
+        w.scan();
+    }
+}
+
 pub(crate) fn create_vault(state: &AppState, parent: &str, name: &str) -> Result<String, String> {
     if !valid_vault_name(name) {
         return Err("Invalid vault name".to_string());
