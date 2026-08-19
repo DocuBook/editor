@@ -103,6 +103,21 @@ body {
     color: var(--color-ai-cursor-text);
 }
 
+/* Editor "page" box — BlockNote hardcodes the canvas bg (light: #fff,
+   dark: #1f1f1f). #fff equals our light window background, so the editing
+   container vanishes in the light theme while dark's #1f1f1f is visibly
+   distinct from #0c0c0d. Pin the fill to our surface token and give it a thin
+   border so the box reads the same in BOTH themes. #root beats bundled css
+   order regardless of source position. */
+#root .bn-root {
+    --bn-colors-editor-background: var(--color-surface);
+}
+#root .bn-editor {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+}
+
 /* UI shell — single source of truth for user-select on non-editor chrome.
    Applying user-select:none globally blocks drag/selection in WebKit, so
    UI shells opt in individually instead. The -webkit- prefix is REQUIRED on
