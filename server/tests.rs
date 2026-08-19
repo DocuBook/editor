@@ -1,6 +1,6 @@
 // API integration tests (moved out of main).
 use super::*;
-use crate::{ai, probe, handlers, httpm, cmds, auth_routes};
+use crate::probe;
 #[cfg(test)]
 mod api_tests {
     use super::*;

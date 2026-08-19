@@ -1,7 +1,7 @@
-
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { blocknoteMathWhitespaceCompat, tiptapViewProxyCompat } from './frontend/utils/viteCompatPlugins.js'
 
 /**
  * Safari 15 (WKWebView, Tauri on macOS 12) doesn't support regex lookbehind.
@@ -31,52 +31,6 @@ function markedLookbehindCompat(): Plugin {
   }
 }
 
-function blocknoteMathWhitespaceCompat(): import('vite').Plugin {
-  return {
-    name: 'blocknote-math-whitespace-compat',
-    transform(code) {
-      if (code.includes('new Set(["PRE", "CODE"])')) {
-        return code.replace(
-          'new Set(["PRE", "CODE"])',
-          'new Set(["PRE", "CODE", "MATH", "ANNOTATION", "math", "annotation"])',
-        )
-      }
-      if (code.includes('new Set([`PRE`,`CODE`])')) {
-        return code.replace(
-          'new Set([`PRE`,`CODE`])',
-          'new Set([`PRE`,`CODE`,`MATH`,`ANNOTATION`,`math`,`annotation`])',
-        )
-      }
-    },
-  }
-}
-
-/**
- * Tiptap's `get view()` returns a Proxy that THROWS on property access (e.g.
- * `domAtPos`) when the editor view is not mounted. With keep-alive tab
- * instances, a detached view can be re-rendered (BlockPopover/useMemo,
- * AIExtension scroll) before/after remount — the throw propagates into React's
- * render phase and hits the error boundary. Patch the proxy to return a safe
- * placeholder for `domAtPos` instead: callers that need a real element simply
- * get an undefined node and skip their work.
- *
- * Applied to every tiptap copy (@blocknote/core, react, xl-ai) — the dist is
- * readable ESM with identical shape, so one regex covers all.
- */
-function tiptapViewProxyCompat(): import('vite').Plugin {
-  const pattern = /if \(key in obj\) \{\s+return Reflect\.get\(obj, key\);\s*\}\s*throw new Error\(/;
-  return {
-    name: 'tiptap-view-proxy-compat',
-    transform(code) {
-      if (!pattern.test(code)) return
-      return code.replace(
-        pattern,
-        `if (key in obj) {\n        return Reflect.get(obj, key);\n      }\n      if (key === \"domAtPos\") {\n        return () => ({ node: { scrollIntoView() {} }, text: undefined });\n      }\n      throw new Error(`,
-      )
-    },
-  }
-}
-
 export default defineConfig({
   plugins: [react(), tailwindcss(), markedLookbehindCompat(), blocknoteMathWhitespaceCompat(), tiptapViewProxyCompat()],
   clearScreen: false,
@@ -89,10 +43,11 @@ export default defineConfig({
   optimizeDeps: {
     // marked must flow through the dev transform pipeline (its lookbehind
     // detection needs the runtime rewrite), so it is excluded from the
-    // pre-bundle. The @blocknote/tiptap compat transforms below run DURING the
-    // rolldown optimize pass instead — deps stay pre-bundled (fast dev cold
-    // start) and the patches land in the bundled output (verified: the fresh
-    // prebundle contains the domAtPos guard + MATH whitespace preserve).
+    // pre-bundle. The @blocknote/tiptap compat transforms (shared module
+    // frontend/utils/viteCompatPlugins) run DURING the rolldown optimize pass
+    // instead — deps stay pre-bundled (fast dev cold start) and the patches
+    // land in the bundled output (verified: the fresh prebundle contains the
+    // domAtPos guard + MATH whitespace preserve).
     exclude: ['marked'],
     rolldownOptions: {
       transform: { target: ['es2021', 'chrome105', 'safari15'] },

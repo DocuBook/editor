@@ -1,13 +1,33 @@
 # Changelog
 
-## Unreleased (next: v0.1.0-rc.3)
+## v0.1.0-rc.3 — 2026-08-20
 
-### Runtime model discovery — drop the generated provider catalog
+### Release candidate — keep-alive editor tabs, AI stability, wiki/tree freshness, light-theme polish
 
-- **`frontend/data/providers.ts` reworked** — 7,300-line generated catalog (models.dev) replaced with a small manual list (4 verified endpoints); `fetch-providers.mjs` generator removed
-- **Model lists discovered at runtime** — `GET {baseUrl}/v1/models` via new backend `list_models` command (desktop + web), keyed server-side (SEC-5), SSRF-guarded, no redirects; Settings dropdown fetches live with 5-minute cache + manual-input fallback
-- **Probe is the single source of tool-call support** — generated catalog's `toolCall` flag removed; `isTextOnly` is probe-only for every provider
-- **SSRF hardening** — AI reqwest clients (desktop + web) now use `redirect::Policy::none()` (the validated host is the only target an API key may reach); `ALLOWED_API_HOSTS` trimmed to the 4-catalog endpoints + loopback (mirrors `providers.ts`)
+#### 🚀 Features
+- **Keep-alive per-tab BlockNote instances** — one editor instance per open file survives tab switches (only the view remounts): markdown is parsed once per file (no O(doc) re-parse on switch), undo history and the in-flight AI stream stay with the tab; the AI transport closes over its own instance so per-tab stream state is preserved
+- **Vault grounding into both AI paths** — read-per-file related-vault files feed the tool call (Path A) and the text-only prompt (Path B); grounding never changes Path A behaviour
+- **Tool-mill Path A prompt** — document-state scaffolding + empty-document guidance so a model creates structured blocks instead of guessing; containerized docs, mermaid/math encodings
+- **Runtime model discovery — drop the generated provider catalog**
+- `frontend/data/providers.ts` reworked — 7,300-line generated catalog (models.dev) replaced with a small manual list (4 verified endpoints); `fetch-providers.mjs` removed
+- Model lists discovered at runtime — `GET {baseUrl}/v1/models` via backend `list_models` (desktop + web), keyed server-side (SEC-5), SSRF-guarded, no redirects; Settings dropdown fetches live with a 5-minute cache + manual-input fallback
+- Probe is the single source of tool-call support — the generated catalog's `toolCall` flag is gone; `isTextOnly` is probe-only for every provider
+- SSRF hardening — AI reqwest clients (desktop + web) use `redirect::Policy::none()` (the validated host is the only target an API key may reach); `ALLOWED_API_HOSTS` trimmed to the 4-catalog endpoints + loopback
+
+#### 🐛 Bug Fixes
+- **AI stream completes into a detached editor (keep-alive regression)** — switching tabs/mode/close now cancels the in-flight stream (`AIExtension.abort()` → transport `abortSignal` → Rust `cancel_ai`), so tool execution can never run against an unmounted view; tiptap's `view` proxy no longer throws on `domAtPos` for an unmounted editor (patched via Vite transform at build/dev/test, applied during dep optimization for dev/build parity)
+- **Wiki suggestions/backlinks stale until reopen** — the wiki index is now rescanned after every file mutation (write/create/delete/rename, restore/empty trash) on both desktop and the web server, so `[[wikilinks]]` resolve immediately
+- **Sidebar tree hiding new/renamed files after CRUD** — `loadTree` flattened from a stale children cache; two sequential `set()` calls make CRUD visible right away, and persisted expanded folders render their children on the first load after rehydrate
+- **Open tab not updated on sidebar rename** — `renameTab` flushes and remaps the tab's path+name, so saves, git status and wiki backlinks keep targeting the new path (no duplicate-file write)
+- **Math block spacing** — blank line after block/inline math restored and multiline LaTeX preserved (MATH/ANNOTATION whitespace no longer collapsed)
+- **Editor page box invisible in light theme** — BlockNote's hardcoded `#fff` canvas pinned to the surface token + border, so the editing page reads the same in both themes
+
+#### 🔄 Refactor
+- Tauri command layer split into `lib/` modules — one per responsibility (vault, git, agent, wiki, search, markdown, app), each with its own unit tests; `lib.rs` keeps only `AppState` + bootstrap
+- Server split into domain modules; markdown module shared desktop/server via `#[path]`
+
+#### 📚 Documentation
+- README **Credits** section crediting BlockNote / TipTap / ProseMirror with sponsorship links (and the project author)
 
 ## v0.1.0-rc.2 — 2026-08-17 — 2026-08-17
 
