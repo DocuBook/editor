@@ -35,6 +35,10 @@ interface EditorState {
   /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it. */
   openFile: (path: string, name: string, createIfMissing?: boolean) => Promise<void>
   switchTab: (path: string) => void
+  /** Rename an open file: remaps the tab's path+name so saves, git status and
+   *  wiki backlinks keep targeting the NEW path. Flushes first so in-flight WYSIWYG
+   *  edits survive the remap (the editor remounts under the new key). */
+  renameTab: (fromPath: string, toPath: string) => void
   closeTab: (path: string) => void
   setContent: (path: string, fileContent: string) => void
   setFrontmatter: (path: string, fm: string) => void
@@ -96,6 +100,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
      *  explicitly before switching (its state must land in the store first). */
     if (get().activeTab !== path) get().flushEditor()
     set({ activeTab: path })
+  },
+
+  renameTab: (fromPath, toPath) => {
+    if (!get().tabs.some(t => t.path === fromPath)) return
+    /** Flush the renamed editor now: it remounts under the new path key
+     *  (WysiwygEditor key={path}) and there is no unmount-flush anymore, so
+     *  unsaved edits must be captured before the remap. */
+    if (get().activeTab === fromPath) get().flushEditor()
+    /** The target is already open: the renamed file IS that tab — drop the
+     *  stale old-path tab instead of creating a duplicate path. */
+    if (get().tabs.some(t => t.path === toPath && t.path !== fromPath)) {
+      set({ tabs: get().tabs.filter(t => t.path !== fromPath), activeTab: get().activeTab === fromPath ? toPath : get().activeTab })
+      return
+    }
+    const name = toPath.split('/').pop() || toPath
+    const tabs = get().tabs.map(t => t.path === fromPath ? { ...t, path: toPath, name } : t)
+    set({ tabs, activeTab: get().activeTab === fromPath ? toPath : get().activeTab })
   },
   
   closeTab: async (path) => {

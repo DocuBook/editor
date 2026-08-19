@@ -260,7 +260,11 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
                     let target = (e.target as HTMLInputElement).value
                     if (MARKDOWN_EXTENSIONS.some(e => renaming.path.toLowerCase().endsWith(e)) && !/\.\w{1,10}$/i.test(target)) target = target + '.md'
                     const newPath = dir + target
-                    try { await invoke('rename_file', { from: renaming.path, to: newPath }); loadTree() } catch(err) { console.error(err); toast.error('Failed to rename') }
+                    try {
+                      await invoke('rename_file', { from: renaming.path, to: newPath })
+                      useEditorStore.getState().renameTab(renaming.path, newPath)
+                      loadTree()
+                    } catch(err) { console.error(err); toast.error('Failed to rename') }
                     setRenaming(null)
                   }
                   if (e.key === 'Escape') setRenaming(null)
