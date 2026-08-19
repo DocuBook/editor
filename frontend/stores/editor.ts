@@ -90,7 +90,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
   },
   
-  switchTab: (path) => { set({ activeTab: path }) },
+  switchTab: (path) => {
+    /** Keep-alive: leaving editors are NOT unmounted/destroyed (instance cache),
+     *  so the old unmount-flush no longer fires — flush the OUTGOING editor
+     *  explicitly before switching (its state must land in the store first). */
+    if (get().activeTab !== path) get().flushEditor()
+    set({ activeTab: path })
+  },
   
   closeTab: async (path) => {
     if (get().activeTab === path) {
