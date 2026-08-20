@@ -34,9 +34,19 @@ pub(crate) async fn file_route(
     let Some(path) = params.get("path") else {
         return (StatusCode::BAD_REQUEST, "missing path").into_response();
     };
-    let Ok(abs) = super::handlers::ensure_within_data(&state, path) else {
-        return (StatusCode::FORBIDDEN, "path outside data dir").into_response();
+    let root = match state.vault.lock().expect("lock").as_ref() {
+        Some(vault) => vault.root().to_path_buf(),
+        None => return (StatusCode::BAD_REQUEST, "no vault open").into_response(),
     };
+    let Ok(root) = root.canonicalize() else {
+        return (StatusCode::NOT_FOUND, "vault not found").into_response();
+    };
+    let Ok(abs) = std::path::Path::new(path).canonicalize() else {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    };
+    if !abs.starts_with(&root) || !abs.is_file() {
+        return (StatusCode::FORBIDDEN, "path outside active vault").into_response();
+    }
     let Ok(bytes) = tokio::fs::read(&abs).await else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
@@ -65,11 +75,15 @@ pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: N
         let cfg = state.auth.config.lock().expect("lock");
         (cfg.admin.is_none(), cfg.no_auth)
     };
-    let exempt = matches!(
+    let always_public = matches!(
         path.as_str(),
         "/api/setup_status" | "/api/login" | "/api/logout" | "/api/setup_admin" | "/api/health"
     );
-    if no_auth || setup_required || exempt {
+    let setup_public = matches!(
+        path.as_str(),
+        "/api/setup_status" | "/api/setup_admin" | "/api/health"
+    );
+    if no_auth || (setup_required && setup_public) || (!setup_required && always_public) {
         return next.run(req).await;
     }
     let token = req

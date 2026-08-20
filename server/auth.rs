@@ -60,13 +60,24 @@ impl Sessions {
                 }
             }
         }
-        Self { map: Mutex::new(map), base_dir, path }
+        Self {
+            map: Mutex::new(map),
+            base_dir,
+            path,
+        }
     }
 
     fn persist(&self, map: &HashMap<String, SystemTime>) {
         let out: HashMap<String, u64> = map
             .iter()
-            .map(|(h, t)| (h.clone(), t.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)))
+            .map(|(h, t)| {
+                (
+                    h.clone(),
+                    t.duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0),
+                )
+            })
             .collect();
         if let Ok(json) = serde_json::to_string_pretty(&out) {
             if !self.path.starts_with(&self.base_dir) {
@@ -77,7 +88,8 @@ impl Sessions {
             }
             if std::fs::write(&self.path, json).is_ok() {
                 #[cfg(unix)]
-                let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
+                let _ =
+                    std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
             }
         }
     }
@@ -88,14 +100,14 @@ impl Sessions {
         format!("{:x}", Sha256::digest(token.as_bytes()))
     }
 
-    pub fn create(&self, ttl: Duration) -> String {
-        let mut bytes = [0u8; 32];
-        let _ = getrandom::getrandom(&mut bytes);
+    pub fn create(&self, ttl: Duration) -> Result<String, String> {
+        let mut bytes: [u8; 32] = Default::default();
+        getrandom::getrandom(&mut bytes).map_err(|e| format!("session entropy failed: {e}"))?;
         let token = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
         let mut map = self.map.lock().expect("lock");
         map.insert(Self::hash(&token), SystemTime::now() + ttl);
         self.persist(&map);
-        token
+        Ok(token)
     }
 
     pub fn valid(&self, token: &str, _ttl: Duration) -> bool {
@@ -115,9 +127,16 @@ impl Sessions {
             self.persist(&map);
         }
     }
+
+    pub fn revoke_all(&self) {
+        let mut map = self.map.lock().expect("lock");
+        map.clear();
+        self.persist(&map);
+    }
 }
 
-pub struct LoginLimiter {    map: Mutex<HashMap<String, (u32, Instant)>>,
+pub struct LoginLimiter {
+    map: Mutex<HashMap<String, (u32, Instant)>>,
 }
 
 const MAX_ATTEMPTS: u32 = 5;
@@ -125,7 +144,9 @@ const LOCKOUT: Duration = Duration::from_secs(60);
 
 impl LoginLimiter {
     pub fn new() -> Self {
-        Self { map: Mutex::new(HashMap::new()) }
+        Self {
+            map: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn check(&self, ip: &str) -> Result<(), String> {
@@ -142,7 +163,9 @@ impl LoginLimiter {
 
     pub fn fail(&self, ip: &str) {
         let mut map = self.map.lock().expect("lock");
-        let e = map.entry(ip.to_string()).or_insert((0, Instant::now() + LOCKOUT));
+        let e = map
+            .entry(ip.to_string())
+            .or_insert((0, Instant::now() + LOCKOUT));
         e.0 += 1;
         if e.0 > MAX_ATTEMPTS {
             e.1 = Instant::now() + LOCKOUT;
@@ -162,7 +185,10 @@ mod tests {
         let d = std::env::temp_dir().join(format!(
             "db-auth-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -179,7 +205,7 @@ mod tests {
     fn sessions_create_and_validate() {
         let s = Sessions::new(&tmp());
         let ttl = Duration::from_secs(3600);
-        let t = s.create(ttl);
+        let t = s.create(ttl).unwrap();
         assert!(s.valid(&t, ttl));
         assert!(!s.valid("deadbeef", ttl));
         s.revoke(&t);
@@ -192,7 +218,7 @@ mod tests {
         let ttl = Duration::from_secs(3600);
         let token = {
             let s = Sessions::new(&dir);
-            let t = s.create(ttl);
+            let t = s.create(ttl).unwrap();
             assert!(s.valid(&t, ttl));
             t
         };
@@ -209,16 +235,19 @@ mod tests {
     fn sessions_file_stores_hashes_not_tokens() {
         let dir = tmp();
         let s = Sessions::new(&dir);
-        let token = s.create(Duration::from_secs(60));
+        let token = s.create(Duration::from_secs(60)).unwrap();
         let raw = std::fs::read_to_string(dir.join("sessions.json")).unwrap();
-        assert!(!raw.contains(&token), "sessions.json must not contain raw tokens");
+        assert!(
+            !raw.contains(&token),
+            "sessions.json must not contain raw tokens"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn sessions_expire_after_ttl() {
         let s = Sessions::new(&tmp());
-        let t = s.create(Duration::ZERO);
+        let t = s.create(Duration::ZERO).unwrap();
         assert!(!s.valid(&t, Duration::ZERO)); // expires immediately — GC path
     }
 

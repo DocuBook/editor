@@ -26,7 +26,11 @@ pub(crate) fn custom_env_base_url() -> Option<String> {
 /** Mirrors lib.rs ask_ai + test_connection — streams SSE events to the browser. */
 /** Runtime model discovery — GET {baseUrl}/models with the stored key (data dir),
  *  so the frontend never holds API keys. SSRF-guarded + no redirects. */
-pub(crate) async fn list_models(state: &AppState, provider: &str, base_url: &str) -> Result<String, String> {
+pub(crate) async fn list_models(
+    state: &AppState,
+    provider: &str,
+    base_url: &str,
+) -> Result<String, String> {
     if base_url.is_empty() {
         return Err("Base URL is required".into());
     }
@@ -75,15 +79,20 @@ pub(crate) async fn test_connection(
     };
     // Custom endpoints skip the allowlist (any public https host) but still pass
     // the generic sanitize; catalog providers stay strictly allowlisted.
-    if provider == agent::CUSTOM_PROVIDER_ID {
-        agent::validate_custom_base_url(&base_url, false)?;
+    let custom_resolution = if provider == agent::CUSTOM_PROVIDER_ID {
+        Some(agent::validated_custom_addrs(&base_url, false)?)
     } else {
         agent::validate_base_url(&base_url)?;
-    }
-    let client = reqwest::Client::builder()
+        None
+    };
+    let mut client_builder = reqwest::Client::builder()
         // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(15));
+    if let Some((host, addrs)) = &custom_resolution {
+        client_builder = client_builder.resolve_to_addrs(host, addrs);
+    }
+    let client = client_builder
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
@@ -150,7 +159,12 @@ pub(crate) async fn test_connection(
         // support tool calls in "auto" mode (e.g. opencode.ai, DeepSeek thinking).
         // Retry once with "auto" before concluding tools:false.
         tool_body["tool_choice"] = json!("auto");
-        let auto = client.post(&url).header("Authorization", format!("Bearer {}", api_key)).json(&tool_body).send().await;
+        let auto = client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&tool_body)
+            .send()
+            .await;
         if let Ok(r2) = auto {
             if r2.status().is_success() {
                 let t2 = r2.text().await.map_err(|e| e.to_string())?;

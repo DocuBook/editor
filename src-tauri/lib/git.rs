@@ -95,18 +95,19 @@ pub async fn git_push(message: String, state: State<'_, AppState>) -> Result<Str
 pub async fn git_status(state: State<'_, AppState>) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
-        None => return Ok(r#"{"branch":"","status":""}"#.to_string()),
+        None => return Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","status":""}"#.to_string()),
     };
     // git spawns subprocesses (is_repo + status) — off the main thread (PERF:
     // this runs on a 3s poller; previously SYNC on the UI thread).
-    let (branch, status) = tauri::async_runtime::spawn_blocking(move || {
+    let (is_repo, has_remote, branch, status) = tauri::async_runtime::spawn_blocking(move || {
         let g = crate::git::Git::open(&repo_path);
         if !g.is_repo() {
-            return (String::new(), String::new());
+            return (false, false, String::new(), String::new());
         }
-        g.status_with_branch().unwrap_or_default()
+        let (branch, status) = g.status_with_branch().unwrap_or_default();
+        (true, g.has_remote(), branch, status)
     })
     .await
     .map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "branch": branch, "status": status.trim() }).to_string())
+    Ok(serde_json::json!({ "isRepo": is_repo, "hasRemote": has_remote, "branch": branch, "status": status.trim() }).to_string())
 }

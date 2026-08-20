@@ -130,14 +130,20 @@ impl Config {
     }
 
     pub fn change_password(&mut self, old: &str, new: &str) -> Result<(), String> {
-        let admin = self.admin.as_ref().ok_or("No admin account")?;
-        if !super::auth::verify_password(&admin.password_hash, old) {
+        // admin must exist before a password can change (guard, not unwrap)
+        let existing = self.admin.as_ref().ok_or("No admin account")?;
+        if !super::auth::verify_password(&existing.password_hash, old) {
             return Err("Current password is incorrect".into());
         }
         if new.len() < 8 {
             return Err("New password must be at least 8 characters".into());
         }
-        self.admin.as_mut().unwrap().password_hash = super::auth::hash_password(new)?;
+        let hash = super::auth::hash_password(new)?;
+        // admin is guaranteed Some above; write without unwrap so this can't
+        // panic even if the guard ever changes
+        if let Some(admin) = self.admin.as_mut() {
+            admin.password_hash = hash;
+        }
         self.save()
     }
 

@@ -5,11 +5,15 @@ import { useAuth } from './auth'
 /** Shared git status (branch + porcelain status) polled ONCE and consumed by
  *  StatusBar + TabBar (PERF-1: previously two parallel pollers ran 3s + 5s). */
 interface GitStatusState {
+  isRepo: boolean
+  hasRemote: boolean
   branch: string
   status: string
 }
 
-export const useGitStatus = create<GitStatusState>(() => ({ branch: '', status: '' }))
+const EMPTY_GIT_STATUS: GitStatusState = { isRepo: false, hasRemote: false, branch: '', status: '' }
+
+export const useGitStatus = create<GitStatusState>(() => EMPTY_GIT_STATUS)
 
 export async function pollGitStatus() {
   // Skip while unauthenticated (web login/setup screen): the server answers 401
@@ -20,9 +24,9 @@ export async function pollGitStatus() {
     const { invoke } = await import('../lib/ipc')
     const s = await invoke<string>('git_status')
     const d = JSON.parse(s)
-    useGitStatus.setState({ branch: d.branch || '', status: d.status || '' })
+    useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', status: d.status || '' })
   } catch {
-    useGitStatus.setState({ branch: '', status: '' })
+    useGitStatus.setState(EMPTY_GIT_STATUS)
   }
 }
 

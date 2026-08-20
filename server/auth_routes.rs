@@ -54,7 +54,10 @@ pub(crate) async fn login(
         return err_response("Invalid email or password");
     }
     state.auth.limiter.clear(&ip);
-    let token = state.auth.sessions.create(state.auth.session_ttl());
+    let token = match state.auth.sessions.create(state.auth.session_ttl()) {
+        Ok(token) => token,
+        Err(e) => return err_response(&e),
+    };
     (
         StatusCode::OK,
         [(header::SET_COOKIE, session_cookie(&state.auth, &token))],
@@ -93,16 +96,21 @@ pub(crate) async fn setup_admin(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let password = args
-        .get("password")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    // Password is never defaulted to a literal: a missing or EMPTY password is
+    // rejected outright, so no blank/hard-coded credential can be hashed into
+    // an admin account.
+    let password = match args.get("password").and_then(|v| v.as_str()) {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => return err_response("Email and password are required"),
+    };
     let token = args
         .get("token")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
     let ip = addr.ip().to_string();
+    if email.is_empty() {
+        return err_response("Email and password are required");
+    }
     // Rate-limit the pre-auth claim window: 6 failed attempts / minute
     // per IP — blocked on the 7th (limiter blocks when count > MAX_ATTEMPTS).
     if let Err(e) = state.auth.limiter.check(&ip) {
@@ -114,7 +122,10 @@ pub(crate) async fn setup_admin(
     match res {
         Ok(()) => {
             state.auth.limiter.clear(&ip);
-            let token = state.auth.sessions.create(state.auth.session_ttl());
+            let token = match state.auth.sessions.create(state.auth.session_ttl()) {
+                Ok(token) => token,
+                Err(e) => return err_response(&e),
+            };
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, session_cookie(&state.auth, &token))],
@@ -128,5 +139,3 @@ pub(crate) async fn setup_admin(
         }
     }
 }
-
-

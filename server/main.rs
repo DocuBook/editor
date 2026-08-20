@@ -9,19 +9,19 @@
 //! Docker: see ../Dockerfile (multi-stage, single binary, non-root).
 #[path = "../src-tauri/agent/mod.rs"]
 mod agent;
-mod auth;
 mod ai;
-mod cmds;
+mod auth;
 mod auth_routes;
+mod cmds;
 mod config;
-mod handlers;
-mod httpm;
-mod probe;
 #[path = "../src-tauri/git/mod.rs"]
 mod git;
+mod handlers;
+mod httpm;
 mod keys;
 #[path = "../src-tauri/markdown.rs"]
 mod markdown;
+mod probe;
 #[path = "../src-tauri/search/mod.rs"]
 mod search;
 #[path = "../src-tauri/vault/mod.rs"]
@@ -138,8 +138,12 @@ fn build_router(state: AppState, www_dir: PathBuf) -> Router {
         .route("/api/logout", post(auth_routes::logout))
         .route("/api/setup_admin", post(auth_routes::setup_admin))
         .route("/api/{cmd}", post(handlers::api))
+        .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024))
         .layer(middleware::from_fn(httpm::security_headers))
-        .layer(middleware::from_fn_with_state(state.clone(), httpm::auth_mw))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            httpm::auth_mw,
+        ))
         // axum 0.8: .layer() does NOT wrap fallback_service — wrap the static
         // service explicitly so security headers apply to / and /assets too.
         .fallback_service(

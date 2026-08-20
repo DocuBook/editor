@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
+import { PROVIDERS } from '../data/providers'
 
 /** Synthetic provider id for user-configured OpenAI-compatible endpoints — shared
  *  with SettingsModal and the Rust backend (agent::CUSTOM_PROVIDER_ID). */
@@ -39,8 +40,8 @@ export const useAiSettings = create<AiSettingsState>()(
       models: {},
       baseUrls: {},
       probeTools: {},
-      /** Restore per-provider apiKey + model (+ custom base URL) when switching providers. */
-      setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || '' }),
+      /** Restore the saved model, or use a valid bootstrap model so a new key can be validated before discovery. */
+      setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || PROVIDERS.find(x => x.id === p)?.defaultModel || '' }),
       /** Save model per-provider so it survives provider switches. */
       setModel: (m) => set((s) => ({ model: m, models: { ...s.models, [s.provider]: m } })),
       setApiKey: (key) => set((s) => ({ apiKey: key, apiKeys: { ...s.apiKeys, [s.provider]: key } })),

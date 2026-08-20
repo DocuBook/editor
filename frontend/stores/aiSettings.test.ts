@@ -48,7 +48,7 @@ describe('aiSettings store', () => {
 
     // switch to another provider, pick a different model
     useAiSettings.getState().setProvider('anthropic')
-    expect(useAiSettings.getState().model).toBe('')
+    expect(useAiSettings.getState().model).toBe('claude-sonnet-5')
     useAiSettings.getState().setModel('opus-5')
     expect(useAiSettings.getState().models['anthropic']).toBe('opus-5')
 
@@ -60,7 +60,19 @@ describe('aiSettings store', () => {
     expect(useAiSettings.getState().model).toBe('opus-5')
   })
 
-  it('setProvider restores model only when previously saved', () => {
+  it('setProvider uses valid bootstrap models before keyed discovery is available', () => {
+    for (const [provider, model] of [
+      ['opencode-go', 'deepseek-v4-flash'],
+      ['anthropic', 'claude-sonnet-5'],
+      ['google', 'gemini-3.7-flash'],
+      ['deepseek', 'deepseek-v4-flash'],
+    ]) {
+      useAiSettings.getState().setProvider(provider)
+      expect(useAiSettings.getState().model).toBe(model)
+    }
+  })
+
+  it('setProvider keeps unknown providers empty', () => {
     useAiSettings.getState().setProvider('groq')
     expect(useAiSettings.getState().model).toBe('')
   })

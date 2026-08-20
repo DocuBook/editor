@@ -40,6 +40,7 @@ interface EditorState {
    *  edits survive the remap (the editor remounts under the new key). */
   renameTab: (fromPath: string, toPath: string) => void
   closeTab: (path: string) => void
+  closeAllTabs: () => void
   setContent: (path: string, fileContent: string) => void
   setFrontmatter: (path: string, fm: string) => void
   setEditedContent: (path: string, md: string) => void
@@ -123,7 +124,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (get().activeTab === path) {
       get().flushEditor()
       const tab = get().tabs.find(t => t.path === path)
-      if (tab?.editedContent && tab.dirty && !tab.deleted) {
+      if (tab?.editedContent !== null && tab?.dirty && !tab.deleted) {
         const content = tab.frontmatter + tab.editedContent.replace(/^\n+/, '').replace(/\n+$/, '')
         try { await invoke('write_file', { path, content }) } catch (e) { console.error(e) }
       }
@@ -132,6 +133,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     let activeTab = get().activeTab
     if (activeTab === path) activeTab = tabs.length > 0 ? tabs[tabs.length - 1].path : null
     set({ tabs, activeTab })
+  },
+
+  closeAllTabs: () => {
+    set({ tabs: [], activeTab: null, blockEditor: null, _flushEditor: null, canUndo: false, canRedo: false })
   },
   
   setContent: (path, fileContent) => {
@@ -152,7 +157,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   persistAllDirty: async () => {
     get().flushEditor()
     for (const tab of get().tabs) {
-      if (tab.dirty && tab.editedContent && !tab.deleted) {
+      if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
         const content = tab.frontmatter + tab.editedContent.replace(/^\n+/, '').replace(/\n+$/, '')
         try { await invoke('write_file', { path: tab.path, content }) } catch (e) { console.error('save on close:', e) }
       }

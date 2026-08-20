@@ -17,6 +17,11 @@ impl Git {
     pub fn is_repo(&self)  -> bool {
         Command::new("git").args(["rev-parse", "--git-dir"]).current_dir(&self.repo_path).output().map(|o| o.status.success()).unwrap_or(false)
     }
+    /** Check whether at least one remote is configured. */
+    #[allow(dead_code)] // Shared server build does not use this desktop-only query.
+    pub fn has_remote(&self) -> bool {
+        Command::new("git").arg("remote").current_dir(&self.repo_path).output().map(|o| o.status.success() && !o.stdout.is_empty()).unwrap_or(false)
+    }
 /** Return git status as porcelain string. */
     pub fn status(&self) -> Result<String, String> {
         let out = Command::new("git").args(["status", "--porcelain"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
