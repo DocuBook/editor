@@ -17,11 +17,13 @@ export interface ProviderInfo {
   name: string
   /** OpenAI-compatible base URL. Empty = not usable from the catalog. */
   api: string
+  /** Valid model used to validate a newly entered key before model discovery is available. */
+  defaultModel?: string
 }
 
 export const PROVIDERS: ProviderInfo[] = [
-  { id: 'opencode-go', name: 'Opencode Go', api: 'https://opencode.ai/zen/go/v1' },
-  { id: 'anthropic', name: 'Anthropic', api: 'https://api.anthropic.com/v1' },
-  { id: 'google', name: 'Google Gemini', api: 'https://generativelanguage.googleapis.com/v1beta/openai' },
-  { id: 'deepseek', name: 'DeepSeek', api: 'https://api.deepseek.com' },
+  { id: 'opencode-go', name: 'Opencode Go', api: 'https://opencode.ai/zen/go/v1', defaultModel: 'deepseek-v4-flash' },
+  { id: 'anthropic', name: 'Anthropic', api: 'https://api.anthropic.com/v1', defaultModel: 'claude-sonnet-5' },
+  { id: 'google', name: 'Google Gemini', api: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-3.7-flash' },
+  { id: 'deepseek', name: 'DeepSeek', api: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash' },
 ]

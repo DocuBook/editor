@@ -12,7 +12,12 @@ pub struct Agent {
 impl Agent {
     /** Create a new AI agent with explicit config. */
     pub fn new(provider: &str, model: &str, api_key: &str, base_url: &str) -> Self {
-        Self { provider: provider.to_string(), model: model.to_string(), api_key: api_key.to_string(), base_url: base_url.to_string() }
+        Self {
+            provider: provider.to_string(),
+            model: model.to_string(),
+            api_key: api_key.to_string(),
+            base_url: base_url.to_string(),
+        }
     }
 }
 
@@ -96,21 +101,30 @@ fn validate_scheme_and_host(url: &reqwest::Url) -> Result<String, String> {
  *  (keychain/keys `{provider}:base_url`), so a webview-provided URL can never
  *  redirect the stored key elsewhere. */
 pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<(), String> {
+    validated_custom_addrs(base_url, allow_loopback).map(|_| ())
+}
+
+/** Validate and resolve a custom endpoint once. Server callers pin reqwest to
+ *  these addresses so DNS cannot change between validation and connection. */
+pub fn validated_custom_addrs(
+    base_url: &str,
+    allow_loopback: bool,
+) -> Result<(String, Vec<std::net::SocketAddr>), String> {
     let url =
         reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {}", base_url))?;
     let host = validate_scheme_and_host(&url)?;
     if is_loopback(&host) && !allow_loopback {
         return Err("Loopback addresses are not allowed on the server".into());
     }
-    if host.parse::<std::net::IpAddr>().is_ok() {
-        return Ok(()); // IP literal — already vetted by validate_scheme_and_host
-    }
-    // DNS-based SSRF guard: resolve the hostname now and reject internal targets.
     let port = url.port_or_known_default().unwrap_or(443);
-    let addrs: Vec<std::net::SocketAddr> = (host.as_str(), port)
-        .to_socket_addrs()
-        .map_err(|_| format!("Could not resolve host \"{}\" — DNS lookup failed", host))?
-        .collect();
+    let addrs: Vec<std::net::SocketAddr> = if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        vec![std::net::SocketAddr::new(ip, port)]
+    } else {
+        (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|_| format!("Could not resolve host \"{}\" — DNS lookup failed", host))?
+            .collect()
+    };
     if addrs.is_empty() {
         return Err(format!("Could not resolve host \"{}\"", host));
     }
@@ -135,7 +149,7 @@ pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<
             ));
         }
     }
-    Ok(())
+    Ok((host, addrs))
 }
 
 /** Fetch the model list from an OpenAI-compatible endpoint (GET /models).

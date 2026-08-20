@@ -39,6 +39,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         .and_then(|v| v.as_str())
         .map(|t| t.to_string());
 
+    let mut custom_resolution = None;
     let agent_cfg = match (provider.as_str(), model.as_str()) {
         // Custom OpenAI-compatible endpoint: URL is bound server-side at save time,
         // the webview-provided baseUrl is IGNORED so the stored key can never be
@@ -70,8 +71,9 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                     (b, k, m.to_string())
                 }
             };
-            if let Err(e) = agent::validate_custom_base_url(&b, false) {
-                return err_response(&e);
+            match agent::validated_custom_addrs(&b, false) {
+                Ok(resolution) => custom_resolution = Some(resolution),
+                Err(e) => return err_response(&e),
             }
             agent::Agent::new(p, &model, &key, &b)
         }
@@ -90,13 +92,15 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
 
     state.ai_cancel.store(false, Ordering::SeqCst);
     let started = std::time::Instant::now();
-    let client = match reqwest::Client::builder()
+    let mut client_builder = reqwest::Client::builder()
         // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
-        .read_timeout(std::time::Duration::from_secs(120))
-        .build()
-    {
+        .read_timeout(std::time::Duration::from_secs(120));
+    if let Some((host, addrs)) = &custom_resolution {
+        client_builder = client_builder.resolve_to_addrs(host, addrs);
+    }
+    let client = match client_builder.build() {
         Ok(c) => c,
         Err(e) => return err_response(&format!("Client error: {}", e)),
     };

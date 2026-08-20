@@ -151,16 +151,36 @@ pub(crate) fn git_settings(state: &AppState) -> Result<String, String> {
     }
 }
 
-/** Server-side vault folders under DATA_DIR/vaults — the web "open folder" dialog. */
+/** Server-side vault folders under DATA_DIR/vaults — the web "open folder" dialog.
+ *  Every path sink below is guarded by an explicit containment check against a
+ *  canonical base, so neither a crafted DATA_DIR nor a crafted folder name/symlink
+ *  can turn the listing into a traversal outside the data directory. */
 pub(crate) fn web_vaults(state: &AppState) -> Result<String, String> {
-    let root = state.data_dir.join("vaults");
-    std::fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    // Trusted, canonical base; root is derived from it and must stay under it.
+    let base = state
+        .data_dir
+        .canonicalize()
+        .unwrap_or_else(|_| state.data_dir.clone());
+    let root = base.join("vaults");
+    if !root.starts_with(&base) {
+        return Err("invalid data directory".to_string());
+    }
+    let _ = std::fs::create_dir_all(&root);
+    let root = root.canonicalize().unwrap_or(root);
     let mut out = Vec::new();
-    for entry in std::fs::read_dir(&root).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        if path.is_dir() {
-            out.push(json!({ "name": entry.file_name().to_string_lossy().to_string(), "path": path.to_string_lossy().to_string() }));
+    if let Ok(entries) = std::fs::read_dir(&root) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !valid_vault_name(&name) {
+                continue;
+            }
+            let dir = root.join(&name).canonicalize().unwrap_or_else(|_| root.clone());
+            if !dir.starts_with(&root) {
+                continue;
+            }
+            if dir.is_dir() {
+                out.push(json!({ "name": name, "path": dir.to_string_lossy().to_string() }));
+            }
         }
     }
     serde_json::to_string(&out).map_err(|e| e.to_string())

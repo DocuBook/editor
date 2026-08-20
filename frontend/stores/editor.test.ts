@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useEditorStore } from './editor'
+import { invoke } from '../lib/ipc'
 
 vi.mock('../lib/ipc', () => ({
   invoke: vi.fn().mockResolvedValue(''),
@@ -86,5 +87,52 @@ describe('editor store renameTab', () => {
     useEditorStore.setState({ tabs: [], activeTab: null })
     useEditorStore.getState().renameTab('ghost.md', 'real.md')
     expect(useEditorStore.getState().tabs).toEqual([])
+  })
+})
+
+describe('editor store tab persistence', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    useEditorStore.setState({ tabs: [], activeTab: null, _flushEditor: null })
+  })
+
+  it('does not write unchanged files or auto-save when switching tabs', async () => {
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'a', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'a.md',
+    })
+
+    useEditorStore.getState().switchTab('b.md')
+    await useEditorStore.getState().closeTab('b.md')
+
+    expect(invoke).not.toHaveBeenCalledWith('write_file', expect.anything())
+  })
+
+  it('writes a dirty active tab on close, including content edited to empty', async () => {
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: '', dirty: true, deleted: false }],
+      activeTab: 'a.md',
+    })
+
+    await useEditorStore.getState().closeTab('a.md')
+
+    expect(invoke).toHaveBeenCalledWith('write_file', { path: 'a.md', content: '' })
+  })
+
+  it('does not save a dirty inactive tab when it is closed', async () => {
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'changed', dirty: true, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'b.md',
+    })
+
+    await useEditorStore.getState().closeTab('a.md')
+
+    expect(invoke).not.toHaveBeenCalledWith('write_file', expect.anything())
   })
 })

@@ -40,27 +40,28 @@ fn keys_file(data_dir: &Path) -> std::path::PathBuf {
 }
 
 fn passphrase() -> Option<String> {
-    std::env::var("DB_KEYS_PASSPHRASE").ok().filter(|s| !s.is_empty())
+    std::env::var("DB_KEYS_PASSPHRASE")
+        .ok()
+        .filter(|s| !s.is_empty())
 }
 
 const ENC_VERSION: u8 = 1;
 
 /** Derive a 32-byte AES key from the passphrase + salt (Argon2id). */
-fn derive_key(pass: &str, salt: &[u8]) -> [u8; 32] {
-    // 32 zeroed bytes; overwritten by hash_password_into (Argon2id KDF output,
-    // not a hard-coded key).
-    let mut key = [0u8; 32];
+fn derive_key(pass: &str, salt: &[u8]) -> Result<[u8; 32], String> {
+    // Output buffer is fully overwritten by Argon2id before it is returned.
+    let mut key: [u8; 32] = Default::default();
     Argon2::default()
         .hash_password_into(pass.as_bytes(), salt, &mut key)
-        .expect("argon2id kdf");
-    key
+        .map_err(|e| format!("argon2id kdf failed: {e}"))?;
+    Ok(key)
 }
 
 fn encrypt_map(map: &HashMap<String, String>, pass: &str) -> Result<String, String> {
     let plain = serde_json::to_vec(map).map_err(|e| e.to_string())?;
     let salt: [u8; 16] = std::array::from_fn(|_| rand::random());
     let nonce: [u8; 12] = std::array::from_fn(|_| rand::random());
-    let cipher = Aes256Gcm::new_from_slice(&derive_key(pass, &salt)).map_err(|e| e.to_string())?;
+    let cipher = Aes256Gcm::new_from_slice(&derive_key(pass, &salt)?).map_err(|e| e.to_string())?;
     let ct = cipher
         .encrypt(Nonce::from_slice(&nonce), plain.as_slice())
         .map_err(|e| e.to_string())?;
@@ -76,10 +77,25 @@ fn encrypt_map(map: &HashMap<String, String>, pass: &str) -> Result<String, Stri
 
 fn decrypt_map(raw: &str, pass: &str) -> Result<HashMap<String, String>, String> {
     let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
-    let salt: Vec<u8> = v["salt"].as_array().ok_or("keys.json: missing salt")?.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect();
-    let nonce: Vec<u8> = v["nonce"].as_array().ok_or("keys.json: missing nonce")?.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect();
-    let ct: Vec<u8> = v["data"].as_array().ok_or("keys.json: missing data")?.iter().filter_map(|x| x.as_u64().map(|n| n as u8)).collect();
-    let cipher = Aes256Gcm::new_from_slice(&derive_key(pass, &salt)).map_err(|e| e.to_string())?;
+    let salt: Vec<u8> = v["salt"]
+        .as_array()
+        .ok_or("keys.json: missing salt")?
+        .iter()
+        .filter_map(|x| x.as_u64().map(|n| n as u8))
+        .collect();
+    let nonce: Vec<u8> = v["nonce"]
+        .as_array()
+        .ok_or("keys.json: missing nonce")?
+        .iter()
+        .filter_map(|x| x.as_u64().map(|n| n as u8))
+        .collect();
+    let ct: Vec<u8> = v["data"]
+        .as_array()
+        .ok_or("keys.json: missing data")?
+        .iter()
+        .filter_map(|x| x.as_u64().map(|n| n as u8))
+        .collect();
+    let cipher = Aes256Gcm::new_from_slice(&derive_key(pass, &salt)?).map_err(|e| e.to_string())?;
     let plain = cipher
         .decrypt(Nonce::from_slice(&nonce), ct.as_slice())
         .map_err(|e| format!("keys.json decrypt failed — check DB_KEYS_PASSPHRASE: {e}"))?;
@@ -138,12 +154,18 @@ fn save(data_dir: &Path, map: &HashMap<String, String>) -> Result<(), String> {
     save_with(data_dir, map, passphrase().as_deref())
 }
 
-fn save_with(data_dir: &Path, map: &HashMap<String, String>, pass: Option<&str>) -> Result<(), String> {
+fn save_with(
+    data_dir: &Path,
+    map: &HashMap<String, String>,
+    pass: Option<&str>,
+) -> Result<(), String> {
     // data_dir is deployer-controlled (env/config); keys_file canonicalizes it.
     let path = keys_file(data_dir);
     // Guard: never overwrite an encrypted file with plaintext when the
     // passphrase is missing (would silently destroy all stored keys).
-    let currently_encrypted = std::fs::read_to_string(&path).map(|s| looks_like_envelope(&s)).unwrap_or(false);
+    let currently_encrypted = std::fs::read_to_string(&path)
+        .map(|s| looks_like_envelope(&s))
+        .unwrap_or(false);
     if currently_encrypted && pass.is_none() {
         return Err("keys.json is encrypted — set DB_KEYS_PASSPHRASE to modify keys".into());
     }
@@ -152,16 +174,26 @@ fn save_with(data_dir: &Path, map: &HashMap<String, String>, pass: Option<&str>)
         None => serde_json::to_string_pretty(map).map_err(|e| e.to_string())?,
     };
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
     }
-    std::fs::write(&path, json).map_err(|e| format!("Cannot write {}: {} — check the /data volume ownership", path.display(), e))?;
+    std::fs::write(&path, json).map_err(|e| {
+        format!(
+            "Cannot write {}: {} — check the /data volume ownership",
+            path.display(),
+            e
+        )
+    })?;
     #[cfg(unix)]
     let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     Ok(())
 }
 
 pub fn get_key(data_dir: &Path, provider: &str) -> Result<String, String> {
-    load(data_dir).get(provider).cloned().ok_or_else(|| "not_found".to_string())
+    load(data_dir)
+        .get(provider)
+        .cloned()
+        .ok_or_else(|| "not_found".to_string())
 }
 
 pub fn set_key(data_dir: &Path, provider: &str, key: &str) -> Result<(), String> {
@@ -189,7 +221,10 @@ pub fn set_base_url(data_dir: &Path, provider: &str, url: &str) -> Result<(), St
 }
 
 pub fn get_base_url(data_dir: &Path, provider: &str) -> Result<String, String> {
-    load(data_dir).get(&base_url_key(provider)).cloned().ok_or_else(|| "not_found".to_string())
+    load(data_dir)
+        .get(&base_url_key(provider))
+        .cloned()
+        .ok_or_else(|| "not_found".to_string())
 }
 
 pub fn delete_base_url(data_dir: &Path, provider: &str) -> Result<(), String> {
@@ -201,7 +236,11 @@ pub fn delete_base_url(data_dir: &Path, provider: &str) -> Result<(), String> {
 /** Providers that already have a saved key. */
 pub fn list_keys(data_dir: &Path, providers: &[String]) -> Vec<String> {
     let map = load(data_dir);
-    providers.iter().filter(|p| map.contains_key(*p)).cloned().collect()
+    providers
+        .iter()
+        .filter(|p| map.contains_key(*p))
+        .cloned()
+        .collect()
 }
 
 #[cfg(test)]
@@ -212,7 +251,10 @@ mod tests {
         let d = std::env::temp_dir().join(format!(
             "db-keys-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
         ));
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -237,7 +279,10 @@ mod tests {
         let dir = tmp();
         let mut map = HashMap::new();
         map.insert("anthropic".to_string(), "sk-ant-x".to_string());
-        map.insert("openai-compatible:base_url".to_string(), "https://x.example/v1".to_string());
+        map.insert(
+            "openai-compatible:base_url".to_string(),
+            "https://x.example/v1".to_string(),
+        );
         save_with(&dir, &map, Some("hunter2")).unwrap();
         let raw = std::fs::read_to_string(keys_file(&dir)).unwrap();
         assert!(!raw.contains("sk-ant-x"), "passphrase set must encrypt");
@@ -255,7 +300,10 @@ mod tests {
         save_with(&dir, &map, Some("right")).unwrap();
         assert!(decrypt_map(&std::fs::read_to_string(keys_file(&dir)).unwrap(), "wrong").is_err());
         let loaded = load_with(&dir, Some("wrong"));
-        assert!(loaded.is_empty(), "wrong passphrase must not return garbage");
+        assert!(
+            loaded.is_empty(),
+            "wrong passphrase must not return garbage"
+        );
         let _ = std::fs::remove_file(keys_file(&dir));
     }
 
@@ -270,7 +318,7 @@ mod tests {
         assert_eq!(loaded.get("openai").map(|s| s.as_str()), Some("sk-migrate"));
         let raw = std::fs::read_to_string(keys_file(&dir)).unwrap();
         assert!(looks_like_envelope(&raw), "must migrate to encrypted");
-        assert!(load_with(&dir, Some("secret")).get("openai").is_some());
+        assert!(load_with(&dir, Some("secret")).contains_key("openai"));
         let _ = std::fs::remove_file(keys_file(&dir));
     }
 
@@ -284,9 +332,17 @@ mod tests {
         assert!(load_with(&dir, None).is_empty());
         let mut m2 = HashMap::new();
         m2.insert("openai".to_string(), "sk-new".to_string());
-        assert!(save_with(&dir, &m2, None).is_err(), "must refuse to overwrite encrypted file");
+        assert!(
+            save_with(&dir, &m2, None).is_err(),
+            "must refuse to overwrite encrypted file"
+        );
         // Original still intact & decryptable.
-        assert_eq!(load_with(&dir, Some("secret")).get("openai").map(|s| s.as_str()), Some("sk-x"));
+        assert_eq!(
+            load_with(&dir, Some("secret"))
+                .get("openai")
+                .map(|s| s.as_str()),
+            Some("sk-x")
+        );
         let _ = std::fs::remove_file(keys_file(&dir));
     }
 }

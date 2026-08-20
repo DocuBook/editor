@@ -92,18 +92,20 @@ mod api_tests {
         post_with(app, path, body, None).await
     }
 
-    async fn get(app: &Router, path: &str) -> (StatusCode, HeaderMap, String) {
+    async fn get_with(
+        app: &Router,
+        path: &str,
+        cookie: Option<&str>,
+    ) -> (StatusCode, HeaderMap, String) {
         let app = app
             .clone()
             .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+        let mut builder = Request::builder().method("GET").uri(path);
+        if let Some(cookie) = cookie {
+            builder = builder.header(header::COOKIE, cookie);
+        }
         let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("GET")
-                    .uri(path)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(builder.body(Body::empty()).unwrap())
             .await
             .unwrap();
         let status = resp.status();
@@ -112,6 +114,22 @@ mod api_tests {
             .await
             .unwrap();
         (status, headers, String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    async fn get(app: &Router, path: &str) -> (StatusCode, HeaderMap, String) {
+        get_with(app, path, None).await
+    }
+
+    fn session_cookie(headers: &HeaderMap) -> String {
+        headers
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string()
     }
 
     /** Commands return JSON-serialized strings wrapped in {"result": "..."}. */
@@ -136,6 +154,41 @@ mod api_tests {
         let v = result_json(&body);
         assert_eq!(v["setupRequired"], true, "{body}");
         assert_eq!(v["setupToken"], false, "{body}");
+    }
+
+    #[tokio::test]
+    async fn setup_mode_only_exposes_setup_routes() {
+        let (app, _) = router();
+        let (status, _, _) = post(&app, "/api/web_vault_root", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _, _) = get(&app, "/api/file?path=%2Ftmp%2Fsecret").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn oversized_json_body_is_rejected() {
+        let (app, _) = router();
+        let body = json!({ "content": "x".repeat(8 * 1024 * 1024) });
+        let (status, _, _) = post(&app, "/api/setup_admin", body).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    #[tokio::test]
+    async fn setup_admin_rejects_missing_password() {
+        // A missing/empty password must never be hashed into an admin — the
+        // guard runs before rate-limit so this holds even on a fresh claim.
+        let (app, _) = router();
+        for body in [
+            json!({"email": "a@b.c", "password": ""}),
+            json!({"email": "a@b.c"}),
+        ] {
+            let (s, _, b) = post(&app, "/api/setup_admin", body).await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "{b}");
+        }
+        // admin must not exist after the rejected attempts
+        let (_, _, b) = post(&app, "/api/setup_status", json!({})).await;
+        let j = result_json(&b);
+        assert_eq!(j["setupRequired"], true, "admin must not exist: {b}");
     }
 
     #[tokio::test]
@@ -311,6 +364,68 @@ mod api_tests {
     }
 
     #[tokio::test]
+    async fn password_change_revokes_existing_sessions() {
+        let (app, _) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let (status, _, body) = post_with(
+            &app,
+            "/api/change_password",
+            json!({"old": "password1", "new": "password2"}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (status, _, _) = post_with(&app, "/api/account_get", json!({}), Some(&cookie)).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn file_route_only_serves_files_from_active_vault() {
+        let (app, data_dir) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let vault = data_dir.join("vaults/ok");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(vault.join("image.png"), b"png-data").unwrap();
+        std::fs::write(data_dir.join("keys.json"), b"api-secret").unwrap();
+        let (status, _, body) = post_with(
+            &app,
+            "/api/open_vault",
+            json!({"path": vault.to_string_lossy()}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let allowed = format!(
+            "/api/file?path={}",
+            vault.join("image.png").to_string_lossy()
+        );
+        let (status, _, body) = get_with(&app, &allowed, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, "png-data");
+
+        let secret = format!(
+            "/api/file?path={}",
+            data_dir.join("keys.json").to_string_lossy()
+        );
+        let (status, _, body) = get_with(&app, &secret, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert!(!body.contains("api-secret"));
+    }
+
+    #[tokio::test]
     async fn path_allowlist_blocks_escape_via_api() {
         let (app, data_dir) = router();
         let (s, h, _) = post(
@@ -366,4 +481,3 @@ mod api_tests {
         assert_eq!(s, StatusCode::OK, "{b}");
     }
 }
-

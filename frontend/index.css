@@ -134,6 +134,17 @@ body {
     background: transparent;
     color: inherit;
 }
+.ui-shell input,
+.ui-shell textarea {
+    -webkit-user-select: text;
+    user-select: text;
+    caret-color: var(--color-accent);
+}
+.ui-shell input::selection,
+.ui-shell textarea::selection {
+    background: var(--color-accent);
+    color: var(--color-white);
+}
 .ProseMirror > * {
     margin: 0.125rem 0;
 }

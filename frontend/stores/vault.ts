@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { invoke, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
+import { useEditorStore } from './editor'
 
 /** File or directory info from the vault tree. */
 export interface FileInfo { path: string; name: string; type: string; depth?: number; isExpanded?: boolean }
@@ -13,7 +14,7 @@ export interface RecentVault { path: string; name: string; parent: string }
 interface VaultState {
   name: string; isOpen: boolean; vaultPath: string; recent: RecentVault[]
   tree: FileInfo[]; visibleItems: FileInfo[]; expanded: Record<string, boolean>; childrenCache: Record<string, FileInfo[]>; loading: boolean
-  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; cloneVault: (url: string, parent: string) => Promise<void>; closeVault: () => void; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
+  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; cloneVault: (url: string, parent: string) => Promise<void>; closeVault: () => Promise<void>; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
   loadTree: (subpath?: string) => Promise<void>
   toggleFolder: (item: FileInfo) => Promise<void>; flattenTree: (items: FileInfo[], depth: number) => FileInfo[]
 }
@@ -68,8 +69,10 @@ export const useVaultStore = create<VaultState>()(
         } catch (e) { throw e } finally { set({ loading: false }) }
       },
       /** Close vault and reset all state. */
-      closeVault: () => {
-        invoke('close_vault')
+      closeVault: async () => {
+        await useEditorStore.getState().persistAllDirty()
+        await invoke('close_vault')
+        useEditorStore.getState().closeAllTabs()
         set({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
       },
       /** Open a vault by path (no auto-resume at startup — user picks from welcome screen). */

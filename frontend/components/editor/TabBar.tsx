@@ -53,7 +53,7 @@ export function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   }, [curTab])
 
   /** Git status: shared store (single poller from App root) — derive per-tab state. */
-  const gitStatus = useGitStatus(s => s.status)
+  const { isRepo, hasRemote, status: gitStatus } = useGitStatus()
   useEffect(() => {
     const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
     const curFile = useEditorStore.getState().activeTab
@@ -129,16 +129,16 @@ export function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
             await invoke('git_stage'); setStaged(true); useEditorStore.getState().setTabDirty(s2.activeTab!, false); setHasDiskChanges(false)
           } catch(e) { console.error('Save:', e); toast.error('Failed to save') }
         }}
-        disabled={!(hasDiskChanges || hasUnsaved) || file?.deleted}
+        disabled={!isRepo || !(hasDiskChanges || hasUnsaved) || file?.deleted}
         className="rounded cursor-pointer text-xs text-foreground-subtle hover:text-foreground hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2">Save</button>
-        <span className="tip">Stage changes</span>
+        <span className="tip">{!isRepo ? "Initialize Git in Settings first" : "Stage changes"}</span>
       </span>
       <span className="tip-wrap tip-bar">
-        <button onClick={publish} disabled={!staged || pubState === 'committing' || pubState === 'pushing'}
+        <button onClick={publish} disabled={!isRepo || !hasRemote || !staged || pubState === 'committing' || pubState === 'pushing'}
         className={'rounded cursor-pointer text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed p-2 ' + ({ idle: 'bg-blue-600 text-white hover:bg-blue-500', committing: 'bg-yellow-600 text-white', pushing: 'bg-yellow-600 text-white', done: 'bg-green-600 text-white', error: 'bg-red-600 text-white' }[pubState] || 'bg-blue-600 text-white')}>
         {pubState === 'idle' && <>Publish</>}{pubState === 'committing' && <>Commit...</>}{pubState === 'pushing' && <>Push...</>}{pubState === 'done' && <>{pubMsg} ✓</>}{pubState === 'error' && <>Failed</>}
         </button>
-        <span className="tip">Git commit + push</span>
+        <span className="tip">{!isRepo ? "Initialize Git in Settings first" : !hasRemote ? "Add a Git remote in Settings first" : "Git commit + push"}</span>
       </span>
     </div>
   )

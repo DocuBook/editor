@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useVaultStore } from './vault'
+import { useEditorStore } from './editor'
 
 vi.mock('../lib/ipc', () => ({
   invoke: vi.fn(),
@@ -11,10 +12,27 @@ import { invoke } from '../lib/ipc'
 /** Regression: after a file CRUD, loadTree must flatten from the FRESH
  *  childrenCache — a same-call flatten reads the pre-update cache and hides
  *  new/renamed files until the next tree op (or hard refresh). */
-describe('vault store tree freshness after CRUD', () => {
+describe('vault store lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useVaultStore.setState({ tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false })
+  })
+
+  it('persists dirty tabs and clears editor state when closing a vault', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockResolvedValue(undefined)
+    useVaultStore.setState({ name: 'notes', isOpen: true, vaultPath: '/tmp/notes' })
+    useEditorStore.setState({
+      tabs: [{ path: 'note.md', name: 'note.md', content: '', frontmatter: '---\ntitle: Note\n---\n', editedContent: 'Updated', dirty: true, deleted: false }],
+      activeTab: 'note.md', blockEditor: {}, _flushEditor: vi.fn(), canUndo: true, canRedo: true,
+    })
+
+    await useVaultStore.getState().closeVault()
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'write_file', { path: 'note.md', content: '---\ntitle: Note\n---\nUpdated' })
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'close_vault')
+    expect(useEditorStore.getState()).toMatchObject({ tabs: [], activeTab: null, blockEditor: null, _flushEditor: null, canUndo: false, canRedo: false })
+    expect(useVaultStore.getState()).toMatchObject({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
   })
 
   it('shows a newly created file in an expanded folder after loadTree', async () => {
