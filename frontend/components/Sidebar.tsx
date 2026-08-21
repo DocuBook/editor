@@ -8,8 +8,10 @@ import SettingsModal from './SettingsModal'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS } from '../utils/fileKind'
-const stripMarkdownExt = (name: string) =>
-  MARKDOWN_EXTENSIONS.some(e => name.toLowerCase().endsWith(e)) ? name.replace(/\.(md|mdx)$/i, '') : name
+const stripMarkdownExt = (name: string) => {
+  const ext = MARKDOWN_EXTENSIONS.find(e => name.toLowerCase().endsWith(e))
+  return ext ? name.slice(0, -ext.length) : name
+}
 
 /** Search modal overlay — command-palette style search. */
 function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void }) {

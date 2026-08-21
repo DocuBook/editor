@@ -4,11 +4,6 @@
 
 use crate::markdown::markdown_to_safe_html;
 
-#[tauri::command]
-pub fn markdown_preview(content: &str) -> String {
-    crate::markdown::markdown_preview(content)
-}
-
 /// Convert markdown to clean HTML (no wrapper) for TipTap display.
 #[tauri::command]
 pub fn md_to_html(content: &str) -> String {
@@ -21,23 +16,11 @@ mod tests {
 
     #[test]
     fn markdown_renders_html() {
-        let html = markdown_preview("# Hello\n\n**bold** and `code`");
+        let html = md_to_html("# Hello\n\n**bold** and `code`");
         assert!(html.contains("<h1"));
         assert!(html.contains("Hello"));
         assert!(html.contains("<strong>"));
         assert!(html.contains("<code>"));
-    }
-
-    #[test]
-    fn empty_markdown() {
-        let html = markdown_preview("");
-        assert!(html.contains("<div"));
-    }
-
-    #[test]
-    fn markdown_handles_code_block() {
-        let html = markdown_preview("```rust\nfn main() {}\n```");
-        assert!(html.contains("<code"));
     }
 }
 

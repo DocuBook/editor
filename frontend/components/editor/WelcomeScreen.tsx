@@ -4,7 +4,6 @@ import { Folder, GitBranch, Command } from 'lucide-react'
 import { useVaultStore } from '../../stores/vault'
 import { openDir } from '../../lib/ipc'
 
-/** Welcome screen shown when no vault is open — launchpad (Open Folder / Create Vault / Recent). */
 export function WelcomeScreen() {
   const { recent, openRecent, openVault, createVault, cloneVault, loading } = useVaultStore()
   const [step, setStep] = useState<'idle' | 'name' | 'clone'>('idle')

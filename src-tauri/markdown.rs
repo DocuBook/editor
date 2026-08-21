@@ -40,8 +40,3 @@ pub fn markdown_to_safe_html(content: &str) -> String {
     // (script, iframe, event handlers, javascript: URLs).
     ammonia::clean(&html)
 }
-
-/** Preview wrapper used by both the desktop command and the web API. */
-pub fn markdown_preview(content: &str) -> String {
-    format!(r#"<div class="prose prose-invert max-w-none px-4 py-4 text-sm">{}</div>"#, markdown_to_safe_html(content))
-}

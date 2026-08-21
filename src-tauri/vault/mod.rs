@@ -12,6 +12,10 @@ pub struct FileInfo {
     pub file_type: String, // "0"=file, "1"=dir
 }
 
+pub(crate) fn is_ignored_entry(name: &str) -> bool {
+    matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash")
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TrashEntry {
     pub name: String,      // `{millis}-{original}` inside .trash/
@@ -75,19 +79,10 @@ impl Vault {
         Ok(joined)
     }
 
-    /// Markdown-family extensions — WYSIWYG editable (common markdown + frontmatter).
-    fn is_markdown(name: &str) -> bool {
-        crate::markdown::is_markdown_name(name)
-    }
-
-    fn is_ignored(name: &str) -> bool {
-        matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash")
-    }
-
     /// Extensions shown in the tree: markdown (editable) + images (previewable).
     /// Everything else (pdf/audio/zip/…) is skipped — no way to open them yet.
     fn is_renderable(name: &str) -> bool {
-        if Self::is_markdown(name) { return true; }
+        if crate::markdown::is_markdown_name(name) { return true; }
         let lower = name.to_ascii_lowercase();
         [".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg", ".bmp", ".avif"]
             .iter().any(|e| lower.ends_with(e))
@@ -111,7 +106,7 @@ impl Vault {
             if let Ok(read) = std::fs::read_dir(&d) {
                 for e in read.flatten() {
                     let name = e.file_name().to_string_lossy().to_string();
-                    if Self::is_ignored(&name) { continue; }
+                    if is_ignored_entry(&name) { continue; }
                     if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                         stack.push(e.path());
                     } else if Self::is_renderable(&name) {
@@ -142,7 +137,7 @@ impl Vault {
         if let Ok(read) = std::fs::read_dir(&dir) {
             for e in read.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
-                if Self::is_ignored(&name) { continue; }
+                if is_ignored_entry(&name) { continue; }
                 let rel = if subpath.is_empty() { name.clone() } else { format!("{}/{}", subpath, name) };
                 let ft = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) { "1" } else { "0" };
                 // Show markdown (editable) + images (previewable) in the tree;

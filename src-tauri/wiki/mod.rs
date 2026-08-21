@@ -41,7 +41,7 @@ impl WikiIndex {
             for e in entries.flatten() {
                 let p = e.path();
                 let name = e.file_name().to_string_lossy().to_string();
-                if name == ".git" || name == ".trash" || name == "node_modules" || name == ".DS_Store" { continue; }
+                if crate::vault::is_ignored_entry(&name) { continue; }
                 if p.is_dir() { self.scan_dir(&p, link_re); continue; }
                 let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
                 // markdown family — .md/.mdx (single source in markdown.rs)
