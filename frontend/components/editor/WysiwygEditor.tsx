@@ -11,6 +11,7 @@ import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
 import { combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
+import { Selection, TextSelection } from 'prosemirror-state'
 import { getMathSlashMenuItems } from '@blocknote/math-block'
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
 import { AIExtension, AIMenuController, getAISlashMenuItems } from '@blocknote/xl-ai'
@@ -19,6 +20,7 @@ import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
+import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
 import { setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
@@ -42,6 +44,40 @@ let _mermaidQueue: Promise<unknown> = Promise.resolve()
 
 export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string }) {
   const { editor } = cached
+
+  useEffect(() => {
+    const preserveMermaidIndent = (event: KeyboardEvent) => {
+      if (!["Enter", "Tab"].includes(event.key) || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || (event.key === "Enter" && event.shiftKey)) return
+      const view = (editor as any).prosemirrorView
+      if (!view) return
+      const { $from, $to, empty } = view.state.selection
+      if (event.key === 'Enter' && $from.node().type.name === 'math') {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        const selection = Selection.near(view.state.doc.resolve($from.after()), 1)
+        view.dispatch(view.state.tr.setSelection(selection))
+        return
+      }
+      if ($from.parent.type.name !== 'diagram' || $to.parent !== $from.parent) return
+      const source = $from.parent.textBetween(0, $from.parent.content.size, '\n', '\n')
+      event.preventDefault()
+      event.stopPropagation()
+      if (event.key === 'Enter') {
+        const beforeCaret = source.slice(0, $from.parentOffset)
+        view.dispatch(view.state.tr.insertText(`\n${indentationAt(beforeCaret, beforeCaret.length)}`))
+      } else if (empty && !event.shiftKey) {
+        view.dispatch(view.state.tr.insertText('  '))
+      } else {
+        const edit = indentSelection(source, $from.parentOffset, $to.parentOffset, event.shiftKey)
+        const start = $from.start() + edit.start
+        const tr = view.state.tr.insertText(edit.text, start, $from.start() + $to.parentOffset)
+        tr.setSelection(TextSelection.create(tr.doc, $from.start() + edit.from, $from.start() + edit.to))
+        view.dispatch(tr)
+      }
+    }
+    document.addEventListener('keydown', preserveMermaidIndent, true)
+    return () => document.removeEventListener('keydown', preserveMermaidIndent, true)
+  }, [editor])
 
   /** Hover hint for [[wikilink]]: native title tooltips get cancelled by
    *  ProseMirror's decoration re-rendering, so render a small floating hint
