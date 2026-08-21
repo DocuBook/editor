@@ -38,26 +38,36 @@ pub(crate) async fn login(
         (cfg.admin.clone(), cfg.no_auth)
     };
     if no_auth {
+        tracing::warn!(event = "auth_login_failure", reason = "disabled", client_ip = %ip);
         return err_response("Login is disabled (no_auth mode)");
     }
     let admin = match admin {
         Some(a) => a,
-        None => return err_response("Setup required"),
+        None => {
+            tracing::warn!(event = "auth_login_failure", reason = "setup_required", client_ip = %ip);
+            return err_response("Setup required");
+        }
     };
     if let Err(e) = state.auth.limiter.check(&ip) {
+        tracing::warn!(event = "auth_login_rate_limited", client_ip = %ip);
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e }))).into_response();
     }
     if !admin.email.eq_ignore_ascii_case(&email)
         || !auth::verify_password(&admin.password_hash, &password)
     {
         state.auth.limiter.fail(&ip);
+        tracing::warn!(event = "auth_login_failure", reason = "invalid_credentials", client_ip = %ip);
         return err_response("Invalid email or password");
     }
     state.auth.limiter.clear(&ip);
     let token = match state.auth.sessions.create(state.auth.session_ttl()) {
         Ok(token) => token,
-        Err(e) => return err_response(&e),
+        Err(e) => {
+            tracing::error!(event = "auth_login_failure", reason = "session_creation", client_ip = %ip);
+            return err_response(&e);
+        }
     };
+    tracing::info!(event = "auth_login_success", client_ip = %ip);
     (
         StatusCode::OK,
         [(header::SET_COOKIE, session_cookie(&state.auth, &token))],
@@ -67,6 +77,7 @@ pub(crate) async fn login(
 }
 
 pub(crate) async fn logout(State(state): State<AppState>, req: Request) -> Response {
+    let mut session_revoked = false;
     if let Some(t) = req
         .headers()
         .get(header::COOKIE)
@@ -74,7 +85,9 @@ pub(crate) async fn logout(State(state): State<AppState>, req: Request) -> Respo
         .and_then(|c| cookie_value(c, "db_session"))
     {
         state.auth.sessions.revoke(&t);
+        session_revoked = true;
     }
+    tracing::info!(event = "auth_logout", session_revoked);
     (
         StatusCode::OK,
         [(
@@ -114,6 +127,7 @@ pub(crate) async fn setup_admin(
     // Rate-limit the pre-auth claim window: 6 failed attempts / minute
     // per IP — blocked on the 7th (limiter blocks when count > MAX_ATTEMPTS).
     if let Err(e) = state.auth.limiter.check(&ip) {
+        tracing::warn!(event = "auth_setup_rate_limited", client_ip = %ip);
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e }))).into_response();
     }
     let mut cfg = state.auth.config.lock().expect("lock");
@@ -124,8 +138,12 @@ pub(crate) async fn setup_admin(
             state.auth.limiter.clear(&ip);
             let token = match state.auth.sessions.create(state.auth.session_ttl()) {
                 Ok(token) => token,
-                Err(e) => return err_response(&e),
+                Err(e) => {
+                    tracing::error!(event = "auth_setup_failure", reason = "session_creation", client_ip = %ip);
+                    return err_response(&e);
+                }
             };
+            tracing::info!(event = "auth_setup_success", client_ip = %ip);
             (
                 StatusCode::OK,
                 [(header::SET_COOKIE, session_cookie(&state.auth, &token))],
@@ -135,6 +153,7 @@ pub(crate) async fn setup_admin(
         }
         Err(e) => {
             state.auth.limiter.fail(&ip);
+            tracing::warn!(event = "auth_setup_failure", reason = "validation", client_ip = %ip);
             err_response(&e)
         }
     }

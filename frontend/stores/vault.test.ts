@@ -6,6 +6,7 @@ vi.mock('../lib/ipc', () => ({
   invoke: vi.fn(),
   openDir: vi.fn(),
 }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import { invoke } from '../lib/ipc'
 
@@ -33,6 +34,22 @@ describe('vault store lifecycle', () => {
     expect(mockInvoke).toHaveBeenNthCalledWith(2, 'close_vault')
     expect(useEditorStore.getState()).toMatchObject({ tabs: [], activeTab: null, blockEditor: null, _flushEditor: null, canUndo: false, canRedo: false })
     expect(useVaultStore.getState()).toMatchObject({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
+  })
+
+  it('keeps the vault and tabs open when saving before close fails', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockRejectedValueOnce(new Error('disk full'))
+    useVaultStore.setState({ name: 'notes', isOpen: true, vaultPath: '/tmp/notes' })
+    useEditorStore.setState({
+      tabs: [{ path: 'note.md', name: 'note.md', content: '', frontmatter: '', editedContent: 'Updated', dirty: true, deleted: false }],
+      activeTab: 'note.md',
+    })
+
+    await useVaultStore.getState().closeVault()
+
+    expect(mockInvoke).not.toHaveBeenCalledWith('close_vault')
+    expect(useEditorStore.getState().tabs).toHaveLength(1)
+    expect(useVaultStore.getState()).toMatchObject({ name: 'notes', isOpen: true, vaultPath: '/tmp/notes' })
   })
 
   it('shows a newly created file in an expanded folder after loadTree', async () => {

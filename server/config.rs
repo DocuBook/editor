@@ -37,7 +37,7 @@ impl Config {
     pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join("config.json");
         if !path.exists() {
-            eprintln!("[docubook] no config.json — fresh /data (first boot, or the volume is NOT persisted across redeploys)");
+            tracing::info!(event = "config_missing");
         }
         let mut c = Self::from_file(&path);
 
@@ -50,7 +50,7 @@ impl Config {
                     if let Ok(hash) = super::auth::hash_password(pass) {
                         c.admin = Some(Admin { email: email.clone(), password_hash: hash });
                         let _ = c.save();
-                        eprintln!("[docubook] admin auto-created from env (DB_ADMIN_EMAIL)");
+                        tracing::info!(event = "auth_setup_success", source = "environment");
                     }
                 }
             }
@@ -81,7 +81,7 @@ impl Config {
         // Env-only, never persisted: optional setup guard for public deployments.
         let setup_token = std::env::var("DB_SETUP_TOKEN").ok().filter(|s| !s.is_empty());
         if setup_token.is_none() {
-            eprintln!("[docubook] WARNING: DB_SETUP_TOKEN not set — anyone can claim the admin account before first setup. Set it on public deployments.");
+            tracing::warn!(event = "setup_token_missing");
         }
         Self { admin, no_auth, session_ttl_hours, setup_token, path: path.to_path_buf() }
     }

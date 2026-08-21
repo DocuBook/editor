@@ -125,7 +125,7 @@ fn load_with(data_dir: &Path, pass: Option<&str>) -> HashMap<String, String> {
                 match decrypt_map(&raw, p) {
                     Ok(m) => m,
                     Err(e) => {
-                        eprintln!("[docubook] {e}");
+                        tracing::error!(event = "keys_load_failure", error_category = "decrypt", error = %e);
                         HashMap::new()
                     }
                 }
@@ -133,14 +133,17 @@ fn load_with(data_dir: &Path, pass: Option<&str>) -> HashMap<String, String> {
                 // Plaintext file + passphrase set → migrate to encrypted now.
                 let map: HashMap<String, String> = serde_json::from_str(&raw).unwrap_or_default();
                 if let Err(e) = save_with(data_dir, &map, Some(p)) {
-                    eprintln!("[docubook] keys.json encryption migration failed: {e}");
+                    tracing::error!(event = "keys_migration_failure", error_category = "encryption", error = %e);
                 }
                 map
             }
         }
         None => {
             if looks_like_envelope(&raw) {
-                eprintln!("[docubook] keys.json is encrypted but DB_KEYS_PASSPHRASE is not set — keys unavailable");
+                tracing::error!(
+                    event = "keys_load_failure",
+                    error_category = "missing_passphrase"
+                );
                 HashMap::new()
             } else {
                 serde_json::from_str(&raw).unwrap_or_default()

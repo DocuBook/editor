@@ -6,11 +6,7 @@ pub(crate) fn open_vault(state: &AppState, path: &str) -> Result<String, String>
     let name = v.name();
     let mut w = wiki::WikiIndex::new(v.root());
     w.scan();
-    eprintln!(
-        "[docubook] open_vault: {} (git repo: {})",
-        path,
-        std::path::Path::new(path).join(".git").exists()
-    );
+    tracing::info!(event = "vault_opened", git_repository = std::path::Path::new(path).join(".git").exists());
     let g = git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);
     *state.wiki.lock().expect("lock") = Some(w);

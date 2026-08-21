@@ -141,9 +141,31 @@ mod api_tests {
     #[tokio::test]
     async fn health_ok() {
         let (app, _) = router();
-        let (status, _, body) = get(&app, "/api/health").await;
+        let (status, headers, body) = get(&app, "/api/health").await;
         assert_eq!(status, StatusCode::OK);
+        assert!(headers.get(&REQUEST_ID_HEADER).is_some());
         assert_eq!(result_json(&body)["vaultOpen"], false, "{body}");
+    }
+
+    #[tokio::test]
+    async fn valid_request_id_is_propagated() {
+        let (app, _) = router();
+        let request_id = "123e4567-e89b-12d3-a456-426614174000";
+        let app = app.layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/health")
+                    .header(&REQUEST_ID_HEADER, request_id)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.headers().get(&REQUEST_ID_HEADER).unwrap(),
+            request_id
+        );
     }
 
     #[tokio::test]

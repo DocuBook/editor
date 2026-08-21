@@ -18,6 +18,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
+import { installGlobalErrorHandlers } from './utils/logger'
 import './stores/theme' // applies <html data-theme> before first paint
 import { installIteratorFilterPolyfill } from './utils/iteratorPolyfill'
 installIteratorFilterPolyfill()
@@ -28,6 +29,7 @@ installWebkitStructuredClone()
 // needs it to render. See polyfill file.
 import { installWebkitCssStyleSheet } from './utils/webkitCssStyleSheet'
 installWebkitCssStyleSheet()
+installGlobalErrorHandlers()
 
 // NOTE: no Object.prototype hardening here. Tauri's freezePrototype broke
 // zod/xl-ai (they assign Object.prototype.toString during module eval), and

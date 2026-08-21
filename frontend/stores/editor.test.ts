@@ -6,6 +6,7 @@ vi.mock('../lib/ipc', () => ({
   invoke: vi.fn().mockResolvedValue(''),
   listen: vi.fn().mockResolvedValue(() => {}),
 }))
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 /** Regression: renaming a file in the sidebar must remap the open tab's path
  *  and name — otherwise the tab keeps the OLD path (save would recreate the
@@ -120,6 +121,29 @@ describe('editor store tab persistence', () => {
     await useEditorStore.getState().closeTab('a.md')
 
     expect(invoke).toHaveBeenCalledWith('write_file', { path: 'a.md', content: '' })
+  })
+
+  it('keeps a dirty tab open and reports when its save fails', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('disk full'))
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'changed', dirty: true, deleted: false }],
+      activeTab: 'a.md',
+    })
+
+    await useEditorStore.getState().closeTab('a.md')
+
+    expect(useEditorStore.getState().tabs).toHaveLength(1)
+    expect(useEditorStore.getState().activeTab).toBe('a.md')
+  })
+
+  it('rejects persistAllDirty when any dirty file cannot be saved', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('disk full'))
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'changed', dirty: true, deleted: false }],
+      activeTab: 'a.md',
+    })
+
+    await expect(useEditorStore.getState().persistAllDirty()).rejects.toThrow('Could not save a.md')
   })
 
   it('does not save a dirty inactive tab when it is closed', async () => {
