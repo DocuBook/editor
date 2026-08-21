@@ -166,11 +166,7 @@ pub async fn test_connection(provider: String, model: String, base_url: String, 
         // support tool calls in "auto" mode (e.g. opencode.ai, DeepSeek thinking).
         // Retry once with "auto" before concluding tools:false.
         tool_body["tool_choice"] = serde_json::json!("auto");
-        let client2 = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(std::time::Duration::from_secs(15))
-            .build().map_err(|e| format!("Client error: {}", e))?;
-        let r2 = client2
+        let r2 = client
             .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&tool_body)
@@ -276,20 +272,8 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
     .map_err(|e| sanitize_ai_error(&e.to_string()))?;
     let status = response.status();
     if !status.is_success() {
-        // Do NOT surface the raw provider body — it may leak internal details.
-        // Log the EXACT request body + provider response server-side (desktop
-        // terminal / docker logs) so a gateway rejection is diagnosable without
-        // guessing: this shows what we actually sent and why it was rejected.
-        let req_snapshot = serde_json::json!({
-            "model": body.get("model"),
-            "stream": body.get("stream"),
-            "max_tokens": body.get("max_tokens"),
-            "tool_choice": body.get("tool_choice"),
-            "tools": body.get("tools"),
-            "message_roles": body.get("messages").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|x| x.get("role").and_then(|r| r.as_str()).map(String::from)).collect::<Vec<_>>()),
-        }).to_string();
-        let body = response.text().await.unwrap_or_default();
-        eprintln!("[docubook] ask_ai provider error: HTTP {} — request: {} — body: {}", status, &req_snapshot[..req_snapshot.len().min(1600)], &body[..body.len().min(800)]);
+        // Provider bodies may contain prompts, tool arguments, or internal details.
+        eprintln!("[docubook] ask_ai provider error: HTTP {}", status);
         return Err(format!("AI provider error (HTTP {})", status));
     }
     let mut stream = response;
@@ -399,37 +383,16 @@ pub fn cancel_ai(state: State<AppState>) {
 
 // ── SSE parsing (shared by ask_ai and its tests) ──
 
-/// Process one complete SSE `data:` payload (content delta + tool call accumulation).
+/// Process one complete SSE `data:` payload and emit its content delta.
 fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, String, String, String)>, app: &tauri::AppHandle) {
-    use tauri::Emitter;
-    if data == "[DONE]" { return; }
-    let Ok(val) = serde_json::from_str::<serde_json::Value>(data) else { return; };
-    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
-        full.push_str(content);
+    if let (Some(content), _) = parse_sse_line(data, tool_calls) {
+        full.push_str(&content);
         let _ = app.emit("ai:token", content);
-    }
-    if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
-        for tc in tcs {
-            let idx = tc["index"].as_i64().unwrap_or(0);
-            let id = tc["id"].as_str().unwrap_or("").to_string();
-            let name = tc["function"]["name"].as_str().unwrap_or("").to_string();
-            let args = tc["function"]["arguments"].as_str().unwrap_or("").to_string();
-            if let Some(pos) = tool_calls.iter().position(|(i,_,_,_)| *i == idx) {
-                if !id.is_empty() { tool_calls[pos].1 = id; }
-                if !name.is_empty() { tool_calls[pos].2 = name; }
-                tool_calls[pos].3.push_str(&args);
-            } else {
-                tool_calls.push((idx, id, name, args));
-            }
-        }
     }
 }
 
-/// Parse a single SSE data line from /chat/completions stream.
-/// Returns (content_delta, accumulated_tool_calls, is_done).
-/// Pure parser used by the unit tests below; the streaming path uses
-/// `process_sse_data` (which additionally emits `ai:token` events).
-#[cfg(test)]
+/// Parse one complete SSE `data:` payload (content delta + tool call accumulation).
+/// Returns (content_delta, is_done).
 pub fn parse_sse_line(data: &str, tool_calls: &mut Vec<(i64, String, String, String)>) -> (Option<String>, bool) {
     if data == "[DONE]" { return (None, true); }
     let Ok(val) = serde_json::from_str::<serde_json::Value>(data) else { return (None, false); };
