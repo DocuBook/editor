@@ -80,6 +80,10 @@ impl Vault {
         crate::markdown::is_markdown_name(name)
     }
 
+    fn is_ignored(name: &str) -> bool {
+        matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash")
+    }
+
     /// Extensions shown in the tree: markdown (editable) + images (previewable).
     /// Everything else (pdf/audio/zip/…) is skipped — no way to open them yet.
     fn is_renderable(name: &str) -> bool {
@@ -107,7 +111,7 @@ impl Vault {
             if let Ok(read) = std::fs::read_dir(&d) {
                 for e in read.flatten() {
                     let name = e.file_name().to_string_lossy().to_string();
-                    if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
+                    if Self::is_ignored(&name) { continue; }
                     if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                         stack.push(e.path());
                     } else if Self::is_renderable(&name) {
@@ -138,7 +142,7 @@ impl Vault {
         if let Ok(read) = std::fs::read_dir(&dir) {
             for e in read.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
-                if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
+                if Self::is_ignored(&name) { continue; }
                 let rel = if subpath.is_empty() { name.clone() } else { format!("{}/{}", subpath, name) };
                 let ft = if e.file_type().map(|t| t.is_dir()).unwrap_or(false) { "1" } else { "0" };
                 // Show markdown (editable) + images (previewable) in the tree;
