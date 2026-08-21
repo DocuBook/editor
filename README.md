@@ -10,296 +10,124 @@
 
 > A **vault-based** editor that combines **WYSIWYG blocks**, an **AI assistant**, and **Git integration** — built with Tauri v2 (Rust) and BlockNoteJS (React).
 
----
-
 ## Install
 
-Two distributions from the same codebase — **web (self-hosted Docker)** and **desktop (macOS)**. Pick one: vaults, the WYSIWYG editor, AI, and Git behave identically.
-
-### Option A — Web (Docker, self-host)
-
-> [!IMPORTANT]
-> Docker **pulls a prebuilt image** — no build step on your side. The image is built in CI on every release ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)) and contains the frontend **and** the server. Pin a release to stay on a known version: `ghcr.io/docubook/editor:v0.1.0-rc.2` (default `latest` tracks the newest tag).
-
-**Quick start:**
+### Web — Docker
 
 ```bash
-docker pull ghcr.io/docubook/editor
 docker run -d --name docubook -p 8080:8080 \
   -v docubook:/data \
   ghcr.io/docubook/editor
-# open http://localhost:8080 → setup wizard creates the admin account
 ```
 
-**Docker Compose:**
+Open [http://localhost:8080](http://localhost:8080) and create the admin account.
+
+> [!IMPORTANT]
+> Keep `/data` on a persistent volume. It contains vaults, configuration, and keys; recreating a container without this mount deletes them.
+
+For production, pin an image tag, place the container behind HTTPS, set `DB_SECURE_COOKIE=1`, and back up `/data`.
+
+| Variable                                                                          | Default      | Purpose                                                                 |
+| --------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
+| `DB_SETUP_TOKEN`                                                                  | empty        | Protects first-run admin setup with a plain secret                      |
+| `DB_SECURE_COOKIE`                                                                | `false`      | Restricts session cookies to HTTPS when set to `1`                      |
+| `DB_NO_AUTH`                                                                      | `false`      | Enables access without login when set to `1`                            |
+| `DB_SESSION_TTL_HOURS`                                                            | `168`        | Session lifetime in hours                                               |
+| `DB_KEYS_PASSPHRASE`                                                              | empty        | Encrypts `keys.json` at rest; losing it makes encrypted keys unreadable |
+| `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`                                            | unset        | Skips the setup wizard when both are set                                |
+| `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset        | Provisions a custom OpenAI-compatible provider                          |
+| `RUST_LOG`                                                                        | app defaults | Controls server log filtering                                           |
+
+See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
 
 ```yaml
-# docker-compose.yml
 services:
   docubook:
-    image: ghcr.io/docubook/editor   # or pin a release: ghcr.io/docubook/editor:0.1.0-rc.2
+    image: ghcr.io/docubook/editor
     ports:
       - "8080:8080"
     volumes:
-      - docubook:/data          # vaults + keys.json + config.json (0600)
-    environment:
-      PORT: 8080
-      # DB_SETUP_TOKEN: ""                  # plain secret (not a JWT) — wizard asks for it
-      # DB_ADMIN_EMAIL: admin@example.com    # set BOTH to skip the wizard
-      # DB_ADMIN_PASSWORD: change-me-123
-      # DB_NO_AUTH: "false"                 # "1" = open access without login
-      # DB_SECURE_COOKIE: "1"               # enable behind HTTPS
-      # DB_SESSION_TTL_HOURS: "168"         # session lifetime in hours
-      # DB_KEYS_PASSPHRASE: ""              # AES-256-GCM encrypt keys.json at rest
-      # DB_OPENAI_COMPAT_BASE_URL: https://proxy.example.com/v1   # custom provider
-      # DB_OPENAI_COMPAT_API_KEY: sk-...                          # (read-only in UI)
-      # DB_OPENAI_COMPAT_MODEL: gpt-oss-20b
+      - docubook:/data
     restart: unless-stopped
 
 volumes:
   docubook:
 ```
 
-> [!WARNING]
-> **A persistent volume is REQUIRED — on every Docker host, without exception.**
-> Containers are ephemeral: all data lives in `/data` (vaults, `config.json` with
-> the admin account, `keys.json`). If nothing is mounted at `/data`, a redeploy,
-> image pull, or container recreate **erases everything** — including your admin
-> account — and the setup wizard reappears. This is **not Coolify-specific**:
-> `docker run` without `-v`, Portainer, CapRover, Fly.io, Docker Desktop, or any
-> hosting UI behave the same. Configure persistent storage **once**, with a
-> **stable volume name** (e.g. `docubook`) and destination `/data`.
->
-> The image self-heals `/data` ownership at every start (root entrypoint →
-> `chown` → drop to the app user), so no manual `chown` is needed — but **the
-> mount must exist**. Verify it survives redeploys:
->
-> ```bash
-> docker volume ls | grep docubook        # still ONE volume after several redeploys
-> docker inspect <container> | grep -A2 '"/data"'
-> #  "Type": "volume", "Source": "docubook"   ← correct, persists
-> ```
+The image supports `linux/amd64` and `linux/arm64` and includes a health check at `/api/health`.
 
-**Environment configuration:**
+### Desktop — macOS
 
-All server variables are set via environment — the complete list is in [`.env.example`](./.env.example). They are read at **boot**, so set them before the first deploy; changing them means a restart/redeploy.
+Download the appropriate DMG from [Releases](https://github.com/DocuBook/editor/releases):
 
-How you set them depends on your host — a `.env` file for `docker compose`, `-e` flags for `docker run`, or the environment panel of your Docker UI (e.g. **Coolify → Configuration → Environment Variables**, Portainer, CapRover — any panel works, the variables are the same).
+| File                                    | Mac                                   |
+| --------------------------------------- | ------------------------------------- |
+| `DocuBook Editor_<version>_aarch64.dmg` | Apple Silicon                         |
+| `DocuBook Editor_<version>_x64.dmg`     | Intel, or Apple Silicon via Rosetta 2 |
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `DB_SETUP_TOKEN` | empty | First-run guard: a **plain secret string (not a JWT)**, e.g. `openssl rand -hex 32`. When set, the setup wizard asks for it before creating the admin — prevents anyone else from claiming the account first. Set it *before* the first deploy on public instances; leave empty for private/LAN |
-| `DB_SECURE_COOKIE` | `false` | `1` = session cookie only over HTTPS — enable when behind TLS |
-| `DB_NO_AUTH` | `false` | `1` = open access without login (pre-web behavior) |
-| `DB_SESSION_TTL_HOURS` | `168` | Session lifetime before re-login |
-| `DB_KEYS_PASSPHRASE` | empty | **Encrypt `keys.json` at rest** (AES-256-GCM, key derived via Argon2id). Empty = plaintext (mode 0600, backward compatible); set = plaintext files auto-migrate on first access. Treat like a password — set from first boot, never lose it (an encrypted file without the passphrase is unreadable; writes are refused so it is never silently overwritten). Generate with `openssl rand -hex 32` |
-| `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | — | Set **both** to skip the wizard entirely (headless provisioning) |
-| `DB_OPENAI_COMPAT_BASE_URL` (+ `_API_KEY`, `_MODEL`) | — | Provision/override the **custom OpenAI-compatible provider** from the environment. When `BASE_URL` is set, Settings → AI shows the custom endpoint **read-only** ("from env" badge) and the backend uses these values. Leave unset for the normal in-app setup |
+Builds are not signed or notarized yet; Apple Developer signing will be added when sponsorship covers it. You can [sponsor the project on GitHub](https://github.com/sponsors/gitfromwildan). If Gatekeeper blocks the first launch, run once:
 
-> [!NOTE]
-> `DB_SETUP_TOKEN` is compared verbatim — it is **not** a JWT, has no expiry beyond the setup window, and the wizard never displays it (it only asks for it). Generate one with `openssl rand -hex 32` and keep it safe.
-
-**Requirements (web):**
-
-| Resource | Minimum | Recommended | Notes |
-|---|---|---|---|
-| CPU | 1 vCPU | 2 vCPU | lightweight axum server; git ops are occasional |
-| Memory | **512 MB** | 1 GB | AI responses are streamed (not buffered) |
-| Storage | 1 GB free | 10 GB | vault content lives in `/data` (volume) |
-| Image size | ~20 MB compressed / ~35 MB unpacked | — | single stripped Rust binary + built frontend; verified in CI on every PR (`Report image size`) |
-
-Works on any Docker-capable host: VPS (Hetzner, DigitalOcean, Linode, AWS Lightsail, Oracle Cloud…), Docker hosting (Coolify, Portainer, CapRover, Dokku, Yunohost…), NAS (Synology, Unraid), and ARM hosts — Raspberry Pi, Apple Silicon servers, ARM cloud instances (the image ships **`linux/amd64` + `linux/arm64`**, statically-linked musl binary).
-
-**Deployment notes:**
-
-- **Persistence**: see the [persistence warning](#option-a--web-docker-self-host) — back up the `/data` volume; the container is stateless and can be recreated any time.
-- **HTTPS**: run behind a reverse proxy (Coolify/Traefik/Caddy/Nginx). Set `DB_SECURE_COOKIE=1` so the session cookie is only sent over HTTPS.
-- **Upgrades**: `docker compose pull && docker compose up -d` — data is untouched. Sessions reset on restart (re-login required).
-- **Health**: the image ships a Docker `HEALTHCHECK` against `/api/health` — Coolify/Portainer show container health automatically.
-
-### Operations logging
-
-- The server writes structured operational logs to stdout/stderr. Set `RUST_LOG` at startup to adjust filtering (for example, `RUST_LOG=docubook_server=debug,tower_http=info`); the default is `docubook_server=info,tower_http=info`.
-- Log collection, rotation, retention, and deletion are owned by the container runtime and operator (for example, Docker or Coolify), not by DocuBook.
-- Logs must never contain keys, passwords, tokens, cookies, document bodies, or AI request/response bodies.
-- Frontend errors remain in the local browser or desktop console only; DocuBook does not transmit frontend telemetry.
-
-### Option B — Desktop (macOS)
-
-Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook Editor into Applications:
-
-| DMG                              | Architecture | Mac                                   |
-| -------------------------------- | ------------ | ------------------------------------- |
-| `DocuBook Editor_<version>_aarch64.dmg` | arm64 | Apple Silicon (M1/M2/M3/M4…) — native |
-| `DocuBook Editor_<version>_x64.dmg`     | x86_64 | Intel; Apple Silicon via Rosetta 2    |
-
-**First launch** — builds are **not notarized** (until the project sponsors Apple Developer signing/notarization), so Gatekeeper blocks the first open. The dialog differs by arch (not a malware warning):
-
-- **Apple Silicon (`aarch64.dmg`)** — _"app is damaged"_. macOS launchd refuses to spawn an **unsigned** arm64 binary (`RBSRequestErrorDomain Code=5`), so the build keeps an **ad-hoc signature**; with the download quarantine flag still on, Gatekeeper reads that signature as invalid and reports "damaged." There is **no Open Anyway** button for this case — clear the quarantine flag once:
-  ```sh
-  xattr -cr /Applications/DocuBook\ Editor.app
-  open /Applications/DocuBook\ Editor.app
-  ```
-- **Intel (`x64.dmg`)** — _"developer cannot be verified."_ The x86_64 build is shipped **unsigned** (launchd tolerates this on Intel), so the standard Gatekeeper bypass applies:
-  - Right-click **DocuBook Editor** in Applications → **Open** → **Open**, or
-  - System Settings → Privacy & Security → **Open Anyway**, or
-  - the same `xattr -cr /Applications/DocuBook\ Editor.app` one-liner above.
-
-  Do the bypass once — the app opens normally afterwards.
-
-**Verify your build:**
-
-```sh
-file /Applications/DocuBook.app/Contents/MacOS/DocuBook
-# → "Mach-O thin (arm64)" = Apple Silicon · "Mach-O thin (x86_64)" = Intel
-
-codesign -dv /Applications/DocuBook.app 2>&1 | head -1
-# arm64 → "Signature=adhoc" (required: launchd spawn gate)
-# x64   → "code object is not signed at all" (expected until notarization)
-
-spctl -a -t exec -vv /Applications/DocuBook.app
-# "rejected" is expected until notarization is added
+```bash
+xattr -cr /Applications/DocuBook\ Editor.app
+open /Applications/DocuBook\ Editor.app
 ```
 
-### First run (both)
+## Start Writing
 
-- **Web**: open the URL → the setup wizard creates the admin account (or provision headless with `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`, both required). Back up the `/data` volume — see the persistence warning in [Option A](#option-a--web-docker-self-host).
-- **Desktop**: open the app → welcome screen → **Open Folder** (an existing folder of `.md` files), **Create New Vault**, or **Clone Repository** (paste a git URL).
-- **Connect AI**: Settings → **AI** — pick a provider, paste your API key (stored backend-side — see [AI Assistant](#ai-assistant)). Docker: provision the custom provider headless via `DB_OPENAI_COMPAT_*` (see [Environment configuration](#environment-configuration)) — shown read-only in the UI.
-- **Publish with Git**: Settings → **Git** — set commit name/email and add a remote. Private repos use your Keychain / SSH keys on desktop; the container's git identity on web.
-- **Start writing**: click a file in the sidebar, type `/` for slash commands, use the **Code** button to toggle WYSIWYG/markdown. See [Usage](#usage).
+1. Open, create, or clone a vault.
+2. Select a `.md` or `.mdx` file.
+3. Type `/` to insert blocks or use **Code** to edit raw Markdown.
+4. Configure an AI provider in **Settings → AI** if needed.
+5. Configure identity and a remote in **Settings → Git**, then **Save** and **Publish**.
 
-### Troubleshooting (both)
+Other text formats can be viewed but only `.md` and `.mdx` use the WYSIWYG editor.
 
-- **Desktop launch fails on Apple Silicon** with _"Launch failed" / POSIX 163_ — a **stripped** (unsigned) arm64 build reached the machine: redownload `aarch64.dmg` and re-run `xattr -cr`.
-- **AI not responding** (either platform): check the provider key in Settings → AI and that your network allows the provider endpoint.
-- **Git publish failing**: check identity/remote in Settings → Git; on web also confirm the container's git identity is configured.
+## What You Get
 
----
+- **Local vaults** — Work directly with folders and Markdown files without a proprietary format.
+- **Block editing** — Headings, lists, quotes, code, math, diagrams, inline formatting, and raw Markdown mode.
+- **Reviewable AI** — Write, improve, summarize, translate, and fix text; accept or reject every suggested change before it reaches the document.
+- **Provider choice** — Built-in providers plus custom OpenAI-compatible endpoints, with keys stored backend-side.
+- **Git publishing** — Stage, commit, push, and see the active branch from the editor.
+- **Fast navigation** — File search, expandable folders, backlinks, and wikilinks.
 
-## Features
+## Shortcuts
 
-> [!NOTE]
-> Only **`.md` and `.mdx` files** open in the WYSIWYG block editor (standard CommonMark). Other extensions (`.markdown`, JSON, TOML, YAML, `.txt`, …) open in **view-only** mode.
-
-### Vault System (Obsidian-like)
-
-- Open any folder as a vault — your files stay local, no lock-in
-- File tree with depth-based indentation, dotfiles support
-- CRUD — create files/folders, rename, delete via right-click context menu
-- Search files by filename (like Zed/Obsidian Cmd+F)
-- Frontmatter (YAML) auto-extracted, preserved during edits
-
-### WYSIWYG Block Editor (Notion-like)
-
-- BlockNoteJS — Notion-style block-based rich text editor
-- Slash command menu (`/`) to insert headings, lists, quotes, code blocks, dividers
-- Bubble menu for inline formatting (bold, italic, code, link, highlight)
-- Markdown source mode — toggle between WYSIWYG and raw markdown (code mode)
-
-### AI Assistant
-
-- Inline AI powered by BlockNote XL (`@blocknote/xl-ai`) + custom Rust backend
-- Slash menu and toolbar AI commands: write, improve, summarize, translate, fix spelling, and more
-- Keyboard shortcut: `Ctrl+Alt+L` to open AI menu
-- API keys configured in **Settings** — stored **backend-side only** (macOS Keychain on desktop, a 0600 file in `/data` on web), never in localStorage
-- **Built-in providers** (Opencode Go, Anthropic, Google Gemini, DeepSeek — first-party/local endpoints only) with **runtime model discovery** — model lists are fetched live from each endpoint's `/models` (backend `list_models`, keyed server-side, SSRF-guarded); anything else — aggregators (302.AI, OpenRouter) or any OpenAI-compatible endpoint — works via the Custom provider (base URL + key + model entered directly)
-
-> [!NOTE]\
-> **Every AI response becomes a reviewable suggestion.** The editor converts model output into `applyDocumentOperations` — either from the model's own tool call (tool-call capable models) or generated from plain-text output (text-only models — e.g. `opencode-go` until its gateway probe measures tool support). In both cases the result appears as a tracked-change suggestion with **accept/reject** buttons before it touches the document. Output is guarded: referenced block ids must exist in the document (invalid ids trigger an automatic retry), and unclosed code fences are auto-closed before parsing.
-
-### Git Integration
-
-- Save — stage all changes (git add -A)
-- Publish — commit + push with auto-generated message
-- Git branch displayed in status bar
-- Disabled state tracking — Publish only enabled after staging
-
-### Sidebar
-
-- Vault file tree with expandable folders
-- Search files modal (filename-based, recursive)
-- Backlinks panel for current file (wikilinks)
-- Bottom toolbar: Open vault, Search files, New file/folder
-
----
+| Shortcut                          | Action                        |
+| --------------------------------- | ----------------------------- |
+| `Ctrl/Cmd+J`                      | Toggle sidebar                |
+| `Ctrl/Cmd+F` or `Ctrl/Cmd+P`      | Find a file                   |
+| `Ctrl/Cmd+O`                      | Open a vault                  |
+| `Ctrl/Cmd+Shift+E`                | Toggle WYSIWYG/Markdown       |
+| `Ctrl/Cmd+Z` / `Ctrl/Cmd+Shift+Z` | Undo/redo                     |
+| `Ctrl+Alt+L`                      | Open the AI menu              |
+| `Ctrl/Cmd+,`                      | Open settings                 |
+| `/`                               | Open the block menu           |
+| `Tab` / `Shift+Tab`               | Indent/outdent a block        |
+| `Ctrl/Cmd+B`, `I`, `U`, `K`       | Bold, italic, underline, link |
 
 ## Stack
 
-| Layer    | Tech                            |
-| -------- | ------------------------------- |
-| Frontend | React 19, TypeScript 6, Zustand |
-| UI       | Tailwind CSS v4, Lucide icons   |
-| Editor   | BlockNoteJS 0.54 (ProseMirror)  |
-| Backend  | Rust with Tauri v2              |
-| Build    | Vite 8 + Rolldown               |
-| Markdown | pulldown-cmark (Rust)           |
+| Layer    | Technology                          |
+| -------- | ----------------------------------- |
+| Desktop  | Tauri v2, Rust                      |
+| Web API  | Axum, Rust                          |
+| Frontend | React 19, TypeScript 6, Zustand     |
+| Editor   | BlockNote 0.54, TipTap, ProseMirror |
+| UI       | Tailwind CSS v4                     |
+| Build    | Vite 8, Rolldown                    |
 
----
+## Development
 
-## Build from Source
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, local development, builds, cross-compilation, and project structure.
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for prerequisites, building, cross-compiling, and the project layout.
-
----
-
-## Usage
-
-1. Launch the app — click Open Vault (folder icon in sidebar)
-2. Select a folder containing .md files
-3. Click a file in the sidebar tree — opens in WYSIWYG editor
-4. Edit: `/` for slash commands, select text for bubble formatting, Code button toggles WYSIWYG/markdown (see [Features](#features) and [Keyboard Shortcuts](#keyboard-shortcuts))
-5. Save — stages changes, Publish — commit + push
-6. Toggle AI in toolbar for AI assistance
-
-### Keyboard Shortcuts
-
-| Shortcut                         | Action                                           |
-| -------------------------------- | ------------------------------------------------ |
-| `Ctrl/Cmd+J`                     | Toggle sidebar                                   |
-| `Ctrl/Cmd+F` / `Ctrl/Cmd+P`      | Open file search                                 |
-| `Ctrl/Cmd+O`                     | Open vault / project folder                      |
-| `Ctrl/Cmd+Shift+E`               | Toggle WYSIWYG / Markdown                        |
-| `Ctrl/Cmd+Z` / `+Shift+Z` / `+Y` | Undo / Redo                                      |
-| `Ctrl/Cmd+Shift+F` (native also `Ctrl/Cmd+N`) | New file                                         |
-| `Ctrl/Cmd+Alt+Shift+F` (native also `Ctrl/Cmd+Alt+N`) | New folder                                       |
-| `Ctrl+Alt+L`                     | Ask AI / Write with AI (opens AI menu at cursor) |
-| `Ctrl/Cmd+,`                     | Settings (AI + Git)                              |
-| `/` (in editor)                  | Slash command menu                               |
-| `↑` / `↓` / `Enter`              | Navigate search results                          |
-| `Enter` (on create/rename)       | Confirm                                          |
-| `Escape` (on create/rename)      | Cancel                                           |
-
-Writing shortcuts (built-in, no setup needed):
-
-| Shortcut                                       | Action                                    |
-| ---------------------------------------------- | ----------------------------------------- |
-| `Tab` / `Shift+Tab`                            | Indent / outdent block                    |
-| `Enter` / `Shift+Enter`                        | New block / line break                    |
-| `Ctrl/Cmd+B` / `+I` / `+U` / `+K` / `+Shift+S` | Bold / Italic / Underline / Link / Strike |
-| `Ctrl/Cmd+E`                                   | Inline code                               |
-| `Shift+Cmd+↑` / `+↓`                           | Move block up / down                      |
-| `Ctrl/Cmd+Alt+0`                               | Paragraph                                 |
-| `Ctrl/Cmd+Alt+1`–`5`                           | Heading level 1–5                         |
-| `Ctrl/Cmd+Alt+Q`                               | Quote                                     |
-| `Ctrl/Cmd+Shift+6`                             | Toggle list                               |
-| `Ctrl/Cmd+Shift+7`                             | Numbered list                             |
-| `Ctrl/Cmd+Shift+8`                             | Bullet list                               |
-| `Ctrl/Cmd+Shift+9`                             | Checklist                                 |
-| `#` + `Space`                                  | Toggle heading                            |
-| `-` + `Space`                                  | Toggle bullet list                        |
-| `1.` + `Space`                                 | Toggle numbered list                      |
-| `[]` + `Space`                                 | Toggle checklist                          |
-| `>` + `Space`                                  | Toggle quote                              |
-| ` ``` ` + `Space`                              | Toggle code block                         |
-
----
+Operational logs are written to stdout/stderr and can be filtered with `RUST_LOG`. DocuBook does not transmit frontend telemetry.
 
 ## Credits
 
 DocuBook Editor isn't built from nothing — it stands on the shoulders of a few thoughtful open-source projects. Every note you open, every keystroke in the WYSIWYG canvas, flows through them:
 
-- **[BlockNote](https://www.blocknotejs.org/)** — the block editor that powers the writing experience. The `/`-menu, math blocks, diagrams, and the AI writing layer all live here. The editor you type into *is* BlockNote.
+- **[BlockNote](https://www.blocknotejs.org/)** — the block editor that powers the writing experience. The `/`-menu, math blocks, diagrams, and the AI writing layer all live here. The editor you type into _is_ BlockNote.
 - **[TipTap](https://tiptap.dev/)** — the headless editor framework underneath. It handles the plumbing — extensions, keyboard shortcuts, undo/redo, editor lifecycle — so BlockNote and you can focus on ideas instead of boilerplate.
 - **[ProseMirror](https://prosemirror.net/)** — the engine at the foundation. It's the document model and collaborative-editing core that both TipTap and BlockNote are built on, and the reason your undo history and document state behave so predictably.
 
