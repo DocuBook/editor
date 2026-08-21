@@ -22,7 +22,7 @@ import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
 import { cacheMermaidRender, whenIdle } from '../../utils/mermaidRenderCache'
-import { setWikilinkStylerPaused } from './setup'
+import { setDiagramRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
 // Mermaid is a singleton — wrapping render here also patches the instance
@@ -145,8 +145,9 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
    *  (they only recompute on state change). */
   useEffect(() => {
     setWikilinkStylerPaused(isAiWriting)
+    setDiagramRenderingPaused(isAiWriting)
     if (!isAiWriting) (editor as any).prosemirrorView?.dispatch((editor as any).prosemirrorView.state.tr)
-    return () => setWikilinkStylerPaused(false)
+    return () => { setWikilinkStylerPaused(false); setDiagramRenderingPaused(false) }
   }, [isAiWriting, editor])
   const followRef = useRef(true)
   /** Mirrors isAiWriting for the onChange gate (avoids re-subscribing). */
