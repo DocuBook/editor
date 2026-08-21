@@ -1,11 +1,39 @@
 /** BlockNote schema (heading 1-5 + math/diagram blocks) and the [[wikilink]]
  *  ProseMirror decoration/click handling — shared, single-instance setup. */
+import { createElement, useSyncExternalStore } from 'react'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
+import { createReactBlockSpec } from '@blocknote/react'
 import { createReactMathBlockSpec, createReactInlineMathSpec } from '@blocknote/math-block'
-import { createReactDiagramBlockSpec } from '@blocknote/diagram-block'
+import { createDiagramBlockConfig, DiagramBlockPreviewWithPopup, parseDiagramCodeContent, parseDiagramCodeElement } from '@blocknote/diagram-block'
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
+
+let _diagramRenderingPaused = false
+const _diagramRenderingListeners = new Set<() => void>()
+
+export const setDiagramRenderingPaused = (paused: boolean) => {
+  if (_diagramRenderingPaused === paused) return
+  _diagramRenderingPaused = paused
+  _diagramRenderingListeners.forEach((listener) => listener())
+}
+
+const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
+  meta: { code: true, defining: true, isolating: false, highlight: () => 'mermaid', hasPreview: true, hardBreakShortcut: 'enter' },
+  parse: parseDiagramCodeElement,
+  parseContent: parseDiagramCodeContent,
+  runsBefore: ['codeBlock'],
+  render: function DiagramRender(props) {
+    const paused = useSyncExternalStore(
+      (listener) => { _diagramRenderingListeners.add(listener); return () => _diagramRenderingListeners.delete(listener) },
+      () => _diagramRenderingPaused,
+    )
+    return paused
+      ? createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef }))
+      : createElement(DiagramBlockPreviewWithPopup, props)
+  },
+  toExternalHTML: (props) => createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef })),
+})
 
 /** Base BlockNote schema with heading levels 1-5. */
 let _schema: any = null
@@ -15,7 +43,7 @@ export const getSchema = () => {
       ...defaultBlockSpecs,
       heading: createHeadingBlockSpec({ levels: [1, 2, 3, 4, 5], allowToggleHeadings: false }),
       mathBlock: createReactMathBlockSpec(),
-      diagram: createReactDiagramBlockSpec(),
+      diagram: diagramSpec(),
     },
     inlineContentSpecs: {
       ...defaultInlineContentSpecs,
