@@ -1,10 +1,12 @@
 # Changelog
 
-## v0.1.0-rc.3 — 2026-08-20
+## v0.1.0-rc.3 — 2026-08-21
 
 ### Release candidate — keep-alive editor tabs, AI stability, wiki/tree freshness, light-theme polish
 
 #### 🚀 Features
+- **Provider bootstrap models** — newly selected OpenCode Go, Anthropic, Google Gemini, and DeepSeek providers now start with a valid model so API keys can be validated before runtime model discovery; OpenCode Go uses `deepseek-v4-flash`
+- **Git capability status** — desktop and web Git status now report whether the active vault is a repository and has a remote, enabling contextual guidance before staging or publishing
 - **Keep-alive per-tab BlockNote instances** — one editor instance per open file survives tab switches (only the view remounts): markdown is parsed once per file (no O(doc) re-parse on switch), undo history and the in-flight AI stream stay with the tab; the AI transport closes over its own instance so per-tab stream state is preserved
 - **Vault grounding into both AI paths** — read-per-file related-vault files feed the tool call (Path A) and the text-only prompt (Path B); grounding never changes Path A behaviour
 - **Tool-mill Path A prompt** — document-state scaffolding + empty-document guidance so a model creates structured blocks instead of guessing; containerized docs, mermaid/math encodings
@@ -15,6 +17,14 @@
 - SSRF hardening — AI reqwest clients (desktop + web) use `redirect::Policy::none()` (the validated host is the only target an API key may reach); `ALLOWED_API_HOSTS` trimmed to the 4-catalog endpoints + loopback
 
 #### 🐛 Bug Fixes
+- **Vault close lifecycle** — closing a project now persists genuinely edited files, closes every editor tab, and clears editor state; untouched files remain unwritten and empty edited files are saved correctly
+- **Save and Publish availability** — Save stays disabled until Git is initialized, while Publish additionally requires a configured remote; tooltips explain the missing setup
+- **AI settings input visibility** — text carets and selections are now visible in AI settings inputs and text areas across themes
+- **Server authentication hardening** — session creation now fails safely when secure randomness is unavailable, password changes revoke all existing sessions, and setup-mode authentication exposes only the required setup endpoints
+- **Server file and vault isolation** — file serving is restricted to regular files inside the active vault, while web vault discovery rejects invalid names and paths escaping the configured data directory
+- **Encrypted API-key storage robustness** — Argon2id key derivation errors are propagated instead of panicking, and encrypted key files remain protected from accidental plaintext overwrites
+- **Custom AI endpoint SSRF protection** — validated DNS addresses are pinned to AI and connection-test clients, preventing DNS changes between validation and connection
+- **Code scanning compliance** — hardened filesystem and cryptographic flows were clarified and covered by regression tests so Rust CodeQL checks complete without suppressions
 - **AI stream completes into a detached editor (keep-alive regression)** — switching tabs/mode/close now cancels the in-flight stream (`AIExtension.abort()` → transport `abortSignal` → Rust `cancel_ai`), so tool execution can never run against an unmounted view; tiptap's `view` proxy no longer throws on `domAtPos` for an unmounted editor (patched via Vite transform at build/dev/test, applied during dep optimization for dev/build parity)
 - **Wiki suggestions/backlinks stale until reopen** — the wiki index is now rescanned after every file mutation (write/create/delete/rename, restore/empty trash) on both desktop and the web server, so `[[wikilinks]]` resolve immediately
 - **Sidebar tree hiding new/renamed files after CRUD** — `loadTree` flattened from a stale children cache; two sequential `set()` calls make CRUD visible right away, and persisted expanded folders render their children on the first load after rehydrate
