@@ -21,6 +21,7 @@ import { toast } from 'sonner'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
+import { cacheMermaidRender, whenIdle } from '../../utils/mermaidRenderCache'
 import { setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
@@ -31,16 +32,16 @@ import type { CachedEditor } from '../../utils/editorFactory'
 import mermaid from 'mermaid'
 const _mermaidRender = mermaid.render.bind(mermaid)
 let _mermaidQueue: Promise<unknown> = Promise.resolve()
-;(mermaid as any).render = (id: string, text: string) => {
-  const run = _mermaidQueue.then(() =>
+;(mermaid as any).render = cacheMermaidRender((id: string, text: string) => {
+  const run = _mermaidQueue.then(() => whenIdle(() =>
     _mermaidRender(id, text).catch((e: unknown) => {
       console.error('[mermaid render]', id, e)
       throw e
     }),
-  )
+  ))
   _mermaidQueue = run.catch(() => {})
   return run
-}
+})
 
 export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string }) {
   const { editor } = cached
