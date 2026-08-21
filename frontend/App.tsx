@@ -4,7 +4,7 @@ import './index.css'
 import Sidebar from './components/Sidebar'
 import Editor from './components/Editor'
 import StatusBar from './components/StatusBar'
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
 import { PanelLeftOpen, Command } from 'lucide-react'
 
 import { useGitPolling } from './stores/gitStatus'
@@ -13,6 +13,7 @@ import { listen, invoke } from './lib/ipc'
 import { useAuth, initAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
 import Login from './components/Login'
+import { logger } from './utils/logger'
 
 initAuthGuard()
 
@@ -31,9 +32,12 @@ export default function App() {
     let unsub: (() => void) | undefined
     let cancelled = false
     listen('app:before-close', async () => {
-      await useEditorStore.getState().persistAllDirty()
-      if (!cancelled) {
-        try { await invoke('app_ready_to_close') } catch (e) { console.error('close:', e) }
+      try {
+        await useEditorStore.getState().persistAllDirty()
+        if (!cancelled) await invoke('app_ready_to_close')
+      } catch (error) {
+        logger.error('app_close_failed', { error })
+        toast.error('App stayed open because changes could not be saved. Check disk access and try closing again.')
       }
     }).then(u => { if (!cancelled) unsub = u })
     return () => { cancelled = true; unsub?.() }

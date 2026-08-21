@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { invoke, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
 import { useEditorStore } from './editor'
+import { logger } from '../utils/logger'
 
 /** File or directory info from the vault tree. */
 export interface FileInfo { path: string; name: string; type: string; depth?: number; isExpanded?: boolean }
@@ -70,7 +71,11 @@ export const useVaultStore = create<VaultState>()(
       },
       /** Close vault and reset all state. */
       closeVault: async () => {
-        await useEditorStore.getState().persistAllDirty()
+        try { await useEditorStore.getState().persistAllDirty() } catch (error) {
+          logger.error('vault_close_save_failed', { error })
+          toast.error('Vault stayed open because a file could not be saved. Check disk access and try again.')
+          return
+        }
         await invoke('close_vault')
         useEditorStore.getState().closeAllTabs()
         set({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })

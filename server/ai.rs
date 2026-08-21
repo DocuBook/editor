@@ -23,7 +23,7 @@ fn sanitize_ai_error(err: &str) -> String {
 }
 
 pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Response {
-    eprintln!("[ask_ai] handler entry");
+    tracing::debug!(event = "ai_request_received");
     let s = |k: &str| {
         args.get(k)
             .and_then(|v| v.as_str())
@@ -140,11 +140,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
-                eprintln!(
-                    "[ask_ai] send error at {:.0}s: {}",
-                    started.elapsed().as_secs_f32(),
-                    e
-                );
+                tracing::warn!(event = "ai_request_failure", provider = %agent_cfg.provider, model = %agent_cfg.model, duration_ms = started.elapsed().as_millis() as u64, body_bytes = 0_u64, error_category = "send");
                 let _ = tx
                     .send(Ok(Event::default()
                         .event("error")
@@ -153,10 +149,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 return;
             }
             Err(_) => {
-                eprintln!(
-                    "[ask_ai] send timeout at {:.0}s — provider never responded",
-                    started.elapsed().as_secs_f32()
-                );
+                tracing::warn!(event = "ai_request_failure", provider = %agent_cfg.provider, model = %agent_cfg.model, duration_ms = started.elapsed().as_millis() as u64, body_bytes = 0_u64, error_category = "send_timeout");
                 let _ = tx
                     .send(Ok(Event::default()
                         .event("error")
@@ -167,24 +160,8 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         };
         let status = response.status();
         if !status.is_success() {
-            // Log the EXACT request body + provider response server-side (docker
-            // logs) — never to the client (it may leak internal details). This
-            // shows what we actually sent and why the gateway rejected it.
-            let req_snapshot = json!({
-                "model": body_obj.get("model"),
-                "stream": body_obj.get("stream"),
-                "max_tokens": body_obj.get("max_tokens"),
-                "tool_choice": body_obj.get("tool_choice"),
-                "tools": body_obj.get("tools"),
-                "message_roles": body_obj.get("messages").and_then(|m| m.as_array()).map(|a| a.iter().filter_map(|x| x.get("role").and_then(|r| r.as_str()).map(String::from)).collect::<Vec<_>>()),
-            }).to_string();
-            let body = response.text().await.unwrap_or_default();
-            eprintln!(
-                "[ask_ai] provider error: HTTP {} — request: {} — body: {}",
-                status,
-                &req_snapshot[..req_snapshot.len().min(1600)],
-                &body[..body.len().min(800)]
-            );
+            let body_bytes = response.bytes().await.map(|body| body.len()).unwrap_or(0);
+            tracing::warn!(event = "ai_request_failure", provider = %agent_cfg.provider, model = %agent_cfg.model, status = status.as_u16(), duration_ms = started.elapsed().as_millis() as u64, body_bytes, error_category = "provider_http");
             let _ = tx
                 .send(Ok(Event::default()
                     .event("error")
@@ -196,38 +173,36 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         // First-chunk budget (P1): a provider that accepts the request but never
         // sends data gets 30s, not the 120s stall timeout. After the first chunk
         // arrives, inter-chunk stalls keep the 120s read_timeout.
-        let first =
-            match tokio::time::timeout(std::time::Duration::from_secs(30), stream.chunk()).await {
-                Ok(Ok(Some(c))) => c,
-                Ok(Ok(None)) => {
-                    let _ = tx
-                        .send(Ok(Event::default()
-                            .event("error")
-                            .data("AI provider returned an empty response")))
-                        .await;
-                    return;
-                }
-                Ok(Err(e)) => {
-                    let _ = tx
-                        .send(Ok(Event::default()
-                            .event("error")
-                            .data(sanitize_ai_error(&e.to_string()))))
-                        .await;
-                    return;
-                }
-                Err(_) => {
-                    eprintln!(
-                        "[ask_ai] P1 first-chunk timeout fired at {:.0}s",
-                        started.elapsed().as_secs_f32()
-                    );
-                    let _ = tx
-                        .send(Ok(Event::default()
-                            .event("error")
-                            .data("AI provider did not respond — try again")))
-                        .await;
-                    return;
-                }
-            };
+        let first = match tokio::time::timeout(std::time::Duration::from_secs(30), stream.chunk())
+            .await
+        {
+            Ok(Ok(Some(c))) => c,
+            Ok(Ok(None)) => {
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("error")
+                        .data("AI provider returned an empty response")))
+                    .await;
+                return;
+            }
+            Ok(Err(e)) => {
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("error")
+                        .data(sanitize_ai_error(&e.to_string()))))
+                    .await;
+                return;
+            }
+            Err(_) => {
+                tracing::warn!(event = "ai_request_failure", provider = %agent_cfg.provider, model = %agent_cfg.model, status = status.as_u16(), duration_ms = started.elapsed().as_millis() as u64, body_bytes = 0_u64, error_category = "first_chunk_timeout");
+                let _ = tx
+                    .send(Ok(Event::default()
+                        .event("error")
+                        .data("AI provider did not respond — try again")))
+                    .await;
+                return;
+            }
+        };
         let mut full = String::new();
         let mut tool_calls: Vec<(i64, String, String, String)> = Vec::new();
         let mut byte_buf: Vec<u8> = Vec::new();
@@ -284,11 +259,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 }
                 Ok(None) => break,
                 Err(e) => {
-                    eprintln!(
-                        "[ask_ai] stream read error at {:.0}s: {}",
-                        started.elapsed().as_secs_f32(),
-                        e
-                    );
+                    tracing::warn!(event = "ai_request_failure", provider = %agent_cfg.provider, model = %agent_cfg.model, status = status.as_u16(), duration_ms = started.elapsed().as_millis() as u64, body_bytes = full.len(), error_category = "stream_read");
                     let _ = tx
                         .send(Ok(Event::default()
                             .event("error")
@@ -332,13 +303,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 .await;
             return;
         }
-        eprintln!(
-            "[docubook] ask_ai done: elapsed={:.1}s chars={} tools={} truncated={}",
-            started.elapsed().as_secs_f32(),
-            full.len(),
-            tool_calls.len(),
-            truncated
-        );
+        tracing::info!(event = "ai_request_complete", provider = %agent_cfg.provider, model = %agent_cfg.model, status = status.as_u16(), duration_ms = started.elapsed().as_millis() as u64, body_bytes = full.len(), error_category = "none");
         let _ = tx
             .send(Ok(Event::default().event("ai:done").data(
                 json!({ "provider": agent_cfg.provider, "truncated": truncated }).to_string(),

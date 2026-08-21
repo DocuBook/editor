@@ -3,6 +3,7 @@ import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { undoDepth, redoDepth } from '@tiptap/pm/history'
 import { isBinaryPath } from '../utils/fileKind'
+import { logger } from '../utils/logger'
 
 export interface Tab {
   path: string
@@ -39,7 +40,7 @@ interface EditorState {
    *  wiki backlinks keep targeting the NEW path. Flushes first so in-flight WYSIWYG
    *  edits survive the remap (the editor remounts under the new key). */
   renameTab: (fromPath: string, toPath: string) => void
-  closeTab: (path: string) => void
+  closeTab: (path: string) => Promise<void>
   closeAllTabs: () => void
   setContent: (path: string, fileContent: string) => void
   setFrontmatter: (path: string, fm: string) => void
@@ -126,7 +127,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       const tab = get().tabs.find(t => t.path === path)
       if (tab?.editedContent !== null && tab?.dirty && !tab.deleted) {
         const content = tab.frontmatter + tab.editedContent.replace(/^\n+/, '').replace(/\n+$/, '')
-        try { await invoke('write_file', { path, content }) } catch (e) { console.error(e) }
+        try { await invoke('write_file', { path, content }) } catch (error) {
+          logger.error('tab_save_failed', { error, fileName: tab.name })
+          toast.error(`Could not save "${tab.name}". The tab was kept open; check disk access and try again.`)
+          return
+        }
       }
     }
     const tabs = get().tabs.filter(t => t.path !== path)
@@ -159,7 +164,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     for (const tab of get().tabs) {
       if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
         const content = tab.frontmatter + tab.editedContent.replace(/^\n+/, '').replace(/\n+$/, '')
-        try { await invoke('write_file', { path: tab.path, content }) } catch (e) { console.error('save on close:', e) }
+        try { await invoke('write_file', { path: tab.path, content }) } catch (error) {
+          logger.error('dirty_file_save_failed', { error, fileName: tab.name })
+          throw new Error(`Could not save ${tab.name}`, { cause: error })
+        }
       }
     }
   },

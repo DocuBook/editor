@@ -37,7 +37,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::extract::Request;
 use axum::extract::{ConnectInfo, Path as AxPath, Query, State};
-use axum::http::{header, HeaderValue, StatusCode};
+use axum::http::{header, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
@@ -46,7 +46,54 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use tokio_stream::wrappers::ReceiverStream;
+use tower_http::request_id::{
+    MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
+};
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::TraceLayer;
+use tracing::{info, warn, Span};
+use tracing_subscriber::EnvFilter;
+
+const REQUEST_ID_HEADER: HeaderName = HeaderName::from_static("x-request-id");
+
+#[derive(Clone)]
+struct MakeRequestUuid;
+
+impl MakeRequestId for MakeRequestUuid {
+    fn make_request_id<B>(&mut self, request: &axum::http::Request<B>) -> Option<RequestId> {
+        let valid_inbound = request
+            .headers()
+            .get(&REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| is_uuid(value));
+        let value = valid_inbound
+            .map(str::to_owned)
+            .unwrap_or_else(new_request_id);
+        HeaderValue::from_str(&value).ok().map(RequestId::new)
+    }
+}
+
+fn is_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        })
+}
+
+fn new_request_id() -> String {
+    let mut bytes = [0_u8; 16];
+    if getrandom::getrandom(&mut bytes).is_err() {
+        return format!("fallback-{}", std::process::id());
+    }
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
 
 #[derive(Clone)]
 struct AppState {
@@ -67,6 +114,13 @@ const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
  *  to finish; this cap only guards against a runaway generation. */
 const AI_MAX_SECONDS: u64 = 900;
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("docubook_server=info,tower_http=info")),
+        )
+        .init();
+
     let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".into());
     let www_dir = std::env::var("WWW_DIR").unwrap_or_else(|_| "./dist".into());
     let port: u16 = std::env::var("PORT")
@@ -85,10 +139,7 @@ fn main() {
         })
         .unwrap_or(false);
     if !writable {
-        eprintln!("[docubook] {data_dir} is NOT writable — /data volume ownership problem.");
-        eprintln!(
-            "[docubook] fix: docker run --rm -v <volume>:/data alpine chown -R 1000:1000 /data"
-        );
+        warn!(event = "data_dir_not_writable", data_dir = %data_dir, "data directory is not writable");
     }
 
     let state = AppState {
@@ -103,7 +154,7 @@ fn main() {
     let app = build_router(state, PathBuf::from(&www_dir));
 
     let addr = format!("[::]:{port}");
-    println!("[docubook] listening on http://{addr} (data={data_dir} www={www_dir})");
+    info!(event = "server_listening", address = %addr, data_dir = %data_dir, www_dir = %www_dir);
     let rt = tokio::runtime::Runtime::new().expect("tokio");
     rt.block_on(async {
         // Dual-stack ([::]): IPv4 + IPv6. Health checks (Coolify/Docker) probe
@@ -138,6 +189,37 @@ fn build_router(state: AppState, www_dir: PathBuf) -> Router {
         .route("/api/logout", post(auth_routes::logout))
         .route("/api/setup_admin", post(auth_routes::setup_admin))
         .route("/api/{cmd}", post(handlers::api))
+        .layer(PropagateRequestIdLayer::new(REQUEST_ID_HEADER.clone()))
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(|request: &Request| {
+                    let request_id = request
+                        .extensions()
+                        .get::<RequestId>()
+                        .and_then(|id| id.header_value().to_str().ok())
+                        .unwrap_or("unknown");
+                    tracing::info_span!(
+                        "http_request",
+                        request_id,
+                        method = %request.method(),
+                        status = tracing::field::Empty,
+                        duration_ms = tracing::field::Empty
+                    )
+                })
+                .on_request(())
+                .on_response(|response: &Response, latency: std::time::Duration, span: &Span| {
+                    span.record("status", response.status().as_u16());
+                    span.record("duration_ms", latency.as_millis() as u64);
+                    info!(parent: span, event = "http_request_complete");
+                })
+                .on_failure(|failure: tower_http::classify::ServerErrorsFailureClass, latency: std::time::Duration, span: &Span| {
+                    warn!(parent: span, event = "http_request_failure", error_category = %failure, duration_ms = latency.as_millis() as u64);
+                }),
+        )
+        .layer(SetRequestIdLayer::new(
+            REQUEST_ID_HEADER.clone(),
+            MakeRequestUuid,
+        ))
         .layer(axum::extract::DefaultBodyLimit::max(8 * 1024 * 1024))
         .layer(middleware::from_fn(httpm::security_headers))
         .layer(middleware::from_fn_with_state(

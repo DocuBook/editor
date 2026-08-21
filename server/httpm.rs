@@ -96,6 +96,7 @@ pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: N
             return next.run(req).await;
         }
     }
+    tracing::warn!(event = "auth_unauthorized_api_access");
     (
         StatusCode::UNAUTHORIZED,
         Json(json!({ "error": "Unauthorized" })),

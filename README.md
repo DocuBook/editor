@@ -117,6 +117,13 @@ Works on any Docker-capable host: VPS (Hetzner, DigitalOcean, Linode, AWS Lights
 - **Upgrades**: `docker compose pull && docker compose up -d` — data is untouched. Sessions reset on restart (re-login required).
 - **Health**: the image ships a Docker `HEALTHCHECK` against `/api/health` — Coolify/Portainer show container health automatically.
 
+### Operations logging
+
+- The server writes structured operational logs to stdout/stderr. Set `RUST_LOG` at startup to adjust filtering (for example, `RUST_LOG=docubook_server=debug,tower_http=info`); the default is `docubook_server=info,tower_http=info`.
+- Log collection, rotation, retention, and deletion are owned by the container runtime and operator (for example, Docker or Coolify), not by DocuBook.
+- Logs must never contain keys, passwords, tokens, cookies, document bodies, or AI request/response bodies.
+- Frontend errors remain in the local browser or desktop console only; DocuBook does not transmit frontend telemetry.
+
 ### Option B — Desktop (macOS)
 
 Download the DMG for your Mac from the [Releases](https://github.com/DocuBook/editor/releases) page and drag DocuBook Editor into Applications:
