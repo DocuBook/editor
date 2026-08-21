@@ -40,8 +40,6 @@ let _mermaidQueue: Promise<unknown> = Promise.resolve()
   return run
 }
 
-/** ── Inner content components (no container — shared scroll in Editor) ── */
-/** WYSIWYG block editor powered by BlockNoteJS (keep-alive instance from editorFactory). */
 export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string }) {
   const { editor } = cached
 

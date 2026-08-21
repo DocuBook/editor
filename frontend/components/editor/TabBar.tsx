@@ -7,8 +7,6 @@ import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
 
-/** ── Tab bar ── */
-/** Tab bar with file name, undo/redo, stage, publish, and AI toggle. */
 export function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()

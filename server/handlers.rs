@@ -65,7 +65,6 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "wiki_suggest" => sync(state, cmd, args),
         "wiki_resolve" => sync(state, cmd, args),
         "custom_ai_config" => sync(state, cmd, args),
-        "markdown_preview" => sync(state, cmd, args),
         "md_to_html" => sync(state, cmd, args),
         "cancel_ai" => sync(state, cmd, args),
         "set_api_key" => sync(state, cmd, args),
@@ -254,7 +253,6 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             let model = env.and_then(|(_, _, em)| em);
             Ok(serde_json::json!({ "source": source, "baseUrl": base_url, "hasKey": has_key, "model": model }).to_string())
         }
-        "markdown_preview" => Ok(markdown::markdown_preview(&s("content"))),
         "md_to_html" => Ok(markdown::markdown_to_safe_html(&s("content"))),
         "cancel_ai" => {
             state.ai_cancel.store(true, Ordering::SeqCst);

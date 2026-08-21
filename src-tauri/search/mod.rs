@@ -10,29 +10,9 @@ pub struct SearchResult { pub path: String, pub name: String }
 /// instead of never matching the whole sentence. Used for AI grounding.
 pub fn search_vault_terms(root: &Path, terms: &[&str]) -> Vec<SearchResult> {
     let mut found: Vec<(i32, SearchResult)> = Vec::new();
-    walk_terms(root, root, terms, &mut found);
+    walk(root, root, &|stem| terms.iter().map(|t| fuzzy_score(stem, t)).max().unwrap_or(0), &mut found);
     found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
     found.into_iter().take(30).map(|(_, r)| r).collect()
-}
-
-fn walk_terms(base: &Path, dir: &Path, terms: &[&str], out: &mut Vec<(i32, SearchResult)>) {
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
-            if path.is_dir() { walk_terms(base, &path, terms, out); }
-            else if crate::markdown::is_markdown_name(&name) {
-                let stem = crate::markdown::strip_markdown_ext(&name);
-                let mut best = 0;
-                for t in terms { let sc = fuzzy_score(stem, t); if sc > best { best = sc; } }
-                if best > 0 {
-                    let rel = path.strip_prefix(base).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                    out.push((best, SearchResult { path: rel, name }));
-                }
-            }
-        }
-    }
 }
 
 /// Search .md/.mdx files by filename stem — no content reads. Case-insensitive,
@@ -43,25 +23,24 @@ pub fn search_vault(root: &Path, query: &str) -> Vec<SearchResult> {
     let q = query.trim().to_lowercase();
     if q.is_empty() { return vec![]; }
     let mut scored: Vec<(i32, SearchResult)> = Vec::new();
-    walk(root, root, &q, &mut scored);
+    walk(root, root, &|stem| fuzzy_score(stem, &q), &mut scored);
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
     scored.into_iter().take(30).map(|(_, r)| r).collect()
 }
 
-fn walk(base: &Path, dir: &Path, q: &str, scored: &mut Vec<(i32, SearchResult)>) {
+fn walk(base: &Path, dir: &Path, score: &impl Fn(&str) -> i32, scored: &mut Vec<(i32, SearchResult)>) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if name == ".git" || name == ".DS_Store" || name == "node_modules" || name == ".trash" { continue; }
+            if crate::vault::is_ignored_entry(&name) { continue; }
             if path.is_dir() {
-                walk(base, &path, q, scored);
+                walk(base, &path, score, scored);
             } else if crate::markdown::is_markdown_name(&name) {
-                let stem = crate::markdown::strip_markdown_ext(&name);
-                let score = fuzzy_score(stem, q);
-                if score > 0 {
+                let rank = score(crate::markdown::strip_markdown_ext(&name));
+                if rank > 0 {
                     let rel = path.strip_prefix(base).map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-                    scored.push((score, SearchResult { path: rel, name }));
+                    scored.push((rank, SearchResult { path: rel, name }));
                 }
             }
         }
