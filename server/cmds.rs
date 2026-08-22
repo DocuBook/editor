@@ -92,7 +92,7 @@ pub(crate) fn ai_grounding_context(
         if r.path == active_path {
             continue;
         }
-        if let Ok(content) = v.read_file(&r.path) {
+        if let Ok(content) = v.read_file_limited(&r.path, httpm::MAX_FILE_BYTES) {
             let trimmed = trim_to_tokens(&content, 2000);
             let name = std::path::Path::new(&r.path)
                 .file_stem()
