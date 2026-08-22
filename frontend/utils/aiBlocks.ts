@@ -234,22 +234,43 @@ function findBlock(editor: any, id: string): any | null {
   return find(Array.isArray(editor?.document) ? editor.document : []);
 }
 
-function updateIsMeaningful(editor: any, op: any): boolean {
-  if (!op?.id || typeof op.block !== "string") return false;
+function sanitizeBlockHtml(editor: any, html: unknown): string | null {
+  if (
+    typeof html !== "string" ||
+    typeof editor?.tryParseHTMLToBlocks !== "function" ||
+    typeof editor?.blocksToHTMLLossy !== "function"
+  ) {
+    return null;
+  }
+  try {
+    const parsed = editor.tryParseHTMLToBlocks(html);
+    if (!Array.isArray(parsed) || !parsed.length) return null;
+    const sanitized = editor.blocksToHTMLLossy([parsed[0]]);
+    return typeof sanitized === "string" ? sanitized : null;
+  } catch {
+    return null;
+  }
+}
+
+function updateIsMeaningful(
+  editor: any,
+  op: any,
+): { meaningful: boolean; block: string } | null {
+  if (!op?.id || typeof op.block !== "string") return null;
   const current = findBlock(editor, op.id);
-  if (!current || typeof editor?.blocksToHTMLLossy !== "function") return false;
+  if (!current || typeof editor?.blocksToHTMLLossy !== "function") return null;
+  const requestedHtml = sanitizeBlockHtml(editor, op.block);
+  if (requestedHtml === null) return null;
   try {
     const currentHtml = editor.blocksToHTMLLossy([
       { ...current, children: [] },
     ]);
-    let requestedHtml = op.block;
-    if (typeof editor.tryParseHTMLToBlocks === "function") {
-      const parsed = editor.tryParseHTMLToBlocks(op.block);
-      if (parsed?.length) requestedHtml = editor.blocksToHTMLLossy([parsed[0]]);
-    }
-    return normalizeHtml(currentHtml) !== normalizeHtml(requestedHtml);
+    return {
+      meaningful: normalizeHtml(currentHtml) !== normalizeHtml(requestedHtml),
+      block: requestedHtml,
+    };
   } catch {
-    return true;
+    return { meaningful: true, block: requestedHtml };
   }
 }
 
@@ -258,16 +279,21 @@ function updateIsMeaningful(editor: any, op: any): boolean {
 export function filterMeaningfulOperations(editor: any, tc: any): any | null {
   if (!isMeaningfulOps(tc)) return null;
   const operations = tc.input.operations.flatMap((op: any) => {
-    if (op?.type === "update")
-      return updateIsMeaningful(editor, op) ? [op] : [];
+    if (op?.type === "update") {
+      const result = updateIsMeaningful(editor, op);
+      return result?.meaningful ? [{ ...op, block: result.block }] : [];
+    }
     if (op?.type === "delete") {
       return op.id && findBlock(editor, op.id) ? [op] : [];
     }
     if (op?.type === "add") {
       const blocks = Array.isArray(op.blocks)
-        ? op.blocks.filter(
-            (block: unknown) => typeof block === "string" && block.trim(),
-          )
+        ? op.blocks
+            .filter(
+              (block: unknown) => typeof block === "string" && block.trim(),
+            )
+            .map((block: string) => sanitizeBlockHtml(editor, block))
+            .filter((block: string | null): block is string => block !== null)
         : [];
       return blocks.length ? [{ ...op, blocks }] : [];
     }

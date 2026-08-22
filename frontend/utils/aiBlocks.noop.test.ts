@@ -6,6 +6,14 @@ import {
 } from "./aiBlocks";
 
 describe("filterMeaningfulOperations", () => {
+  const escapeHtml = (value: string) =>
+    value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
+
   const editor: any = {
     document: [
       {
@@ -15,7 +23,9 @@ describe("filterMeaningfulOperations", () => {
       },
     ],
     blocksToHTMLLossy: (blocks: any[]) =>
-      blocks.map((b: any) => `<p>${b.content?.[0]?.text ?? ""}</p>`).join(""),
+      blocks
+        .map((b: any) => `<p>${escapeHtml(b.content?.[0]?.text ?? "")}</p>`)
+        .join(""),
     tryParseHTMLToBlocks: (html: string) => [
       {
         type: "paragraph",
@@ -45,6 +55,28 @@ describe("filterMeaningfulOperations", () => {
       },
     });
     expect(result?.input.operations).toHaveLength(1);
+  });
+
+  it("does not pass script-like HTML through operation output", () => {
+    const result = filterMeaningfulOperations(editor, {
+      input: {
+        operations: [
+          {
+            type: "update",
+            id: "b1$",
+            block: '<p><script>alert("xss")</script>Changed</p>',
+          },
+          {
+            type: "add",
+            referenceId: "b1$",
+            blocks: ['<p><img src="x" onerror="alert(1)">Added</p>'],
+          },
+        ],
+      },
+    });
+    const operations = result?.input.operations ?? [];
+    expect(JSON.stringify(operations)).not.toContain("<script");
+    expect(JSON.stringify(operations)).not.toContain("onerror");
   });
 
   it("drops empty add blocks and missing deletes", () => {
