@@ -28,7 +28,7 @@ import {
   buildDocumentContext,
   buildToolDocContext,
   buildBaseMessages,
-  isMeaningfulOps,
+  filterMeaningfulOperations,
   suffixOperationIds,
 } from "./aiBlocks";
 import { resolveProbeModel, isTextOnly } from "./aiProbe";
@@ -283,9 +283,11 @@ async function runSendMessages(
          *  overwrites/duplicates streamed prose. Otherwise flush (Path B already
          *  streamed live; Path A flushes now). */
         const meaningfulOps = accepted
-          ? emitToolCalls.filter(isMeaningfulOps)
+          ? emitToolCalls
+              .map((tc: any) => filterMeaningfulOperations(editor, tc))
+              .filter(Boolean)
           : [];
-        if (meaningfulOps.length > 0) {
+        if (meaningfulOps.length > 0 || emitToolCalls.length > 0) {
           pendingDelta = "";
         } else {
           flushDeltas();
@@ -339,31 +341,31 @@ async function runSendMessages(
         } else if (emitText && editor) {
           /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option A) */
           const input = await buildApplyDocumentInput(editor, emitText);
+          const meaningfulInput = input
+            ? filterMeaningfulOperations(editor, { input })?.input
+            : null;
           /** Path A (tools sent) produced text but not parseable markdown —
            *  e.g. empty document where model explains why it can't edit.
            *  Retry once with Path B prompt (no tools, explicit markdown
            *  instruction) before surfacing an error. */
-          if (input) {
+          if (meaningfulInput) {
             /** Let xl-ai create the tool part → suggestion → accept/reject flow */
             controller.enqueue({
               type: "tool-input-available",
               toolCallId: "gen-" + uuid(),
               toolName: "applyDocumentOperations",
-              input,
+              input: meaningfulInput,
             });
             controller.enqueue({ type: "text-end", id });
-          } else {
-            /** Text that can't be parsed into blocks: the streamed text is
-             *  already written into the document (flushed above) — close
-             *  cleanly so xl-ai enters user-reviewing (accept/revert) on it. */
-            console.info(
-              "[ai] text kept as streamed result (not converted to blocks)",
-              {
-                provider,
-                model,
-                textLen: emitText.length,
-              },
+          } else if (input) {
+            /** Parsed text mapped only to no-op operations. Fail so xl-ai does
+             *  not turn successful completion into user-reviewing. */
+            toast.info(
+              "AI made no document changes — retry with a different prompt or cancel",
             );
+            controller.error(new Error("AI made no document changes"));
+          } else {
+            /** Text that cannot be mapped to blocks remains a normal text result. */
             controller.enqueue({ type: "text-end", id });
           }
         } else {

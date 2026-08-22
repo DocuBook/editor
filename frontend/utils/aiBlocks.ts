@@ -173,7 +173,7 @@ export function vaultPromptHints(
 
 /** System prompt for the vault-first path: the vault context is the ONLY source. */
 /** Single shared markdown instruction for Path B / fallback user messages. */
-export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
+export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), inline math ($LaTeX$), block math ($$LaTeX$$ on its own line), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
 
 /** Grounding context for non-tool paths: full document as markdown (the
  *  model-native format) + selection block types. The AI transport uses this
@@ -211,12 +211,72 @@ export function buildToolDocContext(ds: any): string {
     : state;
 }
 
-/** True when a tool call carries at least one operation — the only channel that
- *  writes through xl-ai. Empty operations = model decided no change. */
+/** True when a tool call carries at least one operation — structural check used
+ *  before an editor is available. Semantic filtering lives below. */
 export const isMeaningfulOps = (tc: any): boolean =>
   !!tc?.input &&
   Array.isArray(tc.input.operations) &&
   tc.input.operations.length > 0;
+
+const normalizeHtml = (html: unknown): string =>
+  typeof html === "string" ? html.trim().replace(/\s+/g, " ") : "";
+
+function findBlock(editor: any, id: string): any | null {
+  const clean = stripSuffix(id);
+  const find = (blocks: any[]): any | null => {
+    for (const block of blocks) {
+      if (block?.id === clean) return block;
+      const nested = block?.children?.length ? find(block.children) : null;
+      if (nested) return nested;
+    }
+    return null;
+  };
+  return find(Array.isArray(editor?.document) ? editor.document : []);
+}
+
+function updateIsMeaningful(editor: any, op: any): boolean {
+  if (!op?.id || typeof op.block !== "string") return false;
+  const current = findBlock(editor, op.id);
+  if (!current || typeof editor?.blocksToHTMLLossy !== "function") return false;
+  try {
+    const currentHtml = editor.blocksToHTMLLossy([
+      { ...current, children: [] },
+    ]);
+    let requestedHtml = op.block;
+    if (typeof editor.tryParseHTMLToBlocks === "function") {
+      const parsed = editor.tryParseHTMLToBlocks(op.block);
+      if (parsed?.length) requestedHtml = editor.blocksToHTMLLossy([parsed[0]]);
+    }
+    return normalizeHtml(currentHtml) !== normalizeHtml(requestedHtml);
+  } catch {
+    return true;
+  }
+}
+
+/** Remove operations that cannot change current document state. Returns cloned
+ *  tool call so mixed meaningful/no-op calls keep only effective operations. */
+export function filterMeaningfulOperations(editor: any, tc: any): any | null {
+  if (!isMeaningfulOps(tc)) return null;
+  const operations = tc.input.operations.flatMap((op: any) => {
+    if (op?.type === "update")
+      return updateIsMeaningful(editor, op) ? [op] : [];
+    if (op?.type === "delete") {
+      return op.id && findBlock(editor, op.id) ? [op] : [];
+    }
+    if (op?.type === "add") {
+      const blocks = Array.isArray(op.blocks)
+        ? op.blocks.filter(
+            (block: unknown) => typeof block === "string" && block.trim(),
+          )
+        : [];
+      return blocks.length ? [{ ...op, blocks }] : [];
+    }
+    return [];
+  });
+  return operations.length
+    ? { ...tc, input: { ...tc.input, operations } }
+    : null;
+}
 
 /** Base messages for ask_ai — differs by path:
  *  - tools: system prompt + clean chat history (doc state lives in the prompt)
@@ -292,7 +352,8 @@ Rules (MUST follow):
 - NEVER invent block ids — use only the ids from the document state above.
 - NEVER echo the document state JSON back.
 - Blocks are HTML strings (single valid HTML element per block).
-- Math block: <math display="block"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
+- Inline math inside a text block: <math display="inline"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
+- Block math as its own block: <math display="block"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
 - Diagram (mermaid): <pre><code class="language-mermaid" data-language="mermaid">…mermaid source…</code></pre>
 - When editing or replacing selected blocks, PRESERVE each block's type and formatting.`;
 }
