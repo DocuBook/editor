@@ -297,7 +297,7 @@ async function runSendMessages(
               .map((tc: any) => filterMeaningfulOperations(editor, tc))
               .filter(Boolean)
           : [];
-        if (meaningfulOps.length > 0 || emitToolCalls.length > 0) {
+        if (useTools || meaningfulOps.length > 0 || emitToolCalls.length > 0) {
           pendingDelta = "";
         } else {
           flushDeltas();
@@ -348,8 +348,16 @@ async function runSendMessages(
             /** text-end only when a tool part was emitted (stream still open). */
             controller.enqueue({ type: "text-end", id });
           }
+        } else if (useTools && emitText) {
+          /** Tool-capable path must never promote provider text into a document edit.
+           *  The tool prompt contains internal block ids; accepting echoed text here
+           *  would expose those ids. Retry/cancel instead of treating it as Markdown. */
+          toast.error(
+            "AI returned text instead of a tool call — retry or cancel",
+          );
+          controller.error(new Error("AI tool call required"));
         } else if (emitText && editor) {
-          /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option A) */
+          /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option B) */
           const input = await buildApplyDocumentInput(editor, emitText);
           const meaningfulInput = input
             ? filterMeaningfulOperations(editor, { input })?.input

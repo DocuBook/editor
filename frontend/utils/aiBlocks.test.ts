@@ -338,6 +338,7 @@ describe('buildToolSystemPrompt', () => {
     expect(base).toContain('applyDocumentOperations')
     expect(base).toContain('trailing $')
     expect(base).toContain('"id":"a$"')
+    expect(base).toContain('internal ids may appear only inside applyDocumentOperations arguments')
   })
   it('documents the math block HTML encoding', () => {
     expect(base).toContain('math display="block"')

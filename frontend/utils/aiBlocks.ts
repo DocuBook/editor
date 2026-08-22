@@ -350,7 +350,7 @@ Rules (MUST follow):
 - Call applyDocumentOperations with an \`operations\` array (add / update / delete).
 - Prefer updating existing blocks over removing and adding.
 - NEVER invent block ids — use only the ids from the document state above.
-- NEVER echo the document state JSON back.
+- NEVER echo the document state JSON or internal identifiers in text content; internal ids may appear only inside applyDocumentOperations arguments.
 - Blocks are HTML strings (single valid HTML element per block).
 - Inline math inside a text block: <math display="inline"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
 - Block math as its own block: <math display="block"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
