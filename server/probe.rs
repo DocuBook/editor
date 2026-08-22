@@ -31,19 +31,44 @@ pub(crate) async fn list_models(
     provider: &str,
     base_url: &str,
 ) -> Result<String, String> {
-    if base_url.is_empty() {
-        return Err("Base URL is required".into());
-    }
-    agent::validate_base_url(base_url)?;
-    let api_key =
-        keys::get_key(&state.data_dir, provider).map_err(|_| "No API key found".to_string())?;
-    let client = reqwest::Client::builder()
+    let env_custom = if provider == agent::CUSTOM_PROVIDER_ID {
+        custom_env_config()
+    } else {
+        None
+    };
+    let api_key = env_custom
+        .as_ref()
+        .and_then(|(_, key, _)| key.clone())
+        .or_else(|| keys::get_key(&state.data_dir, provider).ok())
+        .ok_or_else(|| "No API key found".to_string())?;
+    let effective_base_url = if let Some((env_url, _, _)) = env_custom {
+        env_url
+    } else if provider == agent::CUSTOM_PROVIDER_ID {
+        keys::get_base_url(&state.data_dir, provider)
+            .map_err(|_| "No custom base URL saved".to_string())?
+    } else {
+        if base_url.is_empty() {
+            return Err("Base URL is required".into());
+        }
+        base_url.to_string()
+    };
+    let custom_resolution = if provider == agent::CUSTOM_PROVIDER_ID {
+        Some(agent::validated_custom_addrs(&effective_base_url, false)?)
+    } else {
+        agent::validate_provider_base_url(provider, &effective_base_url)?;
+        None
+    };
+    let mut client_builder = reqwest::Client::builder()
         // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10));
+    if let Some((host, addrs)) = &custom_resolution {
+        client_builder = client_builder.resolve_to_addrs(host, addrs);
+    }
+    let client = client_builder
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
-    let models = agent::fetch_models(&client, base_url, &api_key).await?;
+    let models = agent::fetch_models(&client, &effective_base_url, &api_key).await?;
     serde_json::to_string(&models).map_err(|e| e.to_string())
 }
 
@@ -82,7 +107,7 @@ pub(crate) async fn test_connection(
     let custom_resolution = if provider == agent::CUSTOM_PROVIDER_ID {
         Some(agent::validated_custom_addrs(&base_url, false)?)
     } else {
-        agent::validate_base_url(&base_url)?;
+        agent::validate_provider_base_url(provider, &base_url)?;
         None
     };
     let mut client_builder = reqwest::Client::builder()

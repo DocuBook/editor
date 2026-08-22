@@ -222,6 +222,27 @@ pub fn validate_base_url(base_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/** Validate catalog provider URL binding before sending its stored key.
+ * The browser supplies both fields, so host allowlisting alone is not enough:
+ * a valid provider key must not be redirected to another valid provider host. */
+#[allow(dead_code)] // wired by the web server; desktop uses validate_base_url directly.
+pub fn validate_provider_base_url(provider: &str, base_url: &str) -> Result<(), String> {
+    validate_base_url(base_url)?;
+    let url = reqwest::Url::parse(base_url).map_err(|_| "Invalid base URL".to_string())?;
+    let host = url.host_str().unwrap_or("").to_ascii_lowercase();
+    let expected = match provider {
+        "opencode-go" => "opencode.ai",
+        "anthropic" => "api.anthropic.com",
+        "google" => "generativelanguage.googleapis.com",
+        "deepseek" => "api.deepseek.com",
+        _ => return Err("Unknown provider".into()),
+    };
+    if host != expected {
+        return Err("Base URL does not match provider".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -265,9 +286,15 @@ mod tests {
     fn validate_base_url_allows_providers_and_loopback() {
         assert!(validate_base_url("https://api.anthropic.com/v1").is_ok());
         assert!(validate_base_url("https://api.deepseek.com/v1").is_ok());
-        assert!(validate_base_url("https://api.deepseek.com/v1").is_ok());
         assert!(validate_base_url("http://localhost:11434/v1").is_ok());
         assert!(validate_base_url("http://127.0.0.1:8080/v1").is_ok());
+    }
+
+    #[test]
+    fn validate_provider_base_url_binds_key_to_catalog_host() {
+        assert!(validate_provider_base_url("anthropic", "https://api.anthropic.com/v1").is_ok());
+        assert!(validate_provider_base_url("anthropic", "https://api.deepseek.com/v1").is_err());
+        assert!(validate_provider_base_url("unknown", "https://api.anthropic.com/v1").is_err());
     }
 
     #[test]

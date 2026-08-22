@@ -1,5 +1,8 @@
 // HTTP middleware — security headers, auth, file serving (isolated).
 use super::*;
+use tokio::io::AsyncReadExt;
+
+pub(crate) const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 pub(crate) async fn security_headers(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
@@ -47,9 +50,23 @@ pub(crate) async fn file_route(
     if !abs.starts_with(&root) || !abs.is_file() {
         return (StatusCode::FORBIDDEN, "path outside active vault").into_response();
     }
-    let Ok(bytes) = tokio::fs::read(&abs).await else {
+    let Ok(file) = tokio::fs::File::open(&abs).await else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
+    // Bound allocation even if an authenticated user requests a huge vault file.
+    // Read one extra byte so files growing after metadata validation are rejected.
+    let mut bytes = Vec::new();
+    if file
+        .take(MAX_FILE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)
+        .await
+        .is_err()
+    {
+        return (StatusCode::NOT_FOUND, "not found").into_response();
+    }
+    if bytes.len() as u64 > MAX_FILE_BYTES {
+        return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response();
+    }
     let mime = mime_guess::from_path(&abs).first_or_octet_stream();
     (
         StatusCode::OK,

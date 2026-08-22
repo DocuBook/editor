@@ -88,7 +88,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
             agent::Agent::new(p, &model, &key, &b)
         }
         (p, m) if !p.is_empty() && !m.is_empty() && !base_url.is_empty() => {
-            if let Err(e) = agent::validate_base_url(&base_url) {
+            if let Err(e) = agent::validate_provider_base_url(p, &base_url) {
                 return err_response(&e);
             }
             let key = match keys::get_key(&state.data_dir, p) {

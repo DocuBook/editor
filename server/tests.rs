@@ -449,6 +449,40 @@ mod api_tests {
     }
 
     #[tokio::test]
+    async fn file_route_rejects_oversized_files() {
+        let (app, data_dir) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let vault = data_dir.join("vaults/large");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(
+            vault.join("large.bin"),
+            vec![b'x'; (httpm::MAX_FILE_BYTES + 1) as usize],
+        )
+        .unwrap();
+        let (status, _, body) = post_with(
+            &app,
+            "/api/open_vault",
+            json!({"path": vault.to_string_lossy()}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let path = format!(
+            "/api/file?path={}",
+            vault.join("large.bin").to_string_lossy()
+        );
+        let (status, _, body) = get_with(&app, &path, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+        assert_eq!(body, "file too large");
+    }
+
+    #[tokio::test]
     async fn path_allowlist_blocks_escape_via_api() {
         let (app, data_dir) = router();
         let (s, h, _) = post(
