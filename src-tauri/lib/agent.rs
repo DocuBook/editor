@@ -193,6 +193,8 @@ pub async fn test_connection(provider: String, model: String, base_url: String, 
  *  beyond any legitimate document. When exceeded the stream is stopped and
  *  `ai:done` carries `truncated: true`. */
 const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
+const MAX_TOOL_ARGS_SIZE: usize = 2 * 1024 * 1024;
+const MAX_TOOL_CALLS_PER_REQUEST: usize = 64;
 /** Total AI generation budget per attempt (seconds) — a pure backstop.
  *  Failure detection is the PI pattern: 30s first-chunk + 120s per-chunk stall
  *  timeout kill hung streams fast, and the user can always Abort (cancel_ai).
@@ -321,7 +323,7 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
             let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
             let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
             if !data.is_empty() {
-                process_sse_data(data, &mut full, &mut tool_calls, &app);
+                process_sse_data(data, &mut full, &mut tool_calls, &app)?;
                 // Cap runaway responses (memory exhaustion guard).
                 if full.len() >= MAX_AI_BUFFER {
                     truncated = true;
@@ -339,7 +341,7 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
         let line = String::from_utf8_lossy(&byte_buf);
         let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
         if !data.is_empty() {
-            process_sse_data(data, &mut full, &mut tool_calls, &app);
+            process_sse_data(data, &mut full, &mut tool_calls, &app)?;
         }
     }
     // Emit complete tool calls after stream — validation lives frontend-side (doc state).
@@ -388,11 +390,22 @@ pub fn cancel_ai(state: State<AppState>) {
 // ── SSE parsing (shared by ask_ai and its tests) ──
 
 /// Process one complete SSE `data:` payload and emit its content delta.
-fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, String, String, String)>, app: &tauri::AppHandle) {
-    if let (Some(content), _) = parse_sse_line(data, tool_calls) {
+fn validate_tool_calls(tool_calls: &[(i64, String, String, String)]) -> Result<(), String> {
+    let tool_args_size = tool_calls.iter().try_fold(0usize, |total, (_, _, _, args)| total.checked_add(args.len())).ok_or_else(|| "AI response too large".to_string())?;
+    if tool_calls.len() > MAX_TOOL_CALLS_PER_REQUEST || tool_args_size > MAX_TOOL_ARGS_SIZE { return Err("AI response too large".to_string()); }
+    Ok(())
+}
+
+fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, String, String, String)>, app: &tauri::AppHandle) -> Result<(), String> {
+    let mut next_tool_calls = tool_calls.clone();
+    let (content, _) = parse_sse_line(data, &mut next_tool_calls);
+    validate_tool_calls(&next_tool_calls)?;
+    *tool_calls = next_tool_calls;
+    if let Some(content) = content {
         full.push_str(&content);
         let _ = app.emit("ai:token", content);
     }
+    Ok(())
 }
 
 /// Parse one complete SSE `data:` payload (content delta + tool call accumulation).
@@ -531,6 +544,14 @@ mod tests {
         );
         assert_eq!(content, Some("Hello".to_string()));
         assert_eq!(tcs.len(), 1);
+    }
+
+    #[test]
+    fn tool_call_limits_are_enforced() {
+        let args = "x".repeat(MAX_TOOL_ARGS_SIZE / 2 + 1);
+        assert_eq!(validate_tool_calls(&[(0, String::new(), String::new(), args.clone()), (1, String::new(), String::new(), args)]), Err("AI response too large".to_string()));
+        let calls = (0..=MAX_TOOL_CALLS_PER_REQUEST).map(|i| (i as i64, String::new(), String::new(), String::new())).collect::<Vec<_>>();
+        assert_eq!(validate_tool_calls(&calls), Err("AI response too large".to_string()));
     }
 
     #[test]

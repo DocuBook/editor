@@ -38,6 +38,12 @@ import { uuid } from "./uuid";
  *  document writes while the AI types (smooth instead of janky streaming). */
 const AI_DELTA_BATCH_MS = 50;
 
+function safeAiTransportError(error: unknown) {
+  return String(error).includes("AI response too large")
+    ? "AI response is too large. Try a smaller request."
+    : "AI request failed. Please retry.";
+}
+
 /** Provider catalog — small manual list (was a 2.17 MB generated file); model
  *  lists are discovered at runtime via backend `list_models`. Import statically. */
 import { PROVIDERS } from "../data/providers";
@@ -66,8 +72,8 @@ async function getAiConfig(): Promise<{
       model: st.model || undefined,
       baseUrl,
     };
-  } catch (e) {
-    console.error("[ai] getAiConfig error:", e);
+  } catch {
+    console.error("[ai] getAiConfig failed");
     return {};
   }
 }
@@ -293,10 +299,8 @@ async function runSendMessages(
             model,
             supportsTools,
             attempts,
-            reason,
             toolCalls: toolBuffer.length,
             textLen: fullText.length,
-            textSnippet: fullText.substring(0, 300),
           });
           toast.error("AI output was rejected: " + reason);
           controller.error(new Error(reason));
@@ -358,7 +362,6 @@ async function runSendMessages(
                 provider,
                 model,
                 textLen: emitText.length,
-                textSnippet: emitText.substring(0, 200),
               },
             );
             controller.enqueue({ type: "text-end", id });
@@ -372,16 +375,18 @@ async function runSendMessages(
             model,
             supportsTools,
             attempts,
-            lastReason,
             toolCalls: toolBuffer.length,
             textLen: fullText.length,
           });
           controller.error(new Error("AI returned an empty response"));
         }
-      } catch (e) {
-        console.error("[ai] transport error:", e);
+      } catch (error) {
+        if (abortSignal?.aborted) return;
+        const message = safeAiTransportError(error);
+        console.error("[ai] transport failed");
+        toast.error(message);
         try {
-          controller.error(e);
+          controller.error(new Error(message));
         } catch {}
       } finally {
         closed = true;
