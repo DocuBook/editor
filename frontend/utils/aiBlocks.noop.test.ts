@@ -14,6 +14,17 @@ describe("filterMeaningfulOperations", () => {
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#39;");
 
+  const textContent = (html: string) => {
+    let text = "";
+    let insideTag = false;
+    for (const character of html) {
+      if (character === "<") insideTag = true;
+      else if (character === ">") insideTag = false;
+      else if (!insideTag) text += character;
+    }
+    return text;
+  };
+
   const editor: any = {
     document: [
       {
@@ -29,7 +40,7 @@ describe("filterMeaningfulOperations", () => {
     tryParseHTMLToBlocks: (html: string) => [
       {
         type: "paragraph",
-        content: [{ type: "text", text: html.replace(/<[^>]+>/g, "") }],
+        content: [{ type: "text", text: textContent(html) }],
       },
     ],
   };
