@@ -9,6 +9,15 @@ use std::sync::atomic::Ordering;
 use tauri::{Emitter, Manager, State};
 use crate::AppState;
 
+fn pin_custom_endpoint(builder: reqwest::ClientBuilder, provider: &str, base_url: &str) -> Result<reqwest::ClientBuilder, String> {
+    if provider != crate::agent::CUSTOM_PROVIDER_ID {
+        crate::agent::validate_base_url(base_url)?;
+        return Ok(builder);
+    }
+    let (host, addrs) = crate::agent::validated_custom_addrs(base_url, true)?;
+    Ok(builder.resolve_to_addrs(&host, &addrs))
+}
+
 // ── Keychain / model discovery ──
 
 #[tauri::command]
@@ -34,12 +43,11 @@ pub async fn list_models(provider: String, base_url: String) -> Result<String, S
     if base_url.is_empty() {
         return Err("Base URL is required".into());
     }
-    crate::agent::validate_base_url(&base_url)?;
     let key = crate::keychain::get_key(&provider).map_err(|_| "No API key found — save one in Settings -> AI".to_string())?;
-    let client = reqwest::Client::builder()
+    let client = pin_custom_endpoint(reqwest::Client::builder()
         // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(10)), &provider, &base_url)?
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
     let models = crate::agent::fetch_models(&client, &base_url, &key).await?;
@@ -76,14 +84,6 @@ pub fn delete_api_key(provider: &str) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn test_connection(provider: String, model: String, base_url: String, api_key: String) -> Result<String, String> {
-    // SSRF / exfiltration guard — the key may only be sent to an allowed host.
-    // Custom endpoints skip the allowlist (any public https host) but still pass
-    // the generic sanitize; catalog providers stay strictly allowlisted.
-    if provider == crate::agent::CUSTOM_PROVIDER_ID {
-        crate::agent::validate_custom_base_url(&base_url, true)?;
-    } else {
-        crate::agent::validate_base_url(&base_url)?;
-    }
     // API key: prefer the explicit arg (just-entered key), fall back to the
     // stored keychain key so auto-probe works without re-typing the key
     // (mirrors ask_ai, which always resolves from the keychain). Custom
@@ -98,10 +98,10 @@ pub async fn test_connection(provider: String, model: String, base_url: String, 
     } else {
         base_url
     };
-    let client = reqwest::Client::builder()
+    let client = pin_custom_endpoint(reqwest::Client::builder()
         // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(std::time::Duration::from_secs(15))
+        .timeout(std::time::Duration::from_secs(15)), &provider, &base_url)?
         .build().map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
 
@@ -202,13 +202,14 @@ const AI_MAX_SECONDS: u64 = 900;
 
 #[tauri::command]
 pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<String>, model: Option<String>, base_url: Option<String>, _api_key: Option<String>, tools: Option<String>) -> Result<(), String> {
+    let mut custom_resolution = None;
     let agent = match (&provider, &model, &base_url) {
         // Custom OpenAI-compatible endpoint: URL is bound server-side at save time,
         // the webview-provided base_url is IGNORED so the stored key can never be
         // redirected to a host the user did not explicitly bind it to.
         (Some(p), Some(m), _) if p == crate::agent::CUSTOM_PROVIDER_ID => {
             let b = crate::keychain::get_base_url(p).map_err(|_| "No custom base URL saved — set it in Settings → AI")?;
-            crate::agent::validate_custom_base_url(&b, true)?;
+            custom_resolution = Some(crate::agent::validated_custom_addrs(&b, true)?);
             // API key is ALWAYS resolved from the keychain — a webview-provided
             // key is ignored so it can never be exfiltrated to a non-trusted host.
             let key = crate::keychain::get_key(p).map_err(|_| "No API key found in keychain")?;
@@ -229,13 +230,16 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
     eprintln!("[docubook] ask_ai: provider={} model={}", agent.provider, agent.model);
     let started = std::time::Instant::now();
     state.ai_cancel.store(false, Ordering::SeqCst);
-    let client = reqwest::Client::builder()
+    let mut client_builder = reqwest::Client::builder()
         // SSRF: never follow redirects — the validated host is the ONLY target the key may reach.
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
         // Streaming: no total deadline (long generations) — read_timeout resets per chunk, only stalls abort.
-        .read_timeout(std::time::Duration::from_secs(120))
-        .build().map_err(|e| format!("Client error: {}", e))?;
+        .read_timeout(std::time::Duration::from_secs(120));
+    if let Some((host, addrs)) = &custom_resolution {
+        client_builder = client_builder.resolve_to_addrs(host, addrs);
+    }
+    let client = client_builder.build().map_err(|e| format!("Client error: {}", e))?;
     let mut body_obj = serde_json::json!({
         "model": agent.model,
         "messages": serde_json::from_str::<serde_json::Value>(&messages).map_err(|e| format!("Invalid messages: {}", e))?,
@@ -396,9 +400,9 @@ fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, St
 pub fn parse_sse_line(data: &str, tool_calls: &mut Vec<(i64, String, String, String)>) -> (Option<String>, bool) {
     if data == "[DONE]" { return (None, true); }
     let Ok(val) = serde_json::from_str::<serde_json::Value>(data) else { return (None, false); };
-    
+
     let content = val["choices"][0]["delta"]["content"].as_str().map(|s| s.to_string());
-    
+
     if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
         for tc in tcs {
             let idx = tc["index"].as_i64().unwrap_or(0);
