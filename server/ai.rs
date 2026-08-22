@@ -23,6 +23,16 @@ fn sanitize_ai_error(err: &str) -> String {
 }
 
 pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Response {
+    let ai_slot = match state.ai_slots.clone().try_acquire_owned() {
+        Ok(slot) => slot,
+        Err(_) => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "error": "Too many AI requests — try again shortly" })),
+            )
+                .into_response()
+        }
+    };
     tracing::debug!(event = "ai_request_received");
     let s = |k: &str| {
         args.get(k)
@@ -129,6 +139,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(64);
 
     tokio::spawn(async move {
+        let _ai_slot = ai_slot;
         let req = client
             .post(&url)
             .header("Authorization", format!("Bearer {}", agent_cfg.api_key));
@@ -231,6 +242,14 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                         return;
                     }
                     byte_buf.extend_from_slice(&chunk);
+                    if byte_buf.len() > MAX_AI_BUFFER {
+                        let _ = tx
+                            .send(Ok(Event::default()
+                                .event("error")
+                                .data("AI response too large")))
+                            .await;
+                        return;
+                    }
                     let mut start = 0;
                     while let Some(pos) = byte_buf[start..].iter().position(|&b| b == b'\n') {
                         let line_end = start + pos;
@@ -276,7 +295,10 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 .strip_prefix("data: ")
                 .unwrap_or("");
             if !data.is_empty() {
-                let _ = process_sse_data(data, &mut full, &mut tool_calls, &tx).await;
+                if let Err(e) = process_sse_data(data, &mut full, &mut tool_calls, &tx).await {
+                    let _ = tx.send(Ok(Event::default().event("error").data(e))).await;
+                    return;
+                }
             }
         }
         for (_, id, name, args_json) in &tool_calls {
@@ -331,14 +353,16 @@ pub(crate) async fn process_sse_data(
     let Ok(val) = serde_json::from_str::<Value>(data) else {
         return Ok(());
     };
-    if let Some(content) = val["choices"][0]["delta"]["content"].as_str() {
-        full.push_str(content);
-        let _ = tx
-            .send(Ok(Event::default().event("ai:token").data(
-                serde_json::to_string(content).map_err(|e| e.to_string())?,
-            )))
-            .await;
+    let content = val["choices"][0]["delta"]["content"].as_str();
+    if full
+        .len()
+        .checked_add(content.map_or(0, str::len))
+        .filter(|size| *size <= MAX_AI_BUFFER)
+        .is_none()
+    {
+        return Err("AI response too large".into());
     }
+    let mut next_tool_calls = tool_calls.clone();
     if let Some(tcs) = val["choices"][0]["delta"]["tool_calls"].as_array() {
         for tc in tcs {
             let idx = tc["index"].as_i64().unwrap_or(0);
@@ -348,18 +372,100 @@ pub(crate) async fn process_sse_data(
                 .as_str()
                 .unwrap_or("")
                 .to_string();
-            if let Some(pos) = tool_calls.iter().position(|(i, _, _, _)| *i == idx) {
+            if let Some(pos) = next_tool_calls.iter().position(|(i, _, _, _)| *i == idx) {
                 if !id.is_empty() {
-                    tool_calls[pos].1 = id;
+                    next_tool_calls[pos].1 = id;
                 }
                 if !name.is_empty() {
-                    tool_calls[pos].2 = name;
+                    next_tool_calls[pos].2 = name;
                 }
-                tool_calls[pos].3.push_str(&args);
+                next_tool_calls[pos].3.push_str(&args);
             } else {
-                tool_calls.push((idx, id, name, args));
+                next_tool_calls.push((idx, id, name, args));
             }
         }
     }
+    let tool_args_size = next_tool_calls
+        .iter()
+        .try_fold(0usize, |total, (_, _, _, args)| {
+            total.checked_add(args.len())
+        })
+        .ok_or_else(|| "AI response too large".to_string())?;
+    if next_tool_calls.len() > MAX_TOOL_CALLS_PER_REQUEST || tool_args_size > MAX_TOOL_ARGS_SIZE {
+        return Err("AI response too large".into());
+    }
+    *tool_calls = next_tool_calls;
+    if let Some(content) = content {
+        full.push_str(content);
+        let _ = tx
+            .send(Ok(Event::default().event("ai:token").data(
+                serde_json::to_string(content).map_err(|e| e.to_string())?,
+            )))
+            .await;
+    }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tool_delta(index: i64, args: &str) -> String {
+        json!({ "choices": [{ "delta": { "tool_calls": [{ "index": index, "id": format!("call-{index}"), "function": { "name": "test", "arguments": args } }] } }] }).to_string()
+    }
+
+    #[tokio::test]
+    async fn process_sse_data_enforces_text_limit_before_append() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let mut full = "x".repeat(MAX_AI_BUFFER);
+        let mut tools = Vec::new();
+        let data = json!({ "choices": [{ "delta": { "content": "y" } }] }).to_string();
+        assert_eq!(
+            process_sse_data(&data, &mut full, &mut tools, &tx)
+                .await
+                .unwrap_err(),
+            "AI response too large"
+        );
+        assert_eq!(full.len(), MAX_AI_BUFFER);
+    }
+
+    #[tokio::test]
+    async fn process_sse_data_enforces_tool_limits_transactionally() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let mut full = String::new();
+        let mut tools = Vec::new();
+        for index in 0..MAX_TOOL_CALLS_PER_REQUEST {
+            process_sse_data(&tool_delta(index as i64, "{}"), &mut full, &mut tools, &tx)
+                .await
+                .unwrap();
+        }
+        let before = tools.clone();
+        assert_eq!(
+            process_sse_data(
+                &tool_delta(MAX_TOOL_CALLS_PER_REQUEST as i64, "{}"),
+                &mut full,
+                &mut tools,
+                &tx
+            )
+            .await
+            .unwrap_err(),
+            "AI response too large"
+        );
+        assert_eq!(tools, before);
+
+        tools = vec![(
+            0,
+            "call-0".into(),
+            "test".into(),
+            "x".repeat(MAX_TOOL_ARGS_SIZE),
+        )];
+        let before = tools.clone();
+        assert_eq!(
+            process_sse_data(&tool_delta(0, "y"), &mut full, &mut tools, &tx)
+                .await
+                .unwrap_err(),
+            "AI response too large"
+        );
+        assert_eq!(tools, before);
+    }
 }

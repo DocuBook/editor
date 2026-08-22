@@ -46,6 +46,7 @@ mod api_tests {
             wiki: Arc::new(Mutex::new(None)),
             git: Arc::new(Mutex::new(None)),
             ai_cancel: Arc::new(AtomicBool::new(false)),
+            ai_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_AI_REQUESTS)),
             auth: Arc::new(AuthState::new(&dir)),
             data_dir: dir,
         }
