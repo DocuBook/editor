@@ -101,12 +101,16 @@ struct AppState {
     wiki: Arc<Mutex<Option<wiki::WikiIndex>>>,
     git: Arc<Mutex<Option<git::Git>>>,
     ai_cancel: Arc<AtomicBool>,
+    ai_slots: Arc<tokio::sync::Semaphore>,
     auth: Arc<AuthState>,
     data_dir: PathBuf,
 }
 
 /** Cap runaway AI responses (memory-exhaustion guard) — mirrors lib.rs. */
 const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
+const MAX_TOOL_ARGS_SIZE: usize = 2 * 1024 * 1024;
+const MAX_TOOL_CALLS_PER_REQUEST: usize = 64;
+const MAX_CONCURRENT_AI_REQUESTS: usize = 1;
 /** Total AI generation budget per attempt (seconds) — a pure backstop.
  *  Failure detection is the PI pattern: 30s first-chunk + 120s per-chunk stall
  *  timeout kill hung streams fast, and the user can always Abort (cancel_ai).
@@ -147,6 +151,7 @@ fn main() {
         wiki: Arc::new(Mutex::new(None)),
         git: Arc::new(Mutex::new(None)),
         ai_cancel: Arc::new(AtomicBool::new(false)),
+        ai_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_AI_REQUESTS)),
         auth: Arc::new(AuthState::new(Path::new(&data_dir))),
         data_dir: data_dir.clone().into(),
     };

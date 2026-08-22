@@ -60,15 +60,45 @@ try {
   const page = await context.newPage()
   attachLogging(page, 'ai-debug')
 
-  /** Mock the provider response at the browser fetch level. */
-  const mockSSE = [
-    'event: ai:token', 'data: "## Summary\\n\\n- point one\\n- point two\\n- point three"', '',
-    'event: ai:tools_done', 'data: ""', '',
-    'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
-  ].join('\n')
+  /** Mock Path B text output and Path A tool calls at browser fetch level. */
   let askAiHits = 0
   await page.route('**/api/ask_ai', route => {
     askAiHits++
+    const request = route.request().postDataJSON()
+    const messages = String(request?.messages || '')
+    const useTools = typeof request?.tools === 'string' && request.tools.length > 0
+    const noOp = messages.toLowerCase().includes('leave unchanged')
+    if (!useTools) {
+      const mockSSE = [
+        'event: ai:token', 'data: "## Summary\\n\\n- point one\\n- point two\\n- point three"', '',
+        'event: ai:tools_done', 'data: ""', '',
+        'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
+      ].join('\n')
+      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
+    }
+    const ids = [
+      ...messages.matchAll(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+      ),
+    ]
+    const id = ids[0]?.[0] || 'missing'
+    const toolPayload = {
+      toolCallId: 'mock-tool-call',
+      toolName: 'applyDocumentOperations',
+      input: {
+        operations: noOp ? [] : [{
+          type: 'add',
+          referenceId: `${id}$`,
+          position: 'after',
+          blocks: ['<p><script>alert(1)</script>AI tool change<img src="x" onerror="alert(1)"></p>'],
+        }],
+      },
+    }
+    const mockSSE = [
+      'event: ai:tool_call', `data: ${JSON.stringify(toolPayload)}`, '',
+      'event: ai:tools_done', 'data: ""', '',
+      'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
+    ].join('\n')
     route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
   })
 
@@ -149,7 +179,18 @@ try {
   const bodyA = await page.locator('body').innerText()
   ok('Path A: ask_ai fetch intercepted', askAiHits >= 2, `hits=${askAiHits}`)
   ok('Path A: xl-ai rendered Accept/Revert', /\bAccept\b|\bRevert\b/i.test(bodyA), bodyA.slice(-260))
+  ok('Path A: hostile HTML stays inert', await page.locator('.bn-editor script, .bn-editor [onerror]').count() === 0)
   ok('Path A: no xl-ai error UI', !/AI request failed|could not|Error calling/i.test(bodyA), bodyA.slice(-160))
+
+  await page.getByText('Revert', { exact: true }).click()
+  await page.keyboard.press('Control+Alt+L')
+  await page.waitForTimeout(900)
+  await page.keyboard.type('leave unchanged')
+  await page.keyboard.press('Enter')
+  await page.waitForTimeout(4000)
+  const bodyNoOp = await page.locator('body').innerText()
+  ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
+  ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
   process.exitCode = 1

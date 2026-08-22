@@ -28,10 +28,10 @@ import {
   buildDocumentContext,
   buildToolDocContext,
   buildBaseMessages,
-  isMeaningfulOps,
+  filterMeaningfulOperations,
   suffixOperationIds,
 } from "./aiBlocks";
-import { resolveProbeModel, isTextOnly } from "./aiProbe";
+import { resolveRequestModel, isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
@@ -67,9 +67,20 @@ async function getAiConfig(): Promise<{
       (st.provider === CUSTOM_PROVIDER_ID
         ? st.baseUrls[st.provider]
         : undefined);
+    let envModel: string | undefined;
+    if (st.provider === CUSTOM_PROVIDER_ID) {
+      try {
+        const raw = await invoke<string>("custom_ai_config");
+        const config = JSON.parse(raw);
+        if (config?.source === "env" && typeof config.model === "string")
+          envModel = config.model;
+      } catch {
+        /** Backward compatibility: older backends or unavailable config keep the saved model. */
+      }
+    }
     return {
       provider: st.provider || undefined,
-      model: st.model || undefined,
+      model: resolveRequestModel(st.provider, st.model, envModel) || undefined,
       baseUrl,
     };
   } catch {
@@ -110,8 +121,7 @@ async function runSendMessages(
    *  the probe is the single source of truth; unmeasured → text-only until
    *  auto-probe measures true. For env-controlled custom endpoints the probe is
    *  keyed by the env model (the one the backend actually sends). */
-  const probeModel = resolveProbeModel(provider, model);
-  const supportsTools = !isTextOnly(provider, probeModel, st.probeTools);
+  const supportsTools = !isTextOnly(provider, model, st.probeTools);
   const toolDefs = (body as any)?.toolDefinitions as
     Record<string, { description: string; inputSchema: any }> | undefined;
   /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
@@ -283,9 +293,11 @@ async function runSendMessages(
          *  overwrites/duplicates streamed prose. Otherwise flush (Path B already
          *  streamed live; Path A flushes now). */
         const meaningfulOps = accepted
-          ? emitToolCalls.filter(isMeaningfulOps)
+          ? emitToolCalls
+              .map((tc: any) => filterMeaningfulOperations(editor, tc))
+              .filter(Boolean)
           : [];
-        if (meaningfulOps.length > 0) {
+        if (useTools || meaningfulOps.length > 0 || emitToolCalls.length > 0) {
           pendingDelta = "";
         } else {
           flushDeltas();
@@ -336,34 +348,42 @@ async function runSendMessages(
             /** text-end only when a tool part was emitted (stream still open). */
             controller.enqueue({ type: "text-end", id });
           }
+        } else if (useTools && emitText) {
+          /** Tool-capable path must never promote provider text into a document edit.
+           *  The tool prompt contains internal block ids; accepting echoed text here
+           *  would expose those ids. Retry/cancel instead of treating it as Markdown. */
+          toast.error(
+            "AI returned text instead of a tool call — retry or cancel",
+          );
+          controller.error(new Error("AI tool call required"));
         } else if (emitText && editor) {
-          /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option A) */
+          /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option B) */
           const input = await buildApplyDocumentInput(editor, emitText);
+          const meaningfulInput = input
+            ? filterMeaningfulOperations(editor, { input })?.input
+            : null;
           /** Path A (tools sent) produced text but not parseable markdown —
            *  e.g. empty document where model explains why it can't edit.
            *  Retry once with Path B prompt (no tools, explicit markdown
            *  instruction) before surfacing an error. */
-          if (input) {
+          if (meaningfulInput) {
             /** Let xl-ai create the tool part → suggestion → accept/reject flow */
             controller.enqueue({
               type: "tool-input-available",
               toolCallId: "gen-" + uuid(),
               toolName: "applyDocumentOperations",
-              input,
+              input: meaningfulInput,
             });
             controller.enqueue({ type: "text-end", id });
-          } else {
-            /** Text that can't be parsed into blocks: the streamed text is
-             *  already written into the document (flushed above) — close
-             *  cleanly so xl-ai enters user-reviewing (accept/revert) on it. */
-            console.info(
-              "[ai] text kept as streamed result (not converted to blocks)",
-              {
-                provider,
-                model,
-                textLen: emitText.length,
-              },
+          } else if (input) {
+            /** Parsed text mapped only to no-op operations. Fail so xl-ai does
+             *  not turn successful completion into user-reviewing. */
+            toast.info(
+              "AI made no document changes — retry with a different prompt or cancel",
             );
+            controller.error(new Error("AI made no document changes"));
+          } else {
+            /** Text that cannot be mapped to blocks remains a normal text result. */
             controller.enqueue({ type: "text-end", id });
           }
         } else {

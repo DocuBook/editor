@@ -345,11 +345,11 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
         }
     }
     // Emit complete tool calls after stream — validation lives frontend-side (doc state).
-    for (_, id, name, args) in &tool_calls {
-        if !id.is_empty() && !name.is_empty() {
+    for (index, (_, provider_id, name, args)) in tool_calls.iter().enumerate() {
+        if !provider_id.is_empty() && !name.is_empty() {
             let input: serde_json::Value = serde_json::from_str(args).unwrap_or(serde_json::Value::Null);
             let _ = app.emit("ai:tool_call", serde_json::json!({
-                "toolCallId": id,
+                "toolCallId": crate::agent::local_tool_call_id(index),
                 "toolName": name,
                 "input": input,
             }));

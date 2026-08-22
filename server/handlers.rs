@@ -115,7 +115,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             None => Ok("[]".into()),
         },
         "read_file" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.read_file(&s("path")),
+            Some(v) => v.read_file_limited(&s("path"), httpm::MAX_FILE_BYTES),
             None => Err("No vault".into()),
         },
         "write_file" => {

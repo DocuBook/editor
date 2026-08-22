@@ -1,6 +1,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use serde::Serialize;
 
@@ -152,7 +153,22 @@ impl Vault {
         files.sort_by_key(|a| a.name.to_lowercase());
         [dirs, files].concat()
     }
-/** Read file content as UTF-8 string. */
+    #[allow(dead_code)] // used by the web server crate for bounded API reads
+    fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+        let file = std::fs::File::open(path).map_err(|e| format!("Read: {}", e))?;
+        let mut data = Vec::new();
+        file.take(max_bytes.saturating_add(1))
+            .read_to_end(&mut data)
+            .map_err(|e| format!("Read: {}", e))?;
+        if data.len() as u64 > max_bytes {
+            return Err("Read: file too large".to_string());
+        }
+        Ok(data)
+    }
+
+/** Read file content as UTF-8 string. Desktop IPC and AI grounding use this
+ *  unbounded reader; web/API callers use read_file_limited instead. */
+    #[allow(dead_code)] // unused by the web server crate, retained for desktop IPC
     pub fn read_file(&self, path: &str) -> Result<String, String> {
         // Reference-completing fallback: an extension-less path that names a
         // markdown vault file opens it (e.g. links written as `roadmap` instead
@@ -166,6 +182,23 @@ impl Vault {
                 std::fs::read(md.or(mdx)?).map_err(|e| format!("Read: {}", e))?
             }
             Err(e) => return Err(format!("Read: {}", e)),
+        };
+        Ok(String::from_utf8_lossy(&data).to_string())
+    }
+
+/** Read UTF-8 content with a bounded allocation for web/API callers. */
+    #[allow(dead_code)] // used by the web server crate for bounded API reads
+    pub fn read_file_limited(&self, path: &str, max_bytes: u64) -> Result<String, String> {
+        let f = self.safe_path(path)?;
+        let data = match Self::read_limited(&f, max_bytes) {
+            Ok(data) => data,
+            Err(_e) if !f.exists() && !path.contains('.') => {
+                let md = self.safe_path(&format!("{path}.md"))?;
+                let mdx = self.safe_path(&format!("{path}.mdx"))?;
+                Self::read_limited(&md, max_bytes)
+                    .or_else(|_| Self::read_limited(&mdx, max_bytes))?
+            }
+            Err(e) => return Err(e),
         };
         Ok(String::from_utf8_lossy(&data).to_string())
     }
@@ -477,6 +510,18 @@ mod tests {
         std::fs::write(dir.join(".trash/1700000002000-old.md"), "z").unwrap();
         v.empty_trash().unwrap();
         assert_eq!(v.list_trash().len(), 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_limited_rejects_content_over_limit() {
+        let dir = std::env::temp_dir().join(format!("vault-test-read-limit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("large.md"), "12345").unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.read_file_limited("large.md", 5).unwrap(), "12345");
+        assert!(v.read_file_limited("large.md", 4).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { resolveProbeModel, isTextOnly, autoProbe } from './aiProbe'
+import { resolveProbeModel, resolveRequestModel, isTextOnly, autoProbe } from './aiProbe'
 import { CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
 
 describe('resolveProbeModel', () => {
@@ -9,6 +9,17 @@ describe('resolveProbeModel', () => {
   it('UI model used when no env model', () => {
     expect(resolveProbeModel(CUSTOM_PROVIDER_ID, 'ui-model')).toBe('ui-model')
     expect(resolveProbeModel('anthropic', 'claude-x')).toBe('claude-x')
+  })
+})
+
+describe('resolveRequestModel', () => {
+  it('uses env model only for custom env endpoints', () => {
+    expect(resolveRequestModel(CUSTOM_PROVIDER_ID, 'saved-model', 'env-model')).toBe('env-model')
+    expect(resolveRequestModel('anthropic', 'claude-x', 'env-model')).toBe('claude-x')
+  })
+  it('keeps saved model when env config is absent or empty', () => {
+    expect(resolveRequestModel(CUSTOM_PROVIDER_ID, 'saved-model')).toBe('saved-model')
+    expect(resolveRequestModel(CUSTOM_PROVIDER_ID, 'saved-model', '')).toBe('saved-model')
   })
 })
 

@@ -74,6 +74,7 @@ export function suffixOperationIds(input: any): any {
 /** Strip a trailing `$` suffix if present (operation ids are suffixed for the
  *  model; editor block ids are not). */
 const stripSuffix = (id: string) => (id.endsWith("$") ? id.slice(0, -1) : id);
+const MISSING_BLOCK_ERROR = "Referenced document block is no longer available";
 
 export function validateOperationsSemantics(
   editor: any,
@@ -89,14 +90,14 @@ export function validateOperationsSemantics(
       op.referenceId &&
       !blockIdExists(editor, stripSuffix(op.referenceId))
     ) {
-      return `referenceId "${op.referenceId}" does not exist in the document`;
+      return MISSING_BLOCK_ERROR;
     }
     if (
       (op.type === "update" || op.type === "delete") &&
       op.id &&
       !blockIdExists(editor, stripSuffix(op.id))
     ) {
-      return `block id "${op.id}" does not exist in the document`;
+      return MISSING_BLOCK_ERROR;
     }
   }
   return null;
@@ -172,7 +173,7 @@ export function vaultPromptHints(
 
 /** System prompt for the vault-first path: the vault context is the ONLY source. */
 /** Single shared markdown instruction for Path B / fallback user messages. */
-export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
+export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), inline math ($LaTeX$), block math ($$LaTeX$$ on its own line), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
 
 /** Grounding context for non-tool paths: full document as markdown (the
  *  model-native format) + selection block types. The AI transport uses this
@@ -183,7 +184,7 @@ export function buildDocumentContext(editor: any): string {
     const md = editor.blocksToMarkdownLossy(editor.document);
     const sel = editor.getSelection();
     const selCtx = sel?.blocks?.length
-      ? `\n\nSelection (preserve these block types on edit):\n${sel.blocks.map((b: any) => `- ${b.id}: ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`
+      ? `\n\nSelection block types (preserve on edit):\n${sel.blocks.map((b: any) => `- ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`
       : "";
     const MAX = AI_FORMATTING_RULES.maxContextChars;
     const trimmed =
@@ -210,12 +211,98 @@ export function buildToolDocContext(ds: any): string {
     : state;
 }
 
-/** True when a tool call carries at least one operation — the only channel that
- *  writes through xl-ai. Empty operations = model decided no change. */
+/** True when a tool call carries at least one operation — structural check used
+ *  before an editor is available. Semantic filtering lives below. */
 export const isMeaningfulOps = (tc: any): boolean =>
   !!tc?.input &&
   Array.isArray(tc.input.operations) &&
   tc.input.operations.length > 0;
+
+const normalizeHtml = (html: unknown): string =>
+  typeof html === "string" ? html.trim().replace(/\s+/g, " ") : "";
+
+function findBlock(editor: any, id: string): any | null {
+  const clean = stripSuffix(id);
+  const find = (blocks: any[]): any | null => {
+    for (const block of blocks) {
+      if (block?.id === clean) return block;
+      const nested = block?.children?.length ? find(block.children) : null;
+      if (nested) return nested;
+    }
+    return null;
+  };
+  return find(Array.isArray(editor?.document) ? editor.document : []);
+}
+
+function sanitizeBlockHtml(editor: any, html: unknown): string | null {
+  if (
+    typeof html !== "string" ||
+    typeof editor?.tryParseHTMLToBlocks !== "function" ||
+    typeof editor?.blocksToHTMLLossy !== "function"
+  ) {
+    return null;
+  }
+  try {
+    const parsed = editor.tryParseHTMLToBlocks(html);
+    if (!Array.isArray(parsed) || !parsed.length) return null;
+    const sanitized = editor.blocksToHTMLLossy([parsed[0]]);
+    return typeof sanitized === "string" ? sanitized : null;
+  } catch {
+    return null;
+  }
+}
+
+function updateIsMeaningful(
+  editor: any,
+  op: any,
+): { meaningful: boolean; block: string } | null {
+  if (!op?.id || typeof op.block !== "string") return null;
+  const current = findBlock(editor, op.id);
+  if (!current || typeof editor?.blocksToHTMLLossy !== "function") return null;
+  const requestedHtml = sanitizeBlockHtml(editor, op.block);
+  if (requestedHtml === null) return null;
+  try {
+    const currentHtml = editor.blocksToHTMLLossy([
+      { ...current, children: [] },
+    ]);
+    return {
+      meaningful: normalizeHtml(currentHtml) !== normalizeHtml(requestedHtml),
+      block: requestedHtml,
+    };
+  } catch {
+    return { meaningful: true, block: requestedHtml };
+  }
+}
+
+/** Remove operations that cannot change current document state. Returns cloned
+ *  tool call so mixed meaningful/no-op calls keep only effective operations. */
+export function filterMeaningfulOperations(editor: any, tc: any): any | null {
+  if (!isMeaningfulOps(tc)) return null;
+  const operations = tc.input.operations.flatMap((op: any) => {
+    if (op?.type === "update") {
+      const result = updateIsMeaningful(editor, op);
+      return result?.meaningful ? [{ ...op, block: result.block }] : [];
+    }
+    if (op?.type === "delete") {
+      return op.id && findBlock(editor, op.id) ? [op] : [];
+    }
+    if (op?.type === "add") {
+      const blocks = Array.isArray(op.blocks)
+        ? op.blocks
+            .filter(
+              (block: unknown) => typeof block === "string" && block.trim(),
+            )
+            .map((block: string) => sanitizeBlockHtml(editor, block))
+            .filter((block: string | null): block is string => block !== null)
+        : [];
+      return blocks.length ? [{ ...op, blocks }] : [];
+    }
+    return [];
+  });
+  return operations.length
+    ? { ...tc, input: { ...tc.input, operations } }
+    : null;
+}
 
 /** Base messages for ask_ai — differs by path:
  *  - tools: system prompt + clean chat history (doc state lives in the prompt)
@@ -289,9 +376,10 @@ Rules (MUST follow):
 - Call applyDocumentOperations with an \`operations\` array (add / update / delete).
 - Prefer updating existing blocks over removing and adding.
 - NEVER invent block ids — use only the ids from the document state above.
-- NEVER echo the document state JSON back.
+- NEVER echo the document state JSON or internal identifiers in text content; internal ids may appear only inside applyDocumentOperations arguments.
 - Blocks are HTML strings (single valid HTML element per block).
-- Math block: <math display="block"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
+- Inline math inside a text block: <math display="inline"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
+- Block math as its own block: <math display="block"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
 - Diagram (mermaid): <pre><code class="language-mermaid" data-language="mermaid">…mermaid source…</code></pre>
 - When editing or replacing selected blocks, PRESERVE each block's type and formatting.`;
 }
@@ -308,15 +396,15 @@ export function buildEditSystemPrompt(
   const isEmpty = !docContext?.trim();
   const intro = isEmpty
     ? "You are writing new content. Use the reference material below when it supports the request; generate well-structured Markdown, no commentary or preamble."
-    : "You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.";
+    : "You are editing the document below. Output only requested document content as Markdown.";
   const docBlock = isEmpty
     ? ""
-    : "Document state (JSON):\n" + docContext + "\n";
+    : "Document content (Markdown):\n" + docContext + "\n";
   const source = isEmpty ? "the reference material" : "the document";
   const sourceRule = isEmpty
     ? "- Base content on the reference material when relevant; if it lacks what you need, say so instead of fabricating.\n- Structure clearly with headings and lists where natural.\n- Output plain Markdown."
-    : "- Output ONLY the new or modified content for the requested task.\n- Use only the exact block ids from the document above when referencing existing blocks.\n- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.";
-  return `${intro}\n\n${docBlock}${referenceMaterial(grounding)}\n\nRules (MUST follow):\n${sourceRule}\n- NEVER echo the user\'s prompt or instructions.\n- NEVER invent block ids or content that is not in ${source}; if the needed information is missing, state that instead of fabricating.\n- Output must be free of spelling and grammar errors.${taskRules}`;
+    : "- Output ONLY the new or modified content for the requested task.\n- Do not output document metadata or internal identifiers.\n- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.";
+  return `${intro}\n\n${docBlock}${referenceMaterial(grounding)}\n\nRules (MUST follow):\n${sourceRule}\n- NEVER echo the user\'s prompt or instructions.\n- NEVER invent content that is not in ${source}; if the needed information is missing, state that instead of fabricating.\n- Output must be free of spelling and grammar errors.${taskRules}`;
 }
 
 /**
