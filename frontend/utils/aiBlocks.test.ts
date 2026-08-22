@@ -10,9 +10,13 @@ describe('buildDocumentContext', () => {
   it('returns markdown without ids (non-tool path)', () => {
     expect(buildDocumentContext(editor)).toContain('# Title')
   })
-  it('appends selection block types', () => {
-    const ed: any = { ...editor, getSelection: () => ({ blocks: [{ id: 'b1', type: 'heading', level: 1 }] }) }
-    expect(buildDocumentContext(ed)).toContain('b1: heading level 1')
+  it('appends selection block types without internal ids', () => {
+    const leakedId = 'f420cd68-9d89-46dc-9782-d1d973af1471$'
+    const ed: any = { ...editor, getSelection: () => ({ blocks: [{ id: leakedId, type: 'heading', level: 1 }] }) }
+    const context = buildDocumentContext(ed)
+    expect(context).toContain('heading level 1')
+    expect(context).not.toContain(leakedId)
+    expect(buildEditSystemPrompt(context)).not.toContain(leakedId)
   })
   it('returns empty for missing editor', () => {
     expect(buildDocumentContext(null)).toBe('')
@@ -330,9 +334,10 @@ describe('validateOperationsSemantics', () => {
 
 describe('buildToolSystemPrompt', () => {
   const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]')
-  it('instructs the tool call and id suffixing', () => {
+  it('instructs the tool call and preserves internal ids', () => {
     expect(base).toContain('applyDocumentOperations')
     expect(base).toContain('trailing $')
+    expect(base).toContain('"id":"a$"')
   })
   it('documents the math block HTML encoding', () => {
     expect(base).toContain('math display="block"')
@@ -419,12 +424,14 @@ describe('grounding (bekal) in prompts', () => {
 })
 
 describe('buildEditSystemPrompt', () => {
-  it('includes doc state, grounding and task rules', () => {
+  it('includes markdown content, grounding and task rules without block-id instructions', () => {
     const p = buildEditSystemPrompt('konten doc', '## notes\nisi', '- summarize rule')
-    expect(p).toContain('Document state (JSON):')
+    expect(p).toContain('Document content (Markdown):')
     expect(p).toContain('konten doc')
     expect(p).toContain('Reference material')
     expect(p).toContain('summarize rule')
+    expect(p).not.toContain('reference block ids')
+    expect(p).not.toContain('exact block ids')
   })
 })
 

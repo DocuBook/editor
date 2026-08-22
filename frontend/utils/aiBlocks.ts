@@ -184,7 +184,7 @@ export function buildDocumentContext(editor: any): string {
     const md = editor.blocksToMarkdownLossy(editor.document);
     const sel = editor.getSelection();
     const selCtx = sel?.blocks?.length
-      ? `\n\nSelection (preserve these block types on edit):\n${sel.blocks.map((b: any) => `- ${b.id}: ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`
+      ? `\n\nSelection block types (preserve on edit):\n${sel.blocks.map((b: any) => `- ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`
       : "";
     const MAX = AI_FORMATTING_RULES.maxContextChars;
     const trimmed =
@@ -370,15 +370,15 @@ export function buildEditSystemPrompt(
   const isEmpty = !docContext?.trim();
   const intro = isEmpty
     ? "You are writing new content. Use the reference material below when it supports the request; generate well-structured Markdown, no commentary or preamble."
-    : "You are editing the document below. Prefer updating existing blocks over adding new ones; reference block ids EXACTLY as shown.";
+    : "You are editing the document below. Output only requested document content as Markdown.";
   const docBlock = isEmpty
     ? ""
-    : "Document state (JSON):\n" + docContext + "\n";
+    : "Document content (Markdown):\n" + docContext + "\n";
   const source = isEmpty ? "the reference material" : "the document";
   const sourceRule = isEmpty
     ? "- Base content on the reference material when relevant; if it lacks what you need, say so instead of fabricating.\n- Structure clearly with headings and lists where natural.\n- Output plain Markdown."
-    : "- Output ONLY the new or modified content for the requested task.\n- Use only the exact block ids from the document above when referencing existing blocks.\n- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.";
-  return `${intro}\n\n${docBlock}${referenceMaterial(grounding)}\n\nRules (MUST follow):\n${sourceRule}\n- NEVER echo the user\'s prompt or instructions.\n- NEVER invent block ids or content that is not in ${source}; if the needed information is missing, state that instead of fabricating.\n- Output must be free of spelling and grammar errors.${taskRules}`;
+    : "- Output ONLY the new or modified content for the requested task.\n- Do not output document metadata or internal identifiers.\n- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.";
+  return `${intro}\n\n${docBlock}${referenceMaterial(grounding)}\n\nRules (MUST follow):\n${sourceRule}\n- NEVER echo the user\'s prompt or instructions.\n- NEVER invent content that is not in ${source}; if the needed information is missing, state that instead of fabricating.\n- Output must be free of spelling and grammar errors.${taskRules}`;
 }
 
 /**
