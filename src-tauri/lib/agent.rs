@@ -26,7 +26,7 @@ pub async fn list_api_keys(providers: Vec<String>) -> Result<String, String> {
     // so opening Settings never blocks the UI.
     let keys = tauri::async_runtime::spawn_blocking(move || crate::keychain::list_keys(&providers))
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())??;
     serde_json::to_string(&keys).map_err(|e| e.to_string())
 }
 
