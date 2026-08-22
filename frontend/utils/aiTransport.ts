@@ -31,7 +31,7 @@ import {
   filterMeaningfulOperations,
   suffixOperationIds,
 } from "./aiBlocks";
-import { resolveProbeModel, isTextOnly } from "./aiProbe";
+import { resolveRequestModel, isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
@@ -67,9 +67,20 @@ async function getAiConfig(): Promise<{
       (st.provider === CUSTOM_PROVIDER_ID
         ? st.baseUrls[st.provider]
         : undefined);
+    let envModel: string | undefined;
+    if (st.provider === CUSTOM_PROVIDER_ID) {
+      try {
+        const raw = await invoke<string>("custom_ai_config");
+        const config = JSON.parse(raw);
+        if (config?.source === "env" && typeof config.model === "string")
+          envModel = config.model;
+      } catch {
+        /** Backward compatibility: older backends or unavailable config keep the saved model. */
+      }
+    }
     return {
       provider: st.provider || undefined,
-      model: st.model || undefined,
+      model: resolveRequestModel(st.provider, st.model, envModel) || undefined,
       baseUrl,
     };
   } catch {
@@ -110,8 +121,7 @@ async function runSendMessages(
    *  the probe is the single source of truth; unmeasured → text-only until
    *  auto-probe measures true. For env-controlled custom endpoints the probe is
    *  keyed by the env model (the one the backend actually sends). */
-  const probeModel = resolveProbeModel(provider, model);
-  const supportsTools = !isTextOnly(provider, probeModel, st.probeTools);
+  const supportsTools = !isTextOnly(provider, model, st.probeTools);
   const toolDefs = (body as any)?.toolDefinitions as
     Record<string, { description: string; inputSchema: any }> | undefined;
   /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
