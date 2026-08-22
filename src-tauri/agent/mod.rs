@@ -52,6 +52,11 @@ fn is_loopback(host: &str) -> bool {
  *  bound server-side instead of coming from the generated provider catalog. */
 pub const CUSTOM_PROVIDER_ID: &str = "openai-compatible";
 
+/** Request-local tool ID for frontend protocol events; provider IDs stay backend-only. */
+pub fn local_tool_call_id(index: usize) -> String {
+    format!("tool-{index}")
+}
+
 /** Scheme + host sanitization shared by both validators. Returns the lowercased host. */
 fn validate_scheme_and_host(url: &reqwest::Url) -> Result<String, String> {
     let host = url.host_str().unwrap_or("").to_lowercase();
@@ -220,6 +225,12 @@ pub fn validate_base_url(base_url: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_tool_call_ids_are_stable_and_distinct() {
+        assert_eq!(local_tool_call_id(0), "tool-0");
+        assert_ne!(local_tool_call_id(0), local_tool_call_id(1));
+    }
 
     #[test]
     fn agent_new_constructs_struct() {

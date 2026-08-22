@@ -299,7 +299,8 @@ describe('validateOperationsSemantics', () => {
       type: 'applyDocumentOperations',
       operations: [{ type: 'add', referenceId: 'fake$', position: 'after', blocks: ['<p>x</p>'] }],
     })
-    expect(err).toContain('does not exist')
+    expect(err).toBe('Referenced document block is no longer available')
+    expect(err).not.toContain('fake$')
   })
 
   it('rejects update with hallucinated id', () => {
@@ -307,7 +308,8 @@ describe('validateOperationsSemantics', () => {
       type: 'applyDocumentOperations',
       operations: [{ type: 'update', id: 'ghost$', block: '<p>x</p>' }],
     })
-    expect(err).toContain('does not exist')
+    expect(err).toBe('Referenced document block is no longer available')
+    expect(err).not.toContain('ghost$')
   })
 
   it('returns null for non-applyDocumentOperations input', () => {
@@ -321,7 +323,8 @@ describe('validateOperationsSemantics', () => {
     const err = validateOperationsSemantics(editor, {
       operations: [{ type: 'add', referenceId: 'fake$', position: 'after', blocks: ['<p>x</p>'] }],
     })
-    expect(err).toContain('does not exist')
+    expect(err).toBe('Referenced document block is no longer available')
+    expect(err).not.toContain('fake$')
   })
 })
 

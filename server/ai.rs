@@ -301,13 +301,13 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 }
             }
         }
-        for (_, id, name, args_json) in &tool_calls {
-            if !id.is_empty() && !name.is_empty() {
+        for (index, (_, provider_id, name, args_json)) in tool_calls.iter().enumerate() {
+            if !provider_id.is_empty() && !name.is_empty() {
                 let input: Value = serde_json::from_str(args_json).unwrap_or(Value::Null);
                 let _ = tx
                     .send(Ok(Event::default().event("ai:tool_call").data(
                         json!({
-                            "toolCallId": id, "toolName": name, "input": input,
+                            "toolCallId": agent::local_tool_call_id(index), "toolName": name, "input": input,
                         })
                         .to_string(),
                     )))

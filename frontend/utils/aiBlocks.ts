@@ -74,6 +74,7 @@ export function suffixOperationIds(input: any): any {
 /** Strip a trailing `$` suffix if present (operation ids are suffixed for the
  *  model; editor block ids are not). */
 const stripSuffix = (id: string) => (id.endsWith("$") ? id.slice(0, -1) : id);
+const MISSING_BLOCK_ERROR = "Referenced document block is no longer available";
 
 export function validateOperationsSemantics(
   editor: any,
@@ -89,14 +90,14 @@ export function validateOperationsSemantics(
       op.referenceId &&
       !blockIdExists(editor, stripSuffix(op.referenceId))
     ) {
-      return `referenceId "${op.referenceId}" does not exist in the document`;
+      return MISSING_BLOCK_ERROR;
     }
     if (
       (op.type === "update" || op.type === "delete") &&
       op.id &&
       !blockIdExists(editor, stripSuffix(op.id))
     ) {
-      return `block id "${op.id}" does not exist in the document`;
+      return MISSING_BLOCK_ERROR;
     }
   }
   return null;
