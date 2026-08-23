@@ -60,75 +60,6 @@ pub(crate) fn search_vault(state: &AppState, query: &str) -> Result<String, Stri
     serde_json::to_string(&search::search_vault(&root, query)).map_err(|e| e.to_string())
 }
 
-/// Resolve wikilinks + search vault for AI system-prompt grounding.
-/// Extracts [[links]] from query, resolves via wiki index, reads content,
-/// and runs a filename search on remaining text. Token-budgeted.
-pub(crate) fn ai_grounding_context(
-    state: &AppState,
-    query: &str,
-    active_path: &str,
-) -> Result<String, String> {
-    let vault = state.vault.lock().expect("lock");
-    let v = match vault.as_ref() {
-        Some(v) => v,
-        None => return Ok(String::new()),
-    };
-
-    // Read-per-file grounding: keyword terms from the prompt find
-    // related .md files (OR match), then read a token-budgeted slice. No
-    // wikilink index / semantic search — just grep-for-related + read.
-    let stop = [
-        "the", "and", "for", "with", "from", "into", "about", "that", "this", "what", "how", "why",
-        "when", "where", "using", "make", "write", "create",
-    ];
-    let text = query.replace("[[", " ").replace("]]", " ");
-    let terms: Vec<String> = text
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|t| t.len() >= 3 && !stop.contains(t))
-        .map(|t| t.to_lowercase())
-        .collect();
-    if terms.is_empty() {
-        return Ok(String::new());
-    }
-    let refs: Vec<&str> = terms.iter().map(String::as_str).collect();
-    let results = search::search_vault_terms(v.root(), &refs);
-
-    let mut context = String::new();
-    for r in results.iter().take(3) {
-        if r.path == active_path {
-            continue;
-        }
-        if let Ok(content) = v.read_file_limited(&r.path, httpm::MAX_FILE_BYTES) {
-            let trimmed = trim_to_tokens(&content, 2000);
-            let name = std::path::Path::new(&r.path)
-                .file_stem()
-                .map(|s| s.to_string_lossy())
-                .unwrap_or_default();
-            context.push_str(&format!("\n\n## {name}\n(File: {})\n{trimmed}", r.path));
-        }
-    }
-    Ok(context)
-}
-
-/// Trim markdown to roughly `max_chars`, breaking at paragraph boundaries.
-fn trim_to_tokens(content: &str, max_chars: usize) -> String {
-    if content.len() <= max_chars {
-        return content.to_string();
-    }
-    let mut at = max_chars;
-    while !content.is_char_boundary(at) {
-        at -= 1;
-    }
-    if let Some(pos) = content[..at].rfind("\n\n") {
-        at = pos;
-    } else if let Some(pos) = content[..at].rfind('\n') {
-        at = pos;
-    } else if let Some(pos) = content[..at].rfind(". ") {
-        at = pos + 1;
-    }
-    format!("{}...", &content[..at])
-}
-
 pub(crate) fn git_push(state: &AppState, message: &str) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
@@ -212,20 +143,3 @@ pub(crate) fn health(state: &AppState) -> String {
 }
 
 // ── HTTP handlers ──
-
-#[cfg(test)]
-mod tests {
-    use super::trim_to_tokens;
-
-    #[test]
-    fn trim_to_tokens_preserves_short_and_structured_content() {
-        assert_eq!(trim_to_tokens("short", 5), "short");
-        assert_eq!(trim_to_tokens("first\n\nsecond", 10), "first...");
-    }
-
-    #[test]
-    fn trim_to_tokens_never_splits_utf8() {
-        assert_eq!(trim_to_tokens("éclair", 1), "...");
-        assert_eq!(trim_to_tokens("éclair", 3), "éc...");
-    }
-}

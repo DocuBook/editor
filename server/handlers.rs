@@ -78,7 +78,6 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "change_password" => sync(state, cmd, args),
         "config_get" => sync(state, cmd, args),
         "config_set" => sync(state, cmd, args),
-        "ai_grounding_context" => cmds::ai_grounding_context(state, &s("query"), &s("activePath")),
         "health" => Ok(cmds::health(state).to_string()),
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl")).await,
         "test_connection" => {

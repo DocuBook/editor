@@ -133,49 +133,8 @@ export function buildTaskFormattingRules(userText: string): string {
   return "";
 }
 
-/**
- * Route intent: vault-first generation vs document edit.
- *
- * The edit rules ("NEVER invent content that is not in the document") de-authorize
- * vault context, and Path A's tool call has nothing to anchor on in an empty doc.
- * So the vault path is taken when vault context exists AND the request is a
- * wikilink reference, a question, a generation command, or targets an empty
- * document — the vault context then acts as the model's only source material.
- */
-
-/** Prompt-side hints that a request may need vault grounding — no knowledge of
- *  whether vault context actually exists. Shared by the transport's grounding
- *  pre-filter (skip the ai_grounding_context RTT when false) and the intent
- *  router below, so the two can never disagree. */
-export function vaultPromptHints(
-  userText: string,
-  docContext: string,
-): boolean {
-  const t = (userText || "").trim();
-  if (/\[\[[^\]]+\]\]/.test(t)) return true;
-  if (/^.*\?$/.test(t)) return true;
-  if (
-    /^(what|how|why|where|when|who|which|is|are|can|does|do|list|find|search|apa|bagaimana|kenapa|mengapa|kapan|siapa|di mana|dimana|cari|jelaskan|ringkas|sebutkan)\b/i.test(
-      t,
-    )
-  )
-    return true;
-  if (
-    /^(buat|tulis|generate|draft|rangkum|rekap|susun|rancang|outline|kerangka|summar)/i.test(
-      t,
-    )
-  )
-    return true;
-  return !(docContext || "").trim();
-}
-
-/** System prompt for the vault-first path: the vault context is the ONLY source. */
-/** Single shared markdown instruction for Path B / fallback user messages. */
-export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), inline math ($LaTeX$), block math ($$LaTeX$$ on its own line), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
-
-/** Grounding context for non-tool paths: full document as markdown (the
- *  model-native format) + selection block types. The AI transport uses this
- *  for text-only and vault-generation routing. */
+/** Document context for text-only prompts: Markdown plus selection block types.
+ *  Tool prompts use xl-ai's metadata.documentState instead. */
 export function buildDocumentContext(editor: any): string {
   if (!editor) return "";
   try {
@@ -191,22 +150,6 @@ export function buildDocumentContext(editor: any): string {
   } catch {
     return "";
   }
-}
-
-/** Tool-path doc state: reuse xl-ai's OWN document state (already attached to
- *  the last user message as metadata.documentState — ids suffixed with `$`,
- *  HTML blocks). Rebuilding it as markdown is what made models hallucinate
- *  referenceIds ("referenceId not found"). Selection blocks go first. */
-export function buildToolDocContext(ds: any): string {
-  if (!ds?.blocks) return "";
-  const MAX = AI_FORMATTING_RULES.maxContextChars;
-  const full = JSON.stringify(ds.blocks);
-  const state = ds.selectedBlocks?.length
-    ? `SELECTED blocks (edit these when the user refers to the selection):\n${JSON.stringify(ds.selectedBlocks)}\n\nFull document:\n${full}`
-    : full;
-  return state.length > MAX
-    ? state.substring(0, MAX) + "...[truncated]"
-    : state;
 }
 
 /** True when a tool call carries at least one operation — structural check used
@@ -257,7 +200,15 @@ function sanitizeBlockHtml(editor: any, html: unknown): string | null {
     return null;
   }
   try {
-    const parsed = editor.tryParseHTMLToBlocks(html);
+    /** Models sometimes put Markdown math delimiters inside an HTML tool block.
+     * Normalize them before BlockNote's HTML parser; canonical <math> markup is
+     * protected by mathDollarToMathML and passes through unchanged. */
+    const normalizedMath = mathDollarToMathML(html).replace(
+      /<p>\s*(?:\\\[|\$\$)([\s\S]*?)(?:\\\]|\$\$)\s*<\/p>/gi,
+      (_match, latex: string) =>
+        `<math display="block"><annotation encoding="application/x-tex">${latex.trim()}</annotation></math>`,
+    );
+    const parsed = editor.tryParseHTMLToBlocks(normalizedMath);
     if (!Array.isArray(parsed) || !parsed.length) return null;
     const sanitized = editor.blocksToHTMLLossy([parsed[0]]);
     return typeof sanitized === "string" &&
@@ -337,106 +288,6 @@ export function latestUserText(messages: any[]): string {
     );
   }
   return "";
-}
-
-export function buildBaseMessages(p: {
-  system: string;
-  messages: any[];
-  userText: string;
-  selText: string;
-  useTools: boolean;
-}): any[] {
-  if (p.useTools) {
-    const clean = p.messages.map((m: any) => ({
-      role: m.role,
-      content:
-        (m.parts || [])
-          .map((x: any) => (x.type === "text" ? x.text : ""))
-          .join("") ||
-        m.content ||
-        "",
-    }));
-    return p.system ? [{ role: "system", content: p.system }, ...clean] : clean;
-  }
-  const userContent = `${p.userText}${p.selText ? `\n\nSelected text:\n"${p.selText}"` : ""}\n\n${AI_MARKDOWN_INSTRUCTION}`;
-  return p.system
-    ? [
-        { role: "system", content: p.system },
-        { role: "user", content: userContent },
-      ]
-    : [{ role: "user", content: userContent }];
-}
-
-/** System prompt for the tool path: doc state carries real block ids (see
- *  buildToolDocumentContext) and the model must route edits through
- *  applyDocumentOperations — ids EXACTLY as shown, including the trailing $. */
-/** Tool-path system prompt: doc state (real block ids) + rules. Vault context is
- *  intentionally NOT included — vault-gen is routed to buildVaultGroundingPrompt
- *  (vault as the ONLY source), and edit rules de-authorize outside content. */
-/** Build the tool-call (Path A) system prompt — tool-mill: doc state + how to
- *  call applyDocumentOperations + math/diagram HTML encodings. NO task
- *  rules (those steer Path B text output) and NO vault (vault-gen is Path B). */
-/** Shared: related vault files (grounding) injected into both paths. */
-const referenceMaterial = (grounding: string): string =>
-  grounding.trim()
-    ? `\n\n─── Reference material (related vault files) ───\n${grounding}`
-    : "";
-
-/** Build the tool-call (Path A) system prompt — doc state + grounding (related vault files)
- *  + how to call applyDocumentOperations + math/diagram HTML encodings.
- *  NO taskRules (those steer Path B). When the document is empty it gains
- *  explicit scaffolding so the model CREATES structured blocks (PI-style) instead of guessing. */
-export function buildToolSystemPrompt(
-  docContext: string,
-  grounding = "",
-): string {
-  const isEmpty = !docContext?.trim() || docContext.trim() === "[]";
-  const steer = isEmpty
-    ? `
-The document is EMPTY — create the requested content as new blocks ("add" operations).
-Keep it well-structured: use headings (<h1>…<h6>) for organization, lists and
-blockquotes where natural; each block is a single valid HTML element. Follow the
-BlockNote HTML block rules above (math / diagram / code with data-language).
-ONLY invent content the user asked for — structure it clearly.`
-    : "";
-  return `You are editing the document below. Use the "applyDocumentOperations" tool to make changes; do NOT output the new content as text. Reference block ids EXACTLY as shown — including the trailing $.
-
-Document state (JSON):
-${docContext}${referenceMaterial(grounding)}${steer}
-
-Rules (MUST follow):
-- Call applyDocumentOperations with an \`operations\` array (add / update / delete).
-- Prefer updating existing blocks over removing and adding.
-- NEVER invent block ids — use only the ids from the document state above.
-- NEVER echo the document state JSON or internal identifiers in text content; internal ids may appear only inside applyDocumentOperations arguments.
-- Blocks are HTML strings (single valid HTML element per block).
-- Inline math inside a text block: <math display="inline"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
-- Block math as its own block: <math display="block"><annotation encoding="application/x-tex">…LaTeX…</annotation></math>
-- Diagram (mermaid): <pre><code class="language-mermaid" data-language="mermaid">…mermaid source…</code></pre>
-- When editing or replacing selected blocks, PRESERVE each block's type and formatting.`;
-}
-
-/** Single text-only (Path B) system prompt — doc state + grounding +
- *  taskRules. Empty doc = generate new content from the reference material;
- *  non-empty = edit existing blocks. Replaces the old buildVaultGroundingPrompt
- *  (one grounding concept, one prompt). */
-export function buildEditSystemPrompt(
-  docContext: string,
-  grounding = "",
-  taskRules = "",
-): string {
-  const isEmpty = !docContext?.trim();
-  const intro = isEmpty
-    ? "You are writing new content. Use the reference material below when it supports the request; generate well-structured Markdown, no commentary or preamble."
-    : "You are editing the document below. Output only requested document content as Markdown.";
-  const docBlock = isEmpty
-    ? ""
-    : "Document content (Markdown):\n" + docContext + "\n";
-  const source = isEmpty ? "the reference material" : "the document";
-  const sourceRule = isEmpty
-    ? "- Base content on the reference material when relevant; if it lacks what you need, say so instead of fabricating.\n- Structure clearly with headings and lists where natural.\n- Output plain Markdown."
-    : "- Output ONLY the new or modified content for the requested task.\n- Do not output document metadata or internal identifiers.\n- When editing or replacing selected blocks, PRESERVE each block's type and formatting (e.g., keep a heading as a heading with the same level, keep lists as lists, keep code blocks as code blocks). Change only the content unless the user explicitly asks to change the format.";
-  return `${intro}\n\n${docBlock}${referenceMaterial(grounding)}\n\nRules (MUST follow):\n${sourceRule}\n- NEVER echo the user\'s prompt or instructions.\n- NEVER invent content that is not in ${source}; if the needed information is missing, state that instead of fabricating.\n- Output must be free of spelling and grammar errors.${taskRules}`;
 }
 
 /**

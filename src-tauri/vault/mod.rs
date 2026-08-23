@@ -166,8 +166,7 @@ impl Vault {
         Ok(data)
     }
 
-/** Read file content as UTF-8 string. Desktop IPC and AI grounding use this
- *  unbounded reader; web/API callers use read_file_limited instead. */
+/** Read file content as UTF-8 string for desktop IPC callers. */
     #[allow(dead_code)] // unused by the web server crate, retained for desktop IPC
     pub fn read_file(&self, path: &str) -> Result<String, String> {
         // Reference-completing fallback: an extension-less path that names a
