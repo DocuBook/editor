@@ -9,30 +9,26 @@
  *  4. Semantic gate: referenced block ids must exist in the document;
  *     model-echoed ids get the trailing `$` restored before xl-ai validation.
  *
- * Everything pure lives in aiBlocks.ts (doc context, base messages) so the
- * streaming sequence here stays a thin, readable orchestration.
+ *  Prompt policy and context assembly live in aiPrompt.ts; document operation
+ *  helpers stay in aiBlocks.ts so this streaming sequence remains orchestration.
  */
 import { invoke, listen } from "../lib/ipc";
 import { toast } from "sonner";
 import { useAiSettings, CUSTOM_PROVIDER_ID } from "../stores/aiSettings";
-import { useEditorStore } from "../stores/editor";
+
 import {
   buildApplyDocumentInput,
   MAX_AI_ATTEMPTS,
   validateOperationsSemantics,
   buildTaskFormattingRules,
   normalizeMarkdown,
-  vaultPromptHints,
-  buildEditSystemPrompt,
-  buildToolSystemPrompt,
   buildDocumentContext,
-  buildToolDocContext,
-  buildBaseMessages,
   filterMeaningfulOperations,
   isDocumentOperationToolCall,
   latestUserText,
   suffixOperationIds,
 } from "./aiBlocks";
+import { buildAiPrompt } from "./aiPrompt";
 import { resolveRequestModel, isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
 
@@ -185,61 +181,28 @@ async function runSendMessages(
         invoke("cancel_ai").catch(() => {});
       });
       try {
-        /** Ground the model with actual document state so output is doc-specific, not generic. */
-        let docContext = buildDocumentContext(editor);
+        /** Use current editor state as dynamic document context; retrieval is
+         *  intentionally outside this prompt pipeline until semantic search exists. */
+        const docContext = buildDocumentContext(editor);
         const userText = latestUserText(messages);
         const taskRules = buildTaskFormattingRules(userText);
-        /** Resolve wikilinks + search vault for additional grounding context —
-         *  ONLY when the prompt shows vault hints (wikilink / question /
-         *  generate verb / empty doc), so plain edits skip the RTT + index
-         *  lookup entirely. Token-budgeted server-side (2k chars per file,
-         *  3 search results max). */
-        let vaultContext = "";
-        if (vaultPromptHints(userText, docContext)) {
-          try {
-            const activePath = useEditorStore.getState().activeTab || "";
-            vaultContext = await invoke<string>("ai_grounding_context", {
-              query: userText,
-              activePath,
-            });
-          } catch {
-            /* no vault or no wiki index — skip grounding */
-          }
-        }
-        /** Vault-first generation: the edit rules below de-authorize vault
-         *  content ("NEVER invent … content that is not in the document"),
-         *  so a request referencing [[wikilinks]] / asking / generating /
-         *  targeting an empty doc gets forced into an applyDocumentOperations
-         *  edit with nothing to anchor on. Detect that intent → skip the
-         *  tool path and use the vault context as the model's only source;
-         *  output lands as plain-Markdown insert (accept/revert). */
-        /** A tool-capable model ALWAYS uses Path A (tool call) — grounding from
-         *  the vault is injected into the system prompt below; we never switch
-         *  to text-only just because the document is empty or vault is present. */
         const useTools = supportsTools && !!tools;
-        /** Tool path: reuse xl-ai's OWN document state (ids suffixed `$`, HTML
-         *  blocks) — markdown without ids makes models hallucinate referenceIds.
-         *  Always overrides the markdown context above when tools are used. */
-        if (useTools)
-          docContext = buildToolDocContext(
-            (messages[messages.length - 1] as any)?.metadata?.documentState,
-          );
         bufferText = useTools;
-        /** Grounding (read-per-file related vault files) feeds BOTH paths: the
-         *  tool call (buildToolSystemPrompt) and, for text-only models,
-         *  buildEditSystemPrompt. Grounding never changes Path A behaviour. */
-        const systemGrounding = useTools
-          ? buildToolSystemPrompt(docContext, vaultContext)
-          : buildEditSystemPrompt(docContext, vaultContext, taskRules);
-        /** Base messages once; retry loop appends error feedback. */
-        const baseMsgs = buildBaseMessages({
-          system: systemGrounding,
+        const documentState = [...messages]
+          .reverse()
+          .find((message: any) => message?.role === "user")
+          ?.metadata?.documentState;
+        /** Compile stable policy separately from dynamic document/reference context.
+         *  Tool mode uses xl-ai's canonical documentState; text mode uses Markdown. */
+        const basePrompt = {
+          mode: useTools ? ("tool" as const) : ("text" as const),
           messages,
+          documentState,
+          documentMarkdown: docContext,
+          selectedMarkdown: selText,
           userText,
-          selText,
-          useTools,
-        });
-
+          taskRules,
+        };
         /** Retry loop: semantic validation (anti-hallucination) with error feedback. */
         let errorFeedback = "";
         let attempts = 0;
@@ -251,9 +214,10 @@ async function runSendMessages(
           fullText = "";
           pendingDelta = "";
           toolBuffer.length = 0;
-          const msgs = errorFeedback
-            ? [...baseMsgs, { role: "user", content: errorFeedback }]
-            : baseMsgs;
+          const msgs = buildAiPrompt({
+            ...basePrompt,
+            retryFeedback: errorFeedback,
+          }).messages;
           await invoke("ask_ai", {
             messages: JSON.stringify(msgs),
             ...(useTools ? { tools: JSON.stringify(tools) } : {}),

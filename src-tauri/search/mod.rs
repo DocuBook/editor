@@ -4,17 +4,6 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct SearchResult { pub path: String, pub name: String }
 
-/// Search .md/.mdx files that match ANY of the terms (best match per file).
-/// Same scoring as search_vault, but a natural-language prompt like
-/// "generate roadmap from idea" finds files named "roadmap*" or "idea*"
-/// instead of never matching the whole sentence. Used for AI grounding.
-pub fn search_vault_terms(root: &Path, terms: &[&str]) -> Vec<SearchResult> {
-    let mut found: Vec<(i32, SearchResult)> = Vec::new();
-    walk(root, root, &|stem| terms.iter().map(|t| fuzzy_score(stem, t)).max().unwrap_or(0), &mut found);
-    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
-    found.into_iter().take(30).map(|(_, r)| r).collect()
-}
-
 /// Search .md/.mdx files by filename stem — no content reads. Case-insensitive,
 /// ranked: prefix match (3) > substring (2) > fuzzy subsequence (1). The
 /// markdown extension is stripped before matching, so a query like "md" only
@@ -123,24 +112,5 @@ mod tests {
         let r = search_vault(&dir, "f");
         assert!(r.len() <= 30);
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-
-
-    #[test]
-    fn search_vault_terms_finds_any_term() {
-        let d = std::env::temp_dir().join(format!("search-terms-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        for n in ["roadmap.md", "idea.md", "notes.md"] {
-            std::fs::write(d.join(n), "# x").unwrap();
-        }
-        let hits = search_vault_terms(&d, &["generate", "roadmap", "dari"]);
-        let names: Vec<String> = hits.iter().map(|r| r.name.clone()).collect();
-        assert!(names.contains(&"roadmap.md".to_string()), "should match term 'roadmap': {:?}", names);
-        // "dari" (len3) & "generate" don't match any stem, but "roadmap" does -> OR works
-        let hits2 = search_vault_terms(&d, &["generate", "roadmap"]);
-        assert!(hits2.iter().any(|r| r.name == "roadmap.md"));
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

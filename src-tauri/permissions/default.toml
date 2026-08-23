@@ -4,7 +4,6 @@
 
 [default]
 permissions = [
-  "allow-ai-grounding-context",
   "allow-app-ready-to-close",
   "allow-ask-ai",
   "allow-cancel-ai",
@@ -42,15 +41,6 @@ permissions = [
   "allow-write-file"
 ]
 
-[[permission]]
-identifier = "allow-ai-grounding-context"
-description = "Enables the ai_grounding_context command (wikilink + search grounding for AI prompts)."
-commands.allow = ["ai_grounding_context"]
-
-[[permission]]
-identifier = "deny-ai-grounding-context"
-description = "Denies the ai_grounding_context command."
-commands.deny = ["ai_grounding_context"]
 
 [[permission]]
 identifier = "allow-app-ready-to-close"

@@ -37,6 +37,18 @@ describe("mathDollarToMathML", () => {
     const r = mathDollarToMathML("Use $x_i$ here");
     expect(r).toContain("x_i");
   });
+
+  it("supports LaTeX inline delimiters", () => {
+    const r = mathDollarToMathML(String.raw`Area is \(A = \pi r^2\).`);
+    expect(r).toContain('display="inline"');
+    expect(r).toContain("A = \\pi r^2");
+  });
+
+  it("supports LaTeX block delimiters", () => {
+    const r = mathDollarToMathML(String.raw`\[a^2 + b^2 = c^2\]`);
+    expect(r).toContain('display="block"');
+    expect(r).toContain("a^2 + b^2 = c^2");
+  });
   it("block followed by paragraph has blank line (no stray \\ spacing)", () => {
     const r = mathDollarToMathML("$$a = b$$\nAfter");
     expect(r).toContain("</div>\n");
