@@ -29,6 +29,8 @@ import {
   buildToolDocContext,
   buildBaseMessages,
   filterMeaningfulOperations,
+  isDocumentOperationToolCall,
+  latestUserText,
   suffixOperationIds,
 } from "./aiBlocks";
 import { resolveRequestModel, isTextOnly } from "./aiProbe";
@@ -185,11 +187,7 @@ async function runSendMessages(
       try {
         /** Ground the model with actual document state so output is doc-specific, not generic. */
         let docContext = buildDocumentContext(editor);
-        const userMsg = messages.find((m: any) => m.role === "user");
-        const userText =
-          (userMsg?.parts || [])
-            .map((p: any) => (p.type === "text" ? p.text : ""))
-            .join("") || "";
+        const userText = latestUserText(messages);
         const taskRules = buildTaskFormattingRules(userText);
         /** Resolve wikilinks + search vault for additional grounding context —
          *  ONLY when the prompt shows vault hints (wikilink / question /
@@ -269,6 +267,7 @@ async function runSendMessages(
            *  no loop reassignment, so the accept/retry branch is unambiguous. */
           const semanticError =
             toolBuffer
+              .filter(isDocumentOperationToolCall)
               .map((tc: any) => {
                 tc.input = suffixOperationIds(tc.input);
                 return validateOperationsSemantics(editor, tc.input);
@@ -278,7 +277,7 @@ async function runSendMessages(
            *  is the real guard against corruption. Content is always written; user reviews via accept/reject. */
           const normText = normalizeMarkdown(fullText);
           if (!semanticError) {
-            emitToolCalls = [...toolBuffer];
+            emitToolCalls = toolBuffer.filter(isDocumentOperationToolCall);
             emitText = normText;
             accepted = true;
             break;

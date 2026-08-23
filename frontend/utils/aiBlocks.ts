@@ -29,8 +29,6 @@ export const AI_FORMATTING_RULES = {
 export const MAX_AI_ATTEMPTS = 2;
 
 /** Check if a block id (optionally $-suffixed) exists in the editor document (recursive). */
-
-/** Check if a block id (optionally $-suffixed) exists in the editor document (recursive). */
 export function blockIdExists(editor: any, id: string): boolean {
   if (!editor?.document) return false;
   const clean = String(id).replace(/\$$/, "");
@@ -213,13 +211,29 @@ export function buildToolDocContext(ds: any): string {
 
 /** True when a tool call carries at least one operation — structural check used
  *  before an editor is available. Semantic filtering lives below. */
+export const isDocumentOperationToolCall = (tc: any): boolean =>
+  tc?.toolName === "applyDocumentOperations";
+
 export const isMeaningfulOps = (tc: any): boolean =>
   !!tc?.input &&
   Array.isArray(tc.input.operations) &&
   tc.input.operations.length > 0;
 
 const normalizeHtml = (html: unknown): string =>
-  typeof html === "string" ? html.trim().replace(/\s+/g, " ") : "";
+  typeof html === "string" ? html.trim() : "";
+
+function containsInternalBlockId(editor: any, html: string): boolean {
+  const ids: string[] = [];
+  const collect = (blocks: any[]) => {
+    for (const block of blocks) {
+      if (typeof block?.id === "string" && block.id.length >= 8)
+        ids.push(block.id);
+      if (block?.children?.length) collect(block.children);
+    }
+  };
+  collect(Array.isArray(editor?.document) ? editor.document : []);
+  return ids.some((id) => html.includes(id));
+}
 
 function findBlock(editor: any, id: string): any | null {
   const clean = stripSuffix(id);
@@ -246,7 +260,10 @@ function sanitizeBlockHtml(editor: any, html: unknown): string | null {
     const parsed = editor.tryParseHTMLToBlocks(html);
     if (!Array.isArray(parsed) || !parsed.length) return null;
     const sanitized = editor.blocksToHTMLLossy([parsed[0]]);
-    return typeof sanitized === "string" ? sanitized : null;
+    return typeof sanitized === "string" &&
+      !containsInternalBlockId(editor, sanitized)
+      ? sanitized
+      : null;
   } catch {
     return null;
   }
@@ -307,6 +324,21 @@ export function filterMeaningfulOperations(editor: any, tc: any): any | null {
 /** Base messages for ask_ai — differs by path:
  *  - tools: system prompt + clean chat history (doc state lives in the prompt)
  *  - text-only: system prompt + single user message (selection + markdown rules) */
+export function latestUserText(messages: any[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    if (message?.role !== "user") continue;
+    return (
+      (message.parts || [])
+        .map((part: any) => (part.type === "text" ? part.text : ""))
+        .join("") ||
+      message.content ||
+      ""
+    );
+  }
+  return "";
+}
+
 export function buildBaseMessages(p: {
   system: string;
   messages: any[];
