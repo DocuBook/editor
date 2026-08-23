@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('../lib/ipc', () => ({ invoke }))
+vi.mock('../../../frontend/lib/ipc', () => ({ invoke }))
 
-import { pollGitStatus, useGitStatus } from './gitStatus'
-import { useAuth } from './auth'
+import { pollGitStatus, useGitStatus } from '../../../frontend/stores/gitStatus'
+import { useAuth } from '../../../frontend/stores/auth'
 
 describe('pollGitStatus (skip polling while unauthenticated)', () => {
   beforeEach(() => {

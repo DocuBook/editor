@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { cacheMermaidRender, whenIdle } from "./mermaidRenderCache";
+import {
+  cacheMermaidRender,
+  whenIdle,
+} from "../../../frontend/utils/mermaidRenderCache";
 
 describe("Mermaid rendering", () => {
   it("defers uncached work to the next available browser turn", async () => {

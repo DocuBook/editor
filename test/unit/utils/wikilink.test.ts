@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { findWikilinkAt } from './wikilink'
+import { findWikilinkAt } from '../../../frontend/utils/wikilink'
 
 describe('findWikilinkAt', () => {
   it('finds the title at offset inside the link', () => {

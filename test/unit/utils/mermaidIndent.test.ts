@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { indentationAt, indentSelection } from "./mermaidIndent";
+import {
+  indentationAt,
+  indentSelection,
+} from "../../../frontend/utils/mermaidIndent";
 
 describe("Mermaid indentation", () => {
   it("preserves the current line indentation", () => {

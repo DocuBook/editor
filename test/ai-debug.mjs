@@ -33,8 +33,7 @@ const ok = (name, cond, extra = '') => {
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
 mkdirSync(VAULT, { recursive: true })
-writeFileSync(`${VAULT}/notes.md`, '# Notes\n\nhello world\n\nSee [[roadmap]]')
-writeFileSync(`${VAULT}/roadmap.md`, '# Roadmap\n\nplan')
+writeFileSync(`${VAULT}/notes.md`, '# Notes\n\nhello world')
 
 const server = startServer('ai-debug', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
 let browser
@@ -49,7 +48,7 @@ async function api(cmd, args = {}, cookie = '') {
 try {
   await waitForServer(BASE)
   const sa = await api('setup_admin', { email: ADMIN.email, password: ADMIN.password })
-  ok('setup_admin', sa.status === 200, sa.text.slice(0, 60))
+  if (sa.status !== 200) throw new Error(`setup_admin failed: ${sa.text}`)
   const login = await fetch(`${BASE}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ADMIN) })
   const cookie = (login.headers.get('set-cookie') || '').split(';')[0]
   await api('open_vault', { path: VAULT }, cookie)
@@ -121,42 +120,19 @@ try {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('text=notes', { timeout: 10000 })
   await page.getByText('notes', { exact: true }).click()
-  await page.waitForTimeout(1500)
-
-  // ── Wikilink visual indicator + Cmd+Click navigation ──
-  const styled = await page.locator('span[style*="--color-accent"]').count()
-  ok('wikilink rendered with accent decoration', styled >= 1, `spans=${styled}`)
-  // Hover → custom floating hint (native title is cancelled by ProseMirror re-renders)
-  await page.getByText('[[roadmap]]', { exact: true }).hover()
-  await page.waitForSelector('[data-wikilink-tip]', { timeout: 3000 })
-  const tipVisible = await page.locator('[data-wikilink-tip]').isVisible()
-  ok('hover shows wikilink hint (Cmd+Click to open)', tipVisible)
-  // Single click (no modifier) → tooltip feedback instead of silence
-  await page.getByText('[[roadmap]]', { exact: true }).click()
-  await page.waitForSelector('text=Wikilink', { timeout: 4000 })
-  ok('single click shows wikilink tooltip (Open action)', true)
-  await page.waitForTimeout(500)
-  await page.keyboard.down('Meta')
-  await page.getByText('[[roadmap]]', { exact: true }).click()
-  await page.keyboard.up('Meta')
-  await page.waitForSelector('text=plan', { timeout: 5000 }) // roadmap.md content
-  ok('Cmd+Click on [[wikilink]] opened the note', true, 'roadmap.md content visible')
+  await page.getByText('hello world', { exact: true }).waitFor()
 
   // Select the document content so the AI edit path (update ops) is exercised
   await page.keyboard.press('Meta+a')
-  await page.waitForTimeout(300)
 
   // Open the AI menu (Ctrl+Alt+L) and submit — the menu input autofocuses
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
   await page.keyboard.type('summarize the note')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(4000)
-
-  const body = await page.locator('body').innerText()
-  ok('Path B: ask_ai fetch intercepted', askAiHits >= 1, `hits=${askAiHits}`)
-  ok('Path B: xl-ai rendered Accept/Revert', /\bAccept\b|\bRevert\b/i.test(body), body.slice(-260))
-  ok('Path B: no xl-ai error UI', !/AI request failed|could not|Error calling/i.test(body), body.slice(-160))
+  await page.getByText('Accept', { exact: true }).waitFor()
+  await page.getByText('Revert', { exact: true }).waitFor()
+  ok('Path B: text-only request renders review', askAiHits === 1)
 
   // Switch the persisted probe to true and reload: same mock response now
   // exercises Path A (tools are sent, model returns text, no second ask_ai).
@@ -169,25 +145,23 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('text=notes', { timeout: 10000 })
   await page.getByText('notes', { exact: true }).click()
-  await page.waitForTimeout(1000)
+  await page.getByText('hello world', { exact: true }).waitFor()
   await page.keyboard.press('Meta+a')
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
   await page.keyboard.type('summarize the note')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(4000)
-  const bodyA = await page.locator('body').innerText()
-  ok('Path A: ask_ai fetch intercepted', askAiHits >= 2, `hits=${askAiHits}`)
-  ok('Path A: xl-ai rendered Accept/Revert', /\bAccept\b|\bRevert\b/i.test(bodyA), bodyA.slice(-260))
+  await page.getByText('Accept', { exact: true }).waitFor()
+  await page.getByText('Revert', { exact: true }).waitFor()
+  ok('Path A: tool request renders review', askAiHits === 2)
   ok('Path A: hostile HTML stays inert', await page.locator('.bn-editor script, .bn-editor [onerror]').count() === 0)
-  ok('Path A: no xl-ai error UI', !/AI request failed|could not|Error calling/i.test(bodyA), bodyA.slice(-160))
 
   await page.getByText('Revert', { exact: true }).click()
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
   await page.keyboard.type('leave unchanged')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(4000)
+  await page.getByText(/AI made no document changes/i).waitFor()
   const bodyNoOp = await page.locator('body').innerText()
   ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))

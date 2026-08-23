@@ -29,7 +29,7 @@ For production, pin an image tag, place the container behind HTTPS, set `DB_SECU
 
 | Variable                                                                          | Default      | Purpose                                                                 |
 | --------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
-| `DB_SETUP_TOKEN`                                                                  | empty        | Protects first-run admin setup with a plain secret                      |
+| `DB_SETUP_TOKEN`                                                                  | empty        | Protects first-run admin setup; generate with `openssl rand -hex 32`    |
 | `DB_SECURE_COOKIE`                                                                | `false`      | Restricts session cookies to HTTPS when set to `1`                      |
 | `DB_NO_AUTH`                                                                      | `false`      | Enables access without login when set to `1`                            |
 | `DB_SESSION_TTL_HOURS`                                                            | `168`        | Session lifetime in hours                                               |

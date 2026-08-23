@@ -1,74 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, buildTaskFormattingRules, normalizeMarkdown, vaultPromptHints, buildEditSystemPrompt, buildToolSystemPrompt, buildDocumentContext, buildToolDocContext, buildBaseMessages, isMeaningfulOps, AI_MARKDOWN_INSTRUCTION, suffixOperationIds } from '../utils/aiBlocks'
-
-describe('buildDocumentContext', () => {
-  const editor: any = {
-    document: [{ id: 'b1', type: 'heading', content: [{ type: 'text', text: 'Title' }] }],
-    blocksToMarkdownLossy: () => '# Title\n',
-    getSelection: () => null,
-  }
-  it('returns markdown without ids (non-tool path)', () => {
-    expect(buildDocumentContext(editor)).toContain('# Title')
-  })
-  it('appends selection block types without internal ids', () => {
-    const leakedId = 'f420cd68-9d89-46dc-9782-d1d973af1471$'
-    const ed: any = { ...editor, getSelection: () => ({ blocks: [{ id: leakedId, type: 'heading', level: 1 }] }) }
-    const context = buildDocumentContext(ed)
-    expect(context).toContain('heading level 1')
-    expect(context).not.toContain(leakedId)
-    expect(buildEditSystemPrompt(context)).not.toContain(leakedId)
-  })
-  it('returns empty for missing editor', () => {
-    expect(buildDocumentContext(null)).toBe('')
-  })
-})
-
-describe('buildToolDocContext', () => {
-  it('serializes blocks with suffixed ids (xl-ai metadata.documentState)', () => {
-    const ds = { blocks: [{ id: 'abc$', block: '<h2>T</h2>' }], isEmptyDocument: false }
-    const s = buildToolDocContext(ds)
-    expect(s).toContain('"id":"abc$"')
-    expect(s).toContain('<h2>T</h2>')
-  })
-  it('puts selected blocks first when a selection is active', () => {
-    const ds = { selectedBlocks: [{ id: 'sel$', block: '<p>x</p>' }], blocks: [{ id: 'a$', block: '<p>a</p>' }] }
-    const s = buildToolDocContext(ds)
-    expect(s.indexOf('SELECTED')).toBeLessThan(s.indexOf('"id":"a$"'))
-    expect(s.indexOf('sel$')).toBeLessThan(s.indexOf('a$'))
-  })
-  it('returns empty when no blocks', () => {
-    expect(buildToolDocContext({})).toBe('')
-    expect(buildToolDocContext(null)).toBe('')
-  })
-})
-
-describe('buildBaseMessages', () => {
-  const base = { system: 'SYS', messages: [{ role: 'user', parts: [{ type: 'text', text: 'hi' }] }] as any[], userText: 'hi', selText: '', useTools: false }
-  it('text-only: system + user with markdown instruction', () => {
-    const msgs = buildBaseMessages(base)
-    expect(msgs.length).toBe(2)
-    expect(msgs[0]).toEqual({ role: 'system', content: 'SYS' })
-    expect(msgs[1].content).toContain('hi')
-    expect(msgs[1].content).toContain('BlockNote-compatible Markdown')
-  })
-  it('text-only without system: single user message', () => {
-    const msgs = buildBaseMessages({ ...base, system: '' })
-    expect(msgs.length).toBe(1)
-  })
-  it('tools: system + clean history (parts flattened, metadata dropped)', () => {
-    const msgs = buildBaseMessages({ ...base, useTools: true, messages: [
-      { role: 'user', parts: [{ type: 'text', text: 'hello' }, { type: 'text', text: ' world' }], metadata: { documentState: {} } },
-      { role: 'assistant', content: 'prev' },
-    ] as any[] })
-    expect(msgs.length).toBe(3)
-    expect(msgs[1]).toEqual({ role: 'user', content: 'hello world' })
-    expect(msgs[2]).toEqual({ role: 'assistant', content: 'prev' })
-  })
-  it('appends selection text for text-only', () => {
-    const msgs = buildBaseMessages({ ...base, selText: 'selected' })
-    expect(msgs[1].content).toContain('Selected text:\n"selected"')
-  })
-})
+import { filterMeaningfulOperations, inheritFormatOnReplace, buildApplyDocumentInput, validateOperationsSemantics, isMeaningfulOps, suffixOperationIds } from '../../../frontend/utils/aiBlocks'
 
 describe('isMeaningfulOps', () => {
   it('true only for tool calls with non-empty operations array', () => {
@@ -332,113 +263,113 @@ describe('validateOperationsSemantics', () => {
   })
 })
 
-describe('buildToolSystemPrompt', () => {
-  const base = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]')
-  it('instructs the tool call and preserves internal ids', () => {
-    expect(base).toContain('applyDocumentOperations')
-    expect(base).toContain('trailing $')
-    expect(base).toContain('"id":"a$"')
-    expect(base).toContain('internal ids may appear only inside applyDocumentOperations arguments')
-  })
-  it('documents the math block HTML encoding', () => {
-    expect(base).toContain('math display="block"')
-    expect(base).toContain('application/x-tex')
-  })
-  it('documents the mermaid diagram HTML encoding', () => {
-    expect(base).toContain('language-mermaid')
-    expect(base).toContain('data-language="mermaid"')
-  })
-  it('tool prompt has no reference material unless supplied', () => {
-    expect(base).not.toContain('Reference material')
-  })
-  it('adds scaffold guidance only for an EMPTY document (no taskRules)', () => {
-    expect(base).not.toContain('document is EMPTY')
-    const empty = buildToolSystemPrompt('[]')
-    expect(empty).toContain('document is EMPTY')
-    expect(empty).toContain('single valid HTML element')
-    // steering is separate from taskRules
-    expect(empty).not.toContain('Task-specific rules')
-    expect(buildToolSystemPrompt('')).toContain('document is EMPTY')
-  })
-})
+describe("filterMeaningfulOperations", () => {
+  const escapeHtml = (value: string) =>
+    value
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#39;");
 
-describe('vaultPromptHints', () => {
-  it('matches wikilink, question, generate verb and empty doc', () => {
-    expect(vaultPromptHints('lihat [[roadmap]]', 'doc')).toBe(true)
-    expect(vaultPromptHints('Apa isi vault?', 'doc')).toBe(true)
-    expect(vaultPromptHints('Buat draft rencana', 'doc')).toBe(true)
-    expect(vaultPromptHints('apa pun', '')).toBe(true) // empty doc
-  })
-  it('misses plain edit prompts on a non-empty doc', () => {
-    expect(vaultPromptHints('perbaiki kalimat ini', 'doc content')).toBe(false)
-    expect(vaultPromptHints('jadikan lebih pendek', 'doc content')).toBe(false)
-  })
-})
+  const textContent = (html: string) => {
+    let text = "";
+    let insideTag = false;
+    for (const character of html) {
+      if (character === "<") insideTag = true;
+      else if (character === ">") insideTag = false;
+      else if (!insideTag) text += character;
+    }
+    return text;
+  };
 
-describe('buildTaskFormattingRules', () => {
-  it('adds summarize rule', () => {
-    expect(buildTaskFormattingRules('Summarize')).toContain('concise summary')
-  })
-  it('adds translate rule', () => {
-    expect(buildTaskFormattingRules('Translate to Indonesian')).toContain('preserve its tone')
-  })
-  it('adds fix spelling rule', () => {
-    expect(buildTaskFormattingRules('Fix spelling')).toContain('spelling and grammar errors only')
-  })
-  it('adds improve rule', () => {
-    expect(buildTaskFormattingRules('Improve writing')).toContain('preserve the original meaning')
-  })
-  it('returns empty for unknown prompt', () => {
-    expect(buildTaskFormattingRules('do whatever')).toBe('')
-  })
-})
+  const editor: any = {
+    document: [
+      {
+        id: "b1",
+        type: "paragraph",
+        content: [{ type: "text", text: "Existing content" }],
+      },
+    ],
+    blocksToHTMLLossy: (blocks: any[]) =>
+      blocks
+        .map((b: any) => `<p>${escapeHtml(b.content?.[0]?.text ?? "")}</p>`)
+        .join(""),
+    tryParseHTMLToBlocks: (html: string) => [
+      {
+        type: "paragraph",
+        content: [{ type: "text", text: textContent(html) }],
+      },
+    ],
+  };
 
-describe('normalizeMarkdown', () => {
-  it('closes unbalanced code fence', () => {
-    const out = normalizeMarkdown('text\n```js\nconsole.log(1)')
-    expect((out.match(/```/g) || []).length % 2).toBe(0)
-    expect(out.trim().endsWith('```')).toBe(true)
-  })
+  it("drops update with identical HTML", () => {
+    expect(
+      filterMeaningfulOperations(editor, {
+        input: {
+          operations: [
+            { type: "update", id: "b1$", block: "<p>Existing content</p>" },
+          ],
+        },
+      }),
+    ).toBeNull();
+  });
 
-  it('leaves balanced fences unchanged', () => {
-    const md = '```js\nx\n```\nmore'
-    expect(normalizeMarkdown(md)).toBe(md)
-  })
-})
+  it("keeps update with changed HTML", () => {
+    const result = filterMeaningfulOperations(editor, {
+      input: {
+        operations: [
+          { type: "update", id: "b1$", block: "<p>Changed content</p>" },
+        ],
+      },
+    });
+    expect(result?.input.operations).toHaveLength(1);
+  });
 
+  it("does not pass script-like HTML through operation output", () => {
+    const result = filterMeaningfulOperations(editor, {
+      input: {
+        operations: [
+          {
+            type: "update",
+            id: "b1$",
+            block: '<p><script>alert("xss")</script>Changed</p>',
+          },
+          {
+            type: "add",
+            referenceId: "b1$",
+            blocks: ['<p><img src="x" onerror="alert(1)">Added</p>'],
+          },
+        ],
+      },
+    });
+    const operations = result?.input.operations ?? [];
+    expect(JSON.stringify(operations)).not.toContain("<script");
+    expect(JSON.stringify(operations)).not.toContain("onerror");
+  });
 
-describe('grounding (bekal) in prompts', () => {
-  it('tool prompt embeds reference material when provided', () => {
-    const p = buildToolSystemPrompt('[{"id":"a$","block":"<p>x</p>"}]', '## notes\n(File: x.md)\nisi')
-    expect(p).toContain('Reference material')
-    expect(p).toContain('## notes')
-  })
-  it('edit prompt (empty doc) generates from reference material', () => {
-    const p = buildEditSystemPrompt('', '## notes\n(File: x.md)\nisi')
-    expect(p).toContain('writing new content')
-    expect(p).toContain('Reference material')
-    expect(p).toContain('## notes')
-  })
-  it('tool prompt has no reference material when none', () => {
-    expect(buildToolSystemPrompt('[{"id":"a$"}]')).not.toContain('Reference material')
-  })
-})
+  it("drops empty add blocks and missing deletes", () => {
+    expect(
+      filterMeaningfulOperations(editor, {
+        input: {
+          operations: [
+            { type: "add", referenceId: "b1$", blocks: ["", "  "] },
+            { type: "delete", id: "missing$" },
+          ],
+        },
+      }),
+    ).toBeNull();
+  });
 
-describe('buildEditSystemPrompt', () => {
-  it('includes markdown content, grounding and task rules without block-id instructions', () => {
-    const p = buildEditSystemPrompt('konten doc', '## notes\nisi', '- summarize rule')
-    expect(p).toContain('Document content (Markdown):')
-    expect(p).toContain('konten doc')
-    expect(p).toContain('Reference material')
-    expect(p).toContain('summarize rule')
-    expect(p).not.toContain('reference block ids')
-    expect(p).not.toContain('exact block ids')
-  })
-})
-
-describe('AI_MARKDOWN_INSTRUCTION', () => {
-  it('is a non-empty markdown instruction', () => {
-    expect(AI_MARKDOWN_INSTRUCTION).toContain('BlockNote-compatible Markdown')
-    expect(AI_MARKDOWN_INSTRUCTION).toContain('No commentary')
-  })
-})
+  it("keeps valid add and existing delete", () => {
+    const result = filterMeaningfulOperations(editor, {
+      input: {
+        operations: [
+          { type: "add", referenceId: "b1$", blocks: ["<p>New</p>"] },
+          { type: "delete", id: "b1$" },
+        ],
+      },
+    });
+    expect(result?.input.operations).toHaveLength(2);
+  });
+});

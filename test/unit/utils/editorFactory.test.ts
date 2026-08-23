@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { KeepAliveCache } from './editorFactory'
+import { KeepAliveCache } from '../../../frontend/utils/editorFactory'
 
 /** The keep-alive cache is the pure, testable core of tab switching: one
  *  entry per path, created lazily, reused on every later lookup. The BlockNote

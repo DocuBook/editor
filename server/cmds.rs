@@ -6,7 +6,10 @@ pub(crate) fn open_vault(state: &AppState, path: &str) -> Result<String, String>
     let name = v.name();
     let mut w = wiki::WikiIndex::new(v.root());
     w.scan();
-    tracing::info!(event = "vault_opened", git_repository = std::path::Path::new(path).join(".git").exists());
+    tracing::info!(
+        event = "vault_opened",
+        git_repository = std::path::Path::new(path).join(".git").exists()
+    );
     let g = git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);
     *state.wiki.lock().expect("lock") = Some(w);
@@ -74,7 +77,10 @@ pub(crate) fn ai_grounding_context(
     // Read-per-file grounding: keyword terms from the prompt find
     // related .md files (OR match), then read a token-budgeted slice. No
     // wikilink index / semantic search — just grep-for-related + read.
-    let stop = ["the","and","for","with","from","into","about","that","this","what","how","why","when","where","using","make","write","create"];
+    let stop = [
+        "the", "and", "for", "with", "from", "into", "about", "that", "this", "what", "how", "why",
+        "when", "where", "using", "make", "write", "create",
+    ];
     let text = query.replace("[[", " ").replace("]]", " ");
     let terms: Vec<String> = text
         .split(|c: char| !c.is_alphanumeric())
@@ -110,6 +116,9 @@ fn trim_to_tokens(content: &str, max_chars: usize) -> String {
         return content.to_string();
     }
     let mut at = max_chars;
+    while !content.is_char_boundary(at) {
+        at -= 1;
+    }
     if let Some(pos) = content[..at].rfind("\n\n") {
         at = pos;
     } else if let Some(pos) = content[..at].rfind('\n') {
@@ -170,7 +179,10 @@ pub(crate) fn web_vaults(state: &AppState) -> Result<String, String> {
             if !valid_vault_name(&name) {
                 continue;
             }
-            let dir = root.join(&name).canonicalize().unwrap_or_else(|_| root.clone());
+            let dir = root
+                .join(&name)
+                .canonicalize()
+                .unwrap_or_else(|_| root.clone());
             if !dir.starts_with(&root) {
                 continue;
             }
@@ -200,3 +212,20 @@ pub(crate) fn health(state: &AppState) -> String {
 }
 
 // ── HTTP handlers ──
+
+#[cfg(test)]
+mod tests {
+    use super::trim_to_tokens;
+
+    #[test]
+    fn trim_to_tokens_preserves_short_and_structured_content() {
+        assert_eq!(trim_to_tokens("short", 5), "short");
+        assert_eq!(trim_to_tokens("first\n\nsecond", 10), "first...");
+    }
+
+    #[test]
+    fn trim_to_tokens_never_splits_utf8() {
+        assert_eq!(trim_to_tokens("éclair", 1), "...");
+        assert_eq!(trim_to_tokens("éclair", 3), "éc...");
+    }
+}

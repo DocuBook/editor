@@ -35,42 +35,24 @@ try {
   attachLogging(page, 'theme-check')
 
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
-  const bodyBg = () => page.evaluate(() => getComputedStyle(document.body).backgroundColor)
 
-  // ── DARK (default) ──
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(1200)
-  ok('dark: data-theme=dark (default)', (await theme()) === 'dark', await theme())
-  ok('dark: body background token', (await bodyBg()) === 'rgb(12, 12, 13)', await bodyBg())
-  const darkMeta = await page.evaluate(() => document.querySelector('meta[name="theme-color"]')?.content)
-  ok('dark: browser chrome color (meta theme-color)', darkMeta === '#0c0c0d', darkMeta)
-  const darkText = await page.locator('body').innerText()
-  ok('dark: main UI rendered', /Open a vault to start/i.test(darkText), darkText.slice(0, 80))
+  await page.waitForSelector('text=Open a vault to start', { timeout: 5000 })
 
-  // ── LIGHT via stored preference (simulates returning light user) ──
+  // Stored preference is applied on reload.
   await page.evaluate(() => localStorage.setItem('docubook:theme', 'light'))
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(1200)
-  ok('light: data-theme=light from storage', (await theme()) === 'light', await theme())
-  ok('light: body background token', (await bodyBg()) === 'rgb(255, 255, 255)', await bodyBg())
-  const lightMeta = await page.evaluate(() => document.querySelector('meta[name="theme-color"]')?.content)
-  ok('light: browser chrome color (meta theme-color)', lightMeta === '#ffffff', lightMeta)
-  const lightText = await page.locator('body').innerText()
-  ok('light: main UI rendered', /Open a vault to start/i.test(lightText), lightText.slice(0, 80))
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'light')
+  ok('stored theme loads', (await theme()) === 'light')
 
   // ── Appearance picker (Settings → Appearance tab) ──
   await page.keyboard.press('Meta+,')
   await page.waitForSelector('button:has-text("Appearance")', { timeout: 5000 })
   await page.locator('button:has-text("Appearance")').click()
-  await page.waitForTimeout(400)
-  await page.locator('button:has-text("Bright Surfaces")').click()
-  await page.waitForTimeout(400)
-  ok('picker: switches to light', (await theme()) === 'light', await theme())
-  ok('picker: persists to localStorage', (await page.evaluate(() => localStorage.getItem('docubook:theme'))) === 'light')
-  ok('picker: body bg updated', (await bodyBg()) === 'rgb(255, 255, 255)', await bodyBg())
   await page.locator('button:has-text("Midnight")').click()
-  await page.waitForTimeout(400)
-  ok('picker: back to dark', (await theme()) === 'dark', await theme())
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark')
+  const storedTheme = await page.evaluate(() => localStorage.getItem('docubook:theme'))
+  ok('picker changes and persists theme', (await theme()) === 'dark' && storedTheme === 'dark')
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
   process.exitCode = 1

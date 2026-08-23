@@ -4,14 +4,14 @@ on:
   push:
     branches: [master]
     tags:
-      - 'v*'
+      - "v*"
   pull_request:
     branches: [master]
   workflow_dispatch:
 
 env:
   CARGO_TERM_COLORS: always
-  NODE_VERSION: '22'
+  NODE_VERSION: "22"
 
 permissions:
   contents: read
@@ -27,13 +27,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Oxlint
-        run: npx oxlint frontend/
+        run: npx oxlint frontend/ test/unit/ test/__fixtures__/
       - name: TypeScript type check
         run: npx tsc -b
       - name: ACL guard (every Tauri command has an allow entry)
         run: node test/check-acl.mjs
       - name: Frontend tests
-        run: npx vitest run
+        run: npm test
       - name: Check version consistency (manifests + locks + changelog section)
         run: |
           npm_v=$(node -p "require('./package.json').version")
@@ -173,7 +173,6 @@ jobs:
           cargo install cargo-audit --locked
           cd src-tauri && cargo audit
           cd ../server && cargo audit
-
 
   build:
     # Run on PRs too — build is a required branch-protection check, and this

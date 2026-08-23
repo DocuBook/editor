@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { installIteratorFilterPolyfill } from './iteratorPolyfill'
+import { installIteratorFilterPolyfill } from '../../../frontend/utils/iteratorPolyfill'
 
 // %IteratorPrototype% — shared by MapIterator/ArrayIterator/etc.
 const IteratorProto = Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())) as {

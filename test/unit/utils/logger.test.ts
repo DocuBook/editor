@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { logger } from './logger'
+import { logger } from '../../../frontend/utils/logger'
 
 describe('frontend logger', () => {
   beforeEach(() => vi.restoreAllMocks())

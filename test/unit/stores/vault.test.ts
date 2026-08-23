@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useVaultStore } from './vault'
-import { useEditorStore } from './editor'
+import { useVaultStore } from '../../../frontend/stores/vault'
+import { useEditorStore } from '../../../frontend/stores/editor'
 
-vi.mock('../lib/ipc', () => ({
+vi.mock('../../../frontend/lib/ipc', () => ({
   invoke: vi.fn(),
   openDir: vi.fn(),
 }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
-import { invoke } from '../lib/ipc'
+import { invoke } from '../../../frontend/lib/ipc'
 
 /** Regression: after a file CRUD, loadTree must flatten from the FRESH
  *  childrenCache — a same-call flatten reads the pre-update cache and hides

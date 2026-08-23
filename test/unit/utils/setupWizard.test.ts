@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSetupPayload, validateSetupInput } from './setupWizard'
+import { buildSetupPayload, validateSetupInput } from '../../../frontend/utils/setupWizard'
 
 const valid = { email: 'a@b.c', password: 'password1', confirm: 'password1', token: '', tokenRequired: false }
 

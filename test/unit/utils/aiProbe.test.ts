@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { resolveProbeModel, resolveRequestModel, isTextOnly, autoProbe } from './aiProbe'
-import { CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
+import { resolveProbeModel, resolveRequestModel, isTextOnly, autoProbe } from '../../../frontend/utils/aiProbe'
+import { CUSTOM_PROVIDER_ID } from '../../../frontend/stores/aiSettings'
 
 describe('resolveProbeModel', () => {
   it('env model wins for custom provider', () => {
