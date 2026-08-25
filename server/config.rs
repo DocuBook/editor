@@ -223,9 +223,13 @@ impl AuthState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    static NEXT_TMP: AtomicUsize = AtomicUsize::new(0);
 
     fn tmp() -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("db-config-test-{}", std::process::id()));
+        let id = NEXT_TMP.fetch_add(1, Ordering::Relaxed);
+        let d = std::env::temp_dir().join(format!("db-config-test-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&d).unwrap();
         d
     }
