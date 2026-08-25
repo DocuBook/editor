@@ -51,6 +51,8 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
       if (!["Enter", "Tab"].includes(event.key) || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || (event.key === "Enter" && event.shiftKey)) return
       const view = (editor as any).prosemirrorView
       if (!view) return
+      const target = event.target
+      if (!(target instanceof Node && view.dom.contains(target)) && !view.hasFocus()) return
       const { $from, $to, empty } = view.state.selection
       if (event.key === 'Enter' && $from.node().type.name === 'math') {
         event.preventDefault()
@@ -60,6 +62,9 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
         return
       }
       if ($from.parent.type.name !== 'diagram' || $to.parent !== $from.parent) return
+      const block = editor.getTextCursorPosition().block
+      const popupOpenId = editor.getExtension(SourceBlockWithPreviewExtension)?.store.state.popupOpen
+      if (popupOpenId !== block.id) return
       const source = $from.parent.textBetween(0, $from.parent.content.size, '\n', '\n')
       event.preventDefault()
       event.stopPropagation()
