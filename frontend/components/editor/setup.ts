@@ -1,6 +1,6 @@
 /** BlockNote schema (heading 1-5 + math/diagram blocks) and the [[wikilink]]
  *  ProseMirror decoration/click handling — shared, single-instance setup. */
-import { createElement, useSyncExternalStore } from 'react'
+import { createElement, useRef, useSyncExternalStore } from 'react'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
 import { createReactBlockSpec } from '@blocknote/react'
 import { createReactMathBlockSpec, createReactInlineMathSpec } from '@blocknote/math-block'
@@ -18,6 +18,27 @@ export const setDiagramRenderingPaused = (paused: boolean) => {
   _diagramRenderingListeners.forEach((listener) => listener())
 }
 
+/** Keep existing diagram preview mounted while AI updates its source. New diagrams
+ * without a previous preview use the source view until rendering is enabled. */
+function StableDiagramPreview({ paused, props }: { paused: boolean; props: any }) {
+  const stableProps = useRef<any | null>(null)
+
+  if (!paused) stableProps.current = props
+
+  if (paused && !stableProps.current) {
+    return createElement('pre', null, createElement('code', {
+      className: 'language-mermaid',
+      'data-language': 'mermaid',
+      ref: props.contentRef,
+    }))
+  }
+
+  const previewProps = paused
+    ? { ...stableProps.current, contentRef: props.contentRef }
+    : props
+  return createElement(DiagramBlockPreviewWithPopup, previewProps)
+}
+
 const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
   meta: { code: true, defining: true, isolating: false, highlight: () => 'mermaid', hasPreview: true, hardBreakShortcut: 'enter' },
   parse: parseDiagramCodeElement,
@@ -28,9 +49,7 @@ const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
       (listener) => { _diagramRenderingListeners.add(listener); return () => _diagramRenderingListeners.delete(listener) },
       () => _diagramRenderingPaused,
     )
-    return paused
-      ? createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef }))
-      : createElement(DiagramBlockPreviewWithPopup, props)
+    return createElement(StableDiagramPreview, { paused, props })
   },
   toExternalHTML: (props) => createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef })),
 })
