@@ -92,6 +92,7 @@ impl Vault {
     /// True if the subtree at `dir` contains at least one renderable file
     /// (recursive, skipping hidden/system dirs). Drives folder visibility.
     /// Uses the cached map — O(1) after build_renderable_cache().
+    #[allow(dead_code)]
     fn dir_has_renderable(&self, dir: &Path) -> bool {
         *self.renderable.borrow().get(dir).unwrap_or(&false)
     }
@@ -144,7 +145,6 @@ impl Vault {
                 // Show markdown (editable) + images (previewable) in the tree;
                 // folders with nothing renderable are hidden.
                 if ft == "0" && !Self::is_renderable(&name) { continue; }
-                if ft == "1" && !self.dir_has_renderable(&e.path()) { continue; }
                 let info = FileInfo { path: rel, name, file_type: ft.to_string() };
                 if ft == "1" { dirs.push(info) } else { files.push(info) }
             }
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_hides_folders_without_md_recursively() {
+    fn tree_shows_empty_folders_and_renderable_files() {
         let dir = std::env::temp_dir().join("vault-test-hide-nomd");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("assets")).unwrap();
@@ -409,15 +409,15 @@ mod tests {
 
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
         let tree = v.tree("");
-        // docs has a .md (recursively) → visible; assets has an image → visible
-        // too (images are previewable); no-md.txt alone is not renderable.
+        // All non-ignored folders stay visible, including folders with no
+        // renderable files, matching normal file-tree behavior.
         assert_eq!(tree.len(), 2);
         assert_eq!(tree[0].name, "assets");
         assert_eq!(tree[1].name, "docs");
-        // a subtree with only non-renderable files stays hidden even nested
         let docs = v.tree("docs");
-        assert_eq!(docs.len(), 1);
-        assert_eq!(docs[0].name, "readme.md");
+        assert_eq!(docs.len(), 2);
+        assert_eq!(docs[0].name, "inner");
+        assert_eq!(docs[1].name, "readme.md");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -429,9 +429,9 @@ mod tests {
         std::fs::write(dir.join("a.md"), "").unwrap();
 
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
-        // empty/ has no renderable → hidden initially
-        assert_eq!(v.tree("").len(), 1);
-        assert_eq!(v.tree("")[0].name, "a.md");
+        // Empty folders remain visible before and after file creation.
+        assert_eq!(v.tree("").len(), 2);
+        assert_eq!(v.tree("")[0].name, "empty");
 
         // create a renderable file inside empty/ → cache must refresh
         v.create_file("empty/note.md").unwrap();

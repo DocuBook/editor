@@ -121,6 +121,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [newName, setNewName] = useState('')
   const newInputRef = useRef<HTMLInputElement>(null)
+  const createBusyRef = useRef(false)
   const plusMenuRef = useRef<HTMLSpanElement>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
 
@@ -136,7 +137,9 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   useClickOutside(ctxMenuRef, closeContextMenu)
 
   const handleCreate = async () => {
-    if (!newName.trim() || !isOpen || !creating) return
+    if (!newName.trim() || !isOpen || loading || !creating || createBusyRef.current) return
+    createBusyRef.current = true
+    const targetVaultPath = vaultPath
     try {
       let name = newName.trim()
       if (creating === 'file' && !/\.\w{1,10}$/i.test(name)) name = name + '.md'
@@ -147,12 +150,14 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
         const p = await invoke<string>('create_file', { path: fullPath })
         openFile(p, name)
       }
-      loadTree()
+      if (useVaultStore.getState().vaultPath !== targetVaultPath || !useVaultStore.getState().isOpen) return
+      await loadTree()
       setNewName('')
       setCreating(null)
     } catch(e) { console.error(e); toast.error('Failed to create') }
+    finally { createBusyRef.current = false }
   }
-  const { name, isOpen, visibleItems, loading, openVault, closeVault, toggleFolder, loadTree } = useVaultStore()
+  const { name, isOpen, vaultPath, visibleItems, loading, openVault, closeVault, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
   // Context menu
@@ -162,6 +167,11 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   const [renaming, setRenaming] = useState<{path:string;name:string}|null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
   const [currentFolder, setCurrentFolder] = useState('')
+  useEffect(() => {
+    setCurrentFolder('')
+    setCreating(null)
+    setNewName('')
+  }, [vaultPath, isOpen])
   /** Server-side trash (web only — native uses the system Trash/Finder). */
   const [trashOpen, setTrashOpen] = useState(false)
   const [trashItems, setTrashItems] = useState<{name:string;original:string;deleted_at:number}[]>([])
@@ -176,10 +186,10 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   }, [])
   const toggleTrash = async () => { if (trashOpen) { setTrashOpen(false); return } await loadTrash(); setTrashOpen(true) }
   const restoreItem = async (item: {name:string;original:string;deleted_at:number}) => {
-    try { await invoke('restore_file', { trashName: item.name }); toast.success('Restored ' + item.original); await loadTrash(); loadTree() } catch(e) { console.error(e); toast.error('Restore failed') }
+    try { await invoke('restore_file', { trashName: item.name }); toast.success('Restored ' + item.original); await loadTrash(); await loadTree() } catch(e) { console.error(e); toast.error('Restore failed') }
   }
   const emptyTrash = async () => {
-    try { await invoke('empty_trash'); setTrashItems([]); loadTree() } catch(e) { console.error(e); toast.error('Failed to empty trash') }
+    try { await invoke('empty_trash'); setTrashItems([]); await loadTree() } catch(e) { console.error(e); toast.error('Failed to empty trash') }
   }
 
   useEffect(() => {
@@ -210,12 +220,12 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
     const newFolder = (mod && e.shiftKey && e.altKey && e.code === 'KeyF') || (mod && !e.shiftKey && e.altKey && e.code === 'KeyN')
     if (newFile) {
       e.preventDefault()
-      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
+      if (!isOpen || loading) { toast.error('Open a vault first — press ⌘O'); return }
       setCreating('file'); setNewName('')
     }
     if (newFolder) {
       e.preventDefault()
-      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
+      if (!isOpen || loading) { toast.error('Open a vault first — press ⌘O'); return }
       setCreating('folder'); setNewName('')
     }
   })
@@ -250,7 +260,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
       </div>
 
       {isOpen ? (
-        <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5" onClick={e => { if (e.target === e.currentTarget) setCurrentFolder('') }}>
+        <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5">
             {!trashOpen && loading && <div className="text-zinc-500 text-xs p-2">Loading...</div>}
             {!trashOpen && !loading && visibleItems.length === 0 && !creating && <div className="text-zinc-500 italic text-xs p-2">Empty vault</div>}
             {!trashOpen && renaming && (
@@ -265,7 +275,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
                     try {
                       await invoke('rename_file', { from: renaming.path, to: newPath })
                       useEditorStore.getState().renameTab(renaming.path, newPath)
-                      loadTree()
+                      await loadTree()
                     } catch(err) { console.error(err); toast.error('Failed to rename') }
                     setRenaming(null)
                   }
@@ -333,18 +343,18 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
           <span className="tip">Open project <kbd><Command size={11} />O</kbd></span>
         </span>
         <span className="tip-wrap relative" ref={plusMenuRef}>
-            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} data-plus-btn disabled={!isOpen} className="cursor-pointer p-3 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} data-plus-btn disabled={!isOpen || loading} className="cursor-pointer p-3 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
               <Plus size={18} />
             </button>
             <span className="tip">{isOpen ? 'Create a file/folder' : 'Open a vault to create files'}</span>
           {showPlusMenu && (
             <div data-plus-popup className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-              <button onClick={() => { setShowPlusMenu(false); setCreating('file'); setNewName('') }}
+              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
                 className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                 <FileText size={14} /> New File
                 <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
               </button>
-              <button onClick={() => { setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
+              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
                 className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                 <Folder size={14} /> New Folder
                 <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
@@ -377,7 +387,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
             className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Rename</button>
           <button onClick={async () => {
               closeContextMenu()
-              try { await invoke('delete_file', { path: ctxItem.path }); loadTree(); loadTrash(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
+              try { await invoke('delete_file', { path: ctxItem.path }); await loadTree(); await loadTrash(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
             }}
             className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Delete</button>
         </div>
