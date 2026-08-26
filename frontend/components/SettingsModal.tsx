@@ -14,6 +14,7 @@ import { fetchProviderModels, type DiscoveredModel } from '../utils/modelDiscove
 /** Synthetic provider for user-configured OpenAI-compatible endpoints — NOT in the
  *  manual provider list. Base URL + key are bound server-side via set_custom_endpoint. */
 const CUSTOM_PROVIDER: ProviderInfo = { id: CUSTOM_PROVIDER_ID, name: 'OpenAI Compatible (Custom)', api: '' }
+const providers = [CUSTOM_PROVIDER, ...PROVIDERS]
 
 /** Badge for providers currently on the text-only path (no tool-call
  *  streaming). Source of truth is the measured probe (aiSettings.probeTools):
@@ -39,9 +40,13 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   /** API key is entered here but NEVER read back from the backend —
    *  the key stays in the keychain (SEC-5: keys are backend-only). */
   const [keyInput, setKeyInput] = useState('')
+  const keyInputRef = useRef(keyInput)
+  keyInputRef.current = keyInput
 
   /** Custom base URL for the OpenAI-compatible provider (persisted in the store). */
   const [baseUrlInput, setBaseUrlInput] = useState('')
+  const baseUrlInputRef = useRef(baseUrlInput)
+  baseUrlInputRef.current = baseUrlInput
 
   /** Custom provider config from the backend — source "env" means Docker
    *  overrides via DB_OPENAI_COMPAT_* → the UI renders read-only. */
@@ -60,6 +65,12 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     return () => { cancelled = true }
   }, [])
   const envCustom = customCfg?.source === 'env'
+  const envCustomRef = useRef(envCustom)
+  envCustomRef.current = envCustom
+  const customModelRef = useRef(customCfg?.model)
+  customModelRef.current = customCfg?.model
+  const probeToolsRef = useRef(probeTools)
+  probeToolsRef.current = probeTools
   const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 ml-2">from env</span>
 
   /** Auto-probe when the selected model changes and has no stored probe yet.
@@ -73,20 +84,19 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     if (!probeModel) return
     // Skip env-controlled custom: the probe must run against the env key/baseUrl
     // which the backend resolves — invoke with empty UI values lets it do that.
-    void autoProbe(provider, probeModel, probeTools, useAiSettings.getState().setProbeTools, async () => {
+    void autoProbe(provider, probeModel, probeToolsRef.current, useAiSettings.getState().setProbeTools, async () => {
       const result = await invoke<string>('test_connection', {
         provider,
         model: probeModel,
-        baseUrl: provider === CUSTOM_PROVIDER_ID ? (envCustom ? '' : baseUrlInput.trim()) : p?.api || '',
-        apiKey: envCustom ? '' : keyInput,
+        baseUrl: provider === CUSTOM_PROVIDER_ID ? (envCustomRef.current ? '' : baseUrlInputRef.current.trim()) : p?.api || '',
+        apiKey: envCustomRef.current ? '' : keyInputRef.current,
       })
       try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') return { tools: parsed.tools } } catch {}
       return undefined
     })
-  }, [model, provider])
+  }, [model, provider, envCustom, customCfg?.model])
 
   /** Provider catalog — small manual list (no more generated 2.17 MB file). */
-  const providers = [CUSTOM_PROVIDER, ...PROVIDERS]
 
   /** Runtime model discovery — fetched from the provider's /models via the
    *  backend (keyed server-side). Loading/error states drive the dropdown. */
@@ -110,7 +120,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       .catch(e => { if (!cancelled) setModelsError(String(e)) })
       .finally(() => { if (!cancelled) setModelsLoading(false) })
     return () => { cancelled = true }
-  }, [provider])
+  }, [provider, setModel])
 
   const [providerSearch, setProviderSearch] = useState('')
   const [showProviderDropdown, setShowProviderDropdown] = useState(false)
@@ -152,7 +162,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
         ids.forEach(id => addSavedProvider(id))
       } catch {}
     })()
-  }, [])
+  }, [addSavedProvider])
 
   /** Scroll highlighted provider into view on keyboard navigation */
   useEffect(() => {

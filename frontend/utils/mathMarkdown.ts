@@ -55,7 +55,7 @@ export function mathDollarToMathML(markdown: string): string {
   );
 
   out = out.replace(
-    /\u0000MATH\u0000(\d+)\u0000MATH\u0000/g,
+    new RegExp(`${MATH}(\\d+)${MATH}`, 'g'),
     (_m, index) => protectedMath[Number(index)] ?? _m,
   );
   return out.replaceAll(ESC, "\\$");

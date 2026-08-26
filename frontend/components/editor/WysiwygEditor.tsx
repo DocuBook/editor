@@ -241,6 +241,8 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
   const markdownRef = useRef(markdown)
   markdownRef.current = markdown
   const dirtyRef = useRef(false)
+  const loadedRef = useRef(cached.loaded)
+  const loadedMarkdownRef = useRef(cached.loadedMarkdown)
   const initialLoadRef = useRef(true)
 
   /** Serialize the editor to markdown for persistence: normalize list markers
@@ -269,7 +271,7 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
       useEditorStore.getState().setUndoRedoState()
     })
     return () => sub()
-  }, [editor])
+  }, [editor, filePath])
 
   useEffect(() => {
     setBlockEditor(editor)
@@ -299,7 +301,8 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
         // The instance now holds `md` — sync the load baseline so a later
         // remount (tab switch back) sees loadedMarkdown === markdown and skips
         // re-parsing, preserving undo history.
-        cached.loadedMarkdown = md
+        Object.assign(cached, { loadedMarkdown: md })
+        loadedMarkdownRef.current = md
         onSyncRef.current(md)
       }
     }
@@ -313,9 +316,11 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
    *  flushed on exit), so the instance is not re-parsed — undo history and
    *  cursor survive. */
   useEffect(() => {
-    if (cached.loaded && cached.loadedMarkdown === markdown) return
+    if (loadedRef.current && loadedMarkdownRef.current === markdown) return
     cached.loaded = true
+    loadedRef.current = true
     cached.loadedMarkdown = markdown
+    loadedMarkdownRef.current = markdown
     /** Re-parse must not mark the tab dirty: gate onChange until the load
      *  transaction settles (same guard as the initial mount). */
     initialLoadRef.current = true
