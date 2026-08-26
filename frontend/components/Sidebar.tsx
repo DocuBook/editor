@@ -4,7 +4,6 @@ import { useEditorStore } from '../stores/editor'
 import { invoke, isTauri } from '../lib/ipc'
 import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, PanelLeftClose, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
-import SettingsModal from './SettingsModal'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS } from '../utils/fileKind'
@@ -114,9 +113,8 @@ function BacklinksPanel() {
   )
 }
 
-export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+export default function Sidebar({ onToggleSidebar, onOpenSettings }: { onToggleSidebar: () => void; onOpenSettings: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
   const [creating, setCreating] = useState<'file'|'folder'|null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [newName, setNewName] = useState('')
@@ -157,7 +155,7 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
     } catch(e) { console.error(e); toast.error('Failed to create') }
     finally { createBusyRef.current = false }
   }
-  const { name, isOpen, vaultPath, visibleItems, loading, openVault, closeVault, toggleFolder, loadTree } = useVaultStore()
+  const { name, isOpen, vaultPath, visibleItems, loading, closeVault, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
   // Context menu
@@ -203,14 +201,12 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
       if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
       setSearchOpen(true)
     }
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === 'o') { e.preventDefault(); openVault() }
     if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === 'p') {
       e.preventDefault()
       if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
       setSearchOpen(true)
     }
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === ',') { e.preventDefault(); setSettingsOpen(true) }
-    if (e.key === 'Escape' && settingsOpen) { setSettingsOpen(false) }
+    if (e.key === 'Escape') setShowPlusMenu(false)
     /** New file/folder. Canonical (all platforms): ⌘⇧F / ⌘⌥⇧F — browsers
      *  reserve ⌘N / ⌘⇧N / ⌘⌥N (new window / private window) and never deliver
      *  them to the page, so web only ever sees the canonical mapping. Native
@@ -243,19 +239,44 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
   return (
     <aside className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-      <div className="flex items-center justify-between border-b border-border-subtle px-2 py-3">
-        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{isOpen ? name : 'No vault'}</span>
+      <div className="relative flex items-center justify-between border-b border-border-subtle px-2 py-3">
+        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{name}</span>
         <span className="flex items-center gap-1 shrink-0 ml-2">
+          <span className="tip-wrap tip-bar relative" ref={plusMenuRef}>
+            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className="cursor-pointer p-1 rounded hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+              <Plus size={14} />
+            </button>
+            <span className="tip">Create a file/folder</span>
+            {showPlusMenu && (
+              <div data-plus-popup className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
+                  className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                  <FileText size={14} /> New File
+                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
+                </button>
+                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
+                  className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                  <Folder size={14} /> New Folder
+                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
+                </button>
+              </div>
+            )}
+          </span>
+          <span className="tip-wrap tip-bar">
+            <button onClick={(e) => { setSearchOpen(true); e.currentTarget.blur() }} aria-label="Search project files" className="cursor-pointer p-1 rounded hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors">
+              <Search size={14} />
+            </button>
+            <span className="tip">Search project files <kbd><Command size={11} />F</kbd></span>
+          </span>
           <span className="tip-wrap tip-bar">
             <button onClick={onToggleSidebar} aria-label="Collapse sidebar" className="hover:text-foreground-secondary transition-colors p-1 cursor-pointer bg-transparent border-none rounded flex text-foreground-subtle">
               <PanelLeftClose size={14} />
             </button>
             <span className="tip">Collapse sidebar <kbd><Command size={11} />J</kbd></span>
           </span>
-          {isOpen && (
-            <button onClick={closeVault} className="text-zinc-600 hover:text-foreground-secondary text-xs p-1 cursor-pointer bg-transparent border-none rounded">[x]</button>
-          )}
+          <button onClick={closeVault} aria-label="Close vault" className="text-zinc-600 hover:text-foreground-secondary p-1 cursor-pointer bg-transparent border-none rounded flex">
+            <X size={14} />
+          </button>
         </span>
       </div>
 
@@ -335,48 +356,14 @@ export default function Sidebar({ onToggleSidebar }: { onToggleSidebar: () => vo
           {trashItems.length > 0 && <span className="ml-auto text-[10px] text-zinc-600">{trashItems.length}</span>}
         </button>
       )}
-      <div className="flex items-center justify-evenly border-t border-border-subtle px-1 py-3">
-        <span className="tip-wrap">
-          <button onClick={(e) => { openVault(); e.currentTarget.blur() }} className="cursor-pointer p-3 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors">
-            <Folder size={18} />
-          </button>
-          <span className="tip">Open project <kbd><Command size={11} />O</kbd></span>
-        </span>
-        <span className="tip-wrap relative" ref={plusMenuRef}>
-            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} data-plus-btn disabled={!isOpen || loading} className="cursor-pointer p-3 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
-              <Plus size={18} />
-            </button>
-            <span className="tip">{isOpen ? 'Create a file/folder' : 'Open a vault to create files'}</span>
-          {showPlusMenu && (
-            <div data-plus-popup className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
-                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
-                <FileText size={14} /> New File
-                <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
-              </button>
-              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
-                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
-                <Folder size={14} /> New Folder
-                <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
-              </button>
-            </div>
-          )}
-        </span>
-        <span className="tip-wrap">
-          <button onClick={(e) => { setSearchOpen(true); e.currentTarget.blur() }} disabled={!isOpen} className="cursor-pointer p-3 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent">
-            <Search size={18} />
-          </button>
-          <span className="tip">{isOpen ? <>Search project files <kbd><Command size={11} />F</kbd></> : 'Open a vault to search files'}</span>
-        </span>
-        <span className="tip-wrap">
-          <button onClick={(e) => { setSettingsOpen(true); e.currentTarget.blur() }} className="cursor-pointer p-3 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors">
-            <Settings size={18} />
-          </button>
-          <span className="tip">Settings <kbd><Command size={11} />,</kbd></span>
-        </span>
-      </div>
-      <div className="border-t border-border-subtle max-h-32 overflow-y-auto text-xs">
+      <div className="max-h-32 overflow-y-auto text-xs">
         <BacklinksPanel />
+      </div>
+      <div className="flex items-center justify-start px-2 py-2 shrink-0">
+        <button onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" className="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors text-left">
+          <Settings size={16} />
+          <span className="text-[13px]">Settings</span>
+        </button>
       </div>
       {ctxItem && (
         <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.3)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
