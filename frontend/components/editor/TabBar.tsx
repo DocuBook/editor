@@ -66,7 +66,7 @@ export function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
       const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
       /** Sanitize the filename for use in a git commit message: strip control
        *  characters, newlines, and trailing dots (Windows-invalid). */
-      const msg = `Auto-commit: ${rawName.replace(/[\x00-\x1f\x7f]/g, '').replace(/\.+$/g, '').trim() || 'changes'}`
+      const msg = `Auto-commit: ${Array.from(rawName).filter(char => { const code = char.charCodeAt(0); return code > 0x1f && code !== 0x7f }).join('').replace(/\.+$/g, '').trim() || 'changes'}`
       const res = await invoke<string>('git_push', { message: msg })
       const d = JSON.parse(res)
       if (d.error && d.error !== 'Nothing to push') { setPubMsg(d.error); setPubState('error'); setStaged(false) }

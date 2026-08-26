@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { createRoot } from 'react-dom/client'
 import { invoke } from '../lib/ipc'
 import { Folder, Loader, X } from 'lucide-react'
 
@@ -10,18 +9,7 @@ interface ServerVault { name: string; path: string }
  *  DATA_DIR/vaults: click to open, type a name to create, or use the vaults
  *  folder as parent (create/clone flows). Returns the chosen path or null on
  *  cancel — same contract as the native dialog, so callers are unchanged. */
-export function pickServerVault(): Promise<string | null> {
-  return new Promise(resolve => {
-    const host = document.createElement('div')
-    host.style.cssText = 'position:fixed;inset:0;z-index:9999'
-    document.body.appendChild(host)
-    const root = createRoot(host)
-    const close = (path: string | null) => { root.unmount(); host.remove(); resolve(path) }
-    root.render(<VaultPicker onPick={close} />)
-  })
-}
-
-function VaultPicker({ onPick }: { onPick: (path: string | null) => void }) {
+export default function VaultPicker({ onPick }: { onPick: (path: string | null) => void }) {
   const [vaults, setVaults] = useState<ServerVault[]>([])
   const [rootPath, setRootPath] = useState('')
   const [loading, setLoading] = useState(true)
@@ -43,7 +31,7 @@ function VaultPicker({ onPick }: { onPick: (path: string | null) => void }) {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onPick(null) }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [onPick])
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault()

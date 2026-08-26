@@ -143,7 +143,7 @@ export async function openDir(opts?: { title?: string; defaultPath?: string }): 
   if (opts?.title !== 'Open Vault') {
     return (await post('web_vault_root', {}) as string).trim() || null
   }
-  const { pickServerVault } = await import('../components/VaultPicker')
+  const { pickServerVault } = await import('../utils/serverVaultPicker')
   return pickServerVault()
 }
 

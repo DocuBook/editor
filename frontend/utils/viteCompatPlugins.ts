@@ -51,7 +51,7 @@ export function tiptapViewProxyCompat(): Plugin {
       if (!pattern.test(code)) return
       return code.replace(
         pattern,
-        `if (key in obj) {\n        return Reflect.get(obj, key);\n      }\n      if (key === \"domAtPos\") {\n        return () => ({ node: { scrollIntoView() {} }, text: undefined });\n      }\n      throw new Error(`,
+        `if (key in obj) {\n        return Reflect.get(obj, key);\n      }\n      if (key === "domAtPos") {\n        return () => ({ node: { scrollIntoView() {} }, text: undefined });\n      }\n      throw new Error(`,
       )
     },
   }
