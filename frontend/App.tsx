@@ -4,11 +4,13 @@ import './index.css'
 import Sidebar from './components/Sidebar'
 import Editor from './components/Editor'
 import StatusBar from './components/StatusBar'
+import SettingsModal from './components/SettingsModal'
 import { Toaster, toast } from 'sonner'
 import { PanelLeftOpen, Command } from 'lucide-react'
 
 import { useGitPolling } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
+import { useVaultStore } from './stores/vault'
 import { listen, invoke } from './lib/ipc'
 import { useAuth, initAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
@@ -20,7 +22,10 @@ initAuthGuard()
 /** Root application component with keyboard shortcuts. */
 export default function App() {
   const { status } = useAuth()
+  const isVaultOpen = useVaultStore(s => s.isOpen)
+  const openVault = useVaultStore(s => s.openVault)
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const toggleSidebar = () => setSidebarOpen(o => !o)
   useEffect(() => { useAuth.getState().init() }, [])
 
@@ -45,11 +50,13 @@ export default function App() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'j') { e.preventDefault(); setSidebarOpen(o => !o) }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'j' && isVaultOpen) { e.preventDefault(); setSidebarOpen(o => !o) }
+      if ((e.metaKey || e.ctrlKey) && e.key === 'o') { e.preventDefault(); openVault() }
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true) }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [])
+  }, [isVaultOpen, openVault])
 
   /** Suppress default browser context menu (Reload, Back, etc.) */
   /** Only in production — dev mode needs right-click for Inspect Element */
@@ -72,8 +79,8 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
-        {sidebarOpen ? (
-          <Sidebar onToggleSidebar={toggleSidebar} />
+        {isVaultOpen && (sidebarOpen ? (
+          <Sidebar onToggleSidebar={toggleSidebar} onOpenSettings={() => setSettingsOpen(true)} />
         ) : (
           <div className="shrink-0 flex flex-col items-center border-r border-border-subtle w-[34px] pt-1.5">
             <span className="tip-wrap tip-strip">
@@ -83,10 +90,11 @@ export default function App() {
               <span className="tip">Expand sidebar <kbd><Command size={11} />J</kbd></span>
             </span>
           </div>
-        )}
+        ))}
         <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor /></main>
       </div>
       <StatusBar />
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <Toaster position="bottom-right" theme="dark" richColors />
     </div>
   )

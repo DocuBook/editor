@@ -79,12 +79,12 @@ export default function Editor() {
       )
     }
 
+    if (!vaultOpen) return <WelcomeScreen />
+
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TabBar onAiToggle={() => {}} />
-        {vaultOpen
-          ? <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
-          : <WelcomeScreen />}
+        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
       </div>
     )
   }
