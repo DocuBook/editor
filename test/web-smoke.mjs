@@ -55,9 +55,9 @@ try {
   await page.fill('input[placeholder="Password (min 8 chars)"]', ADMIN.password)
   await page.fill('input[placeholder="Confirm password"]', ADMIN.password)
   await page.locator(click('Create admin account')).click()
-  await page.waitForFunction(() => /Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
+  await page.waitForFunction(() => /Open Folder|Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
   const afterSetup = await page.locator('body').innerText()
-  ok('setup wizard: admin created', /Open a vault|NO VAULT|Open project/i.test(afterSetup), afterSetup.slice(0, 80))
+  ok('setup wizard: admin created', /Open Folder|Open a vault|NO VAULT|Open project/i.test(afterSetup), afterSetup.slice(0, 80))
 
   // ── Logout → Login ──
   await page.keyboard.press('Meta+,')
@@ -74,9 +74,9 @@ try {
   await page.waitForSelector(click('Sign in'), { timeout: 5000 })
   await page.locator(click('Sign in')).click()
   // Argon2id login can take >1s — wait for the main UI, not a fixed timeout.
-  await page.waitForFunction(() => /Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
+  await page.waitForFunction(() => /Open Folder|Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
   const afterLogin = await page.locator('body').innerText()
-  ok('login: main UI visible', /Open a vault|Open project/i.test(afterLogin), afterLogin.slice(0, 80))
+  ok('login: main UI visible', /Open Folder|Open a vault|Open project/i.test(afterLogin), afterLogin.slice(0, 80))
 
   // ── Restart: admin config AND session must persist (sessions.json on /data) ──
   server.bin.kill()
@@ -90,7 +90,7 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1500)
   const afterReload = await page.locator('body').innerText()
-  ok('restart: session persists — still logged in (no login page)', /Open a vault|Open project/i.test(afterReload) && !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
+  ok('restart: session persists — still logged in (no login page)', /Open Folder|Open a vault|Open project/i.test(afterReload) && !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
   process.exitCode = 1

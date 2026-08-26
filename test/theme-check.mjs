@@ -37,7 +37,7 @@ try {
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('text=Open a vault to start', { timeout: 5000 })
+  await page.waitForSelector('text=Open Folder', { timeout: 5000 })
 
   // Stored preference is applied on reload.
   await page.evaluate(() => localStorage.setItem('docubook:theme', 'light'))
