@@ -7,11 +7,17 @@ import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 
+interface BranchEntry {
+  name: string
+  /** true = remote-tracking ref (`origin/dev`) — switching creates a local tracking branch. */
+  remote: boolean
+}
+
 /** Bottom status bar: keyboard shortcuts + git branch state.
  *  The branch chip shows the local↔remote relation — ↑ahead / ↓behind, or a
  *  "(no upstream)" hint for a branch that was never pushed — and opens a
- *  local-branch switcher. After switching, open tabs are reloaded from disk
- *  (dirty tabs are kept untouched). */
+ *  branch switcher listing LOCAL and REMOTE branches from the actual refs.
+ *  After switching, open tabs are reloaded from disk (dirty tabs kept). */
 export default function StatusBar() {
   const branch = useGitStatus(s => s.branch)
   const upstream = useGitStatus(s => s.upstream)
@@ -19,7 +25,7 @@ export default function StatusBar() {
   const behind = useGitStatus(s => s.behind)
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [open, setOpen] = useState(false)
-  const [branches, setBranches] = useState<string[]>([])
+  const [branches, setBranches] = useState<BranchEntry[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
@@ -29,23 +35,27 @@ export default function StatusBar() {
     const next = !open
     setOpen(next)
     if (!next) return
+    setError('')
     try {
-      const res = await invoke<string>('git_branches')
-      setBranches(typeof res === 'string' ? JSON.parse(res) : res)
+      const res = await invoke<unknown>('git_branches')
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res
+      /** Normalize — never trust the response shape; an unexpected payload
+       *  (null/undefined/object) must not crash the popup render. */
+      setBranches(Array.isArray(parsed) ? parsed.filter((b: any) => b && typeof b.name === 'string') : [])
     } catch (e) { setError(String(e)) }
   }
 
-  const switchTo = async (name: string) => {
-    if (name === branch || busy) return
-    setBusy(name)
+  const switchTo = async (entry: BranchEntry) => {
+    if (entry.name === branch || busy) return
+    setBusy(entry.name)
     setError('')
     try {
-      await invoke('git_checkout', { branch: name })
+      await invoke('git_checkout', { branch: entry.name, remote: entry.remote })
       setOpen(false)
       const dirty = useEditorStore.getState().tabs.filter(t => t.dirty).length
       await useEditorStore.getState().reloadAllTabs()
       void pollGitStatus()
-      toast.success('Switched to ' + name + (dirty ? ` — ${dirty} unsaved tab${dirty > 1 ? 's' : ''} kept open` : ''))
+      toast.success('Switched to ' + entry.name + (dirty ? ` — ${dirty} unsaved tab${dirty > 1 ? 's' : ''} kept open` : ''))
     } catch (e) { setError(String(e)) }
     finally { setBusy(null) }
   }
@@ -73,15 +83,16 @@ export default function StatusBar() {
             <ChevronDown size={11} className={'transition-transform text-muted ' + (open ? 'rotate-180' : '')} />
           </button>
           {open && (
-            <div className="absolute bottom-full right-0 mb-1 bg-surface border border-border rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-              {branches.length === 0 && !error && <div className="px-2.5 py-1.5 text-[12px] text-muted">No local branches</div>}
+            <div className="absolute bottom-full right-0 mb-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+              {branches.length === 0 && !error && <div className="px-2.5 py-1.5 text-[12px] text-muted">No branches found</div>}
               {branches.map(b => (
-                <button key={b} onClick={() => switchTo(b)} disabled={busy !== null}
+                <button key={b.name} onClick={() => switchTo(b)} disabled={busy !== null}
                   className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[12px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-50 disabled:cursor-not-allowed text-left">
                   <GitBranch size={11} className="text-muted shrink-0" />
-                  <span className={b === branch ? 'text-foreground font-medium' : 'text-foreground-secondary'}>{b}</span>
-                  {b === branch && <Check size={12} className="ml-auto text-accent" />}
-                  {busy === b && <span className="ml-auto text-[10px] text-muted">switching…</span>}
+                  <span className={b.name === branch ? 'text-foreground font-medium' : 'text-foreground-secondary'}>{b.name}</span>
+                  {b.remote && <span className="ml-1 text-[10px] text-muted">remote</span>}
+                  {b.name === branch && <Check size={12} className="ml-auto text-accent shrink-0" />}
+                  {busy === b.name && <span className="ml-auto text-[10px] text-muted">switching…</span>}
                 </button>
               ))}
               {error && <div className="px-2.5 py-1 text-[10px] text-red-400 break-words max-w-[240px]">{error}</div>}

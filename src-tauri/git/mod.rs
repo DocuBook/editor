@@ -21,6 +21,15 @@ pub struct WorktreeStatus {
 #[derive(Debug, Serialize)]
 pub struct CommitResult { pub success: bool, pub commit: String, pub message: String, pub error: String }
 
+/** A branch for the switcher: local (`remote: false`) or a remote-tracking
+ *  ref (`remote: true`, full name like `origin/dev`). Sourced from the actual
+ *  refs — never assumed/hardcoded. */
+#[derive(Debug, Serialize, PartialEq)]
+pub struct BranchRef {
+    pub name: String,
+    pub remote: bool,
+}
+
 /// Git repository wrapper for add-commit-push operations.
 pub struct Git { pub repo_path: String }
 
@@ -135,17 +144,45 @@ impl Git {
     fn has_commits(&self) -> bool {
         Command::new("git").args(["rev-parse", "--verify", "HEAD"]).current_dir(&self.repo_path).output().map(|o| o.status.success()).unwrap_or(false)
     }
-/** List local branches (short names, current branch included, no HEAD). */
-    pub fn branches(&self) -> Result<Vec<String>, String> {
-        let out = Command::new("git").args(["for-each-ref", "--format=%(refname:short)", "refs/heads"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+/** List branches from actual refs — local (`refs/heads`) first, then
+ *  remote-tracking (`refs/remotes`). A remote ref whose short name already
+ *  exists locally is skipped: switching there should use the local branch.
+ *
+ *  Remotes are surfaced as their full ref name (`origin/dev`) so the switcher
+ *  can check them out as new local tracking branches. */
+    pub fn branches(&self) -> Result<Vec<BranchRef>, String> {
+        let out = Command::new("git").args(["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
         if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
-        Ok(String::from_utf8_lossy(&out.stdout).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+        let mut refs: Vec<BranchRef> = Vec::new();
+        let mut local: Vec<String> = Vec::new();
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let line = line.trim();
+            if let Some(rest) = line.strip_prefix("refs/heads/") {
+                local.push(rest.to_string());
+                refs.push(BranchRef { name: rest.to_string(), remote: false });
+            } else if let Some(rest) = line.strip_prefix("refs/remotes/") {
+                let short = rest.rsplit('/').next().unwrap_or(rest).to_string();
+                if !local.contains(&short) {
+                    refs.push(BranchRef { name: rest.to_string(), remote: true });
+                }
+            }
+        }
+        Ok(refs)
     }
-/** Switch to a local branch. Name is argv-passed (no shell injection) and
- *  validated so it can never be parsed as a flag. */
-    pub fn checkout_branch(&self, name: &str) -> Result<(), String> {
+/** Switch branches. `remote: false` → plain `git checkout <name>`; `remote:
+ *  true` (name like `origin/dev`) → `git switch -c dev --track origin/dev`,
+ *  creating the local tracking branch. Name is argv-passed (no shell
+ *  injection) and validated so it can never be parsed as a flag. */
+    pub fn checkout_branch(&self, name: &str, remote: bool) -> Result<(), String> {
         let name = name.trim();
         if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
+        if remote {
+            let Some((_, short)) = name.split_once('/') else { return Err("Invalid remote branch name".into()); };
+            if short.is_empty() || short.starts_with('-') { return Err("Invalid remote branch name".into()); }
+            let out = Command::new("git").args(["switch", "-c", short, "--track", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+            if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+            return Ok(());
+        }
         let out = Command::new("git").args(["checkout", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
         if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
         Ok(())
@@ -457,18 +494,42 @@ mod tests {
         std::fs::write(dir.join("a.md"), "a").unwrap();
         g.add_all().unwrap();
         g.commit("first").unwrap();
-        let base = g.branches().unwrap();
+        let names = |g: &Git| g.branches().unwrap().into_iter().map(|b| (b.name, b.remote)).collect::<Vec<_>>();
+        let base = names(&g);
         assert_eq!(base.len(), 1);
         Command::new("git").args(["switch", "-c", "dev"]).current_dir(&dir).output().unwrap();
-        let mut bs = g.branches().unwrap();
-        bs.sort();
-        assert!(bs.contains(&"dev".to_string()));
+        let bs = names(&g);
+        assert!(bs.contains(&("dev".to_string(), false)));
         assert_eq!(bs.len(), 2);
-        g.checkout_branch(base[0].as_str()).unwrap();
-        assert!(g.branches().unwrap().contains(&"dev".to_string()));
+        g.checkout_branch(base[0].0.as_str(), false).unwrap();
+        assert!(names(&g).contains(&("dev".to_string(), false)));
         // flag injection and empty names are rejected before reaching git
-        assert!(g.checkout_branch("").is_err());
-        assert!(g.checkout_branch("-x").is_err());
+        assert!(g.checkout_branch("", false).is_err());
+        assert!(g.checkout_branch("-x", false).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branches_include_remote_refs_and_switch_creates_tracking() {
+        let dir = temp_git_repo("branches-remote");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+        // Simulate a fetched remote without network: configured remote + ref
+        g.add_remote("origin", "https://example.invalid/repo.git").unwrap();
+        Command::new("git").args(["update-ref", "refs/remotes/origin/feat", "HEAD"]).current_dir(&dir).output().unwrap();
+        let names = g.branches().unwrap();
+        assert!(names.contains(&BranchRef { name: "origin/feat".into(), remote: true }));
+        // Checking out the remote ref creates a local tracking branch "feat"
+        g.checkout_branch("origin/feat", true).unwrap();
+        let state = g.status_with_branch().unwrap();
+        assert_eq!(state.branch, "feat");
+        // Malformed remote names are rejected
+        assert!(g.checkout_branch("origin", true).is_err());
+        assert!(g.checkout_branch("origin/-x", true).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

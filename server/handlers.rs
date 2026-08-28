@@ -55,7 +55,8 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         "git_checkout" => {
             let b = s("branch");
-            tokio::task::spawn_blocking(move || cmds::git_checkout(&st, &b))
+            let r = args.get("remote").and_then(|v| v.as_bool()).unwrap_or(false);
+            tokio::task::spawn_blocking(move || cmds::git_checkout(&st, &b, r))
                 .await
                 .map_err(|e| e.to_string())?
         }
