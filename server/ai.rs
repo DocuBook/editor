@@ -259,7 +259,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                             .strip_prefix("data: ")
                             .unwrap_or("");
                         if !data.is_empty() {
-                            let out = process_sse_data(data, &mut full, &mut tool_calls, &tx).await;
+                            let out = process_sse_data(data, &mut full, &mut tool_calls, &mut truncated, &tx).await;
                             if let Err(e) = out {
                                 let _ = tx.send(Ok(Event::default().event("error").data(e))).await;
                                 return;
@@ -295,7 +295,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 .strip_prefix("data: ")
                 .unwrap_or("");
             if !data.is_empty() {
-                if let Err(e) = process_sse_data(data, &mut full, &mut tool_calls, &tx).await {
+                if let Err(e) = process_sse_data(data, &mut full, &mut tool_calls, &mut truncated, &tx).await {
                     let _ = tx.send(Ok(Event::default().event("error").data(e))).await;
                     return;
                 }
@@ -345,6 +345,7 @@ pub(crate) async fn process_sse_data(
     data: &str,
     full: &mut String,
     tool_calls: &mut Vec<(i64, String, String, String)>,
+    truncated: &mut bool,
     tx: &SseTx,
 ) -> Result<(), String> {
     if data == "[DONE]" {
@@ -353,6 +354,14 @@ pub(crate) async fn process_sse_data(
     let Ok(val) = serde_json::from_str::<Value>(data) else {
         return Ok(());
     };
+    // Provider-side truncation: the gateway stopped early (max output tokens /
+    // context length). Treat it like our own MAX_AI_BUFFER cap — the response
+    // is incomplete and `ai:done { truncated: true }` must reach the UI.
+    if let Some(reason) = val["choices"][0]["finish_reason"].as_str() {
+        if reason.eq_ignore_ascii_case("length") {
+            *truncated = true;
+        }
+    }
     let content = val["choices"][0]["delta"]["content"].as_str();
     if full
         .len()
@@ -419,9 +428,10 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
         let mut full = "x".repeat(MAX_AI_BUFFER);
         let mut tools = Vec::new();
+        let mut truncated = false;
         let data = json!({ "choices": [{ "delta": { "content": "y" } }] }).to_string();
         assert_eq!(
-            process_sse_data(&data, &mut full, &mut tools, &tx)
+            process_sse_data(&data, &mut full, &mut tools, &mut truncated, &tx)
                 .await
                 .unwrap_err(),
             "AI response too large"
@@ -434,8 +444,9 @@ mod tests {
         let (tx, _rx) = tokio::sync::mpsc::channel(1);
         let mut full = String::new();
         let mut tools = Vec::new();
+        let mut truncated = false;
         for index in 0..MAX_TOOL_CALLS_PER_REQUEST {
-            process_sse_data(&tool_delta(index as i64, "{}"), &mut full, &mut tools, &tx)
+            process_sse_data(&tool_delta(index as i64, "{}"), &mut full, &mut tools, &mut truncated, &tx)
                 .await
                 .unwrap();
         }
@@ -445,6 +456,7 @@ mod tests {
                 &tool_delta(MAX_TOOL_CALLS_PER_REQUEST as i64, "{}"),
                 &mut full,
                 &mut tools,
+                &mut truncated,
                 &tx
             )
             .await
@@ -461,11 +473,34 @@ mod tests {
         )];
         let before = tools.clone();
         assert_eq!(
-            process_sse_data(&tool_delta(0, "y"), &mut full, &mut tools, &tx)
+            process_sse_data(&tool_delta(0, "y"), &mut full, &mut tools, &mut truncated, &tx)
                 .await
                 .unwrap_err(),
             "AI response too large"
         );
         assert_eq!(tools, before);
+    }
+
+    #[tokio::test]
+    async fn finish_reason_length_marks_provider_truncation() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(1);
+        let mut full = String::new();
+        let mut tools = Vec::new();
+        let mut truncated = false;
+
+        // Gateway stopped early: finish_reason = "length" (max tokens hit).
+        let data = json!({ "choices": [{ "delta": {}, "finish_reason": "length" }] }).to_string();
+        process_sse_data(&data, &mut full, &mut tools, &mut truncated, &tx)
+            .await
+            .unwrap();
+        assert!(truncated, "length finish marks the response truncated");
+
+        // Normal end (stop) must NOT mark truncation.
+        truncated = false;
+        let stop = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] }).to_string();
+        process_sse_data(&stop, &mut full, &mut tools, &mut truncated, &tx)
+            .await
+            .unwrap();
+        assert!(!truncated, "stop finish is a complete response");
     }
 }

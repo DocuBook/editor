@@ -323,7 +323,7 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
             let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
             let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
             if !data.is_empty() {
-                process_sse_data(data, &mut full, &mut tool_calls, &app)?;
+                process_sse_data(data, &mut full, &mut tool_calls, &mut truncated, &app)?;
                 // Cap runaway responses (memory exhaustion guard).
                 if full.len() >= MAX_AI_BUFFER {
                     truncated = true;
@@ -341,7 +341,7 @@ pub async fn ask_ai(messages: String, app: tauri::AppHandle, provider: Option<St
         let line = String::from_utf8_lossy(&byte_buf);
         let data = line.trim_end_matches('\r').strip_prefix("data: ").unwrap_or("");
         if !data.is_empty() {
-            process_sse_data(data, &mut full, &mut tool_calls, &app)?;
+            process_sse_data(data, &mut full, &mut tool_calls, &mut truncated, &app)?;
         }
     }
     // Emit complete tool calls after stream — validation lives frontend-side (doc state).
@@ -396,9 +396,17 @@ fn validate_tool_calls(tool_calls: &[(i64, String, String, String)]) -> Result<(
     Ok(())
 }
 
-fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, String, String, String)>, app: &tauri::AppHandle) -> Result<(), String> {
+fn process_sse_data(data: &str, full: &mut String, tool_calls: &mut Vec<(i64, String, String, String)>, truncated: &mut bool, app: &tauri::AppHandle) -> Result<(), String> {
     let mut next_tool_calls = tool_calls.clone();
     let (content, _) = parse_sse_line(data, &mut next_tool_calls);
+    // Provider-side truncation (max output tokens / context length reach -
+    // finish_reason "length"): the response is incomplete; ai:done must carry
+    // truncated: true so the frontend never promotes partial content.
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(data) {
+        if val["choices"][0]["finish_reason"].as_str().is_some_and(|r| r.eq_ignore_ascii_case("length")) {
+            *truncated = true;
+        }
+    }
     validate_tool_calls(&next_tool_calls)?;
     *tool_calls = next_tool_calls;
     if let Some(content) = content {
