@@ -15,9 +15,12 @@ permissions = [
   "allow-delete-api-key",
   "allow-delete-file",
   "allow-git-add-remote",
+  "allow-git-branches",
+  "allow-git-checkout",
   "allow-git-clone",
+  "allow-git-commit",
   "allow-git-init",
-  "allow-git-push",
+  "allow-git-push-only",
   "allow-git-remove-remote",
   "allow-git-set-identity",
   "allow-git-settings",
@@ -153,6 +156,46 @@ description = "Denies the git_clone command."
 commands.deny = ["git_clone"]
 
 [[permission]]
+identifier = "allow-git-branches"
+description = "Enables the git_branches command."
+commands.allow = ["git_branches"]
+
+[[permission]]
+identifier = "deny-git-branches"
+description = "Denies the git_branches command."
+commands.deny = ["git_branches"]
+
+[[permission]]
+identifier = "allow-git-checkout"
+description = "Enables the git_checkout command."
+commands.allow = ["git_checkout"]
+
+[[permission]]
+identifier = "deny-git-checkout"
+description = "Denies the git_checkout command."
+commands.deny = ["git_checkout"]
+
+[[permission]]
+identifier = "allow-git-commit"
+description = "Enables the git_commit command."
+commands.allow = ["git_commit"]
+
+[[permission]]
+identifier = "deny-git-commit"
+description = "Denies the git_commit command."
+commands.deny = ["git_commit"]
+
+[[permission]]
+identifier = "allow-git-push-only"
+description = "Enables the git_push_only command."
+commands.allow = ["git_push_only"]
+
+[[permission]]
+identifier = "deny-git-push-only"
+description = "Denies the git_push_only command."
+commands.deny = ["git_push_only"]
+
+[[permission]]
 identifier = "allow-git-init"
 description = "Enables the git_init command."
 commands.allow = ["git_init"]
@@ -161,16 +204,6 @@ commands.allow = ["git_init"]
 identifier = "deny-git-init"
 description = "Denies the git_init command."
 commands.deny = ["git_init"]
-
-[[permission]]
-identifier = "allow-git-push"
-description = "Enables the git_push command."
-commands.allow = ["git_push"]
-
-[[permission]]
-identifier = "deny-git-push"
-description = "Denies the git_push command."
-commands.deny = ["git_push"]
 
 [[permission]]
 identifier = "allow-git-remove-remote"
