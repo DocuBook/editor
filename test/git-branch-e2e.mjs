@@ -9,7 +9,7 @@
  * - nested `feature/nested` with BOTH local and remote refs
  *
  * Asserts the switcher contract (see `src-tauri/git/branches.rs`):
- * local + remote entries with a "remote" badge, `*/HEAD` never listed, nested
+ * local + remote entries with a "remote" badge, `<remote>/HEAD` never listed, nested
  * remote deduped when its local branch exists, remote → local tracking branch
  * switch, and dedupe after switching.
  *
@@ -24,7 +24,7 @@ import { mkdirSync, rmSync } from 'node:fs'
 import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
 
 const PORT = 4281
-try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
+try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }); } catch {};
 const DATA = '/tmp/docubook-git-e2e'
 const VAULT = `${DATA}/vaults/gitvault`
 const ORIGIN = '/tmp/docubook-git-e2e-origin.git'

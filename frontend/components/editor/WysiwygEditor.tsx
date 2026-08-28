@@ -308,7 +308,9 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
     }
     setFlushEditor(sync)
     return () => setFlushEditor(null)
-  }, [editor, setFlushEditor])
+    /** `cached` is the keep-alive instance (stable per file path) — it is the
+     *  load baseline the flush syncs into, so it belongs in the deps. */
+  }, [cached, editor, setFlushEditor])
 
   /** Load markdown into this editor instance when it first mounts OR when the
    *  incoming markdown actually changed (code-mode edits, external changes).
