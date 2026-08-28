@@ -236,6 +236,9 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
     return () => window.removeEventListener('focus', h)
   }, [isOpen, loadTree, loadTrash])
 
+  /** Shared header icon style - theme tokens only, so +/search/X match in both themes. */
+  const iconBtn = 'cursor-pointer p-1 rounded hover:bg-surface-active text-foreground-subtle hover:text-foreground transition-colors'
+
   return (
     <aside className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
@@ -243,7 +246,7 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
         <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{name}</span>
         <span className="flex items-center gap-1 shrink-0 ml-2">
           <span className="tip-wrap tip-bar relative" ref={plusMenuRef}>
-            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className="cursor-pointer p-1 rounded hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
               <Plus size={14} />
             </button>
             <span className="tip">Create a file/folder</span>
@@ -263,12 +266,12 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
             )}
           </span>
           <span className="tip-wrap tip-bar">
-            <button onClick={(e) => { setSearchOpen(true); e.currentTarget.blur() }} aria-label="Search project files" className="cursor-pointer p-1 rounded hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors">
+            <button onClick={(e) => { setSearchOpen(true); e.currentTarget.blur() }} aria-label="Search project files" className={iconBtn}>
               <Search size={14} />
             </button>
             <span className="tip">Search project files <kbd><Command size={11} />F</kbd></span>
           </span>
-          <button onClick={closeVault} aria-label="Close vault" className="text-zinc-600 hover:text-foreground-secondary p-1 cursor-pointer bg-transparent border-none rounded flex">
+          <button onClick={closeVault} aria-label="Close vault" className={iconBtn}>
             <X size={14} />
           </button>
         </span>
