@@ -120,7 +120,7 @@ pub async fn git_branches(state: State<'_, AppState>) -> Result<String, String> 
     })
     .await
     .map_err(|e| e.to_string())?;
-    Ok(res?)
+    res
 }
 
 #[tauri::command]
