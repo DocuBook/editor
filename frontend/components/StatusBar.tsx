@@ -1,12 +1,54 @@
-import { useState } from 'react'
-import { GitBranch, CircleHelp } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { GitBranch, CircleHelp, Check, ChevronDown } from 'lucide-react'
 import ShortcutsModal from './ShortcutsModal'
-import { useGitStatus } from '../stores/gitStatus'
+import { useGitStatus, pollGitStatus } from '../stores/gitStatus'
+import { useEditorStore } from '../stores/editor'
+import { invoke } from '../lib/ipc'
+import { toast } from 'sonner'
+import { useClickOutside } from '../hooks/useClickOutside'
 
-/** Bottom status bar showing git branch state (consumes the shared git-status poll). */
+/** Bottom status bar: keyboard shortcuts + git branch state.
+ *  The branch chip shows the local↔remote relation — ↑ahead / ↓behind, or a
+ *  "(no upstream)" hint for a branch that was never pushed — and opens a
+ *  local-branch switcher. After switching, open tabs are reloaded from disk
+ *  (dirty tabs are kept untouched). */
 export default function StatusBar() {
   const branch = useGitStatus(s => s.branch)
+  const upstream = useGitStatus(s => s.upstream)
+  const ahead = useGitStatus(s => s.ahead)
+  const behind = useGitStatus(s => s.behind)
   const [showShortcuts, setShowShortcuts] = useState(false)
+  const [open, setOpen] = useState(false)
+  const [branches, setBranches] = useState<string[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const boxRef = useRef<HTMLDivElement>(null)
+  useClickOutside(boxRef, () => setOpen(false))
+
+  const toggleSwitcher = async () => {
+    const next = !open
+    setOpen(next)
+    if (!next) return
+    try {
+      const res = await invoke<string>('git_branches')
+      setBranches(typeof res === 'string' ? JSON.parse(res) : res)
+    } catch { setError('Could not list branches') }
+  }
+
+  const switchTo = async (name: string) => {
+    if (name === branch || busy) return
+    setBusy(name)
+    setError('')
+    try {
+      await invoke('git_checkout', { branch: name })
+      setOpen(false)
+      const dirty = useEditorStore.getState().tabs.filter(t => t.dirty).length
+      await useEditorStore.getState().reloadAllTabs()
+      void pollGitStatus()
+      toast.success('Switched to ' + name + (dirty ? ` — ${dirty} unsaved tab${dirty > 1 ? 's' : ''} kept open` : ''))
+    } catch (e) { setError(String(e)) }
+    finally { setBusy(null) }
+  }
 
   return (
     <footer className="ui-shell h-6 bg-surface border-t border-border-subtle flex items-center text-xs text-zinc-600 shrink-0 px-3 pl-2">
@@ -16,10 +58,36 @@ export default function StatusBar() {
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
       <span className="flex-1" />
       {branch && (
-        <span className="flex items-center gap-1 font-mono">
-          <GitBranch size={12} />
-          {branch}
-        </span>
+        <div className="relative" ref={boxRef}>
+          <button onClick={toggleSwitcher} aria-label="Switch branch" aria-expanded={open} title="Switch branch"
+            className="flex items-center gap-1 font-mono p-0.5 rounded cursor-pointer bg-transparent border-none hover:bg-surface-active">
+            <GitBranch size={12} />
+            {branch}
+            {upstream ? (
+              <span className="text-muted">
+                {ahead > 0 && `↑${ahead}`}{behind > 0 && `↓${behind}`}
+              </span>
+            ) : (
+              <span className="text-muted italic">no upstream</span>
+            )}
+            <ChevronDown size={11} className={'transition-transform text-muted ' + (open ? 'rotate-180' : '')} />
+          </button>
+          {open && (
+            <div className="absolute bottom-full right-0 mb-1 bg-surface border border-border rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+              {branches.length === 0 && <div className="px-2.5 py-1.5 text-[12px] text-muted">No local branches</div>}
+              {branches.map(b => (
+                <button key={b} onClick={() => switchTo(b)} disabled={busy !== null}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[12px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-50 disabled:cursor-not-allowed text-left">
+                  <GitBranch size={11} className="text-muted shrink-0" />
+                  <span className={b === branch ? 'text-foreground font-medium' : 'text-foreground-secondary'}>{b}</span>
+                  {b === branch && <Check size={12} className="ml-auto text-accent" />}
+                  {busy === b && <span className="ml-auto text-[10px] text-muted">switching…</span>}
+                </button>
+              ))}
+              {error && <div className="px-2.5 py-1 text-[10px] text-red-400 break-words max-w-[240px]">{error}</div>}
+            </div>
+          )}
+        </div>
       )}
     </footer>
   )

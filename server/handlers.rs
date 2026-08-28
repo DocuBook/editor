@@ -48,6 +48,17 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                 .await
                 .map_err(|e| e.to_string())?
         }
+        "git_branches" => {
+            tokio::task::spawn_blocking(move || cmds::git_branches(&st))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_checkout" => {
+            let b = s("branch");
+            tokio::task::spawn_blocking(move || cmds::git_checkout(&st, &b))
+                .await
+                .map_err(|e| e.to_string())?
+        }
         "close_vault" => sync(state, cmd, args),
         "list_tree" => sb(state, cmd, args).await,
         "read_file" => sync(state, cmd, args),
@@ -226,9 +237,9 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             match guard.as_ref() {
                 Some(g) if g.is_repo() => {
                     let ws = g.status_with_branch().unwrap_or_default();
-                    Ok(json!({ "branch": ws.branch, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind }).to_string())
+                    Ok(json!({ "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind }).to_string())
                 }
-                _ => Ok(r#"{"branch":"","status":"","ahead":0,"behind":0}"#.to_string()),
+                _ => Ok(r#"{"branch":"","upstream":"","status":"","ahead":0,"behind":0}"#.to_string()),
             }
         }
         "wiki_backlinks" => match state.wiki.lock().expect("lock").as_ref() {

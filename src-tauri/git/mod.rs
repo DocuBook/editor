@@ -6,10 +6,12 @@ use serde::Serialize;
 pub struct PushResult { pub success: bool, pub commit: String, pub message: String, pub error: String }
 
 /** Parsed `status --porcelain=v2 -b` summary: branch name, v1-style status
- *  lines (`XY path`), and ahead/behind counts vs the upstream branch. */
+ *  lines (`XY path`), upstream tracking ref (empty = never pushed), and
+ *  ahead/behind counts vs that upstream. */
 #[derive(Debug, Default, Serialize)]
 pub struct WorktreeStatus {
     pub branch: String,
+    pub upstream: String,
     pub status: String,
     pub ahead: usize,
     pub behind: usize,
@@ -92,18 +94,61 @@ impl Git {
 /** Push commits to the configured upstream. Nothing ahead → `Nothing to push`
  *  (success, no-op). Independent of the worktree state, fixing the old
  *  push_full retry trap: a clean worktree after a failed push used to report
- *  "Nothing to push" forever, stranding the un-pushed commit. */
+ *  "Nothing to push" forever, stranding the un-pushed commit.
+ *
+ *  Branch without upstream (first push): push with `-u <remote> <branch>` so
+ *  the tracking ref is created — the StatusBar shows the branch as untracked
+ *  until then instead of blocking Push (ahead is meaningless without upstream). */
     pub fn push_checked(&self) -> PushResult {
         if !self.is_repo() { return PushResult { success: false, commit: String::new(), message: String::new(), error: "Not a git repo".into() } }
         let ws = match self.status_with_branch() { Ok(w) => w, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
-        if ws.ahead == 0 { return PushResult { success: true, commit: String::new(), message: "Nothing to push".into(), error: String::new() } }
-        let out = match Command::new("git").arg("push").current_dir(&self.repo_path).output() { Ok(o) => o, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
+        let no_upstream = ws.upstream.is_empty();
+        if !no_upstream && ws.ahead == 0 {
+            return PushResult { success: true, commit: String::new(), message: "Nothing to push".into(), error: String::new() };
+        }
+        if no_upstream && !self.has_commits() {
+            // Brand-new repo (no commits yet): nothing to push — and git would
+            // reject the empty refspec even with -u.
+            return PushResult { success: true, commit: String::new(), message: "Nothing to push".into(), error: String::new() };
+        }
+        let mut cmd = Command::new("git");
+        cmd.arg("push").current_dir(&self.repo_path);
+        if no_upstream {
+            // Detached HEAD ("(HEAD detached at …)") cannot take -u — fall back
+            // to a plain push whose stderr explains the situation.
+            if !ws.branch.starts_with('(') {
+                let remotes = self.remotes().unwrap_or_default();
+                let remote = if remotes.iter().any(|(n, _)| n == "origin") { "origin" } else { remotes.first().map(|(n, _)| n.as_str()).unwrap_or("origin") };
+                cmd.arg("-u").arg(remote).arg(&ws.branch);
+            }
+        }
+        let out = match cmd.output() { Ok(o) => o, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
             return PushResult { success: false, commit: String::new(), message: String::new(), error: if stderr.is_empty() { "Push failed".into() } else { stderr } };
         }
         let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
         PushResult { success: true, commit: String::new(), message: if stdout.is_empty() { "Pushed".into() } else { stdout }, error: String::new() }
+    }
+/** True if HEAD points at a commit (a brand-new repository with no commits
+ *  cannot be pushed even with -u — git rejects the empty refspec). */
+    fn has_commits(&self) -> bool {
+        Command::new("git").args(["rev-parse", "--verify", "HEAD"]).current_dir(&self.repo_path).output().map(|o| o.status.success()).unwrap_or(false)
+    }
+/** List local branches (short names, current branch included, no HEAD). */
+    pub fn branches(&self) -> Result<Vec<String>, String> {
+        let out = Command::new("git").args(["for-each-ref", "--format=%(refname:short)", "refs/heads"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        Ok(String::from_utf8_lossy(&out.stdout).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect())
+    }
+/** Switch to a local branch. Name is argv-passed (no shell injection) and
+ *  validated so it can never be parsed as a flag. */
+    pub fn checkout_branch(&self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
+        let out = Command::new("git").args(["checkout", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        Ok(())
     }
 }
 
@@ -213,6 +258,7 @@ fn is_remote_url(url: &str) -> bool {
  *  ahead/behind. Pure (no git calls) so it is unit-testable offline. */
 fn parse_porcelain_v2(text: &str) -> WorktreeStatus {
     let mut branch = String::new();
+    let mut upstream = String::new();
     let mut ahead = 0usize;
     let mut behind = 0usize;
     let mut lines: Vec<String> = Vec::new();
@@ -224,6 +270,8 @@ fn parse_porcelain_v2(text: &str) -> WorktreeStatus {
             let mut it = rest.split_whitespace();
             if let Some(a) = it.next() { ahead = a.trim_start_matches('+').parse().unwrap_or(0) }
             if let Some(b) = it.next() { behind = b.trim_start_matches('-').parse().unwrap_or(0) }
+        } else if let Some(rest) = line.strip_prefix("# branch.upstream ") {
+            upstream = rest.trim().to_string();
         } else if let Some(rest) = line.strip_prefix("1 ") {
             // v2: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path> → v1: XY path
             let mut it = rest.split_whitespace();
@@ -234,7 +282,7 @@ fn parse_porcelain_v2(text: &str) -> WorktreeStatus {
             lines.push(format!("? {}", rest.trim()));
         }
     }
-    WorktreeStatus { branch, status: lines.join("\n"), ahead, behind }
+    WorktreeStatus { branch, upstream, status: lines.join("\n"), ahead, behind }
 }
 
 #[cfg(test)]
@@ -338,6 +386,7 @@ mod tests {
             "# branch.oid aabbcc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n1 M. N... 100644 100644 100644 a b src/a.md\n? untracked.md",
         );
         assert_eq!(ws.branch, "main");
+        assert_eq!(ws.upstream, "origin/main");
         assert_eq!((ws.ahead, ws.behind), (2, 1));
         assert_eq!(ws.status, "M. src/a.md\n? untracked.md");
     }
@@ -348,6 +397,7 @@ mod tests {
         // correctly reports "Nothing to push" instead of a doomed push.
         let ws = parse_porcelain_v2("# branch.oid abc\n# branch.head (HEAD detached at abc)");
         assert!(ws.status.is_empty());
+        assert!(ws.upstream.is_empty());
         assert_eq!((ws.ahead, ws.behind), (0, 0));
     }
 
@@ -391,9 +441,34 @@ mod tests {
         let dir = temp_git_repo("push-checked");
         let g = Git::open(dir.to_str().unwrap());
         g.init().unwrap();
+        // No commits yet → "Nothing to push" (never attempts a doomed -u push).
         let r = g.push_checked();
         assert!(r.success);
         assert_eq!(r.message, "Nothing to push");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branches_list_and_checkout() {
+        let dir = temp_git_repo("branches");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+        let base = g.branches().unwrap();
+        assert_eq!(base.len(), 1);
+        Command::new("git").args(["switch", "-c", "dev"]).current_dir(&dir).output().unwrap();
+        let mut bs = g.branches().unwrap();
+        bs.sort();
+        assert!(bs.contains(&"dev".to_string()));
+        assert_eq!(bs.len(), 2);
+        g.checkout_branch(base[0].as_str()).unwrap();
+        assert!(g.branches().unwrap().contains(&"dev".to_string()));
+        // flag injection and empty names are rejected before reaching git
+        assert!(g.checkout_branch("").is_err());
+        assert!(g.checkout_branch("-x").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

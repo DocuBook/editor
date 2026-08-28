@@ -68,7 +68,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::vault::open_vault, commands::vault::close_vault, commands::vault::create_vault, commands::git::git_clone, commands::vault::list_tree, commands::vault::read_file, commands::vault::read_file_binary, commands::vault::write_file, commands::vault::create_file, commands::vault::delete_file, commands::vault::rename_file, commands::vault::create_directory,
             commands::git::git_settings, commands::git::git_add_remote, commands::git::git_remove_remote, commands::git::git_set_identity, commands::git::git_init,
-            commands::wiki::wiki_backlinks, commands::wiki::wiki_suggest, commands::wiki::wiki_resolve, commands::search::search_vault, commands::git::git_stage, commands::git::git_commit, commands::git::git_push_only, commands::git::git_status,
+            commands::wiki::wiki_backlinks, commands::wiki::wiki_suggest, commands::wiki::wiki_resolve, commands::search::search_vault, commands::git::git_stage, commands::git::git_commit, commands::git::git_push_only, commands::git::git_branches, commands::git::git_checkout, commands::git::git_status,
             commands::agent::custom_ai_config,
             commands::markdown::md_to_html, commands::agent::ask_ai, commands::agent::cancel_ai, commands::agent::set_api_key, commands::agent::set_custom_endpoint, commands::agent::delete_api_key, commands::agent::list_api_keys, commands::agent::test_connection, commands::agent::list_models,
             commands::app::health, commands::app::app_ready_to_close,

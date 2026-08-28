@@ -65,7 +65,7 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
   }, [curTab])
 
   /** Git status: shared store (single poller from App root) — derive per-tab state. */
-  const { isRepo, hasRemote, ahead, status: gitStatus } = useGitStatus()
+  const { isRepo, hasRemote, ahead, upstream, status: gitStatus } = useGitStatus()
   useEffect(() => {
     const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
     const curFile = useEditorStore.getState().activeTab
@@ -106,6 +106,10 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
       if (d.message === 'Nothing to commit') { setCommitState('idle'); setGitMsg(p => ({ ...p, commit: '' })); toast.info('Nothing to commit'); return }
       setGitMsg(p => ({ ...p, commit: d.commit ? d.commit.substring(0, 7) : 'committed' }))
       setCommitState('done')
+      /** persistAllDirty wrote every dirty tab — disk now matches the buffer,
+       *  so the flags can go (they would otherwise leave Commit enabled
+       *  forever, always ending in "Nothing to commit"). */
+      useEditorStore.getState().tabs.forEach(t => { if (t.dirty) useEditorStore.getState().setTabDirty(t.path, false) })
     } catch { setGitMsg(p => ({ ...p, commit: 'Commit failed' })); setCommitState('error') }
   }
 
@@ -178,11 +182,12 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
               <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
             </button>
             {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.commit}</div>}
-            <button onClick={push} disabled={!isRepo || !hasRemote || ahead <= 0 || pushState === 'busy'}
+            <button onClick={push} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={pushState === 'done' ? 'text-green-500 shrink-0' : pushState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
               <span>{pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed ✓' : pushState === 'error' ? 'Push failed' : 'Push'}</span>
-              {ahead > 0 && <span className="ml-auto text-[10px] text-muted">↑{ahead}</span>}
+              {upstream && ahead > 0 && <span className="ml-auto text-[10px] text-muted">↑{ahead}</span>}
+              {!upstream && hasRemote && <span className="ml-auto text-[10px] text-muted">new branch</span>}
             </button>
             {pushState === 'error' && gitMsg.push && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.push}</div>}
           </div>

@@ -9,7 +9,7 @@ import { useAuth } from '../../../frontend/stores/auth'
 describe('pollGitStatus (skip polling while unauthenticated)', () => {
   beforeEach(() => {
     invoke.mockReset()
-    useGitStatus.setState({ isRepo: false, hasRemote: false, branch: '', status: '', ahead: 0, behind: 0 })
+    useGitStatus.setState({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0 })
     useAuth.setState({ status: 'login' })
   })
 
@@ -20,17 +20,17 @@ describe('pollGitStatus (skip polling while unauthenticated)', () => {
 
   it('polls and updates state when authenticated', async () => {
     useAuth.setState({ status: 'ready' })
-    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', status: ' M file.md', ahead: 2, behind: 1 }))
+    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1 }))
     await pollGitStatus()
     expect(invoke).toHaveBeenCalledWith('git_status')
-    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', status: ' M file.md', ahead: 2, behind: 1 })
+    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1 })
   })
 
   it('resets state when the poll fails', async () => {
     useAuth.setState({ status: 'ready' })
-    useGitStatus.setState({ isRepo: true, hasRemote: true, branch: 'main', status: 'X', ahead: 1, behind: 0 })
+    useGitStatus.setState({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: 'X', ahead: 1, behind: 0 })
     invoke.mockRejectedValue(new Error('network'))
     await pollGitStatus()
-    expect(useGitStatus.getState()).toEqual({ isRepo: false, hasRemote: false, branch: '', status: '', ahead: 0, behind: 0 })
+    expect(useGitStatus.getState()).toEqual({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0 })
   })
 })
