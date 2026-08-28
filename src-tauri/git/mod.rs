@@ -161,7 +161,11 @@ impl Git {
                 local.push(rest.to_string());
                 refs.push(BranchRef { name: rest.to_string(), remote: false });
             } else if let Some(rest) = line.strip_prefix("refs/remotes/") {
-                let short = rest.rsplit('/').next().unwrap_or(rest).to_string();
+                // The local branch a checkout would create is the name after the
+                // FIRST '/': "origin/feature/x" → "feature/x". Comparing the last
+                // segment would let nested remote branches through dedupe and
+                // then fail with "a branch named ... already exists".
+                let short = rest.split_once('/').map(|(_, b)| b).unwrap_or(rest).to_string();
                 if !local.contains(&short) {
                     refs.push(BranchRef { name: rest.to_string(), remote: true });
                 }
@@ -179,7 +183,11 @@ impl Git {
         if remote {
             let Some((_, short)) = name.split_once('/') else { return Err("Invalid remote branch name".into()); };
             if short.is_empty() || short.starts_with('-') { return Err("Invalid remote branch name".into()); }
-            let out = Command::new("git").args(["switch", "-c", short, "--track", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+            // Idempotent: the local tracking branch may already exist (created
+            // earlier, or by a teammate) — plain checkout then, never -c.
+            let local_exists = self.branches().unwrap_or_default().iter().any(|b| !b.remote && b.name == short);
+            let args = if local_exists { vec!["checkout", short] } else { vec!["switch", "-c", short, "--track", name] };
+            let out = Command::new("git").args(&args).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
             if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
             return Ok(());
         }
@@ -506,6 +514,30 @@ mod tests {
         // flag injection and empty names are rejected before reaching git
         assert!(g.checkout_branch("", false).is_err());
         assert!(g.checkout_branch("-x", false).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn nested_remote_branch_dedupes_and_checkout_is_idempotent() {
+        let dir = temp_git_repo("branches-nested");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+        g.add_remote("origin", "https://example.invalid/repo.git").unwrap();
+        // Local branch "feature/x" AND remote "origin/feature/x" exist
+        Command::new("git").args(["switch", "-c", "feature/x"]).current_dir(&dir).output().unwrap();
+        Command::new("git").args(["update-ref", "refs/remotes/origin/feature/x", "HEAD"]).current_dir(&dir).output().unwrap();
+        let names = g.branches().unwrap();
+        assert!(names.contains(&BranchRef { name: "feature/x".into(), remote: false }));
+        // Nested remote must be deduped (short name after the FIRST '/')
+        assert!(!names.iter().any(|b| b.remote && b.name == "origin/feature/x"));
+        // Idempotent: local already exists → plain checkout, no "-c" collision
+        g.checkout_branch("origin/feature/x", true).unwrap();
+        let state = g.status_with_branch().unwrap();
+        assert_eq!(state.branch, "feature/x");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

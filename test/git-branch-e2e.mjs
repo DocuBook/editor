@@ -43,6 +43,8 @@ sh(`git remote add origin ${ORIGIN}`)
 sh('git push -q -u origin main')
 execSync(`git --git-dir=${ORIGIN} update-ref refs/heads/dev refs/heads/main`, { stdio: 'ignore' })
 sh('git fetch -q origin')
+// Nested branch with local + remote refs of the same name
+sh('git switch -q -c feature/nested && git commit -qm nested --allow-empty && git push -q -u origin feature/nested && git switch -q main')
 
 let server, browser, page
 try {
@@ -83,6 +85,12 @@ try {
   ok('switcher: lists remote branch origin/dev', true)
   const badge = await page.locator('text=remote').count()
   ok('switcher: remote entry has "remote" badge', badge > 0)
+  // Regression: local + remote with the same nested name — the remote row must
+  // be deduped, otherwise switching hits "a branch named ... already exists".
+  const nestedLocalRows = await page.locator(click('feature/nested')).count()
+  ok('switcher: nested local branch listed', nestedLocalRows > 0)
+  const nestedRemoteRows = await page.locator(click('origin/feature/nested')).count()
+  ok('switcher: nested remote deduped when local exists', nestedRemoteRows === 0, `rows: ${nestedRemoteRows}`)
 
   // ── Switch to the remote branch → local tracking branch created ──
   await page.locator(click('origin/dev')).click()
