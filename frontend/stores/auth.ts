@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { useEffect } from 'react'
 import { invoke, listen } from '../lib/ipc'
 
 export type AuthStatus = 'checking' | 'setup' | 'login' | 'ready'
@@ -55,8 +56,19 @@ export const useAuth = create<AuthState>((set) => ({
 }))
 
 /** Any 401 mid-session → back to login (web only; desktop never fires it). */
-export function initAuthGuard() {
-  void listen('auth:unauthorized', () => {
-    if (useAuth.getState().status === 'ready') useAuth.getState().refresh()
-  })
+export function useAuthGuard() {
+  useEffect(() => {
+    let active = true
+    let unlisten: (() => void) | undefined
+    void listen('auth:unauthorized', () => {
+      if (useAuth.getState().status === 'ready') void useAuth.getState().refresh()
+    }).then(stop => {
+      if (active) unlisten = stop
+      else stop()
+    }).catch(error => console.error('[auth] listener setup failed', error))
+    return () => {
+      active = false
+      unlisten?.()
+    }
+  }, [])
 }

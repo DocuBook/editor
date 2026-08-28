@@ -10,12 +10,23 @@
  */
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
-export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in (window as any)
+export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
-type Listener = (e: { payload: any }) => void
+const REQUEST_TIMEOUT_MS = 30_000
+const SSE_IDLE_TIMEOUT_MS = 60_000
+
+type Listener = (e: { payload: unknown }) => void
 const bus = new Map<string, Set<Listener>>()
 
-/** Same signature as @tauri-apps/api/event.listen. */
+function emit(event: string, payload: unknown) {
+  bus.get(event)?.forEach(fn => fn({ payload }))
+}
+
+function parseSseData(value: string): unknown {
+  try { return JSON.parse(value) } catch { return value }
+}
+
+/** Same signature as @tauri-apps/api/event.listen for the fields used by the UI. */
 export async function listen<T>(event: string, cb: (e: { payload: T }) => void): Promise<UnlistenFn> {
   if (isTauri) {
     const { listen } = await import('@tauri-apps/api/event')
@@ -24,60 +35,83 @@ export async function listen<T>(event: string, cb: (e: { payload: T }) => void):
   const fn = cb as unknown as Listener
   if (!bus.has(event)) bus.set(event, new Set())
   bus.get(event)!.add(fn)
-  return () => { bus.get(event)?.delete(fn) }
-}
-
-/** Dispatch to local bus (web mode only; tauri events are emitted server-side). */
-function emit(event: string, payload: unknown) {
-  bus.get(event)?.forEach(fn => fn({ payload }))
+  return () => {
+    const listeners = bus.get(event)
+    listeners?.delete(fn)
+    if (listeners?.size === 0) bus.delete(event)
+  }
 }
 
 /** Same signature as @tauri-apps/api/core.invoke. */
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   if (isTauri) {
     const { invoke } = await import('@tauri-apps/api/core')
-    return invoke<T>(cmd, args as any)
+    return invoke<T>(cmd, args)
   }
   if (cmd === 'ask_ai') {
-    await streamAskAi(args ?? {})
+    const controller = new AbortController()
+    activeAskAiController = controller
+    try {
+      await streamAskAi(args ?? {}, controller.signal)
+    } finally {
+      if (activeAskAiController === controller) activeAskAiController = null
+    }
     return undefined as T
   }
+  if (cmd === 'cancel_ai') activeAskAiController?.abort()
   const data = await post(cmd, args ?? {})
   return data as T
 }
 
+let activeAskAiController: AbortController | null = null
+
 async function post(cmd: string, args: Record<string, unknown>): Promise<unknown> {
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   let res: Response
   try {
     res = await fetch(`/api/${cmd}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
       body: JSON.stringify(args),
-      signal: AbortSignal.timeout(30_000),
+      signal: controller.signal,
     })
-  } catch (e) {
-    throw new Error(e instanceof DOMException && e.name === 'TimeoutError' ? 'Server is not responding' : 'Cannot reach server')
+  } catch {
+    throw new Error(controller.signal.aborted ? 'Server is not responding' : 'Cannot reach server')
   }
-  const data = await res.json().catch(() => ({}))
-  if (res.status === 401) {
-    emit('auth:unauthorized', undefined)
-    throw new Error((data as any).error || 'Unauthorized')
+  try {
+    let data: unknown = {}
+    try { data = await res.json() }
+    catch { if (controller.signal.aborted) throw new Error('Server is not responding') }
+    const body = data as { error?: unknown; result?: unknown }
+    const message = typeof body.error === 'string' ? body.error : undefined
+    if (res.status === 401) {
+      emit('auth:unauthorized', undefined)
+      throw new Error(message || 'Unauthorized')
+    }
+    if (!res.ok || message) throw new Error(message || `HTTP ${res.status}`)
+    return body.result
+  } finally {
+    clearTimeout(timeout)
   }
-  if (!res.ok || (data as any).error) throw new Error((data as any).error || `HTTP ${res.status}`)
-  return (data as any).result
 }
 
 /** ask_ai streams SSE events from the server → re-emit on the local bus,
  *  resolve when the stream completes (mirrors the tauri emit flow). */
-async function streamAskAi(args: Record<string, unknown>) {
+async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
   const res = await fetch('/api/ask_ai', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+    credentials: 'same-origin',
     body: JSON.stringify(args),
+    signal,
   })
+  if (res.status === 401) emit('auth:unauthorized', undefined)
   if (!res.ok || !res.body) {
     const data = await res.json().catch(() => ({}))
-    throw new Error((data as any).error || `HTTP ${res.status}`)
+    const message = (data as { error?: unknown }).error
+    throw new Error(typeof message === 'string' ? message : `HTTP ${res.status}`)
   }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -88,41 +122,56 @@ async function streamAskAi(args: Record<string, unknown>) {
   let watchdog: ReturnType<typeof setTimeout> | undefined
   const arm = () => {
     if (watchdog) clearTimeout(watchdog)
-    watchdog = setTimeout(() => { stalled = true; void reader.cancel().catch(() => {}) }, 60_000)
+    watchdog = setTimeout(() => {
+      stalled = true
+      void reader.cancel().catch(() => {})
+    }, SSE_IDLE_TIMEOUT_MS)
+  }
+  const dispatch = (frame: string) => {
+    let event = ''
+    const data: string[] = []
+    for (const line of frame.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/)) {
+      if (line.startsWith(':')) continue
+      if (line.startsWith('event:')) event = line.slice(6).trim()
+      else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''))
+    }
+    if (!event || data.length === 0) {
+      if (frame.trim()) arm()
+      return
+    }
+    const payload = data.join('\n')
+    arm()
+    if (event === 'ai:token') emit('ai:token', parseSseData(payload))
+    else if (event === 'ai:tool_call') emit('ai:tool_call', parseSseData(payload))
+    else if (event === 'ai:tools_done') emit('ai:tools_done', parseSseData(payload))
+    else if (event === 'ai:done') emit('ai:done', parseSseData(payload))
+    else if (event === 'error') throw new Error(payload || 'AI request failed')
+  }
+  const takeFrame = () => {
+    const match = buf.match(/\r\n\r\n|\n\n|\r\r/)
+    if (!match || match.index === undefined) return null
+    const frame = buf.slice(0, match.index)
+    buf = buf.slice(match.index + match[0].length)
+    return frame
   }
   arm()
   try {
     for (;;) {
       const { done, value } = await reader.read()
-      if (done) break
-      buf += decoder.decode(value, { stream: true })
-      let idx: number
-      while ((idx = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, idx).trim()
-        buf = buf.slice(idx + 1)
-        if (!line.startsWith('event:')) continue
-        const ev = line.slice(6).trim()
-        const nl = buf.indexOf('\n')
-        const dataLine = nl >= 0 ? buf.slice(0, nl).trim() : buf.trim()
-        if (nl >= 0) buf = buf.slice(nl + 1)
-        if (!dataLine.startsWith('data:')) continue
-        const payload = dataLine.slice(5).trim()
-        arm()
-        if (ev === 'ai:token') {
-          try { emit('ai:token', JSON.parse(payload)) } catch { /* ignore malformed */ }
-        } else if (ev === 'ai:tool_call') {
-          try { emit('ai:tool_call', JSON.parse(payload)) } catch { /* ignore */ }
-        } else if (ev === 'ai:tools_done') {
-          emit('ai:tools_done', '')
-        } else if (ev === 'ai:done') {
-          try { emit('ai:done', JSON.parse(payload)) } catch { emit('ai:done', {}) }
-        } else if (ev === 'error') {
-          throw new Error(payload || 'AI request failed')
-        }
+      if (done) {
+        buf += decoder.decode()
+        break
       }
+      buf += decoder.decode(value, { stream: true })
+      let frame: string | null
+      while ((frame = takeFrame()) !== null) dispatch(frame)
+      if (stalled) break
     }
+    if (!stalled && buf) dispatch(buf)
   } finally {
     if (watchdog) clearTimeout(watchdog)
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
   if (stalled) throw new Error('AI provider is slow — try again')
 }

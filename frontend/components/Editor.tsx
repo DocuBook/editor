@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide from './OnboardingGuide'
@@ -7,33 +7,19 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { editorFileKind } from '../utils/fileKind'
 import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
-import { WysiwygEditor } from './editor/WysiwygEditor'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
-import { createBlockEditor, KeepAliveCache, type CachedEditor } from '../utils/editorFactory'
+import { clearEditorCache } from '../utils/editorCache'
 
-/** Keep-alive cache: one BlockNote instance per open file. Survives tab
- *  switches — only the view remounts, the instance (doc, undo history, AI
- *  stream) persists. Reset when the vault changes (rel paths are
- *  vault-scoped). */
-function useEditorCache() {
-  const cacheRef = useRef<KeepAliveCache<CachedEditor> | null>(null)
-  const vaultPath = useVaultStore(s => s.vaultPath)
-  if (!cacheRef.current) cacheRef.current = new KeepAliveCache(path => createBlockEditor(vaultPath, path))
-  useEffect(() => {
-    // Vault changed: stale instances must go (rel paths collide across vaults).
-    cacheRef.current!.clear()
-  }, [vaultPath])
-  const get = (path: string): CachedEditor => cacheRef.current!.get(path)
-  return get
-}
+const WysiwygEditorHost = lazy(() => import('./editor/WysiwygEditorHost'))
 
 export default function Editor() {
   const { editMode } = useEditorStore()
-  const getCachedEditor = useEditorCache()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const vaultOpen = useVaultStore(s => s.isOpen)
   const vaultPath = useVaultStore(s => s.vaultPath)
   const [onboardingDone, setOnboardingDone] = useState(() => isOnboardingDone())
+
+  useEffect(() => { clearEditorCache() }, [vaultPath])
 
   // Re-check when vault first opens
   useEffect(() => {
@@ -93,7 +79,7 @@ export default function Editor() {
   const kind = editorFileKind(file.path)
 
   /** Shared scroll container — all modes use the same container. */
-  let inner: React.ReactNode
+  let inner: ReactNode
   if (kind === 'binary') {
     inner = <ImagePreview fileName={file.name} vaultPath={vaultPath} relPath={file.path} />
   } else if (file.content == null) {
@@ -110,8 +96,17 @@ export default function Editor() {
       useEditorStore.getState().setTabDirty(file.path, true)
     }} />
   } else {
-    const cached = getCachedEditor(file.path)
-    inner = <WysiwygEditor key={file.path} cached={cached} filePath={file.path} markdown={(file.editedContent ?? file.content).replace(file.frontmatter, '')} onSync={md => useEditorStore.getState().setEditedContent(file.path, md)} />
+    inner = (
+      <Suspense fallback={<div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading editor...</div>}>
+        <WysiwygEditorHost
+          key={file.path}
+          vaultPath={vaultPath}
+          filePath={file.path}
+          markdown={(file.editedContent ?? file.content).replace(file.frontmatter, '')}
+          onSync={md => useEditorStore.getState().setEditedContent(file.path, md)}
+        />
+      </Suspense>
+    )
   }
 
   return (

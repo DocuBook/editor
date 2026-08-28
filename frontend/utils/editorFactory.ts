@@ -33,23 +33,8 @@ export interface CachedEditor {
   loadedMarkdown: string | null
 }
 
-/** Generic get-or-create cache — the testable core of keep-alive. Keyed by
- *  path; the factory runs at most once per key (lazy on first `get`). */
-export class KeepAliveCache<T> {
-  private entries = new Map<string, T>()
-  private readonly create: (key: string) => T
-  constructor(create: (key: string) => T) { this.create = create }
-  get(key: string): T {
-    let entry = this.entries.get(key)
-    if (!entry) {
-      entry = this.create(key)
-      this.entries.set(key, entry)
-    }
-    return entry
-  }
-  /** Drop every instance — call when the vault changes (rel paths collide across vaults). */
-  clear() { this.entries.clear() }
-}
+/** Kept as a public export for the cache unit tests and existing callers. */
+export { KeepAliveCache } from './keepAliveCache'
 
 /** Create a fresh editor instance bound to the vault + file path.
  *  The AI transport closes over THIS instance, so a stream started in this
