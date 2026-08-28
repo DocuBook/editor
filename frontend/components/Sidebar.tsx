@@ -162,7 +162,7 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
   const [ctxItem, setCtxItem] = useState<{path:string;name:string;type:string}|null>(null)
   const [ctxPos, setCtxPos] = useState({x:0,y:0})
   const openContextMenu = (item: any, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY}) }
-  const [renaming, setRenaming] = useState<{path:string;name:string}|null>(null)
+  const [renaming, setRenaming] = useState<{path:string;name:string;type:string}|null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
   const [currentFolder, setCurrentFolder] = useState('')
   useEffect(() => {
@@ -293,6 +293,15 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
                     try {
                       await invoke('rename_file', { from: renaming.path, to: newPath })
                       useEditorStore.getState().renameTab(renaming.path, newPath)
+                      /* Keep the create-here target in sync: create_file re-creates missing
+                       * parent dirs, so a stale currentFolder would silently recreate the
+                       * old folder (A -> Z then new file lands in A/). */
+                      if (renaming.type === '1') setCurrentFolder(prev => {
+                        if (!prev) return prev
+                        if (prev === renaming.path) return newPath
+                        if (prev.startsWith(renaming.path + '/')) return newPath + prev.slice(renaming.path.length)
+                        return prev
+                      })
                       await loadTree()
                     } catch(err) { console.error(err); toast.error('Failed to rename') }
                     setRenaming(null)
@@ -366,7 +375,7 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
         <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.3)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
           <button onClick={async () => {
               closeContextMenu()
-              setRenaming({ path: ctxItem.path, name: ctxItem.name })
+              setRenaming({ path: ctxItem.path, name: ctxItem.name, type: ctxItem.type })
             }}
             className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Rename</button>
           <button onClick={async () => {
