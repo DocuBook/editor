@@ -19,7 +19,6 @@ const sanitizeCommitName = (rawName: string) =>
 export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggle: () => void; sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
-  const [staged, setStaged] = useState(false)
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
   /** Actions dropdown (Commit / Push) — one state machine per action.
    *  'busy' guards double-clicks; 'done' auto-resets to 'idle' (below). */
@@ -72,7 +71,6 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
     const curFile = useEditorStore.getState().activeTab
     const relevant = curFile ? lines.filter((l: string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
     setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== ' '))
-    if (lines.length === 0 || !lines.some((l: string) => l[0] !== ' ' && l[0] !== '?')) setStaged(false)
   }, [gitStatus])
 
   /** A successful Commit/Push indicator auto-resets to idle after 3s, so the
@@ -90,6 +88,17 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
     if (commitState === 'busy') return
     setCommitState('busy')
     try {
+      /** Commit replaces the old Save button: flush the WYSIWYG editor, write
+       *  every dirty tab to disk, stage all (trash excluded) — then commit. */
+      useEditorStore.getState().flushEditor()
+      try {
+        await useEditorStore.getState().persistAllDirty()
+      } catch (e) {
+        setGitMsg(p => ({ ...p, commit: e instanceof Error ? e.message : 'Could not save changes to disk' }))
+        setCommitState('error')
+        return
+      }
+      await invoke('git_stage')
       const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
       const res = await invoke<string>('git_commit', { message: `Auto-commit: ${sanitizeCommitName(rawName)}` })
       const d = JSON.parse(res)
@@ -156,43 +165,20 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
         >{editMode === 'editor' ? 'Markdown' : 'Editor'}</button>
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
-      <span className="tip-wrap tip-bar">
-        <button onClick={async () => {
-          const s = useEditorStore.getState()
-          s.flushEditor() /** sync WYSIWYG → editedContent */
-          const s2 = useEditorStore.getState() /** fresh state after flush */
-          const tab = s2.tabs.find(t => t.path === s2.activeTab)
-          if (tab?.deleted) return
-          /** No active tab → nothing to save or stage. Save can be enabled by
-           *  repo-wide hasDiskChanges while no tab is open; never stage-all. */
-          if (!tab || !s2.activeTab) return
-          try {
-            const src = tab.content ?? ''
-            const content = tab.frontmatter + (tab.editedContent ?? src.replace(tab.frontmatter, ''))
-            await invoke('write_file', { path: s2.activeTab, content })
-            await invoke('git_stage', { path: s2.activeTab }); setStaged(true); useEditorStore.getState().setTabDirty(s2.activeTab, false); setHasDiskChanges(false)
-          } catch(e) { console.error('Save:', e); toast.error('Failed to save') }
-        }}
-        disabled={!isRepo || !(hasDiskChanges || hasUnsaved) || file?.deleted}
-        className="rounded cursor-pointer text-xs text-foreground-subtle hover:text-foreground hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2">Save</button>
-        <span className="tip">{!isRepo ? "Initialize Git in Settings first" : "Stage changes"}</span>
-      </span>
-      <span className="tip-wrap tip-bar relative" ref={actionsRef}>
+      <span className="relative" ref={actionsRef}>
         <button onClick={() => setActionsOpen(o => !o)} aria-label="Git actions" aria-expanded={actionsOpen}
           className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
           Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
         </button>
-        <span className="tip">Commit staged changes or push to remote</span>
         {actionsOpen && (
           <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-            <button onClick={commit} disabled={!isRepo || (!staged && !hasDiskChanges) || commitState === 'busy'}
+            <button onClick={commit} disabled={!isRepo || (!hasDiskChanges && !hasUnsaved) || commitState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={commitState === 'done' ? 'text-green-500 shrink-0' : commitState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
               <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
-              {commitState === 'idle' && staged && <span className="ml-auto text-[10px] text-muted">staged</span>}
             </button>
             {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.commit}</div>}
-            <button onClick={push} disabled={!isRepo || !hasRemote || (!staged && ahead <= 0) || pushState === 'busy'}
+            <button onClick={push} disabled={!isRepo || !hasRemote || ahead <= 0 || pushState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={pushState === 'done' ? 'text-green-500 shrink-0' : pushState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
               <span>{pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed ✓' : pushState === 'error' ? 'Push failed' : 'Push'}</span>
