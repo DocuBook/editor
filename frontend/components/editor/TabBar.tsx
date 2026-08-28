@@ -1,18 +1,33 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Undo2, Redo2, Sparkles, Command, Option, ChevronUp, ArrowBigUp, PanelLeft } from 'lucide-react'
+import { X, Undo2, Redo2, Sparkles, Command, Option, ChevronUp, ArrowBigUp, PanelLeft, ChevronDown, GitCommitHorizontal, Upload } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
 import { useGitStatus } from '../../stores/gitStatus'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
+import { useClickOutside } from '../../hooks/useClickOutside'
+
+/** Sanitize a filename for use in a git commit message: strip control
+ *  characters, newlines, and trailing dots (Windows-invalid). */
+const sanitizeCommitName = (rawName: string) =>
+  Array.from(rawName)
+    .filter(char => { const code = char.charCodeAt(0); return code > 0x1f && code !== 0x7f })
+    .join('')
+    .replace(/\.+$/g, '')
+    .trim() || 'changes'
 
 export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggle: () => void; sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
-  const [pubState, setPubState] = useState<'idle'|'committing'|'pushing'|'done'|'error'>('idle')
-  const [pubMsg, setPubMsg] = useState('')
-  const [staged, setStaged] = useState(false)
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
+  /** Actions dropdown (Commit / Push) — one state machine per action.
+   *  'busy' guards double-clicks; 'done' auto-resets to 'idle' (below). */
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const [commitState, setCommitState] = useState<'idle'|'busy'|'done'|'error'>('idle')
+  const [pushState, setPushState] = useState<'idle'|'busy'|'done'|'error'>('idle')
+  const [gitMsg, setGitMsg] = useState<{ commit: string; push: string }>({ commit: '', push: '' })
+  const actionsRef = useRef<HTMLSpanElement>(null)
+  useClickOutside(actionsRef, () => setActionsOpen(false))
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const hasUnsaved = file?.dirty ?? false
   /** Only .md files can toggle Editor ↔ Code; others are preview. */
@@ -50,32 +65,65 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
   }, [curTab])
 
   /** Git status: shared store (single poller from App root) — derive per-tab state. */
-  const { isRepo, hasRemote, status: gitStatus } = useGitStatus()
+  const { isRepo, hasRemote, ahead, upstream, status: gitStatus } = useGitStatus()
   useEffect(() => {
     const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
     const curFile = useEditorStore.getState().activeTab
     const relevant = curFile ? lines.filter((l: string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
     setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== ' '))
-    if (lines.length === 0 || !lines.some((l: string) => l[0] !== ' ' && l[0] !== '?')) setStaged(false)
   }, [gitStatus])
 
-  const publish = async () => {
-    setPubState('committing')
+  /** A successful Commit/Push indicator auto-resets to idle after 3s, so the
+   *  menu does not stay green forever after a one-shot action. */
+  useEffect(() => {
+    if (commitState !== 'done' && pushState !== 'done') return
+    const t = setTimeout(() => {
+      setCommitState(x => (x === 'done' ? 'idle' : x))
+      setPushState(x => (x === 'done' ? 'idle' : x))
+    }, 3000)
+    return () => clearTimeout(t)
+  }, [commitState, pushState])
+
+  const commit = async () => {
+    if (commitState === 'busy') return
+    setCommitState('busy')
     try {
-      const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
-      /** Sanitize the filename for use in a git commit message: strip control
-       *  characters, newlines, and trailing dots (Windows-invalid). */
-      const msg = `Auto-commit: ${Array.from(rawName).filter(char => { const code = char.charCodeAt(0); return code > 0x1f && code !== 0x7f }).join('').replace(/\.+$/g, '').trim() || 'changes'}`
-      const res = await invoke<string>('git_push', { message: msg })
-      const d = JSON.parse(res)
-      if (d.error && d.error !== 'Nothing to push') { setPubMsg(d.error); setPubState('error'); setStaged(false) }
-      else {
-        setPubMsg(d.commit ? d.commit.substring(0, 7) : 'synced')
-        setPubState(d.success ? 'done' : 'idle')
-        setStaged(false)
-        if (d.message === 'Nothing to push') setPubState('idle')
+      /** Commit replaces the old Save button: flush the WYSIWYG editor, write
+       *  every dirty tab to disk, stage all (trash excluded) — then commit. */
+      useEditorStore.getState().flushEditor()
+      try {
+        await useEditorStore.getState().persistAllDirty()
+      } catch (e) {
+        setGitMsg(p => ({ ...p, commit: e instanceof Error ? e.message : 'Could not save changes to disk' }))
+        setCommitState('error')
+        return
       }
-    } catch { setPubState('error') }
+      await invoke('git_stage')
+      const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
+      const res = await invoke<string>('git_commit', { message: `Auto-commit: ${sanitizeCommitName(rawName)}` })
+      const d = JSON.parse(res)
+      if (d.error) { setGitMsg(p => ({ ...p, commit: d.error })); setCommitState('error'); return }
+      if (d.message === 'Nothing to commit') { setCommitState('idle'); setGitMsg(p => ({ ...p, commit: '' })); toast.info('Nothing to commit'); return }
+      setGitMsg(p => ({ ...p, commit: d.commit ? d.commit.substring(0, 7) : 'committed' }))
+      setCommitState('done')
+      /** persistAllDirty wrote every dirty tab — disk now matches the buffer,
+       *  so the flags can go (they would otherwise leave Commit enabled
+       *  forever, always ending in "Nothing to commit"). */
+      useEditorStore.getState().tabs.forEach(t => { if (t.dirty) useEditorStore.getState().setTabDirty(t.path, false) })
+    } catch { setGitMsg(p => ({ ...p, commit: 'Commit failed' })); setCommitState('error') }
+  }
+
+  const push = async () => {
+    if (pushState === 'busy') return
+    setPushState('busy')
+    try {
+      const res = await invoke<string>('git_push_only')
+      const d = JSON.parse(res)
+      if (d.error) { setGitMsg(p => ({ ...p, push: d.error })); setPushState('error'); return }
+      if (d.message === 'Nothing to push') { setPushState('idle'); setGitMsg(p => ({ ...p, push: '' })); toast.info('Nothing to push'); return }
+      setGitMsg(p => ({ ...p, push: 'Pushed ✓' }))
+      setPushState('done')
+    } catch { setGitMsg(p => ({ ...p, push: 'Push failed' })); setPushState('error') }
   }
 
   return (
@@ -121,32 +169,29 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggl
         >{editMode === 'editor' ? 'Markdown' : 'Editor'}</button>
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
-      <span className="tip-wrap tip-bar">
-        <button onClick={async () => {
-          const s = useEditorStore.getState()
-          s.flushEditor() /** sync WYSIWYG → editedContent */
-          const s2 = useEditorStore.getState() /** fresh state after flush */
-          const tab = s2.tabs.find(t => t.path === s2.activeTab)
-          if (tab?.deleted) return
-          try {
-            if (tab && s2.activeTab) {
-              const src = tab.content ?? ''
-              const content = tab.frontmatter + (tab.editedContent ?? src.replace(tab.frontmatter, ''))
-              await invoke('write_file', { path: s2.activeTab, content })
-            }
-            await invoke('git_stage'); setStaged(true); useEditorStore.getState().setTabDirty(s2.activeTab!, false); setHasDiskChanges(false)
-          } catch(e) { console.error('Save:', e); toast.error('Failed to save') }
-        }}
-        disabled={!isRepo || !(hasDiskChanges || hasUnsaved) || file?.deleted}
-        className="rounded cursor-pointer text-xs text-foreground-subtle hover:text-foreground hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2">Save</button>
-        <span className="tip">{!isRepo ? "Initialize Git in Settings first" : "Stage changes"}</span>
-      </span>
-      <span className="tip-wrap tip-bar">
-        <button onClick={publish} disabled={!isRepo || !hasRemote || !staged || pubState === 'committing' || pubState === 'pushing'}
-        className={'rounded cursor-pointer text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed p-2 ' + ({ idle: 'bg-blue-600 text-white hover:bg-blue-500', committing: 'bg-yellow-600 text-white', pushing: 'bg-yellow-600 text-white', done: 'bg-green-600 text-white', error: 'bg-red-600 text-white' }[pubState] || 'bg-blue-600 text-white')}>
-        {pubState === 'idle' && <>Publish</>}{pubState === 'committing' && <>Commit...</>}{pubState === 'pushing' && <>Push...</>}{pubState === 'done' && <>{pubMsg} ✓</>}{pubState === 'error' && <>Failed</>}
+      <span className="relative" ref={actionsRef}>
+        <button onClick={() => setActionsOpen(o => !o)} aria-label="Git actions" aria-expanded={actionsOpen}
+          className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
+          Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
         </button>
-        <span className="tip">{!isRepo ? "Initialize Git in Settings first" : !hasRemote ? "Add a Git remote in Settings first" : "Git commit + push"}</span>
+        {actionsOpen && (
+          <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+            <button onClick={commit} disabled={!isRepo || (!hasDiskChanges && !hasUnsaved) || commitState === 'busy'}
+              className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+              <span className={commitState === 'done' ? 'text-green-500 shrink-0' : commitState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
+              <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
+            </button>
+            {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.commit}</div>}
+            <button onClick={push} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
+              className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+              <span className={pushState === 'done' ? 'text-green-500 shrink-0' : pushState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
+              <span>{pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed ✓' : pushState === 'error' ? 'Push failed' : 'Push'}</span>
+              {upstream && ahead > 0 && <span className="ml-auto text-[10px] text-muted">↑{ahead}</span>}
+              {!upstream && hasRemote && <span className="ml-auto text-[10px] text-muted">new branch</span>}
+            </button>
+            {pushState === 'error' && gitMsg.push && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.push}</div>}
+          </div>
+        )}
       </span>
     </div>
   )

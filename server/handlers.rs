@@ -37,9 +37,26 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                 .await
                 .map_err(|e| e.to_string())?
         }
-        "git_push" => {
+        "git_commit" => {
             let m = s("message");
-            tokio::task::spawn_blocking(move || cmds::git_push(&st, &m))
+            tokio::task::spawn_blocking(move || cmds::git_commit(&st, &m))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_push_only" => {
+            tokio::task::spawn_blocking(move || cmds::git_push_only(&st))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_branches" => {
+            tokio::task::spawn_blocking(move || cmds::git_branches(&st))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_checkout" => {
+            let b = s("branch");
+            let r = args.get("remote").and_then(|v| v.as_bool()).unwrap_or(false);
+            tokio::task::spawn_blocking(move || cmds::git_checkout(&st, &b, r))
                 .await
                 .map_err(|e| e.to_string())?
         }
@@ -206,21 +223,24 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Some(g) => g.init().map(|_| "null".into()),
             None => Err("No vault".into()),
         },
-        "git_stage" => match state.git.lock().expect("lock").as_ref() {
-            Some(g) => g
-                .add_all()
-                .map_err(|e| e.to_string())
-                .map(|_| "null".into()),
-            None => Err("No vault".to_string()),
-        },
+        "git_stage" => {
+            let path = s("path");
+            match state.git.lock().expect("lock").as_ref() {
+                Some(g) => {
+                    let r = if path.is_empty() { g.add_all() } else { g.stage_path(&path) };
+                    r.map_err(|e| e.to_string()).map(|_| "null".into())
+                }
+                None => Err("No vault".to_string()),
+            }
+        }
         "git_status" => {
             let guard = state.git.lock().expect("lock");
             match guard.as_ref() {
                 Some(g) if g.is_repo() => {
-                    let (branch, status) = g.status_with_branch().unwrap_or_default();
-                    Ok(json!({ "branch": branch, "status": status.trim() }).to_string())
+                    let ws = g.status_with_branch().unwrap_or_default();
+                    Ok(json!({ "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind }).to_string())
                 }
-                _ => Ok(r#"{"branch":"","status":""}"#.to_string()),
+                _ => Ok(r#"{"branch":"","upstream":"","status":"","ahead":0,"behind":0}"#.to_string()),
             }
         }
         "wiki_backlinks" => match state.wiki.lock().expect("lock").as_ref() {

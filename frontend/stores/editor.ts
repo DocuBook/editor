@@ -49,6 +49,10 @@ interface EditorState {
   setTabDeleted: (path: string, deleted: boolean) => void
   /** Flush the WYSIWYG editor and write every dirty tab to disk (graceful close). */
   persistAllDirty: () => Promise<void>
+  /** Re-read open tabs from disk after a branch switch. Dirty tabs are kept
+   *  untouched (their in-memory edits stay); files missing on the new branch
+   *  are marked deleted. */
+  reloadAllTabs: () => Promise<void>
   setEditMode: (mode: EditMode) => void
   toggleEditMode: () => void
 }
@@ -157,6 +161,22 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setTabDirty: (path, dirty) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, dirty } : t) }) },
   setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, deleted } : t) }) },
+
+  /** After a branch switch: flush, then re-read every non-dirty text tab. */
+  reloadAllTabs: async () => {
+    get().flushEditor()
+    const tabs = get().tabs
+    for (const t of tabs) {
+      if (t.dirty || isBinaryPath(t.path)) continue
+      try {
+        const raw = await invoke<string>('read_file', { path: t.path })
+        get().setContent(t.path, raw)
+        get().setTabDeleted(t.path, false)
+      } catch {
+        get().setTabDeleted(t.path, true)
+      }
+    }
+  },
 
   /** Flush WYSIWYG then write every dirty tab to disk — used on app close. */
   persistAllDirty: async () => {

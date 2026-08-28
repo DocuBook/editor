@@ -60,12 +60,39 @@ pub(crate) fn search_vault(state: &AppState, query: &str) -> Result<String, Stri
     serde_json::to_string(&search::search_vault(&root, query)).map_err(|e| e.to_string())
 }
 
-pub(crate) fn git_push(state: &AppState, message: &str) -> Result<String, String> {
+pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).push_full(message)).map_err(|e| e.to_string())
+    serde_json::to_string(&git::Git::open(&repo_path).commit_all(message)).map_err(|e| e.to_string())
+}
+
+pub(crate) fn git_push_only(state: &AppState) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Ok(r#"{"error":"No vault"}"#.to_string()),
+    };
+    serde_json::to_string(&git::Git::open(&repo_path).push_checked()).map_err(|e| e.to_string())
+}
+
+pub(crate) fn git_branches(state: &AppState) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Ok("[]".to_string()),
+    };
+    // branches() is a Result — serialize the LIST, not the Result wrapper.
+    serde_json::to_string(&git::Git::open(&repo_path).branches()?).map_err(|e| e.to_string())
+}
+
+pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".to_string()),
+    };
+    git::Git::open(&repo_path)
+        .checkout_branch(branch, remote)
+        .map(|_| "null".into())
 }
 
 pub(crate) fn git_settings(state: &AppState) -> Result<String, String> {
@@ -142,4 +169,3 @@ pub(crate) fn health(state: &AppState) -> String {
     .to_string()
 }
 
-// ── HTTP handlers ──
