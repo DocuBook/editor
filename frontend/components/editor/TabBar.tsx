@@ -1,13 +1,12 @@
-/** Tab bar with file name, undo/redo, stage, publish, and AI toggle. */
 import { useEffect, useRef, useState } from 'react'
-import { X, Undo2, Redo2, Sparkles, Command, Option, ChevronUp, ArrowBigUp } from 'lucide-react'
+import { X, Undo2, Redo2, Sparkles, Command, Option, ChevronUp, ArrowBigUp, PanelLeft } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
 import { useGitStatus } from '../../stores/gitStatus'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
 
-export function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
+export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar }: { onAiToggle: () => void; sidebarOpen: boolean; onToggleSidebar: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [pubState, setPubState] = useState<'idle'|'committing'|'pushing'|'done'|'error'>('idle')
@@ -80,7 +79,18 @@ export function TabBar({ onAiToggle }: { onAiToggle: () => void }) {
   }
 
   return (
-    <div className="ui-shell h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-12">
+    <div className="ui-shell h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-6">
+      <span className="tip-wrap tip-bar tip-bar-left">
+        <button
+          onClick={onToggleSidebar}
+          aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          aria-expanded={sidebarOpen}
+          className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active p-2"
+        >
+          {sidebarOpen ? <PanelLeft size={16} /> : <PanelLeft size={16} />}
+        </button>
+        <span className="tip">{sidebarOpen ? 'Collapse' : 'Expand'} sidebar <kbd><Command size={11} />J</kbd></span>
+      </span>
       <span className="tip-wrap tip-bar">
         <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2"><Undo2 size={16} /></button>
         <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>

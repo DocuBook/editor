@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { invoke, isTauri } from '../lib/ipc'
-import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, PanelLeftClose, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
+import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -113,7 +113,7 @@ function BacklinksPanel() {
   )
 }
 
-export default function Sidebar({ onToggleSidebar, onOpenSettings }: { onToggleSidebar: () => void; onOpenSettings: () => void }) {
+export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [creating, setCreating] = useState<'file'|'folder'|null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
@@ -267,12 +267,6 @@ export default function Sidebar({ onToggleSidebar, onOpenSettings }: { onToggleS
               <Search size={14} />
             </button>
             <span className="tip">Search project files <kbd><Command size={11} />F</kbd></span>
-          </span>
-          <span className="tip-wrap tip-bar">
-            <button onClick={onToggleSidebar} aria-label="Collapse sidebar" className="hover:text-foreground-secondary transition-colors p-1 cursor-pointer bg-transparent border-none rounded flex text-foreground-subtle">
-              <PanelLeftClose size={14} />
-            </button>
-            <span className="tip">Collapse sidebar <kbd><Command size={11} />J</kbd></span>
           </span>
           <button onClick={closeVault} aria-label="Close vault" className="text-zinc-600 hover:text-foreground-secondary p-1 cursor-pointer bg-transparent border-none rounded flex">
             <X size={14} />

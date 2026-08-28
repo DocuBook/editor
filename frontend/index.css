@@ -297,6 +297,16 @@ body {
   right: 8px;
   left: auto;
 }
+/* Toolbar tip for the FIRST button (sidebar toggle): anchor to the left so
+   the tooltip grows rightward instead of clipping at the viewport edge. */
+.tip-bar-left .tip {
+  left: 0;
+  right: auto;
+}
+.tip-bar-left .tip::after {
+  right: auto;
+  left: 10px;
+}
 /* Tooltip for the collapsed-sidebar expand strip: below the button, left-aligned. */
 .tip-strip .tip {
   top: calc(100% + 6px);

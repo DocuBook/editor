@@ -6,7 +6,6 @@ import Editor from './components/Editor'
 import StatusBar from './components/StatusBar'
 import SettingsModal from './components/SettingsModal'
 import { Toaster, toast } from 'sonner'
-import { PanelLeftOpen, Command } from 'lucide-react'
 
 import { useGitPolling } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
@@ -78,19 +77,8 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
-        {isVaultOpen && (sidebarOpen ? (
-          <Sidebar onToggleSidebar={toggleSidebar} onOpenSettings={() => setSettingsOpen(true)} />
-        ) : (
-          <div className="shrink-0 flex flex-col items-center border-r border-border-subtle w-[34px] pt-1.5">
-            <span className="tip-wrap tip-strip">
-              <button onClick={toggleSidebar} aria-label="Expand sidebar" className="hover:bg-surface-active hover:text-foreground-secondary transition-colors p-1.5 cursor-pointer bg-transparent border-none rounded-md flex text-foreground-subtle">
-                <PanelLeftOpen size={16} />
-              </button>
-              <span className="tip">Expand sidebar <kbd><Command size={11} />J</kbd></span>
-            </span>
-          </div>
-        ))}
-        <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor /></main>
+        {isVaultOpen && sidebarOpen && <Sidebar onOpenSettings={() => setSettingsOpen(true)} />}
+        <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} /></main>
       </div>
       {isVaultOpen && <StatusBar />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
