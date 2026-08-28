@@ -5,6 +5,20 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct PushResult { pub success: bool, pub commit: String, pub message: String, pub error: String }
 
+/** Parsed `status --porcelain=v2 -b` summary: branch name, v1-style status
+ *  lines (`XY path`), and ahead/behind counts vs the upstream branch. */
+#[derive(Debug, Default, Serialize)]
+pub struct WorktreeStatus {
+    pub branch: String,
+    pub status: String,
+    pub ahead: usize,
+    pub behind: usize,
+}
+
+/** Result of `commit_all` — an empty worktree is a success with `Nothing to commit`. */
+#[derive(Debug, Serialize)]
+pub struct CommitResult { pub success: bool, pub commit: String, pub message: String, pub error: String }
+
 /// Git repository wrapper for add-commit-push operations.
 pub struct Git { pub repo_path: String }
 
@@ -28,62 +42,68 @@ impl Git {
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     }
 
-    /** Branch + status in ONE git subprocess (PERF: the old two-command
-     *  rev-parse + status cost ~2× per 3s poll). Runs `status --porcelain=v2 -b`
-     *  and maps v2 lines back to v1-style `XY path` so frontend parsers are
-     *  unchanged. Returns (branch, v1_status_string). */
-    pub fn status_with_branch(&self) -> Result<(String, String), String> {
+    /** Branch + status + ahead/behind in ONE git subprocess (PERF: the old
+     *  two-command rev-parse + status cost ~2× per 3s poll). Runs
+     *  `status --porcelain=v2 -b`, maps v2 lines back to v1-style `XY path`
+     *  (frontend parsers unchanged) and parses ahead/behind vs upstream. */
+    pub fn status_with_branch(&self) -> Result<WorktreeStatus, String> {
         let out = Command::new("git")
             .args(["status", "--porcelain=v2", "-b"])
             .current_dir(&self.repo_path)
             .output()
             .map_err(|e| e.to_string())?;
-        let text = String::from_utf8_lossy(&out.stdout);
-        let mut branch = String::new();
-        let mut lines: Vec<String> = Vec::new();
-        for line in text.lines() {
-            if let Some(rest) = line.strip_prefix("# branch.head ") {
-                branch = rest.trim().to_string();
-            } else if let Some(rest) = line.strip_prefix("1 ") {
-                // v2: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path> → v1: XY path
-                let mut it = rest.split_whitespace();
-                if let (Some(xy), Some(path)) = (it.next(), it.last()) {
-                    lines.push(format!("{xy} {path}"));
-                }
-            } else if let Some(rest) = line.strip_prefix("? ") {
-                lines.push(format!("? {}", rest.trim()));
-            }
-        }
-        Ok((branch, lines.join("\n")))
+        Ok(parse_porcelain_v2(&String::from_utf8_lossy(&out.stdout)))
     }
 /** Stage all changes, excluding the vault `.trash/` (deleted notes must not be
  *  committed as moves into the trash). Pathspec works for any repo, no
  *  .gitignore required. */
     pub fn add_all(&self) -> Result<(), String> {
-        Command::new("git").args(["add", "-A", "--", ".", ":!.trash"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        let out = Command::new("git").args(["add", "-A", "--", ".", ":!.trash"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        Ok(())
+    }
+/** Stage a single path (the active tab) — never touches other files, unlike
+ *  add_all. The `.trash` exclusion from add_all does not apply: editor saves
+ *  only ever target live vault files. */
+    pub fn stage_path(&self, path: &str) -> Result<(), String> {
+        let out = Command::new("git").args(["add", "--", path]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
         Ok(())
     }
 /** Commit with message. Returns commit hash. */
     pub fn commit(&self, msg: &str) -> Result<String, String> {
         let m = if msg.is_empty() { "Auto-commit from Editor" } else { msg };
-        Command::new("git").args(["commit", "-m", m]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        let out = Command::new("git").args(["commit", "-m", m]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
         let hash = Command::new("git").args(["rev-parse", "HEAD"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
         Ok(String::from_utf8_lossy(&hash.stdout).trim().to_string())
     }
-/** Push to remote. */
-    pub fn push(&self) -> Result<(), String> {
-        Command::new("git").args(["push"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
-        Ok(())
+/** Commit what is staged. An empty worktree is a success with
+ *  `Nothing to commit` (the commit box stays open, no error state). */
+    pub fn commit_all(&self, msg: &str) -> CommitResult {
+        if !self.is_repo() { return CommitResult { success: false, commit: String::new(), message: String::new(), error: "Not a git repo".into() } }
+        let status = match self.status() { Ok(s) => s, Err(e) => return CommitResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
+        if status.trim().is_empty() { return CommitResult { success: true, commit: String::new(), message: "Nothing to commit".into(), error: String::new() } }
+        match self.commit(msg) {
+            Ok(h) => CommitResult { success: true, commit: h, message: "Committed".into(), error: String::new() },
+            Err(e) => CommitResult { success: false, commit: String::new(), message: String::new(), error: format!("Commit: {}", e) },
+        }
     }
-/** Add → commit → push in one call. Returns PushResult. */
-    pub fn push_full(&self, msg: &str) -> PushResult {
+/** Push commits to the configured upstream. Nothing ahead → `Nothing to push`
+ *  (success, no-op). Independent of the worktree state, fixing the old
+ *  push_full retry trap: a clean worktree after a failed push used to report
+ *  "Nothing to push" forever, stranding the un-pushed commit. */
+    pub fn push_checked(&self) -> PushResult {
         if !self.is_repo() { return PushResult { success: false, commit: String::new(), message: String::new(), error: "Not a git repo".into() } }
-        let status = match self.status() { Ok(s) => s, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
-        if status.trim().is_empty() { return PushResult { success: true, commit: String::new(), message: "Nothing to push".into(), error: String::new() } }
-        if let Err(e) = self.add_all() { return PushResult { success: false, commit: String::new(), message: String::new(), error: format!("Add: {}", e) } }
-        let hash = match self.commit(msg) { Ok(h) => h, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: format!("Commit: {}", e) } };
-        if let Err(e) = self.push() { return PushResult { success: false, commit: hash, message: String::new(), error: format!("Push: {}", e) } }
-        PushResult { success: true, commit: hash, message: "Pushed".into(), error: String::new() }
+        let ws = match self.status_with_branch() { Ok(w) => w, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
+        if ws.ahead == 0 { return PushResult { success: true, commit: String::new(), message: "Nothing to push".into(), error: String::new() } }
+        let out = match Command::new("git").arg("push").current_dir(&self.repo_path).output() { Ok(o) => o, Err(e) => return PushResult { success: false, commit: String::new(), message: String::new(), error: e.to_string() } };
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            return PushResult { success: false, commit: String::new(), message: String::new(), error: if stderr.is_empty() { "Push failed".into() } else { stderr } };
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        PushResult { success: true, commit: String::new(), message: if stdout.is_empty() { "Pushed".into() } else { stdout }, error: String::new() }
     }
 }
 
@@ -189,6 +209,34 @@ fn is_remote_url(url: &str) -> bool {
     !host.is_empty() && !host.contains('/') && !path.is_empty()
 }
 
+/** Parse `git status --porcelain=v2 -b` output into branch + v1-style lines +
+ *  ahead/behind. Pure (no git calls) so it is unit-testable offline. */
+fn parse_porcelain_v2(text: &str) -> WorktreeStatus {
+    let mut branch = String::new();
+    let mut ahead = 0usize;
+    let mut behind = 0usize;
+    let mut lines: Vec<String> = Vec::new();
+    for line in text.lines() {
+        if let Some(rest) = line.strip_prefix("# branch.head ") {
+            branch = rest.trim().to_string();
+        } else if let Some(rest) = line.strip_prefix("# branch.ab ") {
+            // e.g. "# branch.ab +2 -1" — signs included
+            let mut it = rest.split_whitespace();
+            if let Some(a) = it.next() { ahead = a.trim_start_matches('+').parse().unwrap_or(0) }
+            if let Some(b) = it.next() { behind = b.trim_start_matches('-').parse().unwrap_or(0) }
+        } else if let Some(rest) = line.strip_prefix("1 ") {
+            // v2: 1 <XY> <sub> <mH> <mI> <mW> <hH> <hI> <path> → v1: XY path
+            let mut it = rest.split_whitespace();
+            if let (Some(xy), Some(path)) = (it.next(), it.last()) {
+                lines.push(format!("{xy} {path}"));
+            }
+        } else if let Some(rest) = line.strip_prefix("? ") {
+            lines.push(format!("? {}", rest.trim()));
+        }
+    }
+    WorktreeStatus { branch, status: lines.join("\n"), ahead, behind }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +315,85 @@ mod tests {
         assert!(!is_remote_url("~/x"));
         assert!(!is_remote_url("./x"));
         assert!(!is_remote_url("plainname"));
+    }
+
+    /** Unique temp dir per invocation — a stable {pid} suffix would collide across
+     *  parallel cargo-test threads if any second test reuses this pattern. */
+    fn temp_git_repo(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "docubook-test-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn parse_porcelain_v2_summary() {
+        let ws = parse_porcelain_v2(
+            "# branch.oid aabbcc\n# branch.head main\n# branch.upstream origin/main\n# branch.ab +2 -1\n1 M. N... 100644 100644 100644 a b src/a.md\n? untracked.md",
+        );
+        assert_eq!(ws.branch, "main");
+        assert_eq!((ws.ahead, ws.behind), (2, 1));
+        assert_eq!(ws.status, "M. src/a.md\n? untracked.md");
+    }
+
+    #[test]
+    fn parse_porcelain_v2_no_upstream_defaults_to_zero() {
+        // Detached HEAD / no upstream → no branch.ab line → 0/0, so push
+        // correctly reports "Nothing to push" instead of a doomed push.
+        let ws = parse_porcelain_v2("# branch.oid abc\n# branch.head (HEAD detached at abc)");
+        assert!(ws.status.is_empty());
+        assert_eq!((ws.ahead, ws.behind), (0, 0));
+    }
+
+    #[test]
+    fn commit_all_flow() {
+        let dir = temp_git_repo("commit-all");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        let r1 = g.commit_all("Auto-commit: x");
+        assert!(r1.success);
+        assert_eq!(r1.message, "Nothing to commit");
+        std::fs::write(dir.join("a.md"), "hello").unwrap();
+        g.add_all().unwrap();
+        let r2 = g.commit_all("Auto-commit: a.md");
+        assert!(r2.success);
+        assert_eq!(r2.message, "Committed");
+        assert!(r2.commit.len() >= 7);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stage_path_stages_only_that_file() {
+        let dir = temp_git_repo("stage-path");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        std::fs::write(dir.join("b.md"), "b").unwrap();
+        g.stage_path("a.md").unwrap();
+        let ws = g.status_with_branch().unwrap();
+        // XY pair "A." = staged add, worktree unchanged; b.md is only
+        // reported as untracked ("? b.md") — never staged.
+        assert!(ws.status.contains("A. a.md"));
+        assert!(ws.status.contains("? b.md"));
+        assert!(!ws.status.contains("A. b.md"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn push_checked_nothing_to_push_without_remote() {
+        let dir = temp_git_repo("push-checked");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        let r = g.push_checked();
+        assert!(r.success);
+        assert_eq!(r.message, "Nothing to push");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

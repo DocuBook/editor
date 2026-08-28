@@ -68,23 +68,41 @@ pub fn git_set_identity(name: String, email: String, state: State<AppState>) -> 
 }
 
 #[tauri::command]
-pub fn git_stage(state: State<AppState>) -> Result<(), String> {
+pub fn git_stage(path: Option<String>, state: State<AppState>) -> Result<(), String> {
     let guard = state.git.lock().expect("lock");
     match guard.as_ref() {
-        Some(g) => g.add_all().map_err(|e| e.to_string()),
+        Some(g) => match path {
+            Some(p) if !p.is_empty() => g.stage_path(&p).map_err(|e| e.to_string()),
+            _ => g.add_all().map_err(|e| e.to_string()),
+        },
         None => Err("No vault".to_string()),
     }
 }
 
 #[tauri::command]
-pub async fn git_push(message: String, state: State<'_, AppState>) -> Result<String, String> {
+pub async fn git_commit(message: String, state: State<'_, AppState>) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
-    // add+commit+push can take seconds on large repos — off the main thread.
+    // git commit can take a moment on large repos — off the main thread.
     let res = tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).push_full(&message)).map_err(|e| e.to_string())
+        serde_json::to_string(&crate::git::Git::open(&repo_path).commit_all(&message)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(res)
+}
+
+#[tauri::command]
+pub async fn git_push_only(state: State<'_, AppState>) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Ok(r#"{"error":"No vault"}"#.to_string()),
+    };
+    // git push hits the network — off the main thread.
+    let res = tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).push_checked()).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -99,15 +117,15 @@ pub async fn git_status(state: State<'_, AppState>) -> Result<String, String> {
     };
     // git spawns subprocesses (is_repo + status) — off the main thread (PERF:
     // this runs on a 3s poller; previously SYNC on the UI thread).
-    let (is_repo, has_remote, branch, status) = tauri::async_runtime::spawn_blocking(move || {
+    let res = tauri::async_runtime::spawn_blocking(move || {
         let g = crate::git::Git::open(&repo_path);
         if !g.is_repo() {
-            return (false, false, String::new(), String::new());
+            return serde_json::json!({ "isRepo": false, "hasRemote": false, "branch": "", "status": "", "ahead": 0, "behind": 0 });
         }
-        let (branch, status) = g.status_with_branch().unwrap_or_default();
-        (true, g.has_remote(), branch, status)
+        let ws = g.status_with_branch().unwrap_or_default();
+        serde_json::json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind })
     })
     .await
     .map_err(|e| e.to_string())?;
-    Ok(serde_json::json!({ "isRepo": is_repo, "hasRemote": has_remote, "branch": branch, "status": status.trim() }).to_string())
+    Ok(res.to_string())
 }
