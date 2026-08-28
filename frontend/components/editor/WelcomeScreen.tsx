@@ -57,7 +57,6 @@ export function WelcomeScreen() {
                   className={btn + ' justify-start px-3 py-2 bg-transparent text-foreground-secondary border border-border hover:bg-surface-active'}>
                   <Folder size={14} className="text-muted shrink-0" />
                   <span className="overflow-hidden text-ellipsis whitespace-nowrap text-foreground font-medium">{r.name}</span>
-                  <span className="ml-auto text-[10px] text-muted overflow-hidden text-ellipsis whitespace-nowrap max-w-[40%]">{r.parent}</span>
                 </button>
               ))}
             </div>
