@@ -81,7 +81,8 @@ pub(crate) fn git_branches(state: &AppState) -> Result<String, String> {
         Some(g) => g.repo_path.clone(),
         None => return Ok("[]".to_string()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).branches()).map_err(|e| e.to_string())
+    // branches() is a Result — serialize the LIST, not the Result wrapper.
+    serde_json::to_string(&git::Git::open(&repo_path).branches()?).map_err(|e| e.to_string())
 }
 
 pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Result<String, String> {

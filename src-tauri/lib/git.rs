@@ -116,7 +116,8 @@ pub async fn git_branches(state: State<'_, AppState>) -> Result<String, String> 
         None => return Ok("[]".to_string()),
     };
     let res = tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).branches()).map_err(|e| e.to_string())
+        // branches() is a Result — serialize the LIST, not the Result wrapper.
+        serde_json::to_string(&crate::git::Git::open(&repo_path).branches()?).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?;
