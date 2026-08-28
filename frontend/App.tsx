@@ -21,9 +21,18 @@ export default function App() {
   const { status } = useAuth()
   const isVaultOpen = useVaultStore(s => s.isOpen)
   const openVault = useVaultStore(s => s.openVault)
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  /** Default per viewport: closed below the 640px `sm` breakpoint (mobile), open above. */
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 640px)').matches)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const toggleSidebar = () => setSidebarOpen(o => !o)
+  /** Keep the sidebar closed below 640px: auto-close when shrinking to mobile,
+   *  re-open when growing back to desktop. Manual toggle still works anytime. */
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 640px)')
+    const onChange = (e: MediaQueryListEvent) => setSidebarOpen(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [])
   useEffect(() => { useAuth.getState().init() }, [])
 
   /** Single git-status poller shared by StatusBar + TabBar. */
