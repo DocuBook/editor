@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { invoke, isTauri } from '../lib/ipc'
-import { Search, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
+import { Search, Check, ChevronDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -122,6 +122,9 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
   const createBusyRef = useRef(false)
   const plusMenuRef = useRef<HTMLSpanElement>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
+  const vaultMenuRef = useRef<HTMLSpanElement>(null)
+  const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
 
   useEffect(() => {
     if (creating) setTimeout(() => newInputRef.current?.focus(), 50)
@@ -133,6 +136,7 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
   useClickOutside(plusMenuRef, () => setShowPlusMenu(false))
   useClickOutside(newInputRef, () => { if (creating) { setCreating(null); setNewName('') } })
   useClickOutside(ctxMenuRef, closeContextMenu)
+  useClickOutside(vaultMenuRef, () => setVaultMenuOpen(false))
 
   const handleCreate = async () => {
     if (!newName.trim() || !isOpen || loading || !creating || createBusyRef.current) return
@@ -155,7 +159,7 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
     } catch(e) { console.error(e); toast.error('Failed to create') }
     finally { createBusyRef.current = false }
   }
-  const { name, isOpen, vaultPath, visibleItems, loading, closeVault, toggleFolder, loadTree } = useVaultStore()
+  const { name, isOpen, vaultPath, recent, visibleItems, loading, closeVault, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
   // Context menu
@@ -206,7 +210,7 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
       if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
       setSearchOpen(true)
     }
-    if (e.key === 'Escape') setShowPlusMenu(false)
+    if (e.key === 'Escape') { setShowPlusMenu(false); setVaultMenuOpen(false); setConfirmClose(false) }
     /** New file/folder. Canonical (all platforms): ⌘⇧F / ⌘⌥⇧F — browsers
      *  reserve ⌘N / ⌘⇧N / ⌘⌥N (new window / private window) and never deliver
      *  them to the page, so web only ever sees the canonical mapping. Native
@@ -243,7 +247,41 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
     <aside className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
       <div className="relative flex items-center justify-between border-b border-border-subtle px-2 py-3">
-        <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider truncate">{name}</span>
+        <span className="tip-wrap tip-bar relative flex-1 min-w-0" ref={vaultMenuRef}>
+          <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
+            className={'flex items-center gap-1 max-w-full cursor-pointer rounded px-1 py-0.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-zinc-500')}>
+            <span className="text-xs font-semibold uppercase tracking-wider truncate">{name}</span>
+            <ChevronDown size={14} className="shrink-0" />
+          </button>
+          {vaultMenuOpen && (
+            <div data-vault-menu className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[220px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+              {recent.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-foreground-subtle italic">No recent vaults</div>}
+              {recent.length > 0 && (
+                <div className="max-h-56 overflow-y-auto">
+                  {recent.slice(0, 5).map(r => {
+                    const active = r.path === vaultPath
+                    return (
+                      <button key={r.path} onClick={() => { setVaultMenuOpen(false); if (!active) openRecent(r.path) }}
+                        className={'flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-left bg-transparent border-none rounded text-[12px] hover:bg-surface-active ' + (active ? 'text-foreground cursor-default' : 'text-foreground-secondary')}>
+                        {active ? <Check size={13} className="text-accent shrink-0" /> : <Folder size={13} className="text-zinc-500 shrink-0" />}
+                        <span className="truncate flex-1">{r.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="border-t border-border-subtle my-1" />
+              <button onClick={() => { setVaultMenuOpen(false); openVault() }}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active">
+                <FolderOpen size={14} /> Open Vault
+              </button>
+              <button onClick={() => { setVaultMenuOpen(false); setConfirmClose(true) }}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active">
+                <X size={14} /> Close Vault
+              </button>
+            </div>
+          )}
+        </span>
         <span className="flex items-center gap-1 shrink-0 ml-2">
           <span className="tip-wrap tip-bar relative" ref={plusMenuRef}>
             <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
@@ -271,9 +309,6 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
             </button>
             <span className="tip">Search project files <kbd><Command size={11} />F</kbd></span>
           </span>
-          <button onClick={closeVault} aria-label="Close vault" className={iconBtn}>
-            <X size={14} />
-          </button>
         </span>
       </div>
 
@@ -383,6 +418,18 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
               try { await invoke('delete_file', { path: ctxItem.path }); await loadTree(); await loadTrash(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
             }}
             className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Delete</button>
+        </div>
+      )}
+      {confirmClose && (
+        <div role="alertdialog" aria-label="Close vault" className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50" onClick={() => setConfirmClose(false)}>
+          <div className="bg-surface border border-border rounded-xl p-4 w-72 shadow-[0_10px_30px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
+            <div className="text-sm font-semibold mb-1">Close vault?</div>
+            <div className="text-xs text-foreground-secondary mb-4">Unsaved changes will be saved before closing.</div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setConfirmClose(false)} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
+              <button onClick={async () => { setConfirmClose(false); await closeVault() }} className="text-xs px-3 py-1.5 rounded bg-danger text-white cursor-pointer border-none">Close</button>
+            </div>
+          </div>
         </div>
       )}
     </aside>
