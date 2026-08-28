@@ -1,0 +1,7 @@
+// Source files in this repo are hand-formatted (compact style: single quotes,
+// no semicolons). There is no prettier config here, so format-on-save with
+// default Prettier rewrites whole files and turns every diff into formatting
+// noise. Keep formatting off unless a formatter config is added on purpose.
+{
+  "format_on_save": "off"
+}
