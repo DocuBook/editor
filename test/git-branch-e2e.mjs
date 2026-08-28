@@ -43,6 +43,8 @@ sh(`git remote add origin ${ORIGIN}`)
 sh('git push -q -u origin main')
 execSync(`git --git-dir=${ORIGIN} update-ref refs/heads/dev refs/heads/main`, { stdio: 'ignore' })
 sh('git fetch -q origin')
+// origin/HEAD symbolic default pointer (created on clone) must never be listed
+sh('git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main')
 // Nested branch with local + remote refs of the same name
 sh('git switch -q -c feature/nested && git commit -qm nested --allow-empty && git push -q -u origin feature/nested && git switch -q main')
 
@@ -91,6 +93,8 @@ try {
   ok('switcher: nested local branch listed', nestedLocalRows > 0)
   const nestedRemoteRows = await page.locator(click('origin/feature/nested')).count()
   ok('switcher: nested remote deduped when local exists', nestedRemoteRows === 0, `rows: ${nestedRemoteRows}`)
+  const headRows = await page.locator(click('origin/HEAD')).count()
+  ok('switcher: origin/HEAD symbolic ref never listed', headRows === 0, `rows: ${headRows}`)
 
   // ── Switch to the remote branch → local tracking branch created ──
   await page.locator(click('origin/dev')).click()

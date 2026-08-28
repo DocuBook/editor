@@ -145,11 +145,15 @@ impl Git {
         Command::new("git").args(["rev-parse", "--verify", "HEAD"]).current_dir(&self.repo_path).output().map(|o| o.status.success()).unwrap_or(false)
     }
 /** List branches from actual refs — local (`refs/heads`) first, then
- *  remote-tracking (`refs/remotes`). A remote ref whose short name already
- *  exists locally is skipped: switching there should use the local branch.
+ *  remote-tracking (`refs/remotes`).
  *
- *  Remotes are surfaced as their full ref name (`origin/dev`) so the switcher
- *  can check them out as new local tracking branches. */
+ *  Contract (what the switcher shows):
+ *  - every local branch (`remote: false`)
+ *  - remote-tracking refs (`remote: true`, full name like `origin/dev`) EXCEPT
+ *    `<remote>/HEAD` (the symbolic default-branch pointer — not a real
+ *    branch) and refs whose local counterpart already exists (dedupe by the
+ *    name a checkout would create, i.e. after the first '/':
+ *    `origin/feature/x` → `feature/x`). */
     pub fn branches(&self) -> Result<Vec<BranchRef>, String> {
         let out = Command::new("git").args(["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
         if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
@@ -161,6 +165,9 @@ impl Git {
                 local.push(rest.to_string());
                 refs.push(BranchRef { name: rest.to_string(), remote: false });
             } else if let Some(rest) = line.strip_prefix("refs/remotes/") {
+                // origin/HEAD (+ <remote>/HEAD) is the symbolic default-branch
+                // pointer, not a branch — never list it ("switch -c HEAD" fatal).
+                if rest.ends_with("/HEAD") { continue; }
                 // The local branch a checkout would create is the name after the
                 // FIRST '/': "origin/feature/x" → "feature/x". Comparing the last
                 // segment would let nested remote branches through dedupe and
@@ -182,7 +189,7 @@ impl Git {
         if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
         if remote {
             let Some((_, short)) = name.split_once('/') else { return Err("Invalid remote branch name".into()); };
-            if short.is_empty() || short.starts_with('-') { return Err("Invalid remote branch name".into()); }
+            if short.is_empty() || short.starts_with('-') || short == "HEAD" { return Err("Invalid remote branch name".into()); }
             // Idempotent: the local tracking branch may already exist (created
             // earlier, or by a teammate) — plain checkout then, never -c.
             let local_exists = self.branches().unwrap_or_default().iter().any(|b| !b.remote && b.name == short);
@@ -553,8 +560,11 @@ mod tests {
         // Simulate a fetched remote without network: configured remote + ref
         g.add_remote("origin", "https://example.invalid/repo.git").unwrap();
         Command::new("git").args(["update-ref", "refs/remotes/origin/feat", "HEAD"]).current_dir(&dir).output().unwrap();
+        // origin/HEAD symbolic default pointer must never be listed
+        Command::new("git").args(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]).current_dir(&dir).output().unwrap();
         let names = g.branches().unwrap();
         assert!(names.contains(&BranchRef { name: "origin/feat".into(), remote: true }));
+        assert!(!names.iter().any(|b| b.name == "origin/HEAD"));
         // Checking out the remote ref creates a local tracking branch "feat"
         g.checkout_branch("origin/feat", true).unwrap();
         let state = g.status_with_branch().unwrap();
