@@ -160,7 +160,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ tabs: get().tabs.map(t => t.path === path ? { ...t, editedContent: md } : t) })
   },
   setTabDirty: (path, dirty) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, dirty } : t) }) },
-  setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => t.path === path ? { ...t, deleted } : t) }) },
+  setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => (t.path === path || t.path.startsWith(path + '/')) ? { ...t, deleted } : t) }) },
 
   /** After a branch switch: flush, then re-read every non-dirty text tab. */
   reloadAllTabs: async () => {
