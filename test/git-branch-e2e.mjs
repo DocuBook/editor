@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 /**
  * Git branch switcher E2E — boots the real server with a pre-seeded git vault
- * (a local branch `main` pushed to origin, plus a remote-only branch `dev`),
- * opens the vault through the UI and exercises the status-bar branch switcher:
- * local + remote entries, remote badge, switch → tracking branch, dedupe.
+ * and exercises the status-bar branch switcher end to end.
+ *
+ * Seed (all refs created locally, no network):
+ * - local `main` pushed to origin → upstream + `origin/main`
+ * - remote-only `dev` (+ `origin/HEAD` symbolic default pointer)
+ * - nested `feature/nested` with BOTH local and remote refs
+ *
+ * Asserts the switcher contract (see `src-tauri/git/branches.rs`):
+ * local + remote entries with a "remote" badge, `*/HEAD` never listed, nested
+ * remote deduped when its local branch exists, remote → local tracking branch
+ * switch, and dedupe after switching.
  *
  * Run:
  *   npm run build && \
