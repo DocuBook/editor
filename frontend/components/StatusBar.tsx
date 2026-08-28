@@ -32,7 +32,7 @@ export default function StatusBar() {
     try {
       const res = await invoke<string>('git_branches')
       setBranches(typeof res === 'string' ? JSON.parse(res) : res)
-    } catch { setError('Could not list branches') }
+    } catch (e) { setError(String(e)) }
   }
 
   const switchTo = async (name: string) => {
@@ -74,7 +74,7 @@ export default function StatusBar() {
           </button>
           {open && (
             <div className="absolute bottom-full right-0 mb-1 bg-surface border border-border rounded-lg p-1 min-w-[180px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-              {branches.length === 0 && <div className="px-2.5 py-1.5 text-[12px] text-muted">No local branches</div>}
+              {branches.length === 0 && !error && <div className="px-2.5 py-1.5 text-[12px] text-muted">No local branches</div>}
               {branches.map(b => (
                 <button key={b} onClick={() => switchTo(b)} disabled={busy !== null}
                   className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[12px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-50 disabled:cursor-not-allowed text-left">
