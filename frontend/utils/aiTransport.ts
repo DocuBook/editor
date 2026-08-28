@@ -176,6 +176,13 @@ async function runSendMessages(
         toolBuffer.push(e.payload);
       });
       const unsubToolsDone = await listen("ai:tools_done", () => {});
+      /** Server-side truncation signal: the response hit MAX_AI_BUFFER and the
+       *  stream ended early with `ai:done { truncated: true }`. Without this the
+       *  partial text would be promoted as a valid response (retry prompts). */
+      let streamTruncated = false;
+      const unsubDone = await listen<{ truncated?: boolean }>("ai:done", (e) => {
+        streamTruncated = e.payload?.truncated === true;
+      });
       /** Propagate xl-ai abort → Rust cancel (stops the in-flight reqwest stream). */
       abortSignal?.addEventListener?.("abort", () => {
         invoke("cancel_ai").catch(() => {});
@@ -214,6 +221,7 @@ async function runSendMessages(
           fullText = "";
           pendingDelta = "";
           toolBuffer.length = 0;
+          streamTruncated = false;
           const msgs = buildAiPrompt({
             ...basePrompt,
             retryFeedback: errorFeedback,
@@ -225,6 +233,8 @@ async function runSendMessages(
             model,
             baseUrl: providerInfo?.api || config.baseUrl,
           });
+          /** Truncated = the same cap applies on retry — no point re-asking. */
+          if (streamTruncated) break;
           /** Real correctness gate: referenced ids must exist in the document (blocking).
            *  Normalize model-echoed ids (BlockNote expects a trailing `$`; models like
            *  GLM strip it), validate each call, keep the FIRST error. Immutable form —
@@ -251,6 +261,21 @@ async function runSendMessages(
           attempts++;
         }
         closed = true;
+        /** Server cap (MAX_AI_BUFFER) hit: content is incomplete — never present
+         *  partial output as a valid response. Fail once so xl-ai shows retry/cancel;
+         *  retrying internally cannot help (the same cap applies). */
+        if (streamTruncated) {
+          console.error("[ai] response truncated at server cap", {
+            provider,
+            model,
+            attempts,
+            textLen: fullText.length,
+            toolCalls: toolBuffer.length,
+          });
+          toast.error("AI response was truncated — try a smaller request");
+          controller.error(new Error("AI response was truncated"));
+          return;
+        }
         /** When the model produced meaningful tool ops they are the ONLY output
          *  channel — drop the buffered commentary text so the suggestion never
          *  overwrites/duplicates streamed prose. Otherwise flush (Path B already
@@ -377,6 +402,7 @@ async function runSendMessages(
         unsubToken();
         unsubTool();
         unsubToolsDone();
+        unsubDone();
         try {
           controller.close();
         } catch {}

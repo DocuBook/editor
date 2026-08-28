@@ -62,4 +62,33 @@ describe('web IPC bridge', () => {
       unlisten()
     }
   })
+
+  it('drops an incomplete trailing frame instead of emitting partial content', async () => {
+    const tokens: string[] = []
+    const unlisten = await listen<string>('ai:token', e => tokens.push(e.payload))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(sseStream([
+      'event: ai:token\r\n',
+      'data: "complete"\r\n\r\n',
+      'event: ai:token\r\n',
+      'data: "trunca', // connection died mid-frame: no trailing blank line
+    ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+
+    try {
+      await invoke('ask_ai', { messages: '[]' })
+      expect(tokens).toEqual(['complete'])
+    } finally {
+      unlisten()
+    }
+  })
+
+  it('rejects when a frame payload is not valid JSON (corrupt stream)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(sseStream([
+      'event: ai:token\n',
+      'data: "ok"\n\n',
+      'event: ai:token\n',
+      'data: "broken\n\n', // unterminated JSON string = cut mid-frame
+    ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+
+    await expect(invoke('ask_ai', { messages: '[]' })).rejects.toThrow('stream was interrupted')
+  })
 })

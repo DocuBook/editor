@@ -22,8 +22,13 @@ function emit(event: string, payload: unknown) {
   bus.get(event)?.forEach(fn => fn({ payload }))
 }
 
-function parseSseData(value: string): unknown {
-  try { return JSON.parse(value) } catch { return value }
+/** Event payloads (except `error`) are JSON by contract. A payload that fails
+ *  to parse means the stream was cut mid-frame — surface a protocol error
+ *  instead of shipping corrupt text into the editor. */
+function parseSseJson(value: string): unknown {
+  try { return JSON.parse(value) } catch {
+    throw new Error('AI response stream was interrupted — retry')
+  }
 }
 
 /** Same signature as @tauri-apps/api/event.listen for the fields used by the UI. */
@@ -141,11 +146,9 @@ async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
     }
     const payload = data.join('\n')
     arm()
-    if (event === 'ai:token') emit('ai:token', parseSseData(payload))
-    else if (event === 'ai:tool_call') emit('ai:tool_call', parseSseData(payload))
-    else if (event === 'ai:tools_done') emit('ai:tools_done', parseSseData(payload))
-    else if (event === 'ai:done') emit('ai:done', parseSseData(payload))
-    else if (event === 'error') throw new Error(payload || 'AI request failed')
+    if (event === 'error') throw new Error(payload || 'AI request failed')
+    if (event !== 'ai:token' && event !== 'ai:tool_call' && event !== 'ai:tools_done' && event !== 'ai:done') return
+    emit(event, parseSseJson(payload))
   }
   const takeFrame = () => {
     const match = buf.match(/\r\n\r\n|\n\n|\r\r/)
@@ -163,11 +166,14 @@ async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
         break
       }
       buf += decoder.decode(value, { stream: true })
+      if (value.byteLength > 0) arm()
       let frame: string | null
       while ((frame = takeFrame()) !== null) dispatch(frame)
       if (stalled) break
     }
-    if (!stalled && buf) dispatch(buf)
+    // The server closes every frame with a blank line — leftover text means the
+    // connection died mid-frame; emitting it would ship partial content.
+    if (!stalled && buf.trim()) console.warn('[ipc] dropping incomplete SSE frame:', buf.slice(0, 120))
   } finally {
     if (watchdog) clearTimeout(watchdog)
     await reader.cancel().catch(() => {})
