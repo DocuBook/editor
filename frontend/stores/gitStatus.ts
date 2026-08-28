@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { useEffect } from 'react'
 import { useAuth } from './auth'
+import { invoke } from '../lib/ipc'
 
 /** Shared git status (branch + porcelain status) polled ONCE and consumed by
  *  StatusBar + TabBar (PERF-1: previously two parallel pollers ran 3s + 5s). */
@@ -21,7 +22,6 @@ export async function pollGitStatus() {
   // session exists. Desktop always reports 'ready', so it is unaffected.
   if (useAuth.getState().status !== 'ready') return
   try {
-    const { invoke } = await import('../lib/ipc')
     const s = await invoke<string>('git_status')
     const d = JSON.parse(s)
     useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', status: d.status || '' })

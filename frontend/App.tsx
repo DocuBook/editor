@@ -12,12 +12,10 @@ import { useGitPolling } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
 import { useVaultStore } from './stores/vault'
 import { listen, invoke } from './lib/ipc'
-import { useAuth, initAuthGuard } from './stores/auth'
+import { useAuth, useAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
 import Login from './components/Login'
 import { logger } from './utils/logger'
-
-initAuthGuard()
 
 /** Root application component with keyboard shortcuts. */
 export default function App() {
@@ -31,6 +29,7 @@ export default function App() {
 
   /** Single git-status poller shared by StatusBar + TabBar. */
   useGitPolling()
+  useAuthGuard()
 
   /** Graceful shutdown: on window close, flush + save all dirty tabs, then confirm. */
   useEffect(() => {
@@ -93,7 +92,7 @@ export default function App() {
         ))}
         <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor /></main>
       </div>
-      <StatusBar />
+      {isVaultOpen && <StatusBar />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <Toaster position="bottom-right" theme="dark" richColors />
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { KeepAliveCache } from '../../../frontend/utils/editorFactory'
+import { KeepAliveCache } from '../../../frontend/utils/keepAliveCache'
 
 /** The keep-alive cache is the pure, testable core of tab switching: one
  *  entry per path, created lazily, reused on every later lookup. The BlockNote
@@ -25,6 +25,16 @@ describe('KeepAliveCache', () => {
     a1.loaded = true
     expect(cache.get('notes/a.md')).toBe(a1)
     expect(cache.get('notes/a.md').loaded).toBe(true)
+  })
+
+  it('reuses a falsy cached value instead of recreating it', () => {
+    const create = vi.fn(() => 0)
+    const cache = new KeepAliveCache(create)
+
+    cache.get('zero')
+    cache.get('zero')
+
+    expect(create).toHaveBeenCalledOnce()
   })
 
   it('clear() drops all entries (vault switch: rel paths are vault-scoped)', () => {
