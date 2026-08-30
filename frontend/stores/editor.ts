@@ -101,28 +101,32 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   
   switchTab: (path) => {
-    /** Keep-alive: leaving editors are NOT unmounted/destroyed (instance cache),
-     *  so the old unmount-flush no longer fires — flush the OUTGOING editor
-     *  explicitly before switching (its state must land in the store first). */
     if (get().activeTab !== path) get().flushEditor()
     set({ activeTab: path })
   },
 
   renameTab: (fromPath, toPath) => {
-    if (!get().tabs.some(t => t.path === fromPath)) return
-    /** Flush the renamed editor now: it remounts under the new path key
-     *  (WysiwygEditor key={path}) and there is no unmount-flush anymore, so
-     *  unsaved edits must be captured before the remap. */
-    if (get().activeTab === fromPath) get().flushEditor()
-    /** The target is already open: the renamed file IS that tab — drop the
-     *  stale old-path tab instead of creating a duplicate path. */
-    if (get().tabs.some(t => t.path === toPath && t.path !== fromPath)) {
-      set({ tabs: get().tabs.filter(t => t.path !== fromPath), activeTab: get().activeTab === fromPath ? toPath : get().activeTab })
-      return
+
+    const prefix = fromPath + '/'
+    const affected = get().tabs.filter(t => t.path === fromPath || t.path.startsWith(prefix))
+    if (affected.length === 0) return
+    if (affected.some(t => t.path === get().activeTab)) get().flushEditor()
+    const remap = (path: string) => (path === fromPath ? toPath : toPath + '/' + path.slice(prefix.length))
+    const stale = new Set(affected.map(t => t.path))
+    const taken = new Set(get().tabs.filter(t => !stale.has(t.path)).map(t => t.path))
+    const tabs = get().tabs.flatMap(t => {
+      if (!stale.has(t.path)) return [t]
+      const newPath = remap(t.path)
+      if (taken.has(newPath)) return [] // collision: keep the already-open new-path tab
+      return [{ ...t, path: newPath, name: newPath.split('/').pop() || newPath }]
+    })
+    const activeTab = get().activeTab
+    let nextActive = activeTab
+    if (activeTab !== null && stale.has(activeTab)) {
+      const remapped = remap(activeTab)
+      nextActive = tabs.some(t => t.path === remapped) ? remapped : (tabs[tabs.length - 1]?.path ?? null)
     }
-    const name = toPath.split('/').pop() || toPath
-    const tabs = get().tabs.map(t => t.path === fromPath ? { ...t, path: toPath, name } : t)
-    set({ tabs, activeTab: get().activeTab === fromPath ? toPath : get().activeTab })
+    set({ tabs, activeTab: nextActive })
   },
   
   closeTab: async (path) => {

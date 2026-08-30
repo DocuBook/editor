@@ -153,4 +153,55 @@ describe("editor store renameTab", () => {
     useEditorStore.getState().renameTab("ghost.md", "real.md");
     expect(useEditorStore.getState().tabs).toEqual([]);
   });
+
+  it("remaps every open tab under a renamed folder (plan/bug.md → task/bug.md)", () => {
+    useEditorStore.setState({
+      tabs: [
+        { path: "plan/bug.md", name: "bug.md", content: "# bug", frontmatter: "", editedContent: null, dirty: false, deleted: false },
+        { path: "plan/deep/x.md", name: "x.md", content: "# x", frontmatter: "", editedContent: null, dirty: false, deleted: false },
+        { path: "notes/y.md", name: "y.md", content: "# y", frontmatter: "", editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: "plan/bug.md",
+    });
+    useEditorStore.getState().renameTab("plan", "task");
+
+    const { tabs, activeTab } = useEditorStore.getState();
+    expect(tabs.some((t) => t.path === "plan/bug.md")).toBe(false);
+    expect(tabs.some((t) => t.path === "plan/deep/x.md")).toBe(false);
+    expect(tabs.find((t) => t.path === "task/bug.md")?.name).toBe("bug.md");
+    expect(tabs.find((t) => t.path === "task/bug.md")?.content).toBe("# bug");
+    expect(tabs.find((t) => t.path === "task/deep/x.md")?.name).toBe("x.md");
+    expect(tabs.find((t) => t.path === "notes/y.md")?.name).toBe("y.md"); // sibling untouched
+    expect(activeTab).toBe("task/bug.md");
+  });
+
+  it("flushes an active WYSIWYG tab under the renamed folder before remap", () => {
+    const spy = vi.fn();
+    useEditorStore.setState({
+      tabs: [
+        { path: "plan/deep/x.md", name: "x.md", content: "# x", frontmatter: "", editedContent: "# x2", dirty: true, deleted: false },
+      ],
+      activeTab: "plan/deep/x.md",
+      _flushEditor: spy,
+    });
+    useEditorStore.getState().renameTab("plan", "task");
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(useEditorStore.getState().activeTab).toBe("task/deep/x.md");
+  });
+
+  it("drops the stale tab when the folder-rename target is already open (search-opened new path)", () => {
+    useEditorStore.setState({
+      tabs: [
+        { path: "plan/bug.md", name: "bug.md", content: "old", frontmatter: "", editedContent: null, dirty: false, deleted: false },
+        { path: "task/bug.md", name: "bug.md", content: "new", frontmatter: "", editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: "plan/bug.md",
+    });
+    useEditorStore.getState().renameTab("plan", "task");
+
+    const { tabs, activeTab } = useEditorStore.getState();
+    expect(tabs.some((t) => t.path === "plan/bug.md")).toBe(false);
+    expect(tabs.filter((t) => t.path === "task/bug.md").length).toBe(1); // no duplicate tab
+    expect(activeTab).toBe("task/bug.md");
+  });
 });
