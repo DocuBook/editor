@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { invoke, listen } from '../../../frontend/lib/ipc'
+import { invoke, listen, isAbsoluteUrl, isSafeImageUrl } from '../../../frontend/lib/ipc'
 
 function sseStream(chunks: Array<string | Uint8Array>) {
   const encoder = new TextEncoder()
@@ -12,6 +12,44 @@ function sseStream(chunks: Array<string | Uint8Array>) {
 }
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('isAbsoluteUrl', () => {
+  it('keeps absolute and protocol-relative URLs out of the vault resolution', () => {
+    // External images in markdown (badges, shields.io, skillicons, raw.githubusercontent).
+    expect(isAbsoluteUrl('https://skillicons.dev/icons?i=tailwindcss,react')).toBe(true)
+    expect(isAbsoluteUrl('https://img.shields.io/badge/Facebook-1877F2?style=for-the-badge')).toBe(true)
+    expect(isAbsoluteUrl('https://raw.githubusercontent.com/a/b/output/graph.svg')).toBe(true)
+    expect(isAbsoluteUrl('http://example.com/a.png')).toBe(true)
+    expect(isAbsoluteUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true)
+    expect(isAbsoluteUrl('blob:https://editor.wildan.dev/uuid')).toBe(true)
+    expect(isAbsoluteUrl('//cdn.example.com/a.png')).toBe(true)
+  })
+
+  it('keeps vault-relative paths as vault-relative', () => {
+    expect(isAbsoluteUrl('images/logo.png')).toBe(false)
+    expect(isAbsoluteUrl('logo.png')).toBe(false)
+    expect(isAbsoluteUrl('./img/a.png')).toBe(false)
+    expect(isAbsoluteUrl('../shared/b.png')).toBe(false)
+  })
+})
+
+describe('isSafeImageUrl', () => {
+  it('allows https, data, blob, protocol-relative, and vault-relative images', () => {
+    expect(isSafeImageUrl('https://skillicons.dev/icons?i=tailwindcss,react')).toBe(true)
+    expect(isSafeImageUrl('https://img.shields.io/badge/Facebook-1877F2?style=for-the-badge')).toBe(true)
+    expect(isSafeImageUrl('//cdn.example.com/a.png')).toBe(true)
+    expect(isSafeImageUrl('data:image/png;base64,iVBORw0KGgo=')).toBe(true)
+    expect(isSafeImageUrl('blob:https://editor.wildan.dev/uuid')).toBe(true)
+    expect(isSafeImageUrl('images/logo.png')).toBe(true) // vault-relative → ACL
+  })
+
+  it('rejects script-capable, local-file, and plaintext-http schemes', () => {
+    expect(isSafeImageUrl('javascript:alert(1)')).toBe(false)
+    expect(isSafeImageUrl('file:///etc/passwd')).toBe(false)
+    expect(isSafeImageUrl('vbscript:msgbox(1)')).toBe(false)
+    expect(isSafeImageUrl('http://example.com/a.png')).toBe(false) // https-only for remote
+  })
+})
 
 describe('web IPC bridge', () => {
   it('re-emits SSE frames when network reads split UTF-8 and event data', async () => {

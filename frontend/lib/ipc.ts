@@ -202,6 +202,14 @@ export async function openDir(opts?: { title?: string; defaultPath?: string }): 
   return pickServerVault()
 }
 
+export function isAbsoluteUrl(url: string): boolean {
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url)
+}
+
+export function isSafeImageUrl(url: string): boolean {
+  return !isAbsoluteUrl(url) || /^(?:https:|data:|blob:|\/\/)/i.test(url)
+}
+
 /**
  * Resolve a vault-relative path to a loadable URL:
  * - Tauri: reads the file via IPC (path-traversal protected) and returns a

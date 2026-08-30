@@ -19,7 +19,7 @@ import { locales as mathLocales } from '@blocknote/math-block'
 import { locales as diagramLocales } from '@blocknote/diagram-block'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
 import { AIExtension } from '@blocknote/xl-ai'
-import { fileUrl } from '../lib/ipc'
+import { fileUrl, isAbsoluteUrl, isSafeImageUrl } from '../lib/ipc'
 import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { createAiTransport } from './aiTransport'
 
@@ -46,7 +46,11 @@ export function createBlockEditor(vaultPath: string, _filePath: string): CachedE
   editor = BlockNoteEditor.create({
     schema: getSchema(),
     dictionary: { ...baseDict, ai: aiDict, math: mathLocales.en, diagram: diagramLocales.en },
-    resolveFileUrl: async (url: string) => (vaultPath ? await fileUrl(vaultPath, url) : url),
+
+    resolveFileUrl: async (url: string) => {
+      if (!isSafeImageUrl(url)) return ''
+      return !vaultPath || isAbsoluteUrl(url) ? url : await fileUrl(vaultPath, url)
+    },
     extensions: [
       AIExtension({
         transport: createAiTransport({ getEditor: () => editor }),
