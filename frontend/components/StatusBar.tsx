@@ -6,6 +6,7 @@ import { useEditorStore } from '../stores/editor'
 import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
+import pkg from '../../package.json'
 
 interface BranchEntry {
   name: string
@@ -66,6 +67,9 @@ export default function StatusBar() {
         <CircleHelp size={13} />
       </button>
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
+      <span title={"Release version " + pkg.version} className="font-mono text-[10px] text-muted px-1.5 py-px rounded bg-surface-active border border-border-subtle select-none">
+        v{pkg.version}
+      </span>
       <span className="flex-1" />
       {branch && (
         <div className="relative" ref={boxRef}>
