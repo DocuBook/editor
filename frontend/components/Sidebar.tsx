@@ -6,86 +6,7 @@ import { Search, Check, ChevronDown, Folder, FileText, FolderOpen, Plus, X, Comm
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
-import { MARKDOWN_EXTENSIONS } from '../utils/fileKind'
-const stripMarkdownExt = (name: string) => {
-  const ext = MARKDOWN_EXTENSIONS.find(e => name.toLowerCase().endsWith(e))
-  return ext ? name.slice(0, -ext.length) : name
-}
-
-/** Search modal overlay — command-palette style search. */
-function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void }) {
-  const [query, setQuery] = useState('')
-  const [results, setResults] = useState<{path:string;name:string}[]>([])
-  const [selectedIdx, setSelectedIdx] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const resultsRef = useRef<HTMLDivElement>(null)
-  const { openFile } = useEditorStore()
-
-  useEffect(() => { inputRef.current?.focus() }, [])
-
-  // Search vault when query changes
-  useEffect(() => {
-    if (!query.trim()) { setResults([]); return }
-    const timer = setTimeout(() => {
-      invoke<string>('search_vault', { query }).then(s => {
-        try { const r = JSON.parse(s).slice(0, 20); setResults(r); setSelectedIdx(0) } catch {}
-      }).catch(e => console.error('Search:', e))
-    }, 200)
-    return () => clearTimeout(timer)
-  }, [query])
-
-  // Keyboard navigation
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { onClose(); return }
-      if (e.key === 'ArrowDown') { e.preventDefault(); setSelectedIdx(i => Math.min(i + 1, results.length - 1)) }
-      if (e.key === 'ArrowUp') { e.preventDefault(); setSelectedIdx(i => Math.max(i - 1, 0)) }
-      if (e.key === 'Enter' && results[selectedIdx]) {
-        const p = results[selectedIdx].path
-        const parent = p.includes('/') ? p.substring(0, p.lastIndexOf('/')) : ''
-        onSelect(parent)
-        openFile(p, results[selectedIdx].name)
-        onClose()
-      }
-    }
-    window.addEventListener('keydown', h)
-    return () => window.removeEventListener('keydown', h)
-  }, [onClose, results, selectedIdx, openFile, onSelect])
-
-  /** Keep the highlighted result in view when navigating with the keyboard. */
-  useEffect(() => {
-    const el = resultsRef.current?.children[selectedIdx] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [selectedIdx])
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] w-[500px] max-h-[50vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
-          <Search size={16} className="text-muted shrink-0" />
-          <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)}
-            className="w-full bg-transparent text-sm text-foreground outline-none border-none" placeholder="Search files..." />
-          <button onClick={onClose} className="p-1 rounded cursor-pointer bg-transparent text-muted hover:text-foreground-secondary"><X size={16} /></button>
-        </div>
-        <div ref={resultsRef} className="overflow-y-auto max-h-[40vh] p-2">
-          {results.length === 0 && query && <div className="py-6 px-3 text-sm text-muted text-center">No files found</div>}
-          {results.map((item, i) => (
-            <div key={item.path} onClick={() => { 
-              const parent = item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : ''
-              onSelect(parent)
-              openFile(item.path, item.name); onClose() }}
-              className={'flex items-center gap-3 px-3 py-2 cursor-pointer text-sm rounded ' + (i === selectedIdx ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
-              <FileText size={14} className="text-muted shrink-0" />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{stripMarkdownExt(item.name)}</span>
-              <span className="text-xs text-muted overflow-hidden text-ellipsis whitespace-nowrap ml-auto">{item.path}</span>
-            </div>
-          ))}
-          {!query && <div className="py-6 px-3 text-sm text-muted text-center">Type to search files...</div>}
-        </div>
-      </div>
-    </div>
-  )
-}
+import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel() {
@@ -113,8 +34,7 @@ function BacklinksPanel() {
   )
 }
 
-export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void }) {
-  const [searchOpen, setSearchOpen] = useState(false)
+export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFolder }: { onOpenSettings: () => void; onOpenSearch: () => void; registerSearchFolder: (fn: (path: string) => void) => void }) {
   const [creating, setCreating] = useState<'file'|'folder'|null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [newName, setNewName] = useState('')
@@ -169,6 +89,10 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
   const [renaming, setRenaming] = useState<{path:string;name:string;type:string}|null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
   const [currentFolder, setCurrentFolder] = useState('')
+  /** Keep the modal's onSelect wired to the sidebar's create-target folder:
+   *  search is owned by App (works with the sidebar closed), which calls this
+   *  callback only while the sidebar is mounted. */
+  useEffect(() => { registerSearchFolder(setCurrentFolder) }, [registerSearchFolder, setCurrentFolder])
   useEffect(() => {
     setCurrentFolder('')
     setCreating(null)
@@ -200,16 +124,6 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
 
   // Keyboard shortcuts
   useKeyboard((e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === 'f') {
-      e.preventDefault()
-      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
-      setSearchOpen(true)
-    }
-    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key === 'p') {
-      e.preventDefault()
-      if (!isOpen) { toast.error('Open a vault first — press ⌘O'); return }
-      setSearchOpen(true)
-    }
     if (e.key === 'Escape') { setShowPlusMenu(false); setVaultMenuOpen(false); setConfirmClose(false) }
     /** New file/folder. Canonical (all platforms): ⌘⇧F / ⌘⌥⇧F — browsers
      *  reserve ⌘N / ⌘⇧N / ⌘⌥N (new window / private window) and never deliver
@@ -245,7 +159,6 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
 
   return (
     <aside className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
-      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(path) => setCurrentFolder(path)} />}
       <div className="relative flex items-center justify-between border-b border-border-subtle px-2 py-3">
         <span className="tip-wrap tip-bar relative flex-1 min-w-0" ref={vaultMenuRef}>
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
@@ -302,14 +215,17 @@ export default function Sidebar({ onOpenSettings }: { onOpenSettings: () => void
                 </button>
               </div>
             )}
+            </span>
           </span>
-          <span className="tip-wrap tip-bar">
-            <button onClick={(e) => { setSearchOpen(true); e.currentTarget.blur() }} aria-label="Search project files" className={iconBtn}>
-              <Search size={14} />
-            </button>
-            <span className="tip">Search project files <kbd><Command size={11} />F</kbd></span>
-          </span>
-        </span>
+        </div>
+
+      {/* Inline search trigger (inline component area below the vault header) — the modal itself lives in App so ⌘F/⌘P still work with the sidebar closed. */}
+      <div className="px-2 py-2">
+        <button onClick={onOpenSearch} aria-label="Search project files" className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground-secondary cursor-pointer transition-colors text-left">
+          <Search size={14} className="text-muted shrink-0" />
+          <span className="flex-1 truncate text-[13px]">Search</span>
+          <kbd className="inline-flex items-center gap-0.5 bg-surface px-1 py-0.5 rounded-[3px] text-[10px] font-mono text-muted border border-border-subtle"><Command size={9} />F</kbd>
+        </button>
       </div>
 
       {isOpen ? (

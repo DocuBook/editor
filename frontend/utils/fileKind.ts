@@ -25,6 +25,12 @@ export function fileKind(path: string): FileKind {
 /** True when the file must never be read as UTF-8 text (binary or image). */
 export const isBinaryPath = (path: string): boolean => fileKind(path) === 'binary'
 
+/** Strip a known markdown extension from a display name (tree names + search results). */
+export const stripMarkdownExt = (name: string) => {
+  const ext = MARKDOWN_EXTENSIONS.find(e => name.toLowerCase().endsWith(e))
+  return ext ? name.slice(0, -ext.length) : name
+}
+
 
 /** UI-level file tier — maps the extension contract onto editor modes:
  *  markdown → wysiwyg (Editor/Code toggle + AI), binary/text stay as-is. */

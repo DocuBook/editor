@@ -1,7 +1,8 @@
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import './index.css'
 import Sidebar from './components/Sidebar'
+import SearchModal from './components/SearchModal'
 import Editor from './components/Editor'
 import StatusBar from './components/StatusBar'
 import SettingsModal from './components/SettingsModal'
@@ -24,6 +25,13 @@ export default function App() {
   /** Default per viewport: closed below the 640px `sm` breakpoint (mobile), open above. */
   const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 640px)').matches)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Search lives here (not in Sidebar) so ⌘F/⌘P and the modal keep working
+   *  with the sidebar closed — Sidebar unmounts when hidden. */
+  const [searchOpen, setSearchOpen] = useState(false)
+  /** Current create-target folder lives in Sidebar; the modal's onSelect only
+   *  needs it while the sidebar is mounted, so Sidebar registers its setter. */
+  const searchFolderRef = useRef<(path: string) => void>(() => {})
+  const registerSearchFolder = useCallback((fn: (path: string) => void) => { searchFolderRef.current = fn }, [])
   const toggleSidebar = () => setSidebarOpen(o => !o)
   /** Keep the sidebar closed below 640px: auto-close when shrinking to mobile,
    *  re-open when growing back to desktop. Manual toggle still works anytime. */
@@ -60,10 +68,17 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'j' && isVaultOpen) { e.preventDefault(); setSidebarOpen(o => !o) }
       if ((e.metaKey || e.ctrlKey) && e.key === 'o') { e.preventDefault(); openVault() }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true) }
+      /** File search — same binding as before, but registered here (App is
+       *  always mounted) so it works with the sidebar closed too. */
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'p') && status === 'ready') {
+        e.preventDefault()
+        if (!isVaultOpen) { toast.error('Open a vault first — press ⌘O'); return }
+        setSearchOpen(true)
+      }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [isVaultOpen, openVault])
+  }, [isVaultOpen, openVault, status])
 
   /** Suppress default browser context menu (Reload, Back, etc.) */
   /** Only in production — dev mode needs right-click for Inspect Element */
@@ -86,10 +101,11 @@ export default function App() {
   return (
     <div className="h-screen flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
-        {isVaultOpen && sidebarOpen && <Sidebar onOpenSettings={() => setSettingsOpen(true)} />}
+        {isVaultOpen && sidebarOpen && <Sidebar onOpenSettings={() => setSettingsOpen(true)} onOpenSearch={() => setSearchOpen(true)} registerSearchFolder={registerSearchFolder} />}
         <main className="flex-1 flex flex-col min-w-0 min-h-0"><Editor sidebarOpen={sidebarOpen} onToggleSidebar={toggleSidebar} /></main>
       </div>
       {isVaultOpen && <StatusBar />}
+      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       <Toaster position="bottom-right" theme="dark" richColors />
     </div>
