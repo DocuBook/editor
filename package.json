@@ -31,7 +31,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.2",
     "@tauri-apps/plugin-opener": "2.5.4",
     "@tiptap/extension-bubble-menu": "^3.29.0",
-    "@tiptap/extension-color": "^3.29.0",
+    "@tiptap/extension-color": "^3.30.5",
     "@tiptap/extension-floating-menu": "^3.29.0",
     "@tiptap/extension-highlight": "^3.29.0",
     "@tiptap/extension-image": "^3.29.0",
