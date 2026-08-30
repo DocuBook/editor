@@ -1,5 +1,39 @@
 # Changelog
 
+## v0.1.0-rc.4 — 2026-08-30
+
+### Release candidate — sidebar vault switcher, AI truncation detection, Mermaid/math polish, collapsible sidebar on mobile
+
+#### 🚀 Features
+- **Vault switcher dropdown** — the sidebar now lists recent vaults with a close-and-confirm flow, replacing the previous single-vault workflow
+- **Git actions split** — Commit and Push are now separate dropdowns, so staging/publishing intent is explicit at a glance
+- **Responsive sidebar** — the sidebar defaults to closed below the small-screen breakpoint, with a toggle in the tab bar; editor padding tightened on mobile
+- **AI truncation detection** — provider-side truncation (`finish_reason: length`) is detected and surfaced instead of shipping partial content as a completed answer
+- **Version badge in status bar** — the release version (`package.json`) is shown as a subtle badge next to the shortcuts help icon, separate from the git branch chip
+- **Mermaid source indentation** — editing a Mermaid block now auto-indents source lines
+- **Secure system observability** — centralized logging for system-level events
+- **xl-ai prompt alignment** — tool-call prompt and math pipeline aligned so document operations and math blocks stay consistent (Path A)
+
+#### 🐛 Bug Fixes
+- **SSE truncation surfaced** — a truncated stream now fails cleanly at the transport boundary instead of shipping the partial content as a final answer
+- **AI transport + server resource guards** — bounded tool calls, sanitized transport failures, bounded keychain enumeration with serialized scans, and pinned DNS for custom AI endpoints (SSRF regression hardening)
+- **Document operation output hardened** — malformed or oversized `applyDocumentOperations` results are rejected instead of corrupting the document
+- **Math and Mermaid preview flicker** — previews no longer flicker while AI is writing; Enter outside the Mermaid source is preserved; inline math paste works on Safari 15
+- **Vault tree freshness** — the tree creation target survives overlapping file operations, `currentFolder` is remapped after folder rename, and tabs under a deleted folder are struck through
+- **Recent vault list** — the directory location tag was removed, and vault header icons use theme tokens (light-theme parity)
+
+#### ⚡ Performance
+- **Lazy-loaded block editor** — the BlockNote editor bundle loads on demand and the IPC bridge was hardened; Mermaid renders are reused and deferred while AI is writing
+
+#### 🧪 Testing & CI
+- AI truncation covered on the tools path (Path A) unit tests; e2e suite follows the welcome-screen vault flow; suites focused by scope with shared fixtures
+
+#### 🔄 Refactor
+- Sidebar toggle relocated into the tab bar and paired with the search trigger when collapsed; sidebar and welcome layout aligned; SSE and vault filtering deduplicated; dead code and duplication removed
+
+#### 📚 Documentation
+- README product delivery section streamlined (project scope, target audience, and distribution channels)
+
 ## v0.1.0-rc.3 — 2026-08-21
 
 ### Release candidate — keep-alive editor tabs, AI stability, wiki/tree freshness, light-theme polish

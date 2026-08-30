@@ -4,7 +4,7 @@ path = "main.rs"
 
 [package]
 name = "docubook-server"
-version = "0.1.0-rc.3"
+version = "0.1.0-rc.4"
 edition = "2021"
 
 # Web-only server: reuses src-tauri's pure modules via #[path] includes.
