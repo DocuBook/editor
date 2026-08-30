@@ -12,7 +12,7 @@ import { clearEditorCache } from '../utils/editorCache'
 
 const WysiwygEditorHost = lazy(() => import('./editor/WysiwygEditorHost'))
 
-export default function Editor({ sidebarOpen, onToggleSidebar }: { sidebarOpen: boolean; onToggleSidebar: () => void }) {
+export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { editMode } = useEditorStore()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const vaultOpen = useVaultStore(s => s.isOpen)
@@ -60,7 +60,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar }: { sidebarOpen: 
     if (!onboardingDone && vaultOpen) {
       return (
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <TabBar onAiToggle={() => {}} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} />
+          <TabBar onAiToggle={() => {}} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
           <OnboardingGuide onDismiss={() => setOnboardingDone(true)} />
         </div>
       )
@@ -70,7 +70,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar }: { sidebarOpen: 
 
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <TabBar onAiToggle={() => {}} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} />
+        <TabBar onAiToggle={() => {}} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
         <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
       </div>
     )
@@ -111,7 +111,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar }: { sidebarOpen: 
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      <TabBar onAiToggle={openXlAiMenu} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} />
+      <TabBar onAiToggle={openXlAiMenu} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       <div className="flex-1 flex flex-col min-h-0 relative">
         <div className="flex-1 min-h-0 overflow-y-auto pt-12 sm:px-16 px-8 pb-8">
           {inner}
