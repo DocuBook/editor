@@ -7,8 +7,10 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { editorFileKind } from '../utils/fileKind'
 import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
+import AiFloatingChat from './editor/AiFloatingChat'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
 import { clearEditorCache } from '../utils/editorCache'
+import { useAiChat } from '../stores/aiChat'
 
 const WysiwygEditorHost = lazy(() => import('./editor/WysiwygEditorHost'))
 
@@ -33,16 +35,8 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
     if (file) markOnboardingDone()
   }, [file])
 
-  const openXlAiMenu = () => {
-    const editor = useEditorStore.getState().blockEditor
-    if (!editor) return
-    const pos = editor.getTextCursorPosition()
-    if (pos?.block?.id) {
-      editor.extensions.get('ai')?.openAIMenuAtBlock(pos.block.id)
-    }
-  }
-
-  /** Ctrl/Cmd+Shift+E toggles edit mode (not ⌘E — conflicts with BlockNote's inline-code mark), Ctrl/Cmd+Alt+L opens XL AI */
+  /** ⌃⌥L toggles the floating AI chat (open at cursor / close to ✨ FAB).
+   *  Ctrl/Cmd+Shift+E toggles edit mode (not ⌘E — conflicts with BlockNote's inline-code mark). */
   useKeyboard((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
       e.preventDefault()
@@ -52,7 +46,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
       if (active && editorFileKind(active.path) === 'wysiwyg') s.toggleEditMode()
     }
     if (e.ctrlKey && e.altKey && (e.code === 'KeyL' || e.key === 'l' || e.key === 'L')) {
-      e.preventDefault(); openXlAiMenu()
+      e.preventDefault(); useAiChat.getState().toggle()
     }
   })
 
@@ -60,7 +54,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
     if (!onboardingDone && vaultOpen) {
       return (
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <TabBar onAiToggle={() => {}} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
+          <TabBar sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
           <OnboardingGuide onDismiss={() => setOnboardingDone(true)} />
         </div>
       )
@@ -70,7 +64,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
 
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <TabBar onAiToggle={() => {}} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
+        <TabBar sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
         <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
       </div>
     )
@@ -111,12 +105,13 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      <TabBar onAiToggle={openXlAiMenu} sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
+      <TabBar sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       <div className="flex-1 flex flex-col min-h-0 relative">
         <div className="flex-1 min-h-0 overflow-y-auto pt-12 sm:px-16 px-8 pb-8">
           {inner}
         </div>
       </div>
+      {kind === 'wysiwyg' && editMode === 'editor' && <AiFloatingChat />}
     </div>
   )
 }

@@ -11,6 +11,9 @@
  * from our side) or does the transport itself fail (→ [ai] log)?
  *
  * Run: npm run build && node test/ai-debug.mjs
+ * Cross-browser: BROWSER=webkit node test/ai-debug.mjs (also chromium, the
+ * default) — lib.mjs resolves the engine binary. Safari-15-specific focus
+ * behavior is covered by the mousedown-preventDefault assertions below.
  */
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -128,11 +131,37 @@ try {
   // Open the AI menu (Ctrl+Alt+L) and submit — the menu input autofocuses
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
+  const promptBox = page.locator('textarea[placeholder="Send message to AI writing..."]')
+  await promptBox.waitFor()
+  // Chip pre-fill keeps focus in the textarea — mousedown preventDefault stops
+  // the chip button from stealing focus (Safari defers its default mousedown
+  // focus, so a refocus() always loses the race there). Type after the click:
+  // the keystrokes must land in the box, proving focus never left it.
+  await page.getByText(/Write Anything/i).click()
+  await page.keyboard.type('Books')
+  const chipPrompt = await promptBox.inputValue()
+  ok('Chip pre-fills and keeps textarea focus', chipPrompt.startsWith('Write about'), JSON.stringify(chipPrompt.slice(0, 40)))
+  await promptBox.fill('')
   await page.keyboard.type('summarize the note')
+  const hSingle = await promptBox.evaluate((el) => el.getBoundingClientRect().height)
+  await page.keyboard.press('Shift+Enter')
+  await page.keyboard.type('and keep it concise')
+  const hMulti = await promptBox.evaluate((el) => el.getBoundingClientRect().height)
+  ok('Prompt input auto-grows for multi-line', hMulti > hSingle + 8, `${hSingle}px -> ${hMulti}px`)
   await page.keyboard.press('Enter')
   await page.getByText('Accept', { exact: true }).waitFor()
   await page.getByText('Revert', { exact: true }).waitFor()
+  // Review keeps the prompt input mounted (old AIMenu parity): the user can
+  // type the next instruction while deciding accept/revert.
+  await page.getByPlaceholder('Send message to AI writing...').waitFor()
   ok('Path B: text-only request renders review', askAiHits === 1)
+
+  // Escape dismisses the chat back to the FAB (old floating-menu parity).
+  // Review keeps the prompt textarea focused, so Escape bubbles from it to
+  // the panel handler.
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Ask AI' }).waitFor()
+  ok('Escape collapses chat to FAB', await page.getByText('DocuBook AI', { exact: true }).count() === 0)
 
   // Switch the persisted probe to true and reload: same mock response now
   // exercises Path A (tools are sent, model returns text, no second ask_ai).
@@ -156,12 +185,14 @@ try {
   ok('Path A: tool request renders review', askAiHits === 2)
   ok('Path A: hostile HTML stays inert', await page.locator('.bn-editor script, .bn-editor [onerror]').count() === 0)
 
+  // Revert now keeps the chat open in input mode (old AIMenu parity) so the
+  // user can keep improving the prompt — the input is already focused, so the
+  // follow-up prompt goes straight to the AI instead of needing a reopen.
   await page.getByText('Revert', { exact: true }).click()
-  await page.keyboard.press('Control+Alt+L')
-  await page.waitForTimeout(900)
+  await page.getByPlaceholder('Send message to AI writing...').waitFor()
   await page.keyboard.type('leave unchanged')
   await page.keyboard.press('Enter')
-  await page.getByText(/AI made no document changes/i).waitFor()
+  await page.locator('[data-sonner-toast]').filter({ hasText: /AI made no document changes/i }).waitFor()
   const bodyNoOp = await page.locator('body').innerText()
   ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))

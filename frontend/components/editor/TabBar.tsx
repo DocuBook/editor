@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, Undo2, Redo2, Sparkles, Command, Option, ChevronUp, ArrowBigUp, PanelLeft, ChevronDown, GitCommitHorizontal, Upload, Search } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Command, ArrowBigUp, PanelLeft, ChevronDown, GitCommitHorizontal, Upload, Search } from 'lucide-react'
+import { BsMarkdown } from 'react-icons/bs'
+import { TbBlocks } from 'react-icons/tb'
 import { useEditorStore } from '../../stores/editor'
 import { useGitStatus } from '../../stores/gitStatus'
 import { invoke } from '../../lib/ipc'
@@ -16,7 +18,7 @@ const sanitizeCommitName = (rawName: string) =>
     .replace(/\.+$/g, '')
     .trim() || 'changes'
 
-export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch }: { onAiToggle: () => void; sidebarOpen: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
+export function TabBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
@@ -32,8 +34,6 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch 
   const hasUnsaved = file?.dirty ?? false
   /** Only .md files can toggle Editor ↔ Code; others are preview. */
   const toggleable = file ? editorFileKind(file.path) === 'wysiwyg' : false
-  /** AI available only in Editor (WYSIWYG) mode — BlockNote must be mounted. */
-  const aiAvailable = file ? editorFileKind(file.path) === 'wysiwyg' && editMode === 'editor' : false
 
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
@@ -148,13 +148,15 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch 
           </button>
         </span>
       )}
-      <span className="tip-wrap tip-bar">
-        <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2"><Undo2 size={16} /></button>
-        <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
-      </span>
-      <span className="tip-wrap tip-bar">
-        <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed p-2"><Redo2 size={16} /></button>
-        <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
+      <span className="inline-flex items-center rounded-md border border-border-subtle bg-background">
+        <span className="tip-wrap tip-bar">
+          <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
+          <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
+        </span>
+        <span className="tip-wrap tip-bar border-l border-border-subtle">
+          <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronRight size={16} /></button>
+          <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
+        </span>
       </span>
       <div ref={tabStripRef} className="flex-1 flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
         {tabs.length === 0 ? <span className="text-zinc-500 italic self-center">No file open</span> : tabs.map(tab => (
@@ -167,15 +169,16 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch 
           </div>
         ))}
       </div>
+
       <span className="tip-wrap tip-bar">
-        <button onClick={onAiToggle} disabled={!aiAvailable}
-        className="rounded text-xs flex items-center gap-1 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer enabled:text-foreground-subtle enabled:hover:text-foreground enabled:hover:bg-surface-active p-2"><Sparkles size={14} /></button>
-        <span className="tip">{!file ? 'Open a file first' : !aiAvailable && editorFileKind(file.path) === 'wysiwyg' ? 'Switch to Editor for AI' : aiAvailable ? 'Ask AI / Write with AI' : 'AI works on .md files'} <kbd><ChevronUp size={10} /><Option size={10} />L</kbd></span>
-      </span>
-      <span className="tip-wrap tip-bar">
-        <button onClick={() => useEditorStore.getState().toggleEditMode()} disabled={!toggleable}
-        className={'rounded text-xs p-2 disabled:opacity-30 disabled:cursor-not-allowed enabled:cursor-pointer ' + (editMode === 'code' ? 'bg-zinc-700 text-white' : 'enabled:text-zinc-500 enabled:hover:text-foreground-secondary enabled:hover:bg-surface-active')}
-        >{editMode === 'editor' ? 'Markdown' : 'Editor'}</button>
+        <span className="inline-flex items-center rounded-md border border-border-subtle bg-background overflow-hidden">
+          <button onClick={() => { if (editMode !== 'code') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Markdown mode"
+          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-zinc-700 text-white' : 'bg-transparent text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active')}
+          ><BsMarkdown size={15} /></button>
+          <button onClick={() => { if (editMode !== 'editor') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Editor (WYSIWYG) mode"
+          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 border-l border-border-subtle disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'editor' ? 'bg-zinc-700 text-white' : 'bg-transparent text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active')}
+          ><TbBlocks size={15} /></button>
+        </span>
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
       <span className="relative" ref={actionsRef}>
