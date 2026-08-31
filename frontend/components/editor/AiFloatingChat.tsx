@@ -50,7 +50,10 @@ export default function AiFloatingChat() {
     if (status !== 'user-input') return []
     return getDefaultAIMenuItems(editor, 'user-input').map((item) => ({
       ...item,
-      onItemClick: () => item.onItemClick(setInput),
+      onItemClick: () => {
+        item.onItemClick(setInput)
+        requestAnimationFrame(() => inputRef.current?.focus())
+      },
     }))
   }, [status, editor, setInput])
 
