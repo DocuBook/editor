@@ -15,7 +15,7 @@ export default function AiFloatingChat() {
   const savedProviders = useAiSettings((s) => s.savedProviders)
   const aiConfigured = !!provider && savedProviders.includes(provider)
   const [input, setInput] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const ai = editor?.getExtension?.(AIExtension) ?? null
 
@@ -35,24 +35,34 @@ export default function AiFloatingChat() {
     setExpanded(isOpen)
   }, [isOpen, setExpanded])
 
-  /** Auto-focus the prompt input whenever the chat shows its input state —
-   *  parity with the old xl-ai menu. Keyed on visibility, so typing/re-renders
-   *  (input stays mounted) never steal focus back from the editor. */
-  const inputShown = status === 'user-input' && (expanded || isOpen)
+  const inputShown = (status === 'user-input' || status === 'user-reviewing') && (expanded || isOpen)
+
   useEffect(() => {
     if (inputShown) inputRef.current?.focus()
-  }, [inputShown])
+  }, [inputShown, status, input])
 
-  /** Selection-aware suggestions (getDefaultAIMenuItems branches on
-   *  editor.getSelection()). Clicking a chip either runs the command directly
-   *  or pre-fills the input (e.g. "Write anything", "Translate"). */
+  /** Grow the prompt textarea with its content (multi-line prompts must stay
+   *  readable) and shrink back when cleared. CSS max-h caps the growth; longer
+   *  prompts scroll inside the box.
+   *
+   *  caniuse audit (app minimum target = Safari 15): scrollHeight + style
+   *  height + resize-none + overflow-y-auto are all baseline (~2015), so no
+   *  gating needed. Deliberately NOT using `field-sizing: content` — Chrome
+   *  123+ / Safari 18.4+ only, which would silently break the auto-grow on
+   *  Safari 15. */
+  useEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = '0px'
+    el.style.height = el.scrollHeight + 'px'
+  }, [input])
+
   const items = useMemo(() => {
     if (status !== 'user-input') return []
     return getDefaultAIMenuItems(editor, 'user-input').map((item) => ({
       ...item,
       onItemClick: () => {
         item.onItemClick(setInput)
-        requestAnimationFrame(() => inputRef.current?.focus())
       },
     }))
   }, [status, editor, setInput])
@@ -82,6 +92,49 @@ export default function AiFloatingChat() {
     setInput('')
   }
 
+  /** Accept/revert but keep the chat open at the same block so the user can
+   *  keep improving the prompt (old AIMenu parity). xl-ai's acceptChanges /
+   *  rejectChanges hard-close via closeAIMenu(), so re-open with the public
+   *  openAIMenuAtBlock API (same call aiChat.toggle uses to open the menu). */
+  const acceptAndContinue = () => {
+    const blockId = aiMenu !== 'closed' ? aiMenu.blockId : undefined
+    ai.acceptChanges()
+    if (blockId) ai.openAIMenuAtBlock(blockId)
+  }
+  const revertAndContinue = () => {
+    const blockId = aiMenu !== 'closed' ? aiMenu.blockId : undefined
+    ai.rejectChanges()
+    if (blockId) ai.openAIMenuAtBlock(blockId)
+  }
+
+  /** Prompt input row — shared by the idle and review states so the user can
+   *  keep refining the instruction while (or right after) reviewing a
+   *  suggestion. Multi-line: Enter sends, Shift+Enter inserts a newline, and
+   *  the box auto-grows up to max-h so long prompts stay readable. */
+  const promptInput = (
+    <div className="flex items-end gap-2 p-3">
+      <textarea
+        ref={inputRef}
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && input.trim()) { e.preventDefault(); submit() } }}
+        rows={1}
+        placeholder="Send message to AI writing..."
+        title="Enter to send · Shift+Enter for new line"
+        className="flex-1 min-w-0 text-xs bg-background border border-border rounded-md px-2.5 py-1.5 text-foreground placeholder:text-muted outline-none focus:border-accent resize-none overflow-y-auto max-h-[120px] leading-relaxed"
+      />
+      <button
+        onClick={submit}
+        onMouseDown={(e) => e.preventDefault()}
+        disabled={!input.trim()}
+        aria-label="Send prompt"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md cursor-pointer bg-accent text-white border-none disabled:opacity-35 disabled:cursor-not-allowed hover:bg-accent-hover"
+      >
+        <ArrowUp size={13} />
+      </button>
+    </div>
+  )
+
   /** Panel is hidden only when both collapsed AND the AI menu is closed. */
   if (!expanded && !isOpen) {
     return (
@@ -97,7 +150,10 @@ export default function AiFloatingChat() {
   }
 
   return (
-    <div className="fixed bottom-10 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.3)] overflow-hidden">
+    <div
+      onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); close() } }}
+      className="fixed bottom-10 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.3)] overflow-hidden"
+    >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
         <Sparkles size={14} className="text-accent shrink-0" />
         <span className="text-xs font-semibold text-foreground">DocuBook AI</span>
@@ -117,6 +173,7 @@ export default function AiFloatingChat() {
                 <button
                   key={item.key}
                   onClick={item.onItemClick}
+                  onMouseDown={(e) => e.preventDefault()}
                   className="flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-full cursor-pointer bg-surface-active text-foreground-secondary border border-border-subtle hover:text-foreground hover:border-border"
                 >
                   {item.icon}
@@ -125,24 +182,7 @@ export default function AiFloatingChat() {
               ))}
             </div>
           )}
-          <div className="flex items-center gap-2 p-3">
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && input.trim()) submit() }}
-              placeholder="Send message to AI writing..."
-              className="flex-1 min-w-0 text-xs bg-background border border-border rounded-md px-2.5 py-1.5 text-foreground placeholder:text-muted outline-none focus:border-accent"
-            />
-            <button
-              onClick={submit}
-              disabled={!input.trim()}
-              aria-label="Send prompt"
-              className="flex h-7 w-7 items-center justify-center rounded-md cursor-pointer bg-accent text-white border-none disabled:opacity-35 disabled:cursor-not-allowed hover:bg-accent-hover shrink-0"
-            >
-              <ArrowUp size={13} />
-            </button>
-          </div>
+          {promptInput}
         </>
       )}
 
@@ -159,16 +199,19 @@ export default function AiFloatingChat() {
       )}
 
       {status === 'user-reviewing' && (
-        <div className="flex items-center justify-end gap-2 px-3 py-3">
-          <span className="text-xs text-foreground-secondary mr-auto">Review the changes</span>
-          <button onClick={() => ai.rejectChanges()} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
-            Revert
-          </button>
-          <button onClick={() => ai.acceptChanges()} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-white border-none hover:bg-accent-hover">
-            <Check size={11} />
-            Accept
-          </button>
-        </div>
+        <>
+          <div className="flex items-center justify-end gap-2 px-3 py-3">
+            <span className="text-xs text-foreground-secondary mr-auto">Review the changes</span>
+            <button onClick={revertAndContinue} onMouseDown={(e) => e.preventDefault()} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
+              Revert
+            </button>
+            <button onClick={acceptAndContinue} onMouseDown={(e) => e.preventDefault()} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-white border-none hover:bg-accent-hover">
+              <Check size={11} />
+              Accept
+            </button>
+          </div>
+          {promptInput}
+        </>
       )}
 
       {status === 'error' && (
