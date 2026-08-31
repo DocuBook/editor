@@ -161,7 +161,7 @@ try {
   await page.waitForTimeout(900)
   await page.keyboard.type('leave unchanged')
   await page.keyboard.press('Enter')
-  await page.getByText(/AI made no document changes/i).waitFor()
+  await page.locator('[data-sonner-toast]').filter({ hasText: /AI made no document changes/i }).waitFor()
   const bodyNoOp = await page.locator('body').innerText()
   ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))
