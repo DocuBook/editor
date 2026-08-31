@@ -88,16 +88,9 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch 
     if (commitState === 'busy') return
     setCommitState('busy')
     try {
-      /** Commit replaces the old Save button: flush the WYSIWYG editor, write
-       *  every dirty tab to disk, stage all (trash excluded) — then commit. */
-      useEditorStore.getState().flushEditor()
-      try {
-        await useEditorStore.getState().persistAllDirty()
-      } catch (e) {
-        setGitMsg(p => ({ ...p, commit: e instanceof Error ? e.message : 'Could not save changes to disk' }))
-        setCommitState('error')
-        return
-      }
+      /** Commit ships the working tree — NO save here. Persisting to disk is an
+       *  app-layer concern (mode switch, close tab, app close); the button is
+       *  disabled while a tab is unsaved so we never commit stale content. */
       await invoke('git_stage')
       const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
       const res = await invoke<string>('git_commit', { message: `Auto-commit: ${sanitizeCommitName(rawName)}` })
@@ -106,10 +99,6 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch 
       if (d.message === 'Nothing to commit') { setCommitState('idle'); setGitMsg(p => ({ ...p, commit: '' })); toast.info('Nothing to commit'); return }
       setGitMsg(p => ({ ...p, commit: d.commit ? d.commit.substring(0, 7) : 'committed' }))
       setCommitState('done')
-      /** persistAllDirty wrote every dirty tab — disk now matches the buffer,
-       *  so the flags can go (they would otherwise leave Commit enabled
-       *  forever, always ending in "Nothing to commit"). */
-      useEditorStore.getState().tabs.forEach(t => { if (t.dirty) useEditorStore.getState().setTabDirty(t.path, false) })
     } catch { setGitMsg(p => ({ ...p, commit: 'Commit failed' })); setCommitState('error') }
   }
 
@@ -196,12 +185,13 @@ export function TabBar({ onAiToggle, sidebarOpen, onToggleSidebar, onOpenSearch 
         </button>
         {actionsOpen && (
           <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-            <button onClick={commit} disabled={!isRepo || (!hasDiskChanges && !hasUnsaved) || commitState === 'busy'}
+            <button onClick={commit} disabled={!isRepo || hasUnsaved || !hasDiskChanges || commitState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={commitState === 'done' ? 'text-green-500 shrink-0' : commitState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
               <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
             </button>
             {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.commit}</div>}
+            {hasUnsaved && isRepo && <div className="px-2.5 pb-1.5 text-[10px] text-muted">Unsaved changes — switch mode or close the tab to save first</div>}
             <button onClick={push} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={pushState === 'done' ? 'text-green-500 shrink-0' : pushState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
