@@ -151,8 +151,11 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
   useEffect(() => {
     setWikilinkStylerPaused(isAiWriting)
     setPreviewRenderingPaused(isAiWriting)
+    /** Autosave gate (store-level): never persist while xl-ai streams. Dirty is
+     *  re-set when writing ends → a fresh autosave writes the full result. */
+    useEditorStore.getState().setAiWriting(isAiWriting)
     if (!isAiWriting) (editor as any).prosemirrorView?.dispatch((editor as any).prosemirrorView.state.tr)
-    return () => { setWikilinkStylerPaused(false); setPreviewRenderingPaused(false) }
+    return () => { setWikilinkStylerPaused(false); setPreviewRenderingPaused(false); useEditorStore.getState().setAiWriting(false) }
   }, [isAiWriting, editor])
   const followRef = useRef(true)
   /** Mirrors isAiWriting for the onChange gate (avoids re-subscribing). */
