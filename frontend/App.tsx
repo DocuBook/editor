@@ -107,7 +107,7 @@ export default function App() {
       {isVaultOpen && <StatusBar />}
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-      <Toaster position="bottom-right" theme="dark" richColors />
+      <Toaster position="bottom-right" theme="dark" richColors offset={{ bottom: 200, right: 16 }} mobileOffset={{ bottom: 96 }} />
     </div>
   )
 }

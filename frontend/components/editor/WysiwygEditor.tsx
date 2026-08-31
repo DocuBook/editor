@@ -14,7 +14,7 @@ import { combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockFor
 import { Selection, TextSelection } from 'prosemirror-state'
 import { getMathSlashMenuItems } from '@blocknote/math-block'
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
-import { AIExtension, AIMenuController, getAISlashMenuItems } from '@blocknote/xl-ai'
+import { AIExtension, getAISlashMenuItems } from '@blocknote/xl-ai'
 import { useEditorStore } from '../../stores/editor'
 import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
@@ -340,8 +340,8 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
   }, [editor, markdown])
 
   return <BlockNoteView editor={editor} theme={useTheme(s => s.name)} slashMenu={false} formattingToolbar={false} linkToolbar={false}>
-    <AIMenuController />
-    {/** Bubble menu (formatting toolbar) with xl-ai entry so the AI text prompt opens from a selection. */}
+    {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
+     *  built-in block-anchored AIMenuController is intentionally not rendered. */}
     <FormattingToolbarController formattingToolbar={FormattingToolbarWithAI} />
     <LinkToolbarController linkToolbar={WikiLinkToolbar} />
     <SuggestionMenuController triggerCharacter="/"
