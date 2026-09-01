@@ -116,7 +116,7 @@ export function TabBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebar
   }
 
   return (
-    <div className="ui-shell h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-6">
+    <div className="ui-shell relative z-30 h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-6">
       {sidebarOpen ? (
         <button
           onClick={onToggleSidebar}
