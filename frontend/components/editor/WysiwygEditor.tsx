@@ -21,27 +21,14 @@ import { toast } from 'sonner'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
-import { cacheMermaidRender, whenIdle } from '../../utils/mermaidRenderCache'
+import { createQueuedMermaidRender } from '../../utils/mermaidRenderCache'
+import { followAiWritingCursor } from '../../utils/aiFollowScroll'
 import { setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
-// Mermaid is a singleton — wrapping render here also patches the instance
-// @blocknote/diagram-block uses. Serialize renders (mermaid keeps global
-// state; parallel renders race on slow engines like WKWebView) and surface
-// the real error instead of blocknote's generic "Invalid diagram".
+// Mermaid is a singleton; patching it here also covers @blocknote/diagram-block.
 import mermaid from 'mermaid'
-const _mermaidRender = mermaid.render.bind(mermaid)
-let _mermaidQueue: Promise<unknown> = Promise.resolve()
-;(mermaid as any).render = cacheMermaidRender((id: string, text: string) => {
-  const run = _mermaidQueue.then(() => whenIdle(() =>
-    _mermaidRender(id, text).catch((e: unknown) => {
-      console.error('[mermaid render]', id, e)
-      throw e
-    }),
-  ))
-  _mermaidQueue = run.catch(() => {})
-  return run
-})
+;(mermaid as any).render = createQueuedMermaidRender(mermaid.render)
 
 export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string }) {
   const { editor } = cached
@@ -189,16 +176,9 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
     }
   }, [isAiWriting])
 
-  /** Token-level scroll: any DOM change in the editor while AI writes keeps the
-   *  writing block in view. rAF-throttled AND viewport-aware — it only scrolls
-   *  when the block actually leaves the visible area (minimal delta). Constant
-   *  re-centering per frame was what made AI typing look janky.
-   *
-   *  The observer watches ONLY the writing block, not the whole document — a
-   *  subtree observer on the editor root fires on every mutation anywhere and
-   *  the old code re-ran a full-document querySelector per frame (O(doc)). The
-   *  block element is cached; if it's not rendered yet (streaming start), the
-   *  observer falls back to the root until the block appears. */
+  /** Follow xl-ai's caret, not the whole writing block. A long pre can exceed
+   *  the viewport, making block-level bounds permanently out of view and
+   *  triggering scroll/layout work on every streamed mutation. */
   useEffect(() => {
     if (!isAiWriting || !aiMenu?.blockId) return
     const root = editor.domElement
@@ -211,19 +191,7 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
         raf = 0
         if (!blockEl) blockEl = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
         if (!blockEl) return
-        const box = blockEl.getBoundingClientRect()
-        // Nearest scrollable ancestor — the editor's scroll container.
-        let scroller: HTMLElement | null = blockEl.parentElement
-        while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement
-        if (!scroller) { blockEl.scrollIntoView({ block: 'nearest' }); return }
-        const cbox = scroller.getBoundingClientRect()
-        const margin = 32
-        if (box.bottom > cbox.bottom - margin) {
-          scroller.scrollTop += box.bottom - (cbox.bottom - margin)   // scroll down
-        } else if (box.top < cbox.top + margin) {
-          scroller.scrollTop -= (cbox.top + margin) - box.top         // scroll up
-        }
-        // block fully in view — do nothing (no jump, no repaint)
+        followAiWritingCursor(blockEl)
       })
     }
     const mo = new MutationObserver(scroll)

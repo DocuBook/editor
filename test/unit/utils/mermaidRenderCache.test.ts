@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   cacheMermaidRender,
+  createQueuedMermaidRender,
   whenIdle,
 } from "../../../frontend/utils/mermaidRenderCache";
 
@@ -24,6 +25,28 @@ describe("Mermaid rendering", () => {
     expect((await cached("first", "A --> B")).svg).toContain("first-arrow");
     expect((await cached("second", "A --> B")).svg).toContain("second-arrow");
     expect(render).toHaveBeenCalledOnce();
+  });
+
+  it("serializes different Mermaid renders", async () => {
+    vi.stubGlobal("requestIdleCallback", (run: () => void) => { run(); return 1; });
+    let finishFirst!: (value: { svg: string }) => void;
+    const render = vi.fn((id: string) =>
+      id === "first"
+        ? new Promise<{ svg: string }>((resolve) => { finishFirst = resolve; })
+        : Promise.resolve({ svg: `<svg id="${id}" />` }),
+    );
+    const queued = createQueuedMermaidRender(render);
+    const first = queued("first", "A --> B");
+    const second = queued("second", "B --> C");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(render).toHaveBeenCalledTimes(1);
+    finishFirst({ svg: '<svg id="first" />' });
+    await first;
+    await second;
+    expect(render).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
   });
 
   it("shares concurrent work and retries failed renders", async () => {

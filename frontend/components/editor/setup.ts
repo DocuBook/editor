@@ -1,7 +1,6 @@
-/** BlockNote schema (heading 1-5 + math/diagram blocks) and the [[wikilink]]
- *  ProseMirror decoration/click handling — shared, single-instance setup. */
 import { createElement, useRef, useSyncExternalStore } from 'react'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
+import { createCodeBlockConfig, parsePreCode, parsePreCodeContent } from '@blocknote/core/blocks'
 import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
 import {
   BlockMathMLElement,
@@ -82,25 +81,23 @@ function StableSourcePreview({ paused, props, language, Preview, fallback }: { p
   return paused ? stableElement.current : createElement(Preview, props)
 }
 
-function StableDiagramPreview({ paused, props }: { paused: boolean; props: any }) {
-  return createElement(StableSourcePreview, { paused, props, language: 'mermaid', Preview: DiagramBlockPreviewWithPopup, fallback: 'block' })
+
+function createStablePreview(Preview: any, language: string | ((props: any) => string), fallback: 'block' | 'inline') {
+  return function StableWrapper(props: any) {
+    const lang = typeof language === 'function' ? language(props) : language
+    return createElement(StableSourcePreview, { paused: usePreviewRenderingPaused(), props, language: lang, Preview, fallback })
+  }
 }
 
-function StableMathBlockPreview({ paused, props }: { paused: boolean; props: any }) {
-  return createElement(StableSourcePreview, { paused, props, language: 'latex', Preview: MathBlockPreviewWithPopup, fallback: 'block' })
-}
-
-function StableMathInlinePreview({ paused, props }: { paused: boolean; props: any }) {
-  return createElement(StableSourcePreview, { paused, props, language: 'latex', Preview: MathInlinePreviewWithPopup, fallback: 'inline' })
-}
+const StableDiagramPreview = createStablePreview(DiagramBlockPreviewWithPopup, 'mermaid', 'block')
+const StableMathBlockPreview = createStablePreview(MathBlockPreviewWithPopup, 'latex', 'block')
+const StableMathInlinePreview = createStablePreview(MathInlinePreviewWithPopup, 'latex', 'inline')
 
 const mathBlockSpec = createReactBlockSpec(createMathBlockConfig, {
   meta: { code: true, defining: true, isolating: false, highlight: () => 'latex', hasPreview: true, hardBreakShortcut: 'shift+enter' },
   parse: parseBlockMathMLElement,
   parseContent: parseBlockMathMLContent,
-  render: function MathBlockRender(props) {
-    return createElement(StableMathBlockPreview, { paused: usePreviewRenderingPaused(), props })
-  },
+  render: StableMathBlockPreview,
   toExternalHTML: BlockMathMLElement,
 }, [MathBlockInputRulesExtension])
 
@@ -108,9 +105,7 @@ const mathInlineSpec = createReactInlineContentSpec(mathInlineContentConfig, {
   meta: { code: true, highlight: () => 'latex', hasPreview: true },
   parse: parseInlineMathMLElement,
   parseContent: parseInlineMathMLContent,
-  render: function MathInlineRender(props) {
-    return createElement(StableMathInlinePreview, { paused: usePreviewRenderingPaused(), props })
-  },
+  render: StableMathInlinePreview,
   toExternalHTML: InlineMathMLElement,
 }, [MathInlineInputRulesExtension])
 
@@ -119,12 +114,102 @@ const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
   parse: parseDiagramCodeElement,
   parseContent: parseDiagramCodeContent,
   runsBefore: ['codeBlock'],
-  render: function DiagramRender(props) {
-    const paused = usePreviewRenderingPaused()
-    return createElement(StableDiagramPreview, { paused, props })
-  },
+  render: StableDiagramPreview,
   toExternalHTML: (props) => createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef })),
 })
+
+/** Code block source view: pre > code, same shape as vanilla renderer. */
+function CodeBlockSource(props: any) {
+  const language = props.block?.props?.language ?? 'text'
+  return createElement('pre', null, createElement('code', {
+    className: `language-${language}`,
+    'data-language': language,
+    ref: props.contentRef,
+  }))
+}
+
+const StableCodeBlockPreview = createStablePreview(CodeBlockSource, (p: any) => p.block?.props?.language ?? 'text', 'block')
+
+const codeBlockShortcuts = createExtension({
+  key: 'codeBlockKeyboardShortcuts',
+  keyboardShortcuts: {
+    Delete: ({ editor }: any) => {
+      return editor.transact((tr: any) => {
+        const { block } = editor.getTextCursorPosition()
+        if (block.type !== 'codeBlock') return false
+        const { $from } = tr.selection
+        if (!$from.parent.textContent) {
+          editor.removeBlocks([block])
+          return true
+        }
+        return false
+      })
+    },
+    Tab: ({ editor }: any) => {
+      return editor.transact((tr: any) => {
+        const { block } = editor.getTextCursorPosition()
+        if (block.type !== 'codeBlock') return false
+        tr.insertText('  ')
+        return true
+      })
+    },
+    Enter: ({ editor }: any) => {
+      return editor.transact((tr: any) => {
+        const { block, nextBlock } = editor.getTextCursorPosition()
+        if (block.type !== 'codeBlock') return false
+        const { $from } = tr.selection
+        const isAtEnd = $from.parentOffset === $from.parent.nodeSize - 2
+        const endsWithDoubleNewline = $from.parent.textContent.endsWith('\n\n')
+        if (isAtEnd && endsWithDoubleNewline) {
+          tr.delete($from.pos - 2, $from.pos)
+          if (nextBlock) {
+            editor.setTextCursorPosition(nextBlock, 'start')
+            return true
+          }
+          const [newBlock] = editor.insertBlocks([{ type: 'paragraph' }], block, 'after')
+          editor.setTextCursorPosition(newBlock, 'start')
+          return true
+        }
+        tr.insertText('\n')
+        return true
+      })
+    },
+    'Shift-Enter': ({ editor }: any) => {
+      return editor.transact(() => {
+        const { block } = editor.getTextCursorPosition()
+        if (block.type !== 'codeBlock') return false
+        const [newBlock] = editor.insertBlocks([{ type: 'paragraph' }], block, 'after')
+        editor.setTextCursorPosition(newBlock, 'start')
+        return true
+      })
+    },
+  },
+  inputRules: [
+    {
+      find: /^```(.*?)\s$/,
+      replace: ({ match }: any) => ({
+        type: 'codeBlock',
+        props: { language: match[1].trim() },
+        content: [],
+      }),
+    },
+  ],
+})
+
+/** React codeBlock spec — same node type, parse, serialize, and shortcuts as
+ *  the default vanilla spec, but with the AI-writing freeze applied (see
+ *  StableCodeBlockPreview). */
+const codeBlockSpec = createReactBlockSpec(createCodeBlockConfig, {
+  meta: { code: true, defining: true, isolating: false, highlight: (block: any) => block.props.language },
+  parse: parsePreCode,
+  parseContent: (opts: any) => parsePreCodeContent(opts, 'codeBlock'),
+  render: StableCodeBlockPreview,
+  toExternalHTML: (props) => createElement('pre', null, createElement('code', {
+    className: `language-${props.block.props.language}`,
+    'data-language': props.block.props.language,
+    ref: props.contentRef,
+  })),
+}, [codeBlockShortcuts])
 
 /** Base BlockNote schema with heading levels 1-5. */
 let _schema: any = null
@@ -133,6 +218,7 @@ export const getSchema = () => {
     blockSpecs: {
       ...defaultBlockSpecs,
       heading: createHeadingBlockSpec({ levels: [1, 2, 3, 4, 5], allowToggleHeadings: false }),
+      codeBlock: codeBlockSpec(),
       mathBlock: mathBlockSpec(),
       diagram: diagramSpec(),
     },

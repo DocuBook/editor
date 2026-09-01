@@ -40,3 +40,24 @@ export function cacheMermaidRender<T extends { svg: string }>(
     return withId(cached.result, cached.id, id);
   };
 }
+
+/** Cache identical diagrams and serialize Mermaid's global renderer on an idle
+ * browser turn. A rejected render cannot poison the queue or cache. */
+export function createQueuedMermaidRender<T extends { svg: string }>(
+  render: (id: string, source: string) => Promise<T>,
+) {
+  let queue: Promise<unknown> = Promise.resolve();
+
+  return cacheMermaidRender((id, source) => {
+    const run = queue.then(() =>
+      whenIdle(() =>
+        render(id, source).catch((error: unknown) => {
+          console.error("[mermaid render]", id, error);
+          throw error;
+        }),
+      ),
+    );
+    queue = run.catch(() => {});
+    return run;
+  });
+}

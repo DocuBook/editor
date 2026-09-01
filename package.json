@@ -16,7 +16,8 @@
     "test:e2e:smoke": "node test/web-smoke.mjs",
     "test:e2e:trash": "node test/trash.mjs",
     "test:e2e:theme": "node test/theme-check.mjs",
-    "test:e2e:ai": "node test/ai-debug.mjs"
+    "test:e2e:ai": "node test/ai-debug.mjs",
+    "test:e2e:ai-pre": "node test/ai-pre-flicker.mjs"
   },
   "dependencies": {
     "@blocknote/core": "0.54.0",

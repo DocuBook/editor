@@ -1,9 +1,5 @@
 @import "tailwindcss";
-/* hot */
-/* Named themes (Zed-style) — the default palette lives in @theme (emitted as
-   --color-* vars + utilities like bg-background). Switching themes = setting
-   <html data-theme="dark|light">; the light palette below (unlayered, so it
-   beats the @theme layer) overrides the same var names on that element. */
+
 @theme {
     --color-background: #0c0c0d;
     --color-surface: #161618;
@@ -47,8 +43,7 @@
     --color-danger-hover: #b91c1c;
     --color-white: #ffffff;
 }
-/* Layered so Tailwind utilities (p-*, m-*, space-*) still win the cascade —
- * unlayered rules beat @layer utilities regardless of specificity. */
+
 @layer base {
     *,
     *::before,
@@ -95,20 +90,10 @@ body {
     user-select: text;
 }
 
-/* AI agent cursor label — y-prosemirror hardcodes #0d0d0d with the SAME
-   specificity as this override (.bn-editor prefix on both), and its css is
-   bundled AFTER index.css, so it won by source order. #root (id) beats it
-   regardless of order. */
 #root .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {
     color: var(--color-ai-cursor-text);
 }
 
-/* Editor "page" box — BlockNote hardcodes the canvas bg (light: #fff,
-   dark: #1f1f1f). #fff equals our light window background, so the editing
-   container vanishes in the light theme while dark's #1f1f1f is visibly
-   distinct from #0c0c0d. Pin the fill to our surface token and give it a thin
-   border so the box reads the same in BOTH themes. #root beats bundled css
-   order regardless of source position. */
 #root .bn-root {
     --bn-colors-editor-background: var(--color-surface);
 }
@@ -189,16 +174,15 @@ body {
     margin: 12px 0;
     border: 1px solid var(--color-border);
 }
-/* Blocknote's code block hardcodes dark bg + white text (its CSS uses no
-   theme vars): `.bn-block-content[data-content-type=codeBlock]{color:#fff;
-   background-color:#161616}`. Override with our tokens — the .ProseMirror
-   ancestor raises specificity above Blocknote's rule regardless of stylesheet
-   order, so text + background + border follow the active theme. */
+
 .ProseMirror .bn-block-content[data-content-type=codeBlock] {
     color: var(--color-foreground);
     background-color: var(--color-surface);
     border: 1px solid var(--color-border);
     border-radius: 8px;
+}
+.ProseMirror .bn-block-content[data-content-type=codeBlock] code {
+    white-space: pre;
 }
 .ProseMirror pre code {
     background: none;
