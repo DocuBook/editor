@@ -2,7 +2,7 @@
  *  (BlockNote's default https-forces them, mangling ./folder.md) and the link
  *  popover merges a vault-note search into one bubble-menu icon. */
 import { useEffect, useState } from 'react'
-import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, type LinkToolbarProps } from '@blocknote/react'
+import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
 import { AIToolbarButton } from '@blocknote/xl-ai'
 import { Link2, Type, ExternalLink } from 'lucide-react'
@@ -189,13 +189,22 @@ export function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPo
 }
 
 /** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */
-export const FormattingToolbarWithAI = () => (
-  <FormattingToolbar>
-    {getFormattingToolbarItems().filter(el => (el as any).key !== 'createLinkButton')}
-    <CreateLinkButtonPreserveUrl />
-    <AIToolbarButton />
-  </FormattingToolbar>
-)
+export const FormattingToolbarWithAI = () => {
+  const editor = useBlockNoteEditor<any, any, any>()
+  const blockTypes = blockTypeSelectItems(editor.dictionary)
+    .filter(item => item.type !== 'heading' || (Number(item.props?.level) <= 5 && item.props?.isToggleable !== true))
+    .map(item => item.type === 'heading'
+      ? { ...item, props: Object.fromEntries(Object.entries(item.props ?? {}).filter(([key]) => key !== 'isToggleable')) }
+      : item)
+
+  return (
+    <FormattingToolbar>
+      {getFormattingToolbarItems(blockTypes).filter(el => (el as any).key !== 'createLinkButton')}
+      <CreateLinkButtonPreserveUrl />
+      <AIToolbarButton />
+    </FormattingToolbar>
+  )
+}
 
 /** "Link a note" — search vault notes (name + content via wiki_suggest) and
  *  pick → caller inserts a `[[wikilink]]`. Lives inside the merged link popover
