@@ -212,6 +212,10 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
   const markdownRef = useRef(markdown)
   markdownRef.current = markdown
   const dirtyRef = useRef(false)
+  /** TipTap emits `update` for UI-only option changes such as xl-ai toggling
+   * editable state when the FAB opens. ProseMirror documents are immutable, so
+   * identity changes only when document content actually changes. */
+  const documentRef = useRef(editor.prosemirrorState.doc)
   const loadedRef = useRef(cached.loaded)
   const loadedMarkdownRef = useRef(cached.loadedMarkdown)
   const initialLoadRef = useRef(true)
@@ -235,6 +239,9 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
     /** After current synchronous ops (replaceBlocks), mark initial load as done */
     queueMicrotask(() => { initialLoadRef.current = false })
     const sub = editor.onChange(() => {
+      const document = editor.prosemirrorState.doc
+      if (document === documentRef.current) return
+      documentRef.current = document
       if (initialLoadRef.current) return
       dirtyRef.current = true
       if (aiWritingRef.current) return // gate UI store spam during AI streaming — settled once at writing end

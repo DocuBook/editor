@@ -16,7 +16,7 @@
  * behavior is covered by the mousedown-preventDefault assertions below.
  */
 import { execSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
 import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
 
@@ -36,7 +36,8 @@ const ok = (name, cond, extra = '') => {
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
 mkdirSync(VAULT, { recursive: true })
-writeFileSync(`${VAULT}/notes.md`, '# Notes\n\nhello world')
+const ORIGINAL_MARKDOWN = '# _Notes_\n\nhello world'
+writeFileSync(`${VAULT}/notes.md`, ORIGINAL_MARKDOWN)
 
 const server = startServer('ai-debug', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
 let browser
@@ -125,6 +126,14 @@ try {
   await page.getByText('notes', { exact: true }).click()
   await page.getByText('hello world', { exact: true }).waitFor()
 
+  // Opening/closing the FAB only toggles editor editability. TipTap emits an
+  // update for that UI-only change; it must not dirty and lossy-serialize the file.
+  await page.getByRole('button', { name: 'Ask AI' }).click()
+  await page.getByPlaceholder('Send message to AI writing...').waitFor()
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(2200)
+  ok('FAB open/close preserves raw Markdown bytes', readFileSync(`${VAULT}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
+
   // Select the document content so the AI edit path (update ops) is exercised
   await page.keyboard.press('Meta+a')
 
@@ -133,16 +142,9 @@ try {
   await page.waitForTimeout(900)
   const promptBox = page.locator('textarea[placeholder="Send message to AI writing..."]')
   await promptBox.waitFor()
-  // Chip pre-fill keeps focus in the textarea — mousedown preventDefault stops
-  // the chip button from stealing focus (Safari defers its default mousedown
-  // focus, so a refocus() always loses the race there). Type after the click:
-  // the keystrokes must land in the box, proving focus never left it.
-  await page.getByText(/Write Anything/i).click()
-  await page.keyboard.type('Books')
-  const chipPrompt = await promptBox.inputValue()
-  ok('Chip pre-fills and keeps textarea focus', chipPrompt.startsWith('Write about'), JSON.stringify(chipPrompt.slice(0, 40)))
-  await promptBox.fill('')
-  await page.keyboard.type('summarize the note')
+  // Selection-aware prompts intentionally do not show “Write Anything”; chip
+  // focus behavior has its own ai-chat-focus suite.
+  await promptBox.fill('summarize the note')
   const hSingle = await promptBox.evaluate((el) => el.getBoundingClientRect().height)
   await page.keyboard.press('Shift+Enter')
   await page.keyboard.type('and keep it concise')
