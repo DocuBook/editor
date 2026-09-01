@@ -1,5 +1,34 @@
 # Changelog
 
+## v0.1.0-rc.5 — 2026-09-01
+
+### Release candidate — floating AI chat, reliable autosave, external media support, and editor stability
+
+#### 🚀 Features
+
+- Replaced the block-anchored AI menu with a floating chat interface, including dedicated focus handling and updated keyboard shortcut guidance.
+- Added app-layer autosave so editor changes are persisted reliably without depending on tab transitions.
+
+#### 🐛 Bug Fixes
+
+- Allowed HTTPS external images and media through URL validation and desktop/web content security policies.
+- Preserved open tabs when their parent folder is renamed by remapping affected paths.
+- Prevented the AI floating action button from reformatting unchanged Markdown.
+- Kept BlockNote side-menu controls from overlapping the tab bar near the top of the editor.
+
+#### 🔄 Refactor
+
+- Unified AI-writing preview wrappers for code, Mermaid, and math blocks, with centralized queued Mermaid rendering and follow-scroll behavior.
+
+#### 📦 Dependencies
+
+- Upgraded Tiptap packages to 3.30.5.
+
+#### 🧪 Testing
+
+- Added coverage for floating AI chat focus and state, autosave persistence, folder-rename tab remapping, external-image URL validation, AI follow-scroll, editor schemas, and Mermaid render caching.
+- Added regression coverage for flicker during AI previews and unchanged-Markdown formatting.
+
 ## v0.1.0-rc.4 — 2026-08-30
 
 ### Release candidate — sidebar vault switcher, AI truncation detection, Mermaid/math polish, collapsible sidebar on mobile
