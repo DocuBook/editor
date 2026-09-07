@@ -6,7 +6,6 @@ import { toast } from 'sonner'
 
 interface ConfigView {
   admin: { email: string } | null
-  no_auth: { value: boolean; source: string }
   session_ttl_hours: { value: number; source: string }
   boot: { port: string; data_dir: string; www_dir: string }
 }
@@ -99,19 +98,6 @@ export default function SystemSettings() {
       <div>
         <div className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">Config</div>
         <div className="flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-xs text-foreground">Require login</div>
-              <div className="text-[10px] text-muted">When off, anyone with the URL can use the server (old behavior).{cfg.no_auth.source === 'env' ? ' Controlled by DB_NO_AUTH env var.' : ''}</div>
-            </div>
-            {cfg.no_auth.source === 'env' ? badge('env') : (
-              <button
-                onClick={() => setConfig('no_auth', !cfg.no_auth.value)}
-                className={'relative w-9 h-5 rounded-full transition-colors cursor-pointer border-none ' + (cfg.no_auth.value ? 'bg-amber-500/60' : 'bg-surface-active')}>
-                <span className={'absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ' + (cfg.no_auth.value ? 'left-[18px]' : 'left-0.5')} />
-              </button>
-            )}
-          </div>
           <div className="flex items-center justify-between">
             <div>
               <div className="text-xs text-foreground">Session lifetime</div>

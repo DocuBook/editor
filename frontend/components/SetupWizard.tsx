@@ -2,13 +2,9 @@ import { useEffect, useState } from 'react'
 import { invoke } from '../lib/ipc'
 import { useAuth } from '../stores/auth'
 import { buildSetupPayload, validateSetupInput } from '../utils/setupWizard'
-import { toast } from 'sonner'
 
-/** First-run wizard — create the admin account (first user becomes the
- *  admin). Backward compat: "Skip" keeps open access (no_auth)
- *  exactly like pre-web deployments; login can be enabled later in Settings.
- *  Shows the setup-token field only when the server requires one
- *  (DB_SETUP_TOKEN set — plain secret string, not a JWT). */
+/** First-run wizard — creates the admin account. DB_SETUP_TOKEN, when set,
+ *  must be submitted as a plain secret string (not a JWT). */
 export default function SetupWizard() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -36,17 +32,6 @@ export default function SetupWizard() {
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
-  const skip = async () => {
-    setBusy(true)
-    try {
-      await invoke('config_set', { key: 'no_auth', value: true })
-      await useAuth.getState().refresh()
-    } catch (e) { toast.error(String(e)); setBusy(false) }
-  }
-
-  /** Explicit consent gate: "keep open access" means anyone with the URL can
-   *  use this server — the skip button stays disabled until acknowledged. */
-  const [ackOpen, setAckOpen] = useState(false)
 
   const input = 'w-full bg-background border border-border rounded-md px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent'
   const btn = 'w-full flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm cursor-pointer transition-colors disabled:opacity-40'
@@ -71,14 +56,6 @@ export default function SetupWizard() {
             {busy ? 'Creating…' : 'Create admin account'}
           </button>
         </form>
-        <label className="flex items-start gap-2 mt-4 text-[11px] text-muted cursor-pointer select-none">
-          <input type="checkbox" checked={ackOpen} onChange={e => setAckOpen(e.target.checked)}
-            className="mt-0.5 cursor-pointer accent-amber-500" />
-          <span>I understand that <span className="text-foreground-secondary">anyone with this URL</span> can access and modify all vaults without logging in. I will enable login later in Settings.</span>
-        </label>
-        <button disabled={busy || !ackOpen} onClick={skip} className="w-full text-center text-[11px] text-muted hover:text-foreground-secondary cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 bg-transparent border-none mt-2">
-          Skip for now — keep open access (enable login later in Settings)
-        </button>
       </div>
     </div>
   )

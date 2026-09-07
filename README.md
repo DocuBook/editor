@@ -20,7 +20,7 @@ docker run -d --name docubook -p 8080:8080 \
   ghcr.io/docubook/editor
 ```
 
-Open [http://localhost:8080](http://localhost:8080) and create the admin account.
+Open [http://localhost:8080](http://localhost:8080) and create the admin account. Setup cannot be skipped; set `DB_SETUP_TOKEN` before public exposure to protect account creation.
 
 > [!IMPORTANT]
 > Keep `/data` on a persistent volume. It contains vaults, configuration, and keys; recreating a container without this mount deletes them.
@@ -31,7 +31,6 @@ For production, pin an image tag, place the container behind HTTPS, set `DB_SECU
 | --------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
 | `DB_SETUP_TOKEN`                                                                  | empty        | Protects first-run admin setup; generate with `openssl rand -hex 32`    |
 | `DB_SECURE_COOKIE`                                                                | `false`      | Restricts session cookies to HTTPS when set to `1`                      |
-| `DB_NO_AUTH`                                                                      | `false`      | Enables access without login when set to `1`                            |
 | `DB_SESSION_TTL_HOURS`                                                            | `168`        | Session lifetime in hours                                               |
 | `DB_KEYS_PASSPHRASE`                                                              | empty        | Encrypts `keys.json` at rest; losing it makes encrypted keys unreadable |
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`                                            | unset        | Skips the setup wizard when both are set                                |

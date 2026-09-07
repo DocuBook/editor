@@ -36,7 +36,7 @@ The Rust backend (`src-tauri`) is the trust boundary; the webview is treated as 
 **Deployment hardening — decide at first boot**
 - `DB_SETUP_TOKEN` — required on public deployments so no one can claim the admin account before you do.
 - `DB_KEYS_PASSPHRASE` — set from first boot and keep it in your secret manager; losing it makes stored keys unrecoverable.
-- Admin account — create it before exposing the server. "Skip for now — keep open access" is a deliberate, **consent-gated** choice: anyone with the URL gets full access (no login) until an admin exists and login is re-enabled in Settings.
+- Admin account — setup cannot be skipped. Create it before exposing the server; login remains required afterward.
 
 **Other controls** — path-traversal-safe vault paths (`safe_path`), SSRF-guarded AI base URLs (allowlist + loopback only), sanitized AI error messages (no provider/URL leakage), CSP, and a web-only server-side trash (`.trash/` inside the vault — persistent in `/data`, excluded from tree, search, and git staging).
 

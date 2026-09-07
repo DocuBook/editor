@@ -313,7 +313,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         // ── account / system ──
         "setup_status" => {
             let cfg = state.auth.config.lock().expect("lock");
-            Ok(json!({ "setupRequired": cfg.admin.is_none(), "noAuth": cfg.no_auth, "setupToken": cfg.setup_token.is_some() }).to_string())
+            Ok(json!({ "setupRequired": cfg.admin.is_none(), "setupToken": cfg.setup_token.is_some() }).to_string())
         }
         "account_get" => {
             let cfg = state.auth.config.lock().expect("lock");

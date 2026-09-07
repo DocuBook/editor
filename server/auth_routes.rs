@@ -33,14 +33,7 @@ pub(crate) async fn login(
         .unwrap_or("")
         .to_string();
     let ip = addr.ip().to_string();
-    let (admin, no_auth) = {
-        let cfg = state.auth.config.lock().expect("lock");
-        (cfg.admin.clone(), cfg.no_auth)
-    };
-    if no_auth {
-        tracing::warn!(event = "auth_login_failure", reason = "disabled", client_ip = %ip);
-        return err_response("Login is disabled (no_auth mode)");
-    }
+    let admin = state.auth.config.lock().expect("lock").admin.clone();
     let admin = match admin {
         Some(a) => a,
         None => {

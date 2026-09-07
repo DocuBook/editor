@@ -52,7 +52,7 @@ Or build the full image (validated in CI on every PR):
 docker compose up --build
 ```
 
-Runtime configuration (admin seeding, session TTL, open access, secure cookie) is documented in [`.env.example`](./.env.example).
+Runtime configuration (admin seeding, setup protection, session TTL, secure cookie) is documented in [`.env.example`](./.env.example).
 
 ## Project Structure
 
@@ -73,7 +73,7 @@ editor/
 
 - **Trust boundary:** the Rust backend (desktop `src-tauri` / web `server`) is trusted; the frontend is not. File paths are canonicalized against the vault root, and AI base URLs pass SSRF validation before requests are sent.
 - **Two runtimes, one frontend:** `frontend/lib/ipc.ts` abstracts Tauri IPC and HTTP/SSE behind one `invoke`/`listen` API, so components are runtime-agnostic. The web server reuses the desktop app's pure modules (`vault`, `wiki`, `git`, `search`, `agent`) via `#[path]` includes — never edit them in one place only.
-- **Web auth:** first run creates an admin account (Argon2id); sessions are httpOnly cookies (rate-limited login) persisted in `sessions.json` (SHA-256 hashed tokens — they survive server restarts, so redeploys don't log users out). `DB_NO_AUTH=1` keeps open access (pre-web behavior); the setup wizard's "Skip — keep open access" is consent-gated (acknowledgement checkbox). Env vars win over the Settings → System overrides.
+- **Web auth:** first run requires an admin account (Argon2id); setup cannot be skipped and login remains required. Sessions are httpOnly cookies (rate-limited login) persisted in `sessions.json` (SHA-256 hashed tokens — they survive server restarts, so redeploys don't log users out). `DB_SETUP_TOKEN` protects account creation. Env vars win over Settings → System overrides.
 - **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web, optionally AES-256-GCM encrypted at rest via `DB_KEYS_PASSPHRASE` (Argon2id-derived key). Stored keys are not returned to or persisted by the frontend; `ask_ai` resolves them backend-side and ignores a key supplied in that request.
 - **Permissions (desktop):** if you add or remove a Tauri command, regenerate `src-tauri/permissions/default.toml` and `src-tauri/capabilities/default.json` in the same change (see the header comment in the permission file).
 - **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles.

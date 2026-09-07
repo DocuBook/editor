@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { useEffect } from 'react'
-import { invoke, listen } from '../lib/ipc'
+import { invoke, isTauri, listen } from '../lib/ipc'
 
-export type AuthStatus = 'checking' | 'setup' | 'login' | 'ready'
+export type AuthStatus = 'checking' | 'setup' | 'login' | 'ready' | 'error'
 
 interface AuthState {
   status: AuthStatus
@@ -18,24 +18,22 @@ export const useAuth = create<AuthState>((set) => ({
 
   /** Boot-time gate: setup wizard → login → ready (mirrors server middleware). */
   init: async () => {
+    if (isTauri) { set({ status: 'ready' }); return }
+    set({ status: 'checking', email: '' })
     try {
       const s = JSON.parse(await invoke<string>('setup_status'))
-      if (s.noAuth) { set({ status: 'ready' }); return }
       if (s.setupRequired) { set({ status: 'setup' }); return }
       try {
         const a = JSON.parse(await invoke<string>('account_get'))
         set({ status: 'ready', email: a.email })
       } catch { set({ status: 'login' }) }
-    } catch { set({ status: 'ready' }) }
+    } catch { set({ status: 'error' }) }
   },
 
   refresh: async () => {
-    // Mirror init(): a successful "Skip — keep open access" flips noAuth,
-    // which must land on 'ready' — account_get alone can't tell it apart from
-    // "never set up" (no admin exists yet on a fresh install).
     try {
       const s = JSON.parse(await invoke<string>('setup_status'))
-      if (s.noAuth) { set({ status: 'ready' }); return }
+      if (s.setupRequired) { set({ status: 'setup' }); return }
     } catch { /* ignore — fall through to account_get */ }
     try {
       const a = JSON.parse(await invoke<string>('account_get'))
