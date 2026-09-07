@@ -34,6 +34,18 @@ try {
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
   attachLogging(page, 'theme-check')
 
+  // This suite serves the static frontend with Vite preview, not the web API.
+  // Keep it focused on theme behavior by stubbing the auth calls that the web
+  // boot gate needs before rendering the editor.
+  await page.route('**/api/setup_status', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ result: JSON.stringify({ setupRequired: false, setupToken: false }) }),
+  }))
+  await page.route('**/api/account_get', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ result: JSON.stringify({ email: 'theme-check@example.test' }) }),
+  }))
+
   const theme = () => page.evaluate(() => document.documentElement.dataset.theme)
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
