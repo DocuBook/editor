@@ -15,6 +15,7 @@
 - Preserved open tabs when their parent folder is renamed by remapping affected paths.
 - Prevented the AI floating action button from reformatting unchanged Markdown.
 - Kept BlockNote side-menu controls from overlapping the tab bar near the top of the editor.
+- Removed setup-wizard Skip controls and no-auth mode; Docker web now requires admin creation and login, with optional `DB_SETUP_TOKEN` protection.
 
 #### 🔄 Refactor
 
@@ -208,7 +209,7 @@ Same codebase now ships as a self-hosted web server (`docubook/editor` image): t
 #### 🚀 Features
 
 - **Web server (`src-tauri-server`)** — axum HTTP server reusing the desktop vault/wiki/git/search/agent modules via `#[path]` includes; single binary serving the built frontend + `/api/*`; SSE streaming for AI
-- **Setup wizard on first run** — create the admin account (Argon2id, session cookie `HttpOnly`/`SameSite=Strict`, login rate-limited 5×/min). Headless provisioning via `DB_ADMIN_EMAIL`/`DB_ADMIN_PASSWORD` env; `DB_NO_AUTH=1` keeps open access (pre-web behavior)
+- **Setup wizard on first run** — create the admin account (Argon2id, session cookie `HttpOnly`/`SameSite=Strict`, login rate-limited 5×/min). Headless provisioning via `DB_ADMIN_EMAIL`/`DB_ADMIN_PASSWORD` env
 - **Settings → System (web only)** — change password, sign out, toggle login requirement, session TTL. Precedence: env var > `/data/config.json` > default; env-sourced values shown locked ("from env")
 - **Vault picker modal (web)** — replaces the browser `prompt()` with an in-app modal (list / open / create), same contract as the native folder dialog
 - **Docker packaging** — multi-stage build (node → rust musl → alpine), non-root user, `/data` volume, `HEALTHCHECK` on `/api/health`, GHCR publish on tags (`ghcr.io/docubook/editor`); all server env vars documented in `.env.example`

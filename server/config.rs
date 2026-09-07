@@ -7,10 +7,8 @@
 //! Env vars (boot-time, win over config.json):
 //!   DB_ADMIN_EMAIL + DB_ADMIN_PASSWORD  → auto-create admin on first boot
 //!     (env-based headless provisioning; BOTH required)
-//!   DB_NO_AUTH=1                        → force open access (old behavior)
 //!   DB_SESSION_TTL_HOURS                → session lifetime
 //!   DB_SECURE_COOKIE=1                  → set Secure flag on session cookie
-
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -27,7 +25,6 @@ pub struct Admin {
 #[derive(Clone)]
 pub struct Config {
     pub admin: Option<Admin>,
-    pub no_auth: bool,
     pub session_ttl_hours: u64,
     pub setup_token: Option<String>,
     path: PathBuf,
@@ -56,9 +53,6 @@ impl Config {
             }
         }
         // Env wins over config.json.
-        if let Ok(v) = std::env::var("DB_NO_AUTH") {
-            c.no_auth = v == "1" || v.eq_ignore_ascii_case("true");
-        }
         if let Ok(v) = std::env::var("DB_SESSION_TTL_HOURS") {
             if let Ok(n) = v.parse::<u64>() {
                 if n > 0 {
@@ -76,14 +70,13 @@ impl Config {
             email: a.get("email").and_then(|e| e.as_str()).unwrap_or("").to_string(),
             password_hash: a.get("password_hash").and_then(|e| e.as_str()).unwrap_or("").to_string(),
         });
-        let no_auth = v.get("no_auth").and_then(|x| x.as_bool()).unwrap_or(false);
         let session_ttl_hours = v.get("session_ttl_hours").and_then(|x| x.as_u64()).unwrap_or(168);
         // Env-only, never persisted: optional setup guard for public deployments.
         let setup_token = std::env::var("DB_SETUP_TOKEN").ok().filter(|s| !s.is_empty());
         if setup_token.is_none() {
             tracing::warn!(event = "setup_token_missing");
         }
-        Self { admin, no_auth, session_ttl_hours, setup_token, path: path.to_path_buf() }
+        Self { admin, session_ttl_hours, setup_token, path: path.to_path_buf() }
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -93,7 +86,6 @@ impl Config {
                 "password_hash": a.password_hash,
                 "created_at": chrono_now(),
             })),
-            "no_auth": self.no_auth,
             "session_ttl_hours": self.session_ttl_hours,
         });
         if let Some(parent) = self.path.parent() {
@@ -150,14 +142,6 @@ impl Config {
     /** Apply a UI override. Only UI_KEYS are accepted. */
     pub fn set(&mut self, key: &str, value: &serde_json::Value) -> Result<(), String> {
         match key {
-            "no_auth" => {
-                let v = value.as_bool().ok_or("no_auth must be a boolean")?;
-                // No admin-guard here: "Skip — keep open access" from the setup
-                // wizard runs on a FRESH install where no admin exists yet, and
-                // disabling it with no admin can't lock anyone out either
-                // (setup_required bypasses auth until an admin is created).
-                self.no_auth = v;
-            }
             "session_ttl_hours" => {
                 let n = value.as_u64().ok_or("session_ttl_hours must be a number")?;
                 if !(1..=8760).contains(&n) {
@@ -172,12 +156,10 @@ impl Config {
 
     /** Effective config + source for the dashboard (env values are read-only). */
     pub fn view(&self, data_dir: &Path) -> serde_json::Value {
-        let env_no_auth = std::env::var("DB_NO_AUTH").ok();
         let env_ttl = std::env::var("DB_SESSION_TTL_HOURS").ok();
         let source = |env: Option<String>| if env.is_some() { "env" } else { "file" };
         serde_json::json!({
             "admin": self.admin.as_ref().map(|a| serde_json::json!({ "email": a.email })),
-            "no_auth": { "value": self.no_auth, "source": source(env_no_auth) },
             "session_ttl_hours": { "value": self.session_ttl_hours, "source": source(env_ttl) },
             "boot": {
                 "port": std::env::var("PORT").unwrap_or_else(|_| "8080".into()),
@@ -253,26 +235,11 @@ mod tests {
     }
 
     #[test]
-    fn no_auth_allowed_without_admin() {
-        // "Skip for now — keep open access" on a fresh install: no admin yet,
-        // but enabling no_auth must succeed and persist.
-        let dir = tmp();
-        let mut c = Config::load(&dir);
-        assert!(c.admin.is_none());
-        c.set("no_auth", &serde_json::json!(true)).unwrap();
-        assert!(c.no_auth);
-        let c2 = Config::load(&dir);
-        assert!(c2.no_auth, "no_auth must persist to disk");
-        let _ = std::fs::remove_file(dir.join("config.json"));
-    }
-
-    #[test]
     fn setup_admin_token_gate() {
         // Backward compatible: no DB_SETUP_TOKEN → no token required.
         let dir = tmp();
         let mut no_tok = Config {
             admin: None,
-            no_auth: false,
             session_ttl_hours: 24,
             setup_token: None,
             path: dir.join("c1.json"),
@@ -285,7 +252,6 @@ mod tests {
         // DB_SETUP_TOKEN was set; pre-auth claim must be token-gated.)
         let mut tok = Config {
             admin: None,
-            no_auth: false,
             session_ttl_hours: 24,
             setup_token: Some("tok-secret-1".into()),
             path: dir.join("c2.json"),
@@ -303,11 +269,6 @@ mod tests {
     fn set_ui_keys_validation() {
         let dir = tmp();
         let mut c = Config::load(&dir);
-        assert!(c.set("no_auth", &serde_json::json!(true)).is_ok(), "no_auth allowed before admin (skip flow)");
-        c.setup_admin("a@b.c", "password1", None).unwrap();
-        c.set("no_auth", &serde_json::json!(true)).unwrap();
-        assert!(c.no_auth);
-        assert!(c.set("no_auth", &serde_json::json!("yes")).is_err());
         assert!(c.set("session_ttl_hours", &serde_json::json!(0)).is_err());
         c.set("session_ttl_hours", &serde_json::json!(24)).unwrap();
         assert_eq!(c.session_ttl_hours, 24);

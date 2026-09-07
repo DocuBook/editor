@@ -17,6 +17,8 @@ const DATA = '/tmp/docubook-e2e-data'
 const BASE = `http://localhost:${PORT}`
 
 const ADMIN = { email: 'e2e@test.dev', password: 'password1' }
+const SETUP_TOKEN = 'web-smoke-setup-token'
+const SERVER_ENV = { DB_SETUP_TOKEN: SETUP_TOKEN }
 const click = (name) => `button:has-text("${name}")`
 const results = []
 const ok = (name, cond, extra = '') => {
@@ -27,7 +29,7 @@ const ok = (name, cond, extra = '') => {
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
 
-let server = startServer('web-smoke', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
+let server = startServer('web-smoke', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist', env: SERVER_ENV })
 let server2
 let browser
 let page
@@ -45,15 +47,22 @@ try {
   // ── Setup wizard ──
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector(click('Create admin account'), { timeout: 12000 })
-  // Consent gate: "Skip — keep open access" stays disabled until acknowledged
-  const skipBtn = page.locator(click('Skip for now — keep open access'))
-  ok('consent gate: skip disabled until acknowledged', await skipBtn.isDisabled())
-  await page.locator('input[type="checkbox"]').check()
-  ok('consent gate: skip enabled after ack', await skipBtn.isEnabled())
-  await page.locator('input[type="checkbox"]').uncheck()
+  await page.waitForSelector('input[placeholder="Setup token (DB_SETUP_TOKEN)"]', { timeout: 12000 })
+  await page.screenshot({ path: 'test/artifacts/web-smoke-setup-token-no-skip.png', fullPage: false })
+  ok('setup wizard: admin creation is required',
+    await page.getByRole('button', { name: 'Create admin account' }).isVisible())
+  ok('setup wizard: no account Skip control',
+    await page.getByRole('button', { name: /^Skip/ }).count() === 0 &&
+    await page.locator('input[type="checkbox"]').count() === 0)
+  const configBeforeSetup = await fetch(`${BASE}/api/config_set`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ key: 'session_ttl_hours', value: 24 }),
+  })
+  ok('setup contract: config cannot bypass admin creation', configBeforeSetup.status === 401, String(configBeforeSetup.status))
   await page.fill('input[type="email"]', ADMIN.email)
   await page.fill('input[placeholder="Password (min 8 chars)"]', ADMIN.password)
   await page.fill('input[placeholder="Confirm password"]', ADMIN.password)
+  await page.fill('input[placeholder="Setup token (DB_SETUP_TOKEN)"]', SETUP_TOKEN)
   await page.locator(click('Create admin account')).click()
   await page.waitForFunction(() => /Open Folder|Open a vault|Open project/i.test(document.body.innerText), { timeout: 10000 })
   const afterSetup = await page.locator('body').innerText()
@@ -81,12 +90,15 @@ try {
   // ── Restart: admin config AND session must persist (sessions.json on /data) ──
   server.bin.kill()
   await new Promise(r => setTimeout(r, 1500))
-  server2 = startServer('web-smoke', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
+  server2 = startServer('web-smoke', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist', env: SERVER_ENV })
   await waitForServer(BASE)
-  const st = await (await fetch(`${BASE}/api/setup_status`, {
+  const stResponse = await (await fetch(`${BASE}/api/setup_status`, {
     method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}'
-  })).text()
-  ok('redeploy: admin persisted (setupRequired=false)', /setupRequired.?.:false/.test(st), st.slice(0, 80))
+  })).json()
+  const st = JSON.parse(stResponse.result)
+  ok('redeploy: admin persisted with minimal setup contract',
+    st.setupRequired === false && Object.keys(st).sort().join(',') === 'setupRequired,setupToken',
+    JSON.stringify(st))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(1500)
   const afterReload = await page.locator('body').innerText()

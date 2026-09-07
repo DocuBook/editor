@@ -175,14 +175,24 @@ mod api_tests {
         let (status, _, body) = post(&app, "/api/setup_status", json!({})).await;
         assert_eq!(status, StatusCode::OK);
         let v = result_json(&body);
-        assert_eq!(v["setupRequired"], true, "{body}");
-        assert_eq!(v["setupToken"], false, "{body}");
+        assert_eq!(
+            v,
+            json!({ "setupRequired": true, "setupToken": false }),
+            "{body}"
+        );
     }
 
     #[tokio::test]
     async fn setup_mode_only_exposes_setup_routes() {
         let (app, _) = router();
         let (status, _, _) = post(&app, "/api/web_vault_root", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _, _) = post(
+            &app,
+            "/api/config_set",
+            json!({"key": "session_ttl_hours", "value": 24}),
+        )
+        .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
         let (status, _, _) = get(&app, "/api/file?path=%2Ftmp%2Fsecret").await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -384,6 +394,42 @@ mod api_tests {
         // setup_status stays public
         let (s, _, _) = post(&app, "/api/setup_status", json!({})).await;
         assert_eq!(s, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn config_api_exposes_and_updates_supported_settings() {
+        let (app, _) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+
+        let (status, _, body) = post_with(&app, "/api/config_get", json!({}), Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let config = result_json(&body);
+        let config = config.as_object().expect("config object");
+        assert_eq!(config.len(), 3, "{body}");
+        assert!(config.contains_key("admin"), "{body}");
+        assert!(config.contains_key("session_ttl_hours"), "{body}");
+        assert!(config.contains_key("boot"), "{body}");
+
+        let (status, _, body) = post_with(
+            &app,
+            "/api/config_set",
+            json!({"key": "session_ttl_hours", "value": 24}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let (_, _, body) = post_with(&app, "/api/config_get", json!({}), Some(&cookie)).await;
+        assert_eq!(
+            result_json(&body)["session_ttl_hours"]["value"],
+            24,
+            "{body}"
+        );
     }
 
     #[tokio::test]

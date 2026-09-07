@@ -90,10 +90,17 @@ export default function App() {
     }
   }, [])
 
-  /** Auth gate: checking → setup wizard → login → app. Desktop (Tauri) never
-   *  gates — this branch only triggers on web when the server enforces login. */
+  /** Auth gate: checking → setup wizard → login → app. Desktop skips the gate. */
   if (status === 'checking') {
     return <div className="h-screen flex items-center justify-center text-xs text-muted">Loading…</div>
+  }
+  if (status === 'error') {
+    return (
+      <div className="h-screen flex flex-col gap-3 items-center justify-center text-xs text-muted">
+        <span>Cannot reach server.</span>
+        <button onClick={() => void useAuth.getState().init()} className="px-3 py-1.5 rounded cursor-pointer bg-surface-active text-foreground border-none hover:bg-surface-hover">Retry</button>
+      </div>
+    )
   }
   if (status === 'setup') return <SetupWizard />
   if (status === 'login') return <Login />

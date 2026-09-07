@@ -77,9 +77,8 @@ pub(crate) async fn file_route(
 }
 
 // ── auth: setup wizard + safe login ──
-// Gates: setup_required (no admin yet) → open (backward compat: existing
-// deployments keep working until the wizard runs). no_auth → always open
-// (DB_NO_AUTH=1 / wizard "skip"). Otherwise session cookie required.
+// Setup mode exposes only account creation and health. After setup, every
+// other API requires a valid session.
 
 pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let path = req.uri().path().to_string();
@@ -88,10 +87,7 @@ pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: N
     if !path.starts_with("/api/") {
         return next.run(req).await;
     }
-    let (setup_required, no_auth) = {
-        let cfg = state.auth.config.lock().expect("lock");
-        (cfg.admin.is_none(), cfg.no_auth)
-    };
+    let setup_required = state.auth.config.lock().expect("lock").admin.is_none();
     let always_public = matches!(
         path.as_str(),
         "/api/setup_status" | "/api/login" | "/api/logout" | "/api/setup_admin" | "/api/health"
@@ -100,7 +96,7 @@ pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: N
         path.as_str(),
         "/api/setup_status" | "/api/setup_admin" | "/api/health"
     );
-    if no_auth || (setup_required && setup_public) || (!setup_required && always_public) {
+    if (setup_required && setup_public) || (!setup_required && always_public) {
         return next.run(req).await;
     }
     let token = req
