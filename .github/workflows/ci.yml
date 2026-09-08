@@ -340,7 +340,7 @@ jobs:
             echo "::error::Expected exactly two DMG assets, found ${#DMGS[@]}"
             exit 1
           }
-          shasum -a 256 "${DMGS[@]}" > SHA256SUMS.txt
+          sha256sum "${DMGS[@]}" > SHA256SUMS.txt
           # Arm64 ad-hoc-signed download triggers Gatekeeper "app is damaged".
           # Users clear it once before first launch.
           cat >> /tmp/release-notes.md <<'EOF'
