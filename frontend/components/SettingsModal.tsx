@@ -254,7 +254,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh]" onClick={onClose}>
+    <div data-testid="settings-modal" className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh]" onClick={onClose}>
       <div className="bg-surface border border-border rounded-xl w-[540px] max-h-[80vh] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <div className="flex items-center gap-3">
