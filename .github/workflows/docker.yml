@@ -1,4 +1,4 @@
-# Builds the web Docker image: full check on every PR, push to GHCR on tags.
+# Builds the web Docker image: amd64 validation on PRs, native multi-arch publish on tags.
 # Users never build: `docker pull ghcr.io/docubook/editor` and run.
 name: Docker Web Image
 
@@ -9,24 +9,58 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/docubook/editor
+  NODE_VERSION: "22"
+
 permissions:
   contents: read
   packages: write
 
 jobs:
-  build-and-push:
-    # PRs: image build waits for admin approval. Tag push (release): builds
-    # + pushes automatically (release-auto env, no reviewers).
-    environment:
-      name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
-    runs-on: ubuntu-latest
+  frontend:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Build frontend once
+        run: npm run build
+      - name: Upload frontend
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-web-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  build-and-push:
+    needs: [frontend]
+    # PRs validate amd64 only. Tags and manual runs use native amd64 + arm64 runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"amd64"}]' || '[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"amd64"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"arm64"}]') }}
+    runs-on: ${{ matrix.runner }}
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download frontend
+        uses: actions/download-artifact@v8
+        with:
+          name: docker-web-${{ github.sha }}
+          path: .docker-web
       - uses: docker/setup-buildx-action@v4
-      # Register QEMU binfmt so the arm64 image can be built on the amd64 runner.
-      - uses: docker/setup-qemu-action@v3
       - name: Log in to GHCR
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -34,22 +68,94 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Image metadata
         id: meta
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/docubook/editor
+          images: ${{ env.IMAGE }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-      # PR: build-only validation of the Dockerfile (frontend + musl server +
-      # runtime image). Tag: build + push.
-      - name: Build (PR check / tag push)
+            type=raw,value=latest
+      - name: Build PR check
+        if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v7
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
-          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
-          tags: ${{ steps.meta.outputs.tags || 'docubook/editor:check' }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          build-contexts: web-content=.docker-web
+          platforms: ${{ matrix.platform }}
+          push: false
+          tags: docubook/editor:check
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+      - name: Build manual check
+        if: github.event_name == 'workflow_dispatch'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-contexts: web-content=.docker-web
+          platforms: ${{ matrix.platform }}
+          push: false
+          tags: docubook/editor:check-${{ matrix.slug }}
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+      - name: Build and push platform image
+        id: build
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          build-contexts: web-content=.docker-web
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+          cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max
+      - name: Export digest
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v7
+        with:
+          name: docker-digest-${{ matrix.slug }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-push]
+    runs-on: ubuntu-24.04
+    environment: release-auto
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v8
+        with:
+          pattern: docker-digest-*
+          path: /tmp/digests
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - name: Create multi-platform manifest
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.IMAGE }}@sha256:%s ' *)
+      - name: Inspect image
+        run: docker buildx imagetools inspect ${{ env.IMAGE }}:${{ steps.meta.outputs.version }}
