@@ -6,7 +6,7 @@
 # ---- frontend (vite) ----
 # Frontend output is architecture-independent. BUILDPLATFORM keeps this stage native
 # and lets one result feed every target in a local multi-platform build.
-FROM --platform=$BUILDPLATFORM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:26-alpine AS web
 WORKDIR /app
 COPY package.json package-lock.json .npmrc ./
 RUN npm ci
