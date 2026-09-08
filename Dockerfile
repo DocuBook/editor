@@ -63,6 +63,6 @@ ENV DATA_DIR=/data WWW_DIR=/app/www PORT=8080
 RUN mkdir -p /data && chown -R docubook:docubook /data
 VOLUME /data
 EXPOSE 8080
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
-  CMD wget -qO- http://127.0.0.1:8080/api/health >/dev/null || exit 1
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
+  CMD wget -qO- "http://127.0.0.1:${PORT:-8080}/api/health" >/dev/null || exit 1
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

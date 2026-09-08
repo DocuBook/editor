@@ -48,6 +48,13 @@ jobs:
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done
           grep -q "^## v$npm_v — " CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v —'"; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            expected_tag="v$npm_v"
+            [ "$GITHUB_REF_NAME" = "$expected_tag" ] || {
+              echo "::error::Release tag $GITHUB_REF_NAME does not match manifest version $expected_tag"
+              exit 1
+            }
+          fi
 
   test:
     runs-on: macos-14
@@ -258,6 +265,25 @@ jobs:
           echo "OK: $BIN keeps adhoc signature — launchd can spawn"
       - name: Bundle DMG (${{ matrix.arch }})
         run: npx tauri bundle --target ${{ matrix.target }}
+      - name: Verify final app bundle (${{ matrix.arch }})
+        run: |
+          APP=$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
+          [ -n "$APP" ] || { echo "::error::No app bundle found"; exit 1; }
+          test -x "$APP/Contents/MacOS/docubook-desktop" || {
+            echo "::error::Final app executable is missing or not executable: $APP"
+            exit 1
+          }
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            codesign -dv "$APP/Contents/MacOS/docubook-desktop" >/dev/null 2>&1 || {
+              echo "::error::Final arm64 app executable is unsigned"
+              exit 1
+            }
+          else
+            if codesign -dv "$APP/Contents/MacOS/docubook-desktop" >/dev/null 2>&1; then
+              echo "::error::Final x86_64 app executable still has a signature"
+              exit 1
+            fi
+          fi
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
@@ -265,11 +291,19 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
-          if-no-files-found: warn
+          if-no-files-found: error
+
+  release-gate:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, e2e, test-server-linux, security, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: All release checks passed
+        run: echo "All CI, security, platform, and artifact checks passed for $GITHUB_REF_NAME"
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build]
+    needs: [release-gate]
     # Tag-only — release publishes automatically (no approval gate).
     environment: release-auto
     runs-on: ubuntu-22.04
@@ -300,8 +334,13 @@ jobs:
           # locate the DMGs recursively instead of assuming a flat layout. The
           # product name contains a SPACE ("DocuBook Editor_*.dmg") — a plain
           # unquoted $DMGS word-splits and gh gets a broken path.
-          mapfile -t DMGS < <(find DocuBook-* -name '*.dmg')
+          mapfile -t DMGS < <(find DocuBook-* -name '*.dmg' -type f)
           echo "release assets: ${DMGS[*]}"
+          [ "${#DMGS[@]}" -eq 2 ] || {
+            echo "::error::Expected exactly two DMG assets, found ${#DMGS[@]}"
+            exit 1
+          }
+          sha256sum "${DMGS[@]}" > SHA256SUMS.txt
           # Arm64 ad-hoc-signed download triggers Gatekeeper "app is damaged".
           # Users clear it once before first launch.
           cat >> /tmp/release-notes.md <<'EOF'
@@ -322,6 +361,8 @@ jobs:
           **macOS (Intel — `*_x64.dmg`):** right-click the app → *Open* →
           *Open Anyway* on the Gatekeeper dialog.
           EOF
-          gh release create "$TAG" "${DMGS[@]}" \
-            --title "$TAG" \
-            --notes-file /tmp/release-notes.md
+          RELEASE_FLAGS=(--title "$TAG" --notes-file /tmp/release-notes.md)
+          case "$TAG" in
+            *-*) RELEASE_FLAGS+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${DMGS[@]}" SHA256SUMS.txt "${RELEASE_FLAGS[@]}"

@@ -19,7 +19,6 @@ env:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   frontend:
@@ -42,6 +41,9 @@ jobs:
           retention-days: 1
 
   build-and-push:
+    permissions:
+      contents: read
+      packages: write
     needs: [frontend]
     # PRs validate amd64 only. Tags and manual runs use native amd64 + arm64 runners.
     strategy:
@@ -53,6 +55,15 @@ jobs:
       name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
     steps:
       - uses: actions/checkout@v7
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(jq -r '.version' package.json)
+          expected_tag="v$version"
+          [ "$GITHUB_REF_NAME" = "$expected_tag" ] || {
+            echo "::error::Release tag $GITHUB_REF_NAME does not match manifest version $expected_tag"
+            exit 1
+          }
       - name: Download frontend
         uses: actions/download-artifact@v8
         with:
@@ -73,9 +84,9 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
+            type=ref,event=tag
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+          flavor: latest=auto
       - name: Build PR check
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v7
@@ -84,7 +95,8 @@ jobs:
           build-contexts: web-content=.docker-web
           platforms: ${{ matrix.platform }}
           push: false
-          tags: docubook/editor:check
+          load: true
+          tags: docubook/editor:check-${{ matrix.slug }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
       - name: Build manual check
         if: github.event_name == 'workflow_dispatch'
@@ -94,8 +106,30 @@ jobs:
           build-contexts: web-content=.docker-web
           platforms: ${{ matrix.platform }}
           push: false
+          load: true
           tags: docubook/editor:check-${{ matrix.slug }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+      - name: Smoke test image
+        if: github.event_name != 'push'
+        run: |
+          set -eu
+          container="docubook-smoke-${{ matrix.slug }}"
+          volume="${container}-data"
+          docker volume create "$volume"
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name "$container" \
+            --env DB_SETUP_TOKEN=ci-smoke-token \
+            --volume "$volume:/data" \
+            --publish 18080:8080 \
+            "docubook/editor:check-${{ matrix.slug }}"
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:18080/api/health >/dev/null && break
+            [ "$attempt" -eq 30 ] && { docker logs "$container"; exit 1; }
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:18080/ >/dev/null
+          docker exec "$container" test -w /data
+
       - name: Build and push platform image
         id: build
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
@@ -108,6 +142,28 @@ jobs:
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max
+      - name: Smoke test published image
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -eu
+          container="docubook-smoke-${{ matrix.slug }}"
+          volume="${container}-data"
+          digest="${{ steps.build.outputs.digest }}"
+          docker volume create "$volume"
+          trap 'docker rm --force "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          docker run --detach --name "$container" \
+            --platform "${{ matrix.platform }}" \
+            --env DB_SETUP_TOKEN=ci-smoke-token \
+            --volume "$volume:/data" \
+            --publish 18080:8080 \
+            "${IMAGE}@${digest}"
+          for attempt in $(seq 1 30); do
+            curl --fail --silent http://127.0.0.1:18080/api/health >/dev/null && break
+            [ "$attempt" -eq 30 ] && { docker logs "$container"; exit 1; }
+            sleep 2
+          done
+          curl --fail --silent http://127.0.0.1:18080/ >/dev/null
+          docker exec "$container" test -w /data
       - name: Export digest
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -124,6 +180,9 @@ jobs:
           retention-days: 1
 
   merge:
+    permissions:
+      contents: read
+      packages: write
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build-and-push]
     runs-on: ubuntu-24.04
@@ -148,9 +207,9 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           tags: |
+            type=ref,event=tag
             type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
+          flavor: latest=auto
       - name: Create multi-platform manifest
         working-directory: /tmp/digests
         run: |
