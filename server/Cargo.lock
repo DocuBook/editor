@@ -385,7 +385,7 @@ dependencies = [
  "argon2",
  "axum",
  "base64",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "mime_guess",
  "pulldown-cmark",
  "rand 0.8.7",
