@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, type ReactNode } from 'react'
+import { act, useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -11,9 +11,18 @@ const vaultState = vi.hoisted(() => ({
 }))
 
 vi.mock('@mantine/core', () => ({
-  Drawer: ({ opened, children }: { opened: boolean; children?: ReactNode }) => (
-    <section data-testid="drawer" data-opened={String(opened)}>{opened ? children : null}</section>
-  ),
+  Drawer: ({ opened, onClose, onExitTransitionEnd, children }: { opened: boolean; onClose: () => void; onExitTransitionEnd?: () => void; children?: ReactNode }) => {
+    const wasOpened = useRef(false)
+    useEffect(() => {
+      if (wasOpened.current && !opened) onExitTransitionEnd?.()
+      wasOpened.current = opened
+    }, [onExitTransitionEnd, opened])
+    return (
+      <section data-testid="drawer" data-opened={String(opened)}>
+        {opened && <><button aria-label="close-drawer" onClick={onClose}>Close</button>{children}</>}
+      </section>
+    )
+  },
 }))
 vi.mock('../../../frontend/components/Sidebar', () => ({
   default: ({ id, onOpenSettings }: { id?: string; onOpenSettings: () => void }) => (
@@ -21,8 +30,8 @@ vi.mock('../../../frontend/components/Sidebar', () => ({
   ),
 }))
 vi.mock('../../../frontend/components/Editor', () => ({
-  default: ({ sidebarOpen, isDesktop, onToggleSidebar }: { sidebarOpen: boolean; isDesktop: boolean; onToggleSidebar: () => void }) => (
-    <button aria-label="toggle-sidebar" data-open={String(sidebarOpen)} data-desktop={String(isDesktop)} onClick={onToggleSidebar}>Toggle</button>
+  default: ({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void }) => (
+    <button ref={sidebarToggleRef} aria-label="toggle-sidebar" data-open={String(sidebarOpen)} data-desktop={String(isDesktop)} onClick={onToggleSidebar}>Toggle</button>
   ),
 }))
 vi.mock('../../../frontend/components/SearchModal', () => ({ default: () => <div data-testid="search" /> }))
@@ -101,6 +110,16 @@ describe('responsive sidebar', () => {
     act(() => setDesktop(true))
     expect(document.getElementById('desktop-sidebar')).toBeNull()
     expect(toggle().dataset.open).toBe('false')
+  })
+
+  it('restores focus to the mobile toggle after the drawer exit transition', () => {
+    act(() => setDesktop(false))
+    const toggle = document.querySelector<HTMLButtonElement>('[aria-label="toggle-sidebar"]')!
+    act(() => toggle.click())
+    const close = document.querySelector<HTMLButtonElement>('[aria-label="close-drawer"]')!
+    act(() => { close.focus(); close.click() })
+
+    expect(document.activeElement).toBe(toggle)
   })
 
   it('closes and blocks mobile drawer while a competing modal is open', () => {

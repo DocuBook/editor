@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { X, ChevronLeft, ChevronRight, Command, ArrowBigUp, PanelLeft, ChevronDown, GitCommitHorizontal, Upload, Search } from 'lucide-react'
 import { BsMarkdown } from 'react-icons/bs'
 import { TbBlocks } from 'react-icons/tb'
@@ -18,7 +18,7 @@ const sanitizeCommitName = (rawName: string) =>
     .replace(/\.+$/g, '')
     .trim() || 'changes'
 
-export function TabBar({ sidebarOpen, isDesktop, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
+export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
@@ -119,6 +119,7 @@ export function TabBar({ sidebarOpen, isDesktop, onToggleSidebar, onOpenSearch }
     <div className="ui-shell relative z-30 h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-6">
       <span className={'inline-flex items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
         <button
+          ref={sidebarToggleRef}
           data-testid="sidebar-toggle"
           onClick={onToggleSidebar}
           aria-label={isDesktop ? (sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar') : (sidebarOpen ? 'Close sidebar drawer' : 'Open sidebar drawer')}

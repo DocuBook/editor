@@ -34,6 +34,7 @@ export default function App() {
   /** Current create-target folder lives in Sidebar; the modal's onSelect only
    *  needs it while the sidebar is mounted, so Sidebar registers its setter. */
   const searchFolderRef = useRef<(path: string) => void>(() => {})
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null)
   const registerSearchFolder = useCallback((fn: (path: string) => void) => {
     searchFolderRef.current = fn
     return () => { if (searchFolderRef.current === fn) searchFolderRef.current = () => {} }
@@ -142,7 +143,7 @@ export default function App() {
           <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
         )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
-          <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
+          <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
         </main>
       </div>
       {isVaultOpen && <StatusBar />}
@@ -160,7 +161,10 @@ export default function App() {
         trapFocus
         closeOnEscape
         closeOnClickOutside
-        returnFocus={!modalOpen}
+        returnFocus={false}
+        onExitTransitionEnd={() => {
+          if (!isDesktop && !modalOpen) sidebarToggleRef.current?.focus({ preventScroll: true })
+        }}
         lockScroll
         classNames={{ overlay: 'mobile-sidebar-drawer-overlay', content: 'mobile-sidebar-drawer-content', header: 'mobile-sidebar-drawer-header', title: 'mobile-sidebar-drawer-title', body: 'mobile-sidebar-drawer-body', close: 'mobile-sidebar-drawer-close' }}
       >
