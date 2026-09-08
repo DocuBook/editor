@@ -48,6 +48,13 @@ jobs:
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done
           grep -q "^## v$npm_v — " CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v —'"; exit 1; }
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            expected_tag="v$npm_v"
+            [ "$GITHUB_REF_NAME" = "$expected_tag" ] || {
+              echo "::error::Release tag $GITHUB_REF_NAME does not match manifest version $expected_tag"
+              exit 1
+            }
+          fi
 
   test:
     runs-on: macos-14
@@ -267,9 +274,17 @@ jobs:
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
           if-no-files-found: warn
 
+  release-gate:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test, e2e, test-server-linux, security, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: All release checks passed
+        run: echo "All CI, security, platform, and artifact checks passed for $GITHUB_REF_NAME"
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build]
+    needs: [release-gate]
     # Tag-only — release publishes automatically (no approval gate).
     environment: release-auto
     runs-on: ubuntu-22.04
@@ -322,6 +337,8 @@ jobs:
           **macOS (Intel — `*_x64.dmg`):** right-click the app → *Open* →
           *Open Anyway* on the Gatekeeper dialog.
           EOF
-          gh release create "$TAG" "${DMGS[@]}" \
-            --title "$TAG" \
-            --notes-file /tmp/release-notes.md
+          RELEASE_FLAGS=(--title "$TAG" --notes-file /tmp/release-notes.md)
+          case "$TAG" in
+            *-*) RELEASE_FLAGS+=(--prerelease) ;;
+          esac
+          gh release create "$TAG" "${DMGS[@]}" "${RELEASE_FLAGS[@]}"
