@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="DocuBook Editor" src="https://shieldcn.dev/header/graph.svg?title=DocuBook+Editor&amp;subtitle=The+markdown+editor+that+thinks+like+a+developer+%E2%80%94+Obsidian+vaults%2C+Notion+blocks%2C+Zed-speed+search%2C+and+Git+%E2%80%94+all+in+one.&amp;logo=lu%3AWandSparkles&amp;mode=dark" />
+  <img alt="DocuBook Editor" src="./opengraph.png" />
 </p>
 
 <p align="center">
