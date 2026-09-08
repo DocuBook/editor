@@ -27,7 +27,7 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["fs", "request-id", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-argon2 = "0.5"
+argon2 = "0.6"
 aes-gcm = "0.10"
 sha2 = "0.10"
 getrandom = "0.2"
