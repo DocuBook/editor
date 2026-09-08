@@ -265,6 +265,25 @@ jobs:
           echo "OK: $BIN keeps adhoc signature — launchd can spawn"
       - name: Bundle DMG (${{ matrix.arch }})
         run: npx tauri bundle --target ${{ matrix.target }}
+      - name: Verify final app bundle (${{ matrix.arch }})
+        run: |
+          APP=$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
+          [ -n "$APP" ] || { echo "::error::No app bundle found"; exit 1; }
+          test -x "$APP/Contents/MacOS/docubook-desktop" || {
+            echo "::error::Final app executable is missing or not executable: $APP"
+            exit 1
+          }
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            codesign -dv "$APP/Contents/MacOS/docubook-desktop" >/dev/null 2>&1 || {
+              echo "::error::Final arm64 app executable is unsigned"
+              exit 1
+            }
+          else
+            if codesign -dv "$APP/Contents/MacOS/docubook-desktop" >/dev/null 2>&1; then
+              echo "::error::Final x86_64 app executable still has a signature"
+              exit 1
+            fi
+          fi
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
@@ -272,7 +291,7 @@ jobs:
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
             src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release-gate:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -315,8 +334,13 @@ jobs:
           # locate the DMGs recursively instead of assuming a flat layout. The
           # product name contains a SPACE ("DocuBook Editor_*.dmg") — a plain
           # unquoted $DMGS word-splits and gh gets a broken path.
-          mapfile -t DMGS < <(find DocuBook-* -name '*.dmg')
+          mapfile -t DMGS < <(find DocuBook-* -name '*.dmg' -type f)
           echo "release assets: ${DMGS[*]}"
+          [ "${#DMGS[@]}" -eq 2 ] || {
+            echo "::error::Expected exactly two DMG assets, found ${#DMGS[@]}"
+            exit 1
+          }
+          shasum -a 256 "${DMGS[@]}" > SHA256SUMS.txt
           # Arm64 ad-hoc-signed download triggers Gatekeeper "app is damaged".
           # Users clear it once before first launch.
           cat >> /tmp/release-notes.md <<'EOF'
@@ -341,4 +365,4 @@ jobs:
           case "$TAG" in
             *-*) RELEASE_FLAGS+=(--prerelease) ;;
           esac
-          gh release create "$TAG" "${DMGS[@]}" "${RELEASE_FLAGS[@]}"
+          gh release create "$TAG" "${DMGS[@]}" SHA256SUMS.txt "${RELEASE_FLAGS[@]}"
