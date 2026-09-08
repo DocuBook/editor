@@ -9,6 +9,7 @@ import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
 
+
 /** Sanitize a filename for use in a git commit message: strip control
  *  characters, newlines, and trailing dots (Windows-invalid). */
 const sanitizeCommitName = (rawName: string) =>
@@ -25,6 +26,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   /** Actions dropdown (Commit / Push) — one state machine per action.
    *  'busy' guards double-clicks; 'done' auto-resets to 'idle' (below). */
   const [actionsOpen, setActionsOpen] = useState(false)
+
   const [commitState, setCommitState] = useState<'idle'|'busy'|'done'|'error'>('idle')
   const [pushState, setPushState] = useState<'idle'|'busy'|'done'|'error'>('idle')
   const [gitMsg, setGitMsg] = useState<{ commit: string; push: string }>({ commit: '', push: '' })
@@ -66,6 +68,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
 
   /** Git status: shared store (single poller from App root) — derive per-tab state. */
   const { isRepo, hasRemote, ahead, upstream, status: gitStatus } = useGitStatus()
+
   useEffect(() => {
     const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
     const curFile = useEditorStore.getState().activeTab
@@ -116,7 +119,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   }
 
   return (
-    <div className="ui-shell relative z-30 h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-6">
+    <div className="ui-shell relative z-30 h-12 flex items-center gap-3 shrink-0 text-xs px-6">
       <span className={'inline-flex items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
         <button
           ref={sidebarToggleRef}
@@ -173,6 +176,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
         </span>
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
+
       <span className="relative" ref={actionsRef}>
         <button onClick={() => setActionsOpen(o => !o)} aria-label="Git actions" aria-expanded={actionsOpen}
           className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">

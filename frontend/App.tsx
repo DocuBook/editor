@@ -5,7 +5,6 @@ import { PanelLeftClose } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 import SearchModal from './components/SearchModal'
 import Editor from './components/Editor'
-import StatusBar from './components/StatusBar'
 import SettingsModal from './components/SettingsModal'
 import { Toaster, toast } from 'sonner'
 
@@ -73,7 +72,7 @@ export default function App() {
   }, [isVaultOpen, modalOpen, status])
   useEffect(() => { useAuth.getState().init() }, [])
 
-  /** Single git-status poller shared by StatusBar + TabBar. */
+  /** Single git-status poller shared by the editor UI. */
   useGitPolling()
   useAuthGuard()
 
@@ -146,7 +145,7 @@ export default function App() {
           <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
         </main>
       </div>
-      {isVaultOpen && <StatusBar />}
+
       <Drawer
         id="mobile-sidebar-drawer"
         data-testid="mobile-sidebar-drawer"

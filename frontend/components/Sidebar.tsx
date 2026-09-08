@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
+import SidebarFooter from './SidebarFooter'
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
@@ -168,7 +169,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
 
   return (
     <aside id={id} data-testid={id} className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
-      <div className="relative flex items-center justify-between border-b border-border-subtle px-2 py-3">
+      <div className="relative flex items-center justify-between px-2 py-3">
         <span className="tip-wrap tip-bar relative flex-1 min-w-0" ref={vaultMenuRef}>
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
             className={'flex items-center gap-1 max-w-full cursor-pointer rounded px-1 py-0.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-zinc-500')}>
@@ -326,11 +327,12 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
         <BacklinksPanel onNavigate={onNavigate} />
       </div>
       <div className="flex items-center justify-start px-2 py-2 shrink-0">
-        <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" className="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors text-left">
+        <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" className="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md text-foreground-secondary hover:bg-surface-active hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors text-left">
           <Settings size={16} />
           <span className="text-[13px]">Settings</span>
         </button>
       </div>
+      <SidebarFooter />
       {ctxItem && (
         <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.3)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
           <button onClick={async () => {

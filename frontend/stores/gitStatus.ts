@@ -4,7 +4,7 @@ import { useAuth } from './auth'
 import { invoke } from '../lib/ipc'
 
 /** Shared git status (branch + porcelain status) polled ONCE and consumed by
- *  StatusBar + TabBar (PERF-1: previously two parallel pollers ran 3s + 5s). */
+ *  TabBar (PERF-1: previously two parallel pollers ran 3s + 5s). */
 interface GitStatusState {
   isRepo: boolean
   hasRemote: boolean
