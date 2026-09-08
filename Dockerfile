@@ -23,7 +23,7 @@ FROM scratch AS web-content
 COPY --from=web /app/dist /
 
 # ---- server (Rust, musl) ----
-FROM rust:1.94-alpine AS server
+FROM rust:1.98-alpine AS server
 # cmake/clang for aws-lc-rs (reqwest TLS), build-base for ring/cc
 RUN apk add --no-cache musl-dev build-base cmake clang git
 WORKDIR /src
