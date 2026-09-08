@@ -130,6 +130,61 @@ body {
     background: var(--color-accent);
     color: var(--color-white);
 }
+
+/* Mantine owns mobile drawer behavior; DocuBook tokens keep its shell aligned
+   with the existing sidebar in both themes. */
+.mobile-sidebar-drawer-content {
+    background: var(--color-surface);
+    color: var(--color-foreground);
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+}
+.mobile-sidebar-drawer-header {
+    position: absolute;
+    top: 8px;
+    right: -44px;
+    z-index: 1;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    border: 0;
+}
+.mobile-sidebar-drawer-title {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+.mobile-sidebar-drawer-close {
+    width: 36px;
+    height: 36px;
+    color: var(--color-foreground-subtle);
+    background: var(--color-surface);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
+}
+.mobile-sidebar-drawer-close:hover {
+    background: var(--color-surface-active);
+    color: var(--color-foreground);
+}
+.mobile-sidebar-drawer-body {
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+}
+.mobile-sidebar-drawer-body > aside {
+    width: 100%;
+    border-right: 0;
+}
+
 .ProseMirror > * {
     margin: 0.125rem 0;
 }

@@ -9,7 +9,7 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
 
 /** Panel showing backlinks for the currently active file. */
-function BacklinksPanel() {
+function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
   const [items, setItems] = useState<{path:string;name:string;snippet:string}[]>([])
   const { openFile } = useEditorStore()
   const activeTab = useEditorStore(s => s.activeTab)
@@ -24,7 +24,7 @@ function BacklinksPanel() {
     <div className="p-2">
       <div className="text-zinc-600 uppercase tracking-wider mb-1 px-1">Backlinks ({items.length})</div>
       {items.map(item => (
-        <div key={item.path} onClick={() => openFile(item.path, item.name)}
+        <div key={item.path} onClick={async () => { await openFile(item.path, item.name); onNavigate() }}
           className="text-zinc-500 hover:text-foreground-secondary cursor-pointer py-1 px-1 rounded hover:bg-surface-active">
           <div className="truncate">{item.name}</div>
           {item.snippet && <div className="truncate text-[10px] text-zinc-600">{item.snippet}</div>}
@@ -34,7 +34,16 @@ function BacklinksPanel() {
   )
 }
 
-export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFolder }: { onOpenSettings: () => void; onOpenSearch: () => void; registerSearchFolder: (fn: (path: string) => void) => void }) {
+interface SidebarProps {
+  id?: string
+  onOpenSettings: () => void
+  onOpenSearch: () => void
+  onRequestCloseVault: () => void
+  onNavigate?: () => void
+  registerSearchFolder: (fn: (path: string) => void) => () => void
+}
+
+export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
   const [creating, setCreating] = useState<'file'|'folder'|null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [newName, setNewName] = useState('')
@@ -44,7 +53,6 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
   const ctxMenuRef = useRef<HTMLDivElement>(null)
   const vaultMenuRef = useRef<HTMLSpanElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
-  const [confirmClose, setConfirmClose] = useState(false)
 
   useEffect(() => {
     if (creating) setTimeout(() => newInputRef.current?.focus(), 50)
@@ -70,16 +78,17 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
         await invoke('create_directory', { path: fullPath })
       } else {
         const p = await invoke<string>('create_file', { path: fullPath })
-        openFile(p, name)
+        await openFile(p, name)
       }
       if (useVaultStore.getState().vaultPath !== targetVaultPath || !useVaultStore.getState().isOpen) return
       await loadTree()
       setNewName('')
       setCreating(null)
+      if (creating === 'file') onNavigate()
     } catch(e) { console.error(e); toast.error('Failed to create') }
     finally { createBusyRef.current = false }
   }
-  const { name, isOpen, vaultPath, recent, visibleItems, loading, closeVault, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
+  const { name, isOpen, vaultPath, recent, visibleItems, loading, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
   // Context menu
@@ -92,7 +101,7 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
   /** Keep the modal's onSelect wired to the sidebar's create-target folder:
    *  search is owned by App (works with the sidebar closed), which calls this
    *  callback only while the sidebar is mounted. */
-  useEffect(() => { registerSearchFolder(setCurrentFolder) }, [registerSearchFolder, setCurrentFolder])
+  useEffect(() => registerSearchFolder(setCurrentFolder), [registerSearchFolder])
   useEffect(() => {
     setCurrentFolder('')
     setCreating(null)
@@ -124,7 +133,7 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
 
   // Keyboard shortcuts
   useKeyboard((e: KeyboardEvent) => {
-    if (e.key === 'Escape') { setShowPlusMenu(false); setVaultMenuOpen(false); setConfirmClose(false) }
+    if (e.key === 'Escape') { setShowPlusMenu(false); setVaultMenuOpen(false) }
     /** New file/folder. Canonical (all platforms): ⌘⇧F / ⌘⌥⇧F — browsers
      *  reserve ⌘N / ⌘⇧N / ⌘⌥N (new window / private window) and never deliver
      *  them to the page, so web only ever sees the canonical mapping. Native
@@ -158,7 +167,7 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
   const iconBtn = 'cursor-pointer p-1 rounded hover:bg-surface-active text-foreground-subtle hover:text-foreground transition-colors'
 
   return (
-    <aside className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
+    <aside id={id} data-testid={id} className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
       <div className="relative flex items-center justify-between border-b border-border-subtle px-2 py-3">
         <span className="tip-wrap tip-bar relative flex-1 min-w-0" ref={vaultMenuRef}>
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
@@ -174,7 +183,7 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
                   {recent.slice(0, 5).map(r => {
                     const active = r.path === vaultPath
                     return (
-                      <button key={r.path} onClick={() => { setVaultMenuOpen(false); if (!active) openRecent(r.path) }}
+                      <button key={r.path} onClick={async () => { setVaultMenuOpen(false); if (!active) { await openRecent(r.path); onNavigate() } }}
                         className={'flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-left bg-transparent border-none rounded text-[12px] hover:bg-surface-active ' + (active ? 'text-foreground cursor-default' : 'text-foreground-secondary')}>
                         {active ? <Check size={13} className="text-accent shrink-0" /> : <Folder size={13} className="text-zinc-500 shrink-0" />}
                         <span className="truncate flex-1">{r.name}</span>
@@ -184,11 +193,11 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
                 </div>
               )}
               <div className="border-t border-border-subtle my-1" />
-              <button onClick={() => { setVaultMenuOpen(false); openVault() }}
+              <button onClick={() => { setVaultMenuOpen(false); onNavigate(); openVault() }}
                 className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active">
                 <FolderOpen size={14} /> Open Vault
               </button>
-              <button onClick={() => { setVaultMenuOpen(false); setConfirmClose(true) }}
+              <button onClick={() => { setVaultMenuOpen(false); onRequestCloseVault() }}
                 className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active">
                 <X size={14} /> Close Vault
               </button>
@@ -275,7 +284,7 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
                     <span className="truncate">{item.name}</span>
                   </div>
                 ) : (
-                  <div onClick={() => { openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '') }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
+                  <div onClick={async () => { await openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : ''); onNavigate() }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
                     className={'depth-' + Math.min(item.depth || 0, 12) + ' flex items-center gap-2 py-1 pr-2 rounded hover:bg-surface-active cursor-pointer text-foreground-secondary'}>
                     <FileText size={14} className="text-zinc-500 shrink-0" />
                     <span className="truncate">{stripMarkdownExt(item.name)}</span>
@@ -307,17 +316,17 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
           <div className="flex-1 flex items-center justify-center p-4 text-sm text-zinc-500 italic">Open a vault to start</div>
         )}
       {isOpen && !isTauri && (
-        <button onClick={toggleTrash} disabled={trashItems.length === 0} className={'flex items-center gap-2 px-3 py-2 border-t border-border-subtle text-[13px] w-full text-left disabled:opacity-40 disabled:cursor-not-allowed ' + (trashOpen ? 'text-foreground-secondary' : 'text-foreground-subtle') + (trashItems.length > 0 ? ' cursor-pointer hover:bg-surface-active' : '')}>
+        <button data-testid="trash-toggle" onClick={toggleTrash} disabled={trashItems.length === 0} className={'flex items-center gap-2 px-3 py-2 border-t border-border-subtle text-[13px] w-full text-left disabled:opacity-40 disabled:cursor-not-allowed ' + (trashOpen ? 'text-foreground-secondary' : 'text-foreground-subtle') + (trashItems.length > 0 ? ' cursor-pointer hover:bg-surface-active' : '')}>
           <Trash size={14} className="text-zinc-500 shrink-0" />
           Trash
           {trashItems.length > 0 && <span className="ml-auto text-[10px] text-zinc-600">{trashItems.length}</span>}
         </button>
       )}
       <div className="max-h-32 overflow-y-auto text-xs">
-        <BacklinksPanel />
+        <BacklinksPanel onNavigate={onNavigate} />
       </div>
       <div className="flex items-center justify-start px-2 py-2 shrink-0">
-        <button onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" className="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors text-left">
+        <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" className="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md hover:bg-surface-active text-zinc-400 hover:text-foreground transition-colors text-left">
           <Settings size={16} />
           <span className="text-[13px]">Settings</span>
         </button>
@@ -336,18 +345,7 @@ export default function Sidebar({ onOpenSettings, onOpenSearch, registerSearchFo
             className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Delete</button>
         </div>
       )}
-      {confirmClose && (
-        <div role="alertdialog" aria-label="Close vault" className="fixed inset-0 z-[120] flex items-center justify-center bg-black/50" onClick={() => setConfirmClose(false)}>
-          <div className="bg-surface border border-border rounded-xl p-4 w-72 shadow-[0_10px_30px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
-            <div className="text-sm font-semibold mb-1">Close vault?</div>
-            <div className="text-xs text-foreground-secondary mb-4">Unsaved changes will be saved before closing.</div>
-            <div className="flex justify-end gap-2">
-              <button onClick={() => setConfirmClose(false)} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
-              <button onClick={async () => { setConfirmClose(false); await closeVault() }} className="text-xs px-3 py-1.5 rounded bg-danger text-white cursor-pointer border-none">Close</button>
-            </div>
-          </div>
-        </div>
-      )}
+
     </aside>
   )
 }

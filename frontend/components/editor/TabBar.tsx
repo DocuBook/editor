@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type RefObject } from 'react'
 import { X, ChevronLeft, ChevronRight, Command, ArrowBigUp, PanelLeft, ChevronDown, GitCommitHorizontal, Upload, Search } from 'lucide-react'
 import { BsMarkdown } from 'react-icons/bs'
 import { TbBlocks } from 'react-icons/tb'
@@ -18,7 +18,7 @@ const sanitizeCommitName = (rawName: string) =>
     .replace(/\.+$/g, '')
     .trim() || 'changes'
 
-export function TabBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
+export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [hasDiskChanges, setHasDiskChanges] = useState(false)
@@ -117,28 +117,20 @@ export function TabBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebar
 
   return (
     <div className="ui-shell relative z-30 h-12 bg-surface border-b border-border-subtle flex items-center gap-3 shrink-0 text-xs px-6">
-      {sidebarOpen ? (
+      <span className={'inline-flex items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
         <button
+          ref={sidebarToggleRef}
+          data-testid="sidebar-toggle"
           onClick={onToggleSidebar}
-          aria-label="Collapse sidebar"
+          aria-label={isDesktop ? (sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar') : (sidebarOpen ? 'Close sidebar drawer' : 'Open sidebar drawer')}
           aria-expanded={sidebarOpen}
+          aria-controls={isDesktop ? 'desktop-sidebar' : 'mobile-sidebar'}
+          aria-haspopup={isDesktop ? undefined : 'dialog'}
           className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active p-2"
         >
           <PanelLeft size={16} />
         </button>
-      ) : (
-        /** Collapsed sidebar → the toggle becomes a compact icon group with a
-         *  search trigger beside it (fumadocs rail pattern) — same actions,
-         *  one shell. */
-        <span className="inline-flex items-center rounded-md border border-border-subtle bg-background overflow-hidden">
-          <button
-            onClick={onToggleSidebar}
-            aria-label="Expand sidebar"
-            aria-expanded={sidebarOpen}
-            className="cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active p-2"
-          >
-            <PanelLeft size={16} />
-          </button>
+        {!sidebarOpen && (
           <button
             onClick={onOpenSearch}
             aria-label="Search files"
@@ -146,8 +138,8 @@ export function TabBar({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebar
           >
             <Search size={16} />
           </button>
-        </span>
-      )}
+        )}
+      </span>
       <span className="inline-flex items-center rounded-md border border-border-subtle bg-background">
         <span className="tip-wrap tip-bar">
           <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>

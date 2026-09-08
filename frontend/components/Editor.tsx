@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type ReactNode, type RefObject } from 'react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide from './OnboardingGuide'
@@ -14,7 +14,7 @@ import { useAiChat } from '../stores/aiChat'
 
 const WysiwygEditorHost = lazy(() => import('./editor/WysiwygEditorHost'))
 
-export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; onToggleSidebar: () => void; onOpenSearch: () => void }) {
+export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { editMode } = useEditorStore()
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const vaultOpen = useVaultStore(s => s.isOpen)
@@ -54,7 +54,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
     if (!onboardingDone && vaultOpen) {
       return (
         <div className="flex-1 flex flex-col min-w-0 min-h-0">
-          <TabBar sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
+          <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
           <OnboardingGuide onDismiss={() => setOnboardingDone(true)} />
         </div>
       )
@@ -64,7 +64,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
 
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
-        <TabBar sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
+        <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
         <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
       </div>
     )
@@ -105,7 +105,7 @@ export default function Editor({ sidebarOpen, onToggleSidebar, onOpenSearch }: {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0">
-      <TabBar sidebarOpen={sidebarOpen} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
+      <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       <div className="flex-1 flex flex-col min-h-0 relative">
         <div className="flex-1 min-h-0 overflow-y-auto pt-12 sm:px-16 px-8 pb-8">
           {inner}

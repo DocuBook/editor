@@ -71,30 +71,85 @@ try {
   await page.addInitScript((vaultPath) => {
     localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
   }, VAULT)
+  const initialTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('text=Empty vault', { timeout: 10000 })
+  await page.waitForSelector('[data-testid="desktop-sidebar"]', { timeout: 10000 })
+  await initialTrash
   ok('vault open: empty vault shown', true)
 
+  // Responsive sidebar journey: desktop inline/collapsible, mobile Mantine Drawer.
+  const sidebarToggle = page.getByTestId('sidebar-toggle')
+  ok('sidebar desktop: inline by default', await page.getByTestId('desktop-sidebar').isVisible())
+  await sidebarToggle.click()
+  await page.getByTestId('desktop-sidebar').waitFor({ state: 'detached' })
+  ok('sidebar desktop: collapses inline', await sidebarToggle.getAttribute('aria-expanded') === 'false')
+
+  await page.setViewportSize({ width: 639, height: 800 })
+  ok('sidebar mobile: starts closed', await sidebarToggle.getAttribute('aria-expanded') === 'false')
+  await sidebarToggle.click()
+  await page.getByTestId('mobile-sidebar').waitFor({ state: 'visible' })
+  const drawerClose = page.getByTestId('mobile-sidebar-drawer').getByRole('button', { name: 'Close sidebar drawer' })
+  await drawerClose.waitFor({ state: 'visible' })
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Close sidebar drawer')
+  const drawerBox = await page.locator('.mobile-sidebar-drawer-content').boundingBox()
+  const closeBox = await drawerClose.boundingBox()
+  ok('sidebar mobile: close control sits outside Drawer', !!drawerBox && !!closeBox && closeBox.x >= drawerBox.x + drawerBox.width)
+  ok('sidebar mobile: Drawer traps initial focus', await drawerClose.evaluate(el => document.activeElement === el))
+  ok('sidebar mobile: locks body scroll', await page.locator('body').getAttribute('data-scroll-locked') !== null)
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('mobile-sidebar').waitFor({ state: 'detached' })
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-testid') === 'sidebar-toggle')
+  ok('sidebar mobile: Escape closes and restores focus', await sidebarToggle.evaluate(el => document.activeElement === el))
+
+  await sidebarToggle.click()
+  await page.getByTestId('mobile-sidebar').waitFor({ state: 'visible' })
+  await page.locator('.mobile-sidebar-drawer-overlay').click({ position: { x: 500, y: 400 } })
+  await page.getByTestId('mobile-sidebar').waitFor({ state: 'detached' })
+  ok('sidebar mobile: backdrop closes Drawer', await sidebarToggle.getAttribute('aria-expanded') === 'false')
+
+  await sidebarToggle.click()
+  await page.getByTestId('mobile-sidebar').waitFor({ state: 'visible' })
+  await page.getByTestId('sidebar-settings').click()
+  await page.getByTestId('settings-modal').waitFor({ state: 'visible' })
+  await page.getByTestId('mobile-sidebar').waitFor({ state: 'detached' })
+  ok('sidebar mobile: competing modal excludes Drawer', await sidebarToggle.getAttribute('aria-expanded') === 'false')
+  await page.getByTestId('settings-modal').click({ position: { x: 5, y: 5 } })
+  await page.getByTestId('settings-modal').waitFor({ state: 'detached' })
+
+  await page.setViewportSize({ width: 640, height: 800 })
+  ok('sidebar boundary: desktop collapse preference restored', await page.getByTestId('desktop-sidebar').count() === 0)
+  await sidebarToggle.click()
+  await page.getByTestId('desktop-sidebar').waitFor({ state: 'visible' })
+  await page.setViewportSize({ width: 639, height: 800 })
+  await page.getByTestId('desktop-sidebar').waitFor({ state: 'detached' })
+  ok('sidebar boundary: resize to mobile never force-opens Drawer', await sidebarToggle.getAttribute('aria-expanded') === 'false')
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.getByTestId('desktop-sidebar').waitFor({ state: 'visible' })
+
   // 1. Empty trash → button disabled (real state read from list_trash)
-  const trashBtn = page.locator('button:has-text("Trash")')
-  await page.waitForTimeout(1200) // let the mount-time list_trash settle
+  const trashBtn = page.getByTestId('trash-toggle')
   ok('trash button: disabled when empty', await trashBtn.isDisabled(), '')
   ok('trash button: no badge when empty', !(await trashBtn.innerText()).includes('1'))
 
   // 2. Seed the server-side trash → reload → button enabled + badge
   mkdirSync(`${VAULT}/.trash`, { recursive: true })
   writeFileSync(`${VAULT}/.trash/1700000000000-notes.md`, '# Notes\n\ncontent')
+  const refreshedTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
   await page.reload({ waitUntil: 'domcontentloaded' })
+  await refreshedTrash
   await page.waitForSelector('text=Empty vault', { timeout: 10000 })
-  await page.waitForTimeout(1200)
+  await page.waitForFunction(() => !document.querySelector('[data-testid="trash-toggle"]')?.disabled)
   ok('trash button: enabled when trash has files', await trashBtn.isEnabled(), '')
   ok('trash button: badge shows 1', (await trashBtn.innerText()).includes('1'))
 
   // 3. Open the panel → restore → back in the tree, button disabled again
   await trashBtn.click()
   await page.waitForSelector('text=Trash (1)', { timeout: 5000 })
+  const restoreResponse = page.waitForResponse(r => r.url().endsWith('/api/restore_file') && r.ok())
   await page.getByText('notes.md', { exact: true }).click() // restore row
-  await page.waitForTimeout(1500)
+  await restoreResponse
+  await page.waitForFunction(() => document.querySelector('[data-testid="trash-toggle"]')?.disabled)
   ok('trash button: disabled again after restore', await trashBtn.isDisabled(), '')
   await page.getByRole('button', { name: 'Back' }).click()
   await page.waitForSelector('text=notes', { timeout: 5000 })
