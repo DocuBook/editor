@@ -45,7 +45,7 @@ COPY server ./server
 RUN touch server/main.rs && cd server && cargo build --release --locked
 
 # ---- runtime ----
-FROM alpine:3.21
+FROM alpine:3.24
 RUN apk add --no-cache git ca-certificates su-exec \
     && adduser -D -u 1000 docubook
 WORKDIR /app
