@@ -51,14 +51,14 @@ export default function SidebarFooter() {
   }
 
   return (
-    <div className="ui-shell flex items-center gap-1 px-2 py-2 shrink-0">
+    <div className="ui-shell relative flex items-center gap-1 px-2 py-2 shrink-0">
       <button onClick={() => setShowShortcuts(true)} title="Keyboard Shortcuts" aria-label="Keyboard Shortcuts"
         className="rounded cursor-pointer text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
         <Keyboard size={15} />
       </button>
       {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
       {branch ? (
-        <div className="relative flex-1 min-w-0" ref={branchRef}>
+        <div className="flex-1 min-w-0" ref={branchRef}>
           <button onClick={toggleBranchSwitcher} aria-label="Switch branch" aria-expanded={branchOpen} title="Switch branch"
             className="flex items-center gap-1 w-full min-w-0 rounded cursor-pointer text-foreground-subtle hover:text-foreground hover:bg-surface-active px-2 py-2 text-left">
             <GitBranch size={13} className="shrink-0" />
@@ -67,19 +67,19 @@ export default function SidebarFooter() {
             <ChevronDown size={11} className={'ml-auto transition-transform text-muted shrink-0 ' + (branchOpen ? 'rotate-180' : '')} />
           </button>
           {branchOpen && (
-            <div className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 w-[220px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+            <div className="absolute bottom-full left-2 right-2 mb-1 bg-surface border border-border rounded-lg p-1 max-h-[min(16rem,calc(100dvh-5rem))] overflow-y-auto z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
               {branches.length === 0 && !error && <div className="px-2.5 py-1.5 text-[12px] text-muted">No branches found</div>}
               {branches.map(entry => (
                 <button key={entry.name} onClick={() => switchBranch(entry)} disabled={busy !== null}
                   className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[12px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-50 disabled:cursor-not-allowed text-left">
                   <GitBranch size={11} className="text-muted shrink-0" />
-                  <span className={entry.name === branch ? 'text-foreground font-medium' : 'text-foreground-secondary'}>{entry.name}</span>
-                  {entry.remote && <span className="ml-1 text-[10px] text-muted">remote</span>}
+                  <span title={entry.name} className={'min-w-0 truncate ' + (entry.name === branch ? 'text-foreground font-medium' : 'text-foreground-secondary')}>{entry.name}</span>
+                  {entry.remote && <span className="ml-1 shrink-0 text-[10px] text-muted">remote</span>}
                   {entry.name === branch && <Check size={12} className="ml-auto text-accent shrink-0" />}
-                  {busy === entry.name && <span className="ml-auto text-[10px] text-muted">switching…</span>}
+                  {busy === entry.name && <span className="ml-auto shrink-0 text-[10px] text-muted">switching…</span>}
                 </button>
               ))}
-              {error && <div className="px-2.5 py-1 text-[10px] text-red-400 break-words max-w-[240px]">{error}</div>}
+              {error && <div className="px-2.5 py-1 text-[10px] text-red-400 break-words">{error}</div>}
             </div>
           )}
         </div>

@@ -56,9 +56,13 @@ sh('git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main')
 // Nested branch with local + remote refs of the same name
 sh('git switch -q -c feature/nested && git commit -qm nested --allow-empty && git push -q -u origin feature/nested && git switch -q main')
 
+const longBranch = 'feature/' + 'long-branch-name-'.repeat(12)
+sh(`git branch ${longBranch}`)
+for (let i = 0; i < 20; i++) sh(`git branch layout-${i}`)
+
 let server, browser, page
 try {
-  server = startServer('git-branch-e2e', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
+  server = startServer('git-branch-e2e', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist', env: { DB_SETUP_TOKEN: 'git-branch-e2e-setup-token' } })
   await waitForServer(BASE)
   browser = await launchBrowser()
   page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
@@ -67,7 +71,7 @@ try {
   // ── Setup wizard ──
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector(click('Create admin account'), { timeout: 12000 })
-  await page.locator('input[type="checkbox"]').check()
+  await page.fill('input[placeholder="Setup token (DB_SETUP_TOKEN)"]', 'git-branch-e2e-setup-token')
   await page.fill('input[type="email"]', ADMIN.email)
   await page.fill('input[placeholder="Password (min 8 chars)"]', ADMIN.password)
   await page.fill('input[placeholder="Confirm password"]', ADMIN.password)
@@ -104,6 +108,30 @@ try {
   const headRows = await page.locator(click('origin/HEAD')).count()
   ok('switcher: origin/HEAD symbolic ref never listed', headRows === 0, `rows: ${headRows}`)
 
+  const checkDropdownLayout = async (sidebarId, label) => {
+    const sidebar = page.locator(sidebarId)
+    const menu = sidebar.locator('button').filter({ hasText: longBranch }).locator('..')
+    const bounds = await menu.evaluate(el => {
+      const rect = el.getBoundingClientRect()
+      const aside = el.closest('aside').getBoundingClientRect()
+      return {
+        fits: rect.left >= aside.left && rect.right <= aside.right && rect.top >= aside.top && rect.bottom <= aside.bottom,
+        followsWidth: Math.abs(rect.width - (aside.width - 16)) <= 1,
+        noHorizontalOverflow: el.scrollWidth <= el.clientWidth,
+        scrollable: el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto',
+      }
+    })
+    ok(`${label}: dropdown fits sidebar`, bounds.fits, JSON.stringify(bounds))
+    ok(`${label}: dropdown follows sidebar width`, bounds.followsWidth)
+    ok(`${label}: long branch has no horizontal overflow`, bounds.noHorizontalOverflow)
+    ok(`${label}: long list scrolls`, bounds.scrollable)
+    const longRow = sidebar.locator('button').filter({ hasText: longBranch })
+    await longRow.scrollIntoViewIfNeeded()
+    const name = longRow.locator('span[title]')
+    ok(`${label}: long name truncated with full title`, await name.evaluate(el => el.scrollWidth > el.clientWidth && getComputedStyle(el).textOverflow === 'ellipsis' && el.title === el.textContent))
+  }
+  await checkDropdownLayout('#desktop-sidebar', 'desktop')
+
   // ── Switch to the remote branch → local tracking branch created ──
   await page.locator(click('origin/dev')).click()
   await page.waitForSelector('text=Switched to origin/dev', { timeout: 6000 })
@@ -123,6 +151,17 @@ try {
   const originDevCount = await page.locator(click('origin/dev')).count()
   ok('switcher: local dev listed', devCount > 0)
   ok('switcher: origin/dev deduped now local dev exists', originDevCount === 0, `origin/dev rows: ${originDevCount}`)
+
+  for (const viewport of [{ width: 390, height: 844 }, { width: 320, height: 360 }]) {
+    await page.setViewportSize(viewport)
+    const sidebar = page.locator('#mobile-sidebar')
+    if (!(await sidebar.isVisible())) {
+      await page.getByRole('button', { name: 'Open sidebar drawer', exact: true }).click()
+      await sidebar.getByRole('button', { name: 'Switch branch', exact: true }).click()
+    }
+    await sidebar.locator('button').filter({ hasText: longBranch }).waitFor()
+    await checkDropdownLayout('#mobile-sidebar', `drawer ${viewport.width}x${viewport.height}`)
+  }
 } catch (e) {
   results.push(['FAIL', 'run', String(e).split('\n')[0]])
   process.exitCode = 1
