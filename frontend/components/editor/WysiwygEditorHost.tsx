@@ -4,9 +4,10 @@ import { getEditorCache } from '../../utils/editorCache'
 import { createBlockEditor, type CachedEditor } from '../../utils/editorFactory'
 
 /** Keep editor instances alive without putting BlockNote in initial app chunk. */
-export default function WysiwygEditorHost({ vaultPath, filePath, markdown, onSync }: {
+export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, markdown, onSync }: {
   vaultPath: string
   filePath: string
+  isDesktop: boolean
   markdown: string
   onSync: (md: string) => void
 }) {
@@ -21,5 +22,5 @@ export default function WysiwygEditorHost({ vaultPath, filePath, markdown, onSyn
   }, [vaultPath, filePath])
 
   if (!ready) return <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading editor...</div>
-  return <WysiwygEditor cached={ready} filePath={filePath} markdown={markdown} onSync={onSync} />
+  return <WysiwygEditor cached={ready} filePath={filePath} isDesktop={isDesktop} markdown={markdown} onSync={onSync} />
 }

@@ -30,7 +30,7 @@ import type { CachedEditor } from '../../utils/editorFactory'
 import mermaid from 'mermaid'
 ;(mermaid as any).render = createQueuedMermaidRender(mermaid.render)
 
-export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string }) {
+export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string; isDesktop: boolean }) {
   const { editor } = cached
 
   useEffect(() => {
@@ -314,7 +314,7 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath }: { cached: 
     // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by loadedMarkdown comparison
   }, [editor, markdown])
 
-  return <BlockNoteView editor={editor} theme={useTheme(s => s.name)} slashMenu={false} formattingToolbar={false} linkToolbar={false}>
+  return <BlockNoteView editor={editor} theme={useTheme(s => s.name)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
     {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
      *  built-in block-anchored AIMenuController is intentionally not rendered. */}
     <FormattingToolbarController formattingToolbar={FormattingToolbarWithAI} />

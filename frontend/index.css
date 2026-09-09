@@ -103,6 +103,20 @@ body {
     border-radius: 8px;
 }
 
+/* Phone editors use the full canvas, matching mobile writing apps: no nested
+   card chrome and no BlockNote desktop gutter competing with screen width. */
+@media (max-width: 639px) {
+    #root .bn-root {
+        --bn-colors-editor-background: var(--color-background);
+    }
+    #root .bn-editor {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        padding-inline: 0;
+    }
+}
+
 /* UI shell — single source of truth for user-select on non-editor chrome.
    Applying user-select:none globally blocks drag/selection in WebKit, so
    UI shells opt in individually instead. The -webkit- prefix is REQUIRED on
