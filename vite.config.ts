@@ -36,7 +36,25 @@ export default defineConfig({
   clearScreen: false,
   server: { port: 5173, strictPort: true, proxy: { '/api': 'http://localhost:4282' } },
   envPrefix: ['VITE_', 'TAURI_'],
-  build: { target: ['es2021', 'chrome105', 'safari15'], minify: !process.env.TAURI_DEBUG ? 'esbuild' : false, sourcemap: !!process.env.TAURI_DEBUG },
+  build: {
+    target: ['es2021', 'chrome105', 'safari15'],
+    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
+    sourcemap: !!process.env.TAURI_DEBUG,
+    // Mermaid's parser is one indivisible generated module (~669 kB minified,
+    // ~151 kB gzip). Keep the warning useful for every larger chunk.
+    chunkSizeWarningLimit: 700,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'react-icons', test: /node_modules[\\/]react-icons[\\/]/ },
+            { name: 'katex', test: /node_modules[\\/]katex[\\/]/ },
+            { name: 'ai-sdk', test: /node_modules[\\/](?:ai|@ai-sdk)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   // Dev dep pre-bundle needs its own target: `build.target` only applies to
   // the build, not to the dev optimizer. Without this, mermaid's `static {`
   // blocks survive into the pre-bundle and WKWebView (Safari 15) chokes.

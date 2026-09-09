@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { AIExtension } from '@blocknote/xl-ai'
+
 import { useEditorStore } from './editor'
 
 interface AiChatState {
@@ -17,7 +17,7 @@ export const useAiChat = create<AiChatState>((set) => ({
   toggle: () => {
     const editor = useEditorStore.getState().blockEditor
     if (!editor) return
-    const ai = editor.getExtension?.(AIExtension)
+    const ai = editor.getExtension?.('ai')
     if (!ai) return
     const menu = ai.store.state.aiMenuState
     if (menu && menu !== 'closed') {
