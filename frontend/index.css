@@ -145,16 +145,16 @@ body {
     color: var(--color-white);
 }
 
-/* Mantine owns mobile drawer behavior; DocuBook tokens keep its shell aligned
-   with the existing sidebar in both themes. */
-.mobile-sidebar-drawer-content {
+/* BlockNote lazy-loads its own Mantine component CSS after this stylesheet.
+   Scope overrides through body so app-owned Drawer layout keeps precedence. */
+body .mobile-sidebar-drawer-content {
     background: var(--color-surface);
     color: var(--color-foreground);
     display: flex;
     flex-direction: column;
     overflow: visible;
 }
-.mobile-sidebar-drawer-header {
+body .mobile-sidebar-drawer-header {
     position: absolute;
     top: 8px;
     right: -44px;
@@ -164,7 +164,7 @@ body {
     background: transparent;
     border: 0;
 }
-.mobile-sidebar-drawer-title {
+body .mobile-sidebar-drawer-title {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -175,7 +175,7 @@ body {
     white-space: nowrap;
     border: 0;
 }
-.mobile-sidebar-drawer-close {
+body .mobile-sidebar-drawer-close {
     width: 36px;
     height: 36px;
     color: var(--color-foreground-subtle);
@@ -184,17 +184,17 @@ body {
     border-radius: 8px;
     box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
 }
-.mobile-sidebar-drawer-close:hover {
+body .mobile-sidebar-drawer-close:hover {
     background: var(--color-surface-active);
     color: var(--color-foreground);
 }
-.mobile-sidebar-drawer-body {
+body .mobile-sidebar-drawer-body {
     flex: 1;
     min-height: 0;
     padding: 0;
     overflow: hidden;
 }
-.mobile-sidebar-drawer-body > aside {
+body .mobile-sidebar-drawer-body > aside {
     width: 100%;
     border-right: 0;
 }
