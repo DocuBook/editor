@@ -11,6 +11,7 @@
 import type { UnlistenFn } from '@tauri-apps/api/event'
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+export const isMacTauri = isTauri && import.meta.env.TAURI_ENV_PLATFORM === 'darwin'
 
 const REQUEST_TIMEOUT_MS = 30_000
 const SSE_IDLE_TIMEOUT_MS = 60_000

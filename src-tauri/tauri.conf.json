@@ -20,6 +20,9 @@
         "resizable": true,
         "fullscreen": false,
         "decorations": true,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "trafficLightPosition": { "x": 16, "y": 16 },
         "dragDropEnabled": false,
         "theme": "Dark"
       }

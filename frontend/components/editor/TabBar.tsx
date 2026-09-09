@@ -4,7 +4,7 @@ import { BsMarkdown } from 'react-icons/bs'
 import { TbBlocks } from 'react-icons/tb'
 import { useEditorStore } from '../../stores/editor'
 import { useGitStatus } from '../../stores/gitStatus'
-import { invoke } from '../../lib/ipc'
+import { invoke, isMacTauri } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -119,7 +119,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   }
 
   return (
-    <div className="editor-tab-bar ui-shell relative z-30 h-12 flex items-center gap-3 shrink-0 text-xs px-6">
+    <div data-tauri-drag-region={isMacTauri ? true : undefined} className={'editor-tab-bar ui-shell relative z-30 h-12 flex items-center gap-3 shrink-0 text-xs pr-6 ' + (isMacTauri && !sidebarOpen ? 'pl-20' : 'pl-6')}>
       <span className={'inline-flex items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
         <button
           ref={sidebarToggleRef}

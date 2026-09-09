@@ -49,6 +49,7 @@
     "allow-wiki-suggest",
     "allow-write-file",
     "opener:default",
-    "core:window:allow-set-theme"
+    "core:window:allow-set-theme",
+    "core:window:allow-start-dragging"
   ]
 }

@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
-import { invoke, isTauri } from '../lib/ipc'
-import { Search, Check, ChevronDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
+import { invoke, isMacTauri, isTauri } from '../lib/ipc'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -169,67 +169,9 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
 
   return (
     <aside id={id} data-testid={id} className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
-      <div className="relative flex items-center justify-between px-2 py-3">
-        <span className="tip-wrap tip-bar relative flex-1 min-w-0" ref={vaultMenuRef}>
-          <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
-            className={'flex items-center gap-1 max-w-full cursor-pointer rounded px-1 py-0.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-zinc-500')}>
-            <span className="text-xs font-semibold uppercase tracking-wider truncate">{name}</span>
-            <ChevronDown size={14} className="shrink-0" />
-          </button>
-          {vaultMenuOpen && (
-            <div data-vault-menu className="absolute top-full left-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[220px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-              {recent.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-foreground-subtle italic">No recent vaults</div>}
-              {recent.length > 0 && (
-                <div className="max-h-56 overflow-y-auto">
-                  {recent.slice(0, 5).map(r => {
-                    const active = r.path === vaultPath
-                    return (
-                      <button key={r.path} onClick={async () => { setVaultMenuOpen(false); if (!active) { await openRecent(r.path); onNavigate() } }}
-                        className={'flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-left bg-transparent border-none rounded text-[12px] hover:bg-surface-active ' + (active ? 'text-foreground cursor-default' : 'text-foreground-secondary')}>
-                        {active ? <Check size={13} className="text-accent shrink-0" /> : <Folder size={13} className="text-zinc-500 shrink-0" />}
-                        <span className="truncate flex-1">{r.name}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-              <div className="border-t border-border-subtle my-1" />
-              <button onClick={() => { setVaultMenuOpen(false); onNavigate(); openVault() }}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active">
-                <FolderOpen size={14} /> Open Vault
-              </button>
-              <button onClick={() => { setVaultMenuOpen(false); onRequestCloseVault() }}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active">
-                <X size={14} /> Close Vault
-              </button>
-            </div>
-          )}
-        </span>
-        <span className="flex items-center gap-1 shrink-0 ml-2">
-          <span className="tip-wrap tip-bar relative" ref={plusMenuRef}>
-            <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
-              <Plus size={14} />
-            </button>
-            <span className="tip">Create a file/folder</span>
-            {showPlusMenu && (
-              <div data-plus-popup className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
-                  className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
-                  <FileText size={14} /> New File
-                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
-                </button>
-                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
-                  className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
-                  <Folder size={14} /> New Folder
-                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
-                </button>
-              </div>
-            )}
-            </span>
-          </span>
-        </div>
+      {isMacTauri && <div data-tauri-drag-region className="h-12 shrink-0" />}
 
-      {/* Inline search trigger (inline component area below the vault header) — the modal itself lives in App so ⌘F/⌘P still work with the sidebar closed. */}
+      {/* Search modal lives in App so ⌘F/⌘P still work with the sidebar closed. */}
       <div className="px-2 py-2">
         <button onClick={onOpenSearch} aria-label="Search project files" className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground-secondary cursor-pointer transition-colors text-left">
           <Search size={14} className="text-muted shrink-0" />
@@ -326,10 +268,64 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
       <div className="max-h-32 overflow-y-auto text-xs">
         <BacklinksPanel onNavigate={onNavigate} />
       </div>
-      <div className="flex items-center justify-start px-2 py-2 shrink-0">
-        <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" className="flex items-center gap-2 w-full cursor-pointer p-2 rounded-md text-foreground-secondary hover:bg-surface-active hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent transition-colors text-left">
-          <Settings size={16} />
-          <span className="text-[13px]">Settings</span>
+      <div className="relative flex items-center gap-1 px-2 py-2 shrink-0">
+        <span className="relative flex-1 min-w-0" ref={vaultMenuRef}>
+          <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
+            className={'flex items-center gap-1 w-full min-w-0 cursor-pointer rounded px-2 py-1.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-foreground-secondary')}>
+            <span className="text-xs font-semibold uppercase tracking-wider truncate">{name}</span>
+            <ChevronsUpDown size={14} className="ml-auto shrink-0" />
+          </button>
+          {vaultMenuOpen && (
+            <div data-vault-menu className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+              {recent.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-foreground-subtle italic">No recent vaults</div>}
+              {recent.length > 0 && (
+                <div className="max-h-56 overflow-y-auto">
+                  {recent.slice(0, 5).map(r => {
+                    const active = r.path === vaultPath
+                    return (
+                      <button key={r.path} onClick={async () => { setVaultMenuOpen(false); if (!active) { await openRecent(r.path); onNavigate() } }}
+                        className={'flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-left bg-transparent border-none rounded text-[12px] hover:bg-surface-active ' + (active ? 'text-foreground cursor-default' : 'text-foreground-secondary')}>
+                        {active ? <Check size={13} className="text-accent shrink-0" /> : <Folder size={13} className="text-zinc-500 shrink-0" />}
+                        <span className="truncate flex-1">{r.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+              <div className="border-t border-border-subtle my-1" />
+              <button onClick={() => { setVaultMenuOpen(false); onNavigate(); openVault() }}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active">
+                <FolderOpen size={14} /> Open Vault
+              </button>
+              <button onClick={() => { setVaultMenuOpen(false); onRequestCloseVault() }}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active">
+                <X size={14} /> Close Vault
+              </button>
+            </div>
+          )}
+        </span>
+        <span className="tip-wrap relative shrink-0" ref={plusMenuRef}>
+          <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
+            <Plus size={14} />
+          </button>
+          <span className="tip">Create a file/folder</span>
+          {showPlusMenu && (
+            <div data-plus-popup className="absolute bottom-full -right-6 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
+                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                <FileText size={14} /> New File
+                <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
+              </button>
+              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
+                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                <Folder size={14} /> New Folder
+                <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
+              </button>
+            </div>
+          )}
+        </span>
+        <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" title="Settings" className={iconBtn}>
+          <Settings size={14} />
         </button>
       </div>
       <SidebarFooter />
