@@ -21,6 +21,6 @@ export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, mark
     return () => { active = false }
   }, [vaultPath, filePath])
 
-  if (!ready) return <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading editor...</div>
+  if (!ready) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading editor...</div>
   return <WysiwygEditor cached={ready} filePath={filePath} isDesktop={isDesktop} markdown={markdown} onSync={onSync} />
 }

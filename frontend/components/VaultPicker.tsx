@@ -47,8 +47,8 @@ export default function VaultPicker({ onPick }: { onPick: (path: string | null) 
   const item = 'w-full flex items-center gap-2 px-3 py-2 rounded-md text-[13px] cursor-pointer bg-transparent border-none text-left transition-colors'
 
   return (
-    <div className="fixed inset-0 flex items-start justify-center pt-[20vh] bg-black/40" onClick={() => onPick(null)}>
-      <div className="w-[360px] bg-surface border border-border rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5)] overflow-hidden" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 flex items-start justify-center pt-[20vh] bg-overlay" onClick={() => onPick(null)}>
+      <div className="w-[360px] bg-surface border border-border rounded-xl shadow-[0_25px_50px_-12px_var(--color-shadow)] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
           <h2 className="text-[13px] font-semibold text-foreground">Open Vault</h2>
           <button onClick={() => onPick(null)} className="p-1 rounded cursor-pointer bg-transparent text-muted border-none hover:text-foreground-secondary"><X size={15} /></button>
@@ -79,7 +79,7 @@ export default function VaultPicker({ onPick }: { onPick: (path: string | null) 
               {creating ? 'Creating…' : 'Create'}
             </button>
           </form>
-          {err && <div className="text-[11px] text-red-400 mt-2">{err}</div>}
+          {err && <div className="text-[11px] text-danger mt-2">{err}</div>}
 
           {rootPath && (
             <button onClick={() => onPick(rootPath)} className="mt-3 w-full text-center text-[11px] text-muted hover:text-foreground-secondary cursor-pointer bg-transparent border-none">

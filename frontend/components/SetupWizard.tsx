@@ -51,8 +51,8 @@ export default function SetupWizard() {
           {tokenRequired && (
             <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Setup token (DB_SETUP_TOKEN)" className={input} />
           )}
-          {err && <div className="text-xs text-red-400">{err}</div>}
-          <button disabled={busy} className={btn + ' bg-accent hover:bg-accent-hover text-white'}>
+          {err && <div className="text-xs text-danger">{err}</div>}
+          <button disabled={busy} className={btn + ' bg-accent hover:bg-accent-hover text-on-accent'}>
             {busy ? 'Creating…' : 'Create admin account'}
           </button>
         </form>

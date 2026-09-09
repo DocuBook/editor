@@ -129,7 +129,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
           aria-expanded={sidebarOpen}
           aria-controls={isDesktop ? 'desktop-sidebar' : 'mobile-sidebar'}
           aria-haspopup={isDesktop ? undefined : 'dialog'}
-          className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active p-2"
+          className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active p-2"
         >
           <PanelLeft size={16} />
         </button>
@@ -137,7 +137,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
           <button
             onClick={onOpenSearch}
             aria-label="Search files"
-            className="cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active p-2 border-l border-border-subtle"
+            className="cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active p-2 border-l border-border-subtle"
           >
             <Search size={16} />
           </button>
@@ -145,16 +145,16 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       </span>
       <span className="inline-flex items-center rounded-md border border-border-subtle bg-background">
         <span className="tip-wrap tip-bar">
-          <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
+          <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
           <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
         </span>
         <span className="tip-wrap tip-bar border-l border-border-subtle">
-          <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronRight size={16} /></button>
+          <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronRight size={16} /></button>
           <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
         </span>
       </span>
       <div ref={tabStripRef} className="flex-1 flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
-        {tabs.length === 0 ? <span className="text-zinc-500 italic self-center">No file open</span> : tabs.map(tab => (
+        {tabs.length === 0 ? <span className="text-foreground-subtle italic self-center">No file open</span> : tabs.map(tab => (
           <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
             className={'tab-item flex items-center justify-center relative px-8 cursor-pointer border-r border-border-subtle whitespace-nowrap shrink-0 ' + (activeTab === tab.path ? 'tab-active bg-background text-foreground shadow-[inset_0_-1px_0_var(--color-accent)]' : 'tab-inactive text-foreground-subtle')}>
             <span className={tab.deleted ? 'line-through opacity-50' : undefined}>{tab.name}</span>
@@ -168,10 +168,10 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       <span className="tip-wrap tip-bar">
         <span className="inline-flex items-center rounded-md border border-border-subtle bg-background overflow-hidden">
           <button onClick={() => { if (editMode !== 'code') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Markdown mode"
-          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-zinc-700 text-white' : 'bg-transparent text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active')}
+          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
           ><BsMarkdown size={15} /></button>
           <button onClick={() => { if (editMode !== 'editor') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Editor (WYSIWYG) mode"
-          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 border-l border-border-subtle disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'editor' ? 'bg-zinc-700 text-white' : 'bg-transparent text-zinc-500 hover:text-foreground-secondary hover:bg-surface-active')}
+          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 border-l border-border-subtle disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'editor' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
           ><TbBlocks size={15} /></button>
         </span>
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
@@ -183,22 +183,22 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
           Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
         </button>
         {actionsOpen && (
-          <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+          <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
             <button onClick={commit} disabled={!isRepo || hasUnsaved || !hasDiskChanges || commitState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-              <span className={commitState === 'done' ? 'text-green-500 shrink-0' : commitState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
+              <span className={commitState === 'done' ? 'text-success shrink-0' : commitState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
               <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
             </button>
-            {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.commit}</div>}
+            {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-danger break-words max-w-[220px]">{gitMsg.commit}</div>}
             {hasUnsaved && isRepo && <div className="px-2.5 pb-1.5 text-[10px] text-muted">Unsaved changes — switch mode or close the tab to save first</div>}
             <button onClick={push} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-              <span className={pushState === 'done' ? 'text-green-500 shrink-0' : pushState === 'error' ? 'text-red-500 shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
+              <span className={pushState === 'done' ? 'text-success shrink-0' : pushState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
               <span>{pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed ✓' : pushState === 'error' ? 'Push failed' : 'Push'}</span>
               {upstream && ahead > 0 && <span className="ml-auto text-[10px] text-muted">↑{ahead}</span>}
               {!upstream && hasRemote && <span className="ml-auto text-[10px] text-muted">new branch</span>}
             </button>
-            {pushState === 'error' && gitMsg.push && <div className="px-2.5 pb-1.5 text-[10px] text-red-400 break-words max-w-[220px]">{gitMsg.push}</div>}
+            {pushState === 'error' && gitMsg.push && <div className="px-2.5 pb-1.5 text-[10px] text-danger break-words max-w-[220px]">{gitMsg.push}</div>}
           </div>
         )}
       </span>

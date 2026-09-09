@@ -52,7 +52,7 @@ export default function SearchModal({ onClose, onSelect }: { onClose: () => void
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl shadow-[0_25px_50px_-12px_rgba(0,0,0,0.25)] w-[500px] max-h-[50vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl shadow-[0_25px_50px_-12px_var(--color-shadow)] w-[500px] max-h-[50vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
           <Search size={16} className="text-muted shrink-0" />
           <input ref={inputRef} type="text" value={query} onChange={e => setQuery(e.target.value)}

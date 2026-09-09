@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+/* Semantic color contract. Components consume only these tokens through
+   Tailwind utilities or var(); each new theme must override the full set. */
 @theme {
     --color-background: #0c0c0d;
     --color-surface: #161618;
@@ -15,11 +17,21 @@
     --color-muted: #52525b;
     --color-accent: #3b82f6;
     --color-accent-hover: #1d4ed8;
+    --color-accent-subtle: rgb(59 130 246 / 10%);
+    --color-on-accent: #ffffff;
     --color-ai-cursor: #ef4444;
     --color-ai-cursor-text: #fafafa;
     --color-danger: #ef4444;
     --color-danger-hover: #f87171;
-    --color-white: #fff;
+    --color-on-danger: #ffffff;
+    --color-warning: #fbbf24;
+    --color-warning-surface: rgb(245 158 11 / 15%);
+    --color-warning-border: rgb(245 158 11 / 30%);
+    --color-success: #22c55e;
+    --color-success-surface: rgb(16 185 129 / 15%);
+    --color-success-border: rgb(16 185 129 / 30%);
+    --color-overlay: rgb(0 0 0 / 45%);
+    --color-shadow: rgb(0 0 0 / 35%);
 }
 
 [data-theme="light"] {
@@ -37,11 +49,21 @@
     --color-muted: #a1a1aa;
     --color-accent: #2563eb;
     --color-accent-hover: #1d4ed8;
-    --color-ai-cursor: #ef4444;
-    --color-ai-cursor-text: #fafafa;
+    --color-accent-subtle: rgb(37 99 235 / 10%);
+    --color-on-accent: #ffffff;
+    --color-ai-cursor: #dc2626;
+    --color-ai-cursor-text: #ffffff;
     --color-danger: #dc2626;
     --color-danger-hover: #b91c1c;
-    --color-white: #ffffff;
+    --color-on-danger: #ffffff;
+    --color-warning: #b45309;
+    --color-warning-surface: #fffbeb;
+    --color-warning-border: #f59e0b;
+    --color-success: #047857;
+    --color-success-surface: #ecfdf5;
+    --color-success-border: #10b981;
+    --color-overlay: rgb(9 9 11 / 40%);
+    --color-shadow: rgb(9 9 11 / 22%);
 }
 
 @layer base {
@@ -142,7 +164,7 @@ body {
 .ui-shell input::selection,
 .ui-shell textarea::selection {
     background: var(--color-accent);
-    color: var(--color-white);
+    color: var(--color-on-accent);
 }
 
 /* BlockNote lazy-loads its own Mantine component CSS after this stylesheet.
@@ -182,7 +204,7 @@ body .mobile-sidebar-drawer-close {
     background: var(--color-surface);
     border: 1px solid var(--color-border-subtle);
     border-radius: 8px;
-    box-shadow: 0 4px 12px rgb(0 0 0 / 25%);
+    box-shadow: 0 4px 12px var(--color-shadow);
 }
 body .mobile-sidebar-drawer-close:hover {
     background: var(--color-surface-active);

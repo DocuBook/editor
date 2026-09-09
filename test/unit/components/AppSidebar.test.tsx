@@ -53,7 +53,7 @@ vi.mock('../../../frontend/stores/auth', () => ({
   useAuth: Object.assign(() => ({ status: 'ready' }), { getState: () => ({ init: vi.fn() }) }),
   useAuthGuard: () => {},
 }))
-vi.mock('../../../frontend/lib/ipc', () => ({ listen: vi.fn(async () => () => {}), invoke: vi.fn() }))
+vi.mock('../../../frontend/lib/ipc', () => ({ isTauri: false, listen: vi.fn(async () => () => {}), invoke: vi.fn() }))
 vi.mock('../../../frontend/utils/logger', () => ({ logger: { error: vi.fn() } }))
 vi.mock('sonner', () => ({ Toaster: () => null, toast: { error: vi.fn() } }))
 

@@ -23,12 +23,12 @@ function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
   if (items.length === 0) return null
   return (
     <div className="p-2">
-      <div className="text-zinc-600 uppercase tracking-wider mb-1 px-1">Backlinks ({items.length})</div>
+      <div className="text-muted uppercase tracking-wider mb-1 px-1">Backlinks ({items.length})</div>
       {items.map(item => (
         <div key={item.path} onClick={async () => { await openFile(item.path, item.name); onNavigate() }}
-          className="text-zinc-500 hover:text-foreground-secondary cursor-pointer py-1 px-1 rounded hover:bg-surface-active">
+          className="text-foreground-subtle hover:text-foreground-secondary cursor-pointer py-1 px-1 rounded hover:bg-surface-active">
           <div className="truncate">{item.name}</div>
-          {item.snippet && <div className="truncate text-[10px] text-zinc-600">{item.snippet}</div>}
+          {item.snippet && <div className="truncate text-[10px] text-muted">{item.snippet}</div>}
         </div>
       ))}
     </div>
@@ -182,8 +182,8 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
 
       {isOpen ? (
         <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5">
-            {!trashOpen && loading && <div className="text-zinc-500 text-xs p-2">Loading...</div>}
-            {!trashOpen && !loading && visibleItems.length === 0 && !creating && <div className="text-zinc-500 italic text-xs p-2">Empty vault</div>}
+            {!trashOpen && loading && <div className="text-foreground-subtle text-xs p-2">Loading...</div>}
+            {!trashOpen && !loading && visibleItems.length === 0 && !creating && <div className="text-foreground-subtle italic text-xs p-2">Empty vault</div>}
             {!trashOpen && renaming && (
               <input ref={renameRef} type="text" defaultValue={stripMarkdownExt(renaming.name)}
                 className="w-full bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none mb-1"
@@ -229,7 +229,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
                 ) : (
                   <div onClick={async () => { await openFile(item.path, item.name); setCurrentFolder(item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : ''); onNavigate() }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
                     className={'depth-' + Math.min(item.depth || 0, 12) + ' flex items-center gap-2 py-1 pr-2 rounded hover:bg-surface-active cursor-pointer text-foreground-secondary'}>
-                    <FileText size={14} className="text-zinc-500 shrink-0" />
+                    <FileText size={14} className="text-foreground-subtle shrink-0" />
                     <span className="truncate">{stripMarkdownExt(item.name)}</span>
                   </div>
                 )}
@@ -238,15 +238,15 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
             {trashOpen && (
               <>
                 <div className="flex items-center justify-between px-1 pb-1">
-                  <span className="text-zinc-600 uppercase tracking-wider text-xs">Trash ({trashItems.length})</span>
+                  <span className="text-muted uppercase tracking-wider text-xs">Trash ({trashItems.length})</span>
                   <button onClick={() => setTrashOpen(false)} className="text-xs text-foreground-subtle hover:text-foreground-secondary cursor-pointer bg-transparent border-none">Back</button>
                 </div>
-                {trashItems.length === 0 && <div className="text-zinc-500 italic text-xs p-2">Trash is empty</div>}
+                {trashItems.length === 0 && <div className="text-foreground-subtle italic text-xs p-2">Trash is empty</div>}
                 {trashItems.map(item => (
                   <div key={item.name} onClick={() => restoreItem(item)} title="Restore" className="flex items-center gap-2 py-1 pr-2 rounded hover:bg-surface-active cursor-pointer">
-                    <RotateCcw size={13} className="text-zinc-500 shrink-0" />
+                    <RotateCcw size={13} className="text-foreground-subtle shrink-0" />
                     <span className="truncate flex-1">{item.original}</span>
-                    <span className="text-[10px] text-zinc-600 shrink-0">{new Date(item.deleted_at).toLocaleDateString()}</span>
+                    <span className="text-[10px] text-muted shrink-0">{new Date(item.deleted_at).toLocaleDateString()}</span>
                   </div>
                 ))}
                 {trashItems.length > 0 && (
@@ -256,13 +256,13 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
             )}
           </div>
         ) : (
-          <div className="flex-1 flex items-center justify-center p-4 text-sm text-zinc-500 italic">Open a vault to start</div>
+          <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>
         )}
       {isOpen && !isTauri && (
         <button data-testid="trash-toggle" onClick={toggleTrash} disabled={trashItems.length === 0} className={'flex items-center gap-2 px-3 py-2 border-t border-border-subtle text-[13px] w-full text-left disabled:opacity-40 disabled:cursor-not-allowed ' + (trashOpen ? 'text-foreground-secondary' : 'text-foreground-subtle') + (trashItems.length > 0 ? ' cursor-pointer hover:bg-surface-active' : '')}>
-          <Trash size={14} className="text-zinc-500 shrink-0" />
+          <Trash size={14} className="text-foreground-subtle shrink-0" />
           Trash
-          {trashItems.length > 0 && <span className="ml-auto text-[10px] text-zinc-600">{trashItems.length}</span>}
+          {trashItems.length > 0 && <span className="ml-auto text-[10px] text-muted">{trashItems.length}</span>}
         </button>
       )}
       <div className="max-h-32 overflow-y-auto text-xs">
@@ -276,7 +276,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
             <ChevronsUpDown size={14} className="ml-auto shrink-0" />
           </button>
           {vaultMenuOpen && (
-            <div data-vault-menu className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+            <div data-vault-menu className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
               {recent.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-foreground-subtle italic">No recent vaults</div>}
               {recent.length > 0 && (
                 <div className="max-h-56 overflow-y-auto">
@@ -285,7 +285,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
                     return (
                       <button key={r.path} onClick={async () => { setVaultMenuOpen(false); if (!active) { await openRecent(r.path); onNavigate() } }}
                         className={'flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-left bg-transparent border-none rounded text-[12px] hover:bg-surface-active ' + (active ? 'text-foreground cursor-default' : 'text-foreground-secondary')}>
-                        {active ? <Check size={13} className="text-accent shrink-0" /> : <Folder size={13} className="text-zinc-500 shrink-0" />}
+                        {active ? <Check size={13} className="text-accent shrink-0" /> : <Folder size={13} className="text-foreground-subtle shrink-0" />}
                         <span className="truncate flex-1">{r.name}</span>
                       </button>
                     )
@@ -310,7 +310,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
           </button>
           <span className="tip">Create a file/folder</span>
           {showPlusMenu && (
-            <div data-plus-popup className="absolute bottom-full -right-6 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+            <div data-plus-popup className="absolute bottom-full -right-6 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
               <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
                 className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                 <FileText size={14} /> New File
@@ -330,7 +330,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
       </div>
       <SidebarFooter />
       {ctxItem && (
-        <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_rgba(0,0,0,0.3)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
+        <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_var(--color-shadow)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
           <button onClick={async () => {
               closeContextMenu()
               setRenaming({ path: ctxItem.path, name: ctxItem.name, type: ctxItem.type })

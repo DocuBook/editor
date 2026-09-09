@@ -16,10 +16,12 @@ import { useAuth, useAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
 import Login from './components/Login'
 import { logger } from './utils/logger'
+import { useTheme } from './stores/theme'
 
 /** Root application component with keyboard shortcuts. */
 export default function App() {
   const { status } = useAuth()
+  const colorScheme = useTheme(s => s.colorScheme)
   const isVaultOpen = useVaultStore(s => s.isOpen)
   const openVault = useVaultStore(s => s.openVault)
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches)
@@ -172,18 +174,18 @@ export default function App() {
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {confirmCloseVault && (
-        <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center bg-black/50" onClick={() => setConfirmCloseVault(false)}>
-          <div className="bg-surface border border-border rounded-xl p-4 w-72 shadow-[0_10px_30px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
+        <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={() => setConfirmCloseVault(false)}>
+          <div className="bg-surface border border-border rounded-xl p-4 w-72 shadow-[0_10px_30px_var(--color-shadow)]" onClick={e => e.stopPropagation()}>
             <div className="text-sm font-semibold mb-1">Close vault?</div>
             <div className="text-xs text-foreground-secondary mb-4">Unsaved changes will be saved before closing.</div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setConfirmCloseVault(false)} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
-              <button onClick={async () => { setConfirmCloseVault(false); await useVaultStore.getState().closeVault() }} className="text-xs px-3 py-1.5 rounded bg-danger text-white cursor-pointer border-none">Close</button>
+              <button onClick={async () => { setConfirmCloseVault(false); await useVaultStore.getState().closeVault() }} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Close</button>
             </div>
           </div>
         </div>
       )}
-      <Toaster position="bottom-right" theme="dark" richColors offset={{ bottom: 200, right: 16 }} mobileOffset={{ bottom: 96 }} />
+      <Toaster position="bottom-right" theme={colorScheme} richColors offset={{ bottom: 200, right: 16 }} mobileOffset={{ bottom: 96 }} />
     </div>
   )
 }

@@ -81,7 +81,7 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }:
     const tip = document.createElement('div')
     tip.setAttribute('data-wikilink-tip', '1')
     tip.textContent = 'Cmd+Click to open'
-    tip.style.cssText = 'position:fixed;z-index:9999;display:none;pointer-events:none;padding:3px 8px;border-radius:6px;font-size:11px;white-space:nowrap;background:var(--color-surface,#2a2a2c);color:var(--color-foreground,#fafafa);border:1px solid var(--color-border,#3a3a3c);box-shadow:0 4px 12px rgba(0,0,0,0.3);'
+    tip.style.cssText = 'position:fixed;z-index:9999;display:none;pointer-events:none;padding:3px 8px;border-radius:6px;font-size:11px;white-space:nowrap;background:var(--color-surface);color:var(--color-foreground);border:1px solid var(--color-border);box-shadow:0 4px 12px var(--color-shadow);'
     document.body.appendChild(tip)
     const show = (x: number, y: number) => { tip.style.left = `${x + 10}px`; tip.style.top = `${y + 16}px`; tip.style.display = 'block' }
     const hide = () => { tip.style.display = 'none' }
@@ -314,7 +314,7 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }:
     // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by loadedMarkdown comparison
   }, [editor, markdown])
 
-  return <BlockNoteView editor={editor} theme={useTheme(s => s.name)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
+  return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
     {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
      *  built-in block-anchored AIMenuController is intentionally not rendered. */}
     <FormattingToolbarController formattingToolbar={FormattingToolbarWithAI} />

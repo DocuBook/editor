@@ -15,7 +15,7 @@ export function ImagePreview({ fileName, vaultPath, relPath }: { fileName: strin
     return () => { alive = false }
   }, [vaultPath, relPath])
   if (failed) return <PreviewFallback fileName={fileName} />
-  if (!src) return <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading...</div>
+  if (!src) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
   return (
     <div className="h-full w-full flex items-center justify-center p-6 overflow-auto">
       <img src={src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => setFailed(true)} />
@@ -26,7 +26,7 @@ export function ImagePreview({ fileName, vaultPath, relPath }: { fileName: strin
 /** Fallback UI for binary file types that can't be previewed as text. */
 function PreviewFallback({ fileName }: { fileName: string }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full text-zinc-500 gap-3">
+    <div className="flex flex-col items-center justify-center h-full text-foreground-subtle gap-3">
       <EyeOff size={32} strokeWidth={1.5} />
       <span className="text-sm"><span className="text-foreground-subtle">{fileName}</span> — preview only</span>
     </div>
@@ -36,7 +36,7 @@ function PreviewFallback({ fileName }: { fileName: string }) {
 export function PlainTextViewer({ content, fileName }: { content: string; fileName: string }) {
   return (
     <>
-      <div className="text-[11px] text-zinc-600 font-mono uppercase tracking-wider mb-4">{fileName}</div>
+      <div className="text-[11px] text-muted font-mono uppercase tracking-wider mb-4">{fileName}</div>
       <pre className="text-sm text-foreground-secondary font-mono leading-relaxed whitespace-pre-wrap pt-4">{content}</pre>
     </>
   )
@@ -54,7 +54,7 @@ export function MarkdownEditor({ content, onChange }: { content: string; onChang
   return (
     <textarea ref={ref} value={content} onChange={e => onChange(e.target.value)}
       placeholder="Start writing in Markdown…"
-      className="w-full bg-transparent text-sm text-foreground font-mono leading-relaxed outline-none resize-none placeholder:text-zinc-600 pt-4"
+      className="w-full bg-transparent text-sm text-foreground font-mono leading-relaxed outline-none resize-none placeholder:text-muted pt-4"
       spellCheck={false} />
   )
 }

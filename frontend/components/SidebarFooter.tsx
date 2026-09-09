@@ -67,7 +67,7 @@ export default function SidebarFooter() {
             <ChevronDown size={11} className={'ml-auto transition-transform text-muted shrink-0 ' + (branchOpen ? 'rotate-180' : '')} />
           </button>
           {branchOpen && (
-            <div className="absolute bottom-full left-2 right-2 mb-1 bg-surface border border-border rounded-lg p-1 max-h-[min(16rem,calc(100dvh-5rem))] overflow-y-auto z-50 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+            <div className="absolute bottom-full left-2 right-2 mb-1 bg-surface border border-border rounded-lg p-1 max-h-[min(16rem,calc(100dvh-5rem))] overflow-y-auto z-50 shadow-[0_4px_12px_var(--color-shadow)]">
               {branches.length === 0 && !error && <div className="px-2.5 py-1.5 text-[12px] text-muted">No branches found</div>}
               {branches.map(entry => (
                 <button key={entry.name} onClick={() => switchBranch(entry)} disabled={busy !== null}
@@ -79,7 +79,7 @@ export default function SidebarFooter() {
                   {busy === entry.name && <span className="ml-auto shrink-0 text-[10px] text-muted">switching…</span>}
                 </button>
               ))}
-              {error && <div className="px-2.5 py-1 text-[10px] text-red-400 break-words">{error}</div>}
+              {error && <div className="px-2.5 py-1 text-[10px] text-danger break-words">{error}</div>}
             </div>
           )}
         </div>

@@ -71,7 +71,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   customModelRef.current = customCfg?.model
   const probeToolsRef = useRef(probeTools)
   probeToolsRef.current = probeTools
-  const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 ml-2">from env</span>
+  const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-surface text-warning border border-warning-border ml-2">from env</span>
 
   /** Auto-probe when the selected model changes and has no stored probe yet.
    *  Custom endpoints are text-only until measured true — a model switch would
@@ -255,7 +255,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
   return (
     <div data-testid="settings-modal" className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh]" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-[540px] max-h-[80vh] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.4)]" onClick={e => e.stopPropagation()}>
+      <div className="bg-surface border border-border rounded-xl w-[540px] max-h-[80vh] overflow-hidden shadow-[0_25px_50px_-12px_var(--color-shadow)]" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <div className="flex items-center gap-3">
             <h2 className="text-[13px] font-semibold text-foreground">Settings</h2>
@@ -295,7 +295,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <ChevronsUpDown size={14} className="text-muted shrink-0" />
             </div>
             {showProviderDropdown && providerDropdownPos && (
-              <div style={providerDropdownPos} className="max-h-[280px] bg-surface border border-border rounded-lg z-[200] shadow-[0_8px_24px_rgba(0,0,0,0.3)] overflow-clip">
+              <div style={providerDropdownPos} className="max-h-[280px] bg-surface border border-border rounded-lg z-[200] shadow-[0_8px_24px_var(--color-shadow)] overflow-clip">
                 <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                   <Search size={14} className="text-muted shrink-0" />
                   <input ref={searchRef} type="text" value={providerSearch} onChange={e => { setProviderSearch(e.target.value); setProviderHighlightIdx(0) }}
@@ -310,7 +310,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div ref={providerListRef} className="max-h-[240px] overflow-y-auto">
                   {filteredProviders.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">No providers found</div> : filteredProviders.map((p, i) => (
                     <div key={p.id} onClick={() => selectProviderFn(p)}
-                      className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-accent text-white' : i === providerHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
+                      className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-accent text-on-accent' : i === providerHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
                       <span className="flex-1">{p.name}</span>
                       {isTextOnlyProvider(p.id, model, probeTools) && <TextOnlyBadge />}
                       {savedSet.has(p.id) && <Check size={12} />}
@@ -360,7 +360,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   <ChevronsUpDown size={14} className="text-muted shrink-0 ml-auto" />
                 </div>
                 {showModelDropdown && modelDropdownPos && (
-                  <div style={modelDropdownPos} className="max-h-[240px] bg-surface border border-border rounded-lg z-[200] shadow-[0_8px_24px_rgba(0,0,0,0.3)] overflow-clip">
+                  <div style={modelDropdownPos} className="max-h-[240px] bg-surface border border-border rounded-lg z-[200] shadow-[0_8px_24px_var(--color-shadow)] overflow-clip">
                     <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                       <Search size={14} className="text-muted shrink-0" />
                       <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}
@@ -378,7 +378,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                         const filtered = modelOptions.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
                         return filtered.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">No models found</div> : filtered.map((m, i) => (
                           <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
-                            className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-accent text-white' : i === modelHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
+                            className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-accent text-on-accent' : i === modelHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
                             <span className="flex-1">{m.id}</span>
                           </div>
                         ))
@@ -408,7 +408,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   {saving ? '...' : (savedSet.has(provider) ? 'Update' : 'Save')}
                 </button>
                 <button onClick={handleTest} disabled={(!keyInput && !envCustom) || testing || (isCustom && !baseUrlInput.trim() && !envCustom)}
-                  className="px-3.5 py-[7px] text-xs rounded-md bg-accent text-white border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
+                  className="px-3.5 py-[7px] text-xs rounded-md bg-accent text-on-accent border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
                   {testing ? <Loader size={12} className="animate-spin" /> : null}
                   {testing ? 'Testing...' : 'Test'}
                 </button>

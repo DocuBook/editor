@@ -128,7 +128,7 @@ export default function AiFloatingChat() {
         onMouseDown={(e) => e.preventDefault()}
         disabled={!input.trim()}
         aria-label="Send prompt"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md cursor-pointer bg-accent text-white border-none disabled:opacity-35 disabled:cursor-not-allowed hover:bg-accent-hover"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md cursor-pointer bg-accent text-on-accent border-none disabled:opacity-35 disabled:cursor-not-allowed hover:bg-accent-hover"
       >
         <ArrowUp size={13} />
       </button>
@@ -142,7 +142,7 @@ export default function AiFloatingChat() {
         onClick={() => useAiChat.getState().toggle()}
         aria-label="Ask AI"
         title="Ask AI (⌃⌥L)"
-        className="editor-ai-floating fixed bottom-10 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white shadow-lg cursor-pointer border-none hover:bg-accent-hover focus-visible:outline-none"
+        className="editor-ai-floating fixed bottom-10 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-accent text-on-accent shadow-[0_10px_24px_var(--color-shadow)] cursor-pointer border-none hover:bg-accent-hover focus-visible:outline-none"
       >
         <Sparkles size={17} />
       </button>
@@ -152,12 +152,12 @@ export default function AiFloatingChat() {
   return (
     <div
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); close() } }}
-      className="editor-ai-floating fixed bottom-10 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.3)] overflow-hidden"
+      className="editor-ai-floating fixed bottom-10 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-[0_4px_12px_var(--color-shadow)] overflow-hidden"
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
         <Sparkles size={14} className="text-accent shrink-0" />
         <span className="text-xs font-semibold text-foreground">DocuBook AI</span>
-        <span className={'text-[10px] px-1.5 py-0.5 rounded border ' + (aiConfigured ? 'text-accent bg-surface-active border-border-subtle' : 'text-amber-400 bg-amber-500/15 border-amber-500/30')} title={aiConfigured ? 'AI configured' : 'Configure an API key in Settings (⌘,)'}>
+        <span className={'text-[10px] px-1.5 py-0.5 rounded border ' + (aiConfigured ? 'text-accent bg-surface-active border-border-subtle' : 'text-warning bg-warning-surface border-warning-border')} title={aiConfigured ? 'AI configured' : 'Configure an API key in Settings (⌘,)'}>
           {aiConfigured ? 'AI ready' : 'Not configured'}
         </span>
         <button onClick={close} aria-label="Close AI chat" className="ml-auto p-1 rounded cursor-pointer bg-transparent text-muted border-none hover:text-foreground-secondary">
@@ -205,7 +205,7 @@ export default function AiFloatingChat() {
             <button onClick={revertAndContinue} onMouseDown={(e) => e.preventDefault()} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
               Revert
             </button>
-            <button onClick={acceptAndContinue} onMouseDown={(e) => e.preventDefault()} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-white border-none hover:bg-accent-hover">
+            <button onClick={acceptAndContinue} onMouseDown={(e) => e.preventDefault()} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-on-accent border-none hover:bg-accent-hover">
               <Check size={11} />
               Accept
             </button>
@@ -223,7 +223,7 @@ export default function AiFloatingChat() {
             <button onClick={() => ai.rejectChanges()} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
               Cancel
             </button>
-            <button onClick={() => ai.retry()?.catch(() => {})} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-white border-none hover:bg-accent-hover">
+            <button onClick={() => ai.retry()?.catch(() => {})} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-on-accent border-none hover:bg-accent-hover">
               <RotateCcw size={11} />
               Retry
             </button>

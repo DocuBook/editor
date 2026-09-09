@@ -50,8 +50,8 @@ export default function SystemSettings() {
   const label = 'text-xs font-medium text-foreground mb-1.5 block'
   const input = 'w-full bg-background border border-border rounded-md px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent'
   const badge = (src: string) => src === 'env'
-    ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 ml-2">from env</span>
-    : <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 ml-2">from config</span>
+    ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-surface text-warning border border-warning-border ml-2">from env</span>
+    : <span className="text-[10px] px-1.5 py-0.5 rounded bg-success-surface text-success border border-success-border ml-2">from config</span>
 
   if (isTauri) return null // web-only: desktop has no account/server-config
   if (!cfg) return <div className="text-xs text-muted">Loading…</div>

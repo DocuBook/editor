@@ -65,7 +65,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
-        <div className="flex-1 flex items-center justify-center text-zinc-500 text-sm italic">Select a file from the sidebar</div>
+        <div className="flex-1 flex items-center justify-center text-foreground-subtle text-sm italic">Select a file from the sidebar</div>
       </div>
     )
   }
@@ -77,7 +77,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   if (kind === 'binary') {
     inner = <ImagePreview fileName={file.name} vaultPath={vaultPath} relPath={file.path} />
   } else if (file.content == null) {
-    inner = <div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading...</div>
+    inner = <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
   } else if (kind === 'text') {
     inner = <PlainTextViewer content={file.content} fileName={file.name} />
   } else if (editMode === 'code') {
@@ -91,7 +91,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     }} />
   } else {
     inner = (
-      <Suspense fallback={<div className="h-full flex items-center justify-center text-zinc-500 text-sm italic">Loading editor...</div>}>
+      <Suspense fallback={<div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading editor...</div>}>
         <WysiwygEditorHost
           key={file.path}
           vaultPath={vaultPath}

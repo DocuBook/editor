@@ -1,11 +1,4 @@
-import { useTheme, type ThemeName } from '../stores/theme'
-
-/** Named themes, Zed-style — each entry is a theme NAME (no Light/Dark
- *  suffix; the name itself describes the look). Selected entry is highlighted. */
-const THEMES: { id: ThemeName; name: string; hint: string }[] = [
-  { id: 'dark', name: 'Midnight', hint: 'Low-light default' },
-  { id: 'light', name: 'Bright Surfaces', hint: 'Daytime' },
-]
+import { THEMES, useTheme } from '../stores/theme'
 
 export default function AppearanceSettings() {
   const { name, setTheme } = useTheme()
