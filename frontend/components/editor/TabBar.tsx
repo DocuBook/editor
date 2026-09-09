@@ -205,12 +205,3 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
     </div>
   )
 }
-
-/** ── Main layout ── */
-/**
- * Classify a file into one of three tiers (single source of truth in
- * frontend/utils/fileKind.ts):
- * - 'wysiwyg' — markdown family (.md/.mdx): Editor/Code toggle + AI
- * - 'binary'  — image etc: inline preview (read-only)
- * - 'text'    — everything else readable: plain text viewer (read-only)
- */
