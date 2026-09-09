@@ -142,7 +142,7 @@ export default function AiFloatingChat() {
         onClick={() => useAiChat.getState().toggle()}
         aria-label="Ask AI"
         title="Ask AI (⌃⌥L)"
-        className="fixed bottom-10 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white shadow-lg cursor-pointer border-none hover:bg-accent-hover focus-visible:outline-none"
+        className="editor-ai-floating fixed bottom-10 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full bg-accent text-white shadow-lg cursor-pointer border-none hover:bg-accent-hover focus-visible:outline-none"
       >
         <Sparkles size={17} />
       </button>
@@ -152,7 +152,7 @@ export default function AiFloatingChat() {
   return (
     <div
       onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); close() } }}
-      className="fixed bottom-10 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.3)] overflow-hidden"
+      className="editor-ai-floating fixed bottom-10 right-4 z-40 w-[380px] max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.3)] overflow-hidden"
     >
       <div className="flex items-center gap-2 px-3 py-2 border-b border-border-subtle">
         <Sparkles size={14} className="text-accent shrink-0" />

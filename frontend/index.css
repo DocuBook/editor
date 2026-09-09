@@ -372,6 +372,27 @@ body {
   gap: 3px;
 }
 
+/* Keep the document surface and its tab bar visually centered on wide displays.
+   The existing shell/sidebar layout stays unchanged; the rail keeps a small
+   breathing space even when the sidebar is open, then caps at 1280px. */
+@media (min-width: 1440px) {
+    .editor-tab-bar,
+    .editor-content {
+        width: min(calc(100% - 6rem), 1280px);
+        margin-inline: auto;
+    }
+
+    /* The AI FAB/panel is rendered after the scroll area. Anchor it to the
+       editor rail instead of the viewport so it follows the centered content. */
+    .editor-root {
+        position: relative;
+    }
+    .editor-ai-floating {
+        position: absolute;
+        right: calc((100% - min(calc(100% - 6rem), 1280px)) / 2);
+    }
+}
+
 /* Tab hover effects */
 .tab-inactive:hover {
   color: var(--color-foreground-quaternary);

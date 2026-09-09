@@ -119,7 +119,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   }
 
   return (
-    <div className="ui-shell relative z-30 h-12 flex items-center gap-3 shrink-0 text-xs px-6">
+    <div className="editor-tab-bar ui-shell relative z-30 h-12 flex items-center gap-3 shrink-0 text-xs px-6">
       <span className={'inline-flex items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
         <button
           ref={sidebarToggleRef}
