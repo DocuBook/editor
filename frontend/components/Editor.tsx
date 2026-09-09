@@ -7,12 +7,12 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { editorFileKind } from '../utils/fileKind'
 import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
-import AiFloatingChat from './editor/AiFloatingChat'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
 import { clearEditorCache } from '../utils/editorCache'
 import { useAiChat } from '../stores/aiChat'
 
 const WysiwygEditorHost = lazy(() => import('./editor/WysiwygEditorHost'))
+const AiFloatingChat = lazy(() => import('./editor/AiFloatingChat'))
 
 export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { editMode } = useEditorStore()
@@ -111,7 +111,9 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
           {inner}
         </div>
       </div>
-      {kind === 'wysiwyg' && editMode === 'editor' && <AiFloatingChat />}
+      {kind === 'wysiwyg' && editMode === 'editor' && (
+        <Suspense fallback={null}><AiFloatingChat /></Suspense>
+      )}
     </div>
   )
 }
