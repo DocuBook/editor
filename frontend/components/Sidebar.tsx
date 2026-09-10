@@ -308,7 +308,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
           <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
             <Plus size={14} />
           </button>
-          <span className="tip">Create a file/folder</span>
+          <span className="tip tip-left">Create a file/folder</span>
           {showPlusMenu && (
             <div data-plus-popup className="absolute bottom-full -right-6 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
               <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}

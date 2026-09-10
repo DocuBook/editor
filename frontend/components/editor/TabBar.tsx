@@ -4,7 +4,7 @@ import { BsMarkdown } from 'react-icons/bs'
 import { TbBlocks } from 'react-icons/tb'
 import { useEditorStore } from '../../stores/editor'
 import { useGitStatus } from '../../stores/gitStatus'
-import { invoke, isMacTauri } from '../../lib/ipc'
+import { invoke, isMacTauri, isTauri } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -34,6 +34,13 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   useClickOutside(actionsRef, () => setActionsOpen(false))
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   const hasUnsaved = file?.dirty ?? false
+  /** Compact web (<640px, Docker/web only — native macOS untouched):
+   *  single row keeps [panel|search] + tabs + Actions; undo/redo + mode
+   *  toggle move into the Actions menu. JS conditional (not CSS hidden)
+   *  so WKWebView is never affected. Reuses isDesktop prop — no new MQ. */
+  const compact = !isTauri && !isDesktop
+  const showInlineEditing = !compact
+  const closeActions = () => setActionsOpen(false)
   /** Only .md files can toggle Editor ↔ Code; others are preview. */
   const toggleable = file ? editorFileKind(file.path) === 'wysiwyg' : false
 
@@ -119,8 +126,8 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   }
 
   return (
-    <div data-tauri-drag-region={isMacTauri ? true : undefined} className={'editor-tab-bar ui-shell relative z-30 h-12 flex items-center gap-3 shrink-0 text-xs pr-6 ' + (isMacTauri && !sidebarOpen ? 'pl-20' : 'pl-6')}>
-      <span className={'inline-flex items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
+    <div data-tauri-drag-region={isMacTauri ? true : undefined} className={'editor-tab-bar ui-shell relative z-30 h-12 flex items-center flex-nowrap shrink-0 text-xs ' + (compact ? 'gap-2 pl-4 pr-4 ' : 'gap-3 pr-6 ') + (!compact && isMacTauri && !sidebarOpen ? 'pl-20' : !compact ? 'pl-6' : '')}>
+      <span className={'inline-flex shrink-0 items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
         <button
           ref={sidebarToggleRef}
           data-testid="sidebar-toggle"
@@ -143,7 +150,8 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
           </button>
         )}
       </span>
-      <span className="inline-flex items-center rounded-md border border-border-subtle bg-background">
+      {showInlineEditing && (
+      <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background">
         <span className="tip-wrap tip-bar">
           <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
           <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
@@ -153,19 +161,21 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
           <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
         </span>
       </span>
-      <div ref={tabStripRef} className="flex-1 flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
+      )}
+      <div ref={tabStripRef} className="flex-1 min-w-0 flex items-stretch h-full overflow-x-auto overflow-y-hidden scrollbar-none">
         {tabs.length === 0 ? <span className="text-foreground-subtle italic self-center">No file open</span> : tabs.map(tab => (
           <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
-            className={'tab-item flex items-center justify-center relative px-8 cursor-pointer border-r border-border-subtle whitespace-nowrap shrink-0 ' + (activeTab === tab.path ? 'tab-active bg-background text-foreground shadow-[inset_0_-1px_0_var(--color-accent)]' : 'tab-inactive text-foreground-subtle')}>
+            className={'tab-item flex items-center justify-center relative cursor-pointer border-r border-border-subtle whitespace-nowrap shrink-0 ' + (compact ? 'px-3 ' : 'px-8 ') + (activeTab === tab.path ? 'tab-active bg-background text-foreground shadow-[inset_0_-1px_0_var(--color-accent)]' : 'tab-inactive text-foreground-subtle')}>
             <span className={tab.deleted ? 'line-through opacity-50' : undefined}>{tab.name}</span>
             {activeTab === tab.path && (
-              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} className="tab-close-btn absolute right-2 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
+              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} style={compact ? { opacity: 1 } : undefined} className="tab-close-btn absolute right-1 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
             )}
           </div>
         ))}
       </div>
 
-      <span className="tip-wrap tip-bar">
+      {showInlineEditing && (
+      <span className="tip-wrap tip-bar shrink-0">
         <span className="inline-flex items-center rounded-md border border-border-subtle bg-background overflow-hidden">
           <button onClick={() => { if (editMode !== 'code') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Markdown mode"
           className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
@@ -176,14 +186,35 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
         </span>
         <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
       </span>
+      )}
 
-      <span className="relative" ref={actionsRef}>
+      <span className="relative shrink-0" ref={actionsRef}>
         <button onClick={() => setActionsOpen(o => !o)} aria-label="Git actions" aria-expanded={actionsOpen}
           className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
           Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
         </button>
         {actionsOpen && (
           <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
+            {compact && (
+              <>
+                <button onClick={() => undo()} disabled={!canUndo}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                  <span className="text-foreground-secondary shrink-0"><ChevronLeft size={14} /></span>
+                  <span>Undo</span>
+                </button>
+                <button onClick={() => redo()} disabled={!canRedo}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                  <span className="text-foreground-secondary shrink-0"><ChevronRight size={14} /></span>
+                  <span>Redo</span>
+                </button>
+                <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                  <span className="text-foreground-secondary shrink-0">{editMode === 'editor' ? <BsMarkdown size={14} /> : <TbBlocks size={14} />}</span>
+                  <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
+                </button>
+                <div className="border-t border-border-subtle my-1" />
+              </>
+            )}
             <button onClick={commit} disabled={!isRepo || hasUnsaved || !hasDiskChanges || commitState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={commitState === 'done' ? 'text-success shrink-0' : commitState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
