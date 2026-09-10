@@ -21,6 +21,7 @@
     "allow-git-add-remote",
     "allow-git-branches",
     "allow-git-checkout",
+    "allow-git-create-branch",
     "allow-git-clone",
     "allow-git-commit",
     "allow-git-init",

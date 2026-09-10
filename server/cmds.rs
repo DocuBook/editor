@@ -85,6 +85,14 @@ pub(crate) fn git_branches(state: &AppState) -> Result<String, String> {
     serde_json::to_string(&git::Git::open(&repo_path).branches()?).map_err(|e| e.to_string())
 }
 
+pub(crate) fn git_create_branch(state: &AppState, branch: &str) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".to_string()),
+    };
+    git::Git::open(&repo_path).create_branch(branch).map(|_| "null".into())
+}
+
 pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),

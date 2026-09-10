@@ -268,7 +268,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
       <div className="max-h-32 overflow-y-auto text-xs">
         <BacklinksPanel onNavigate={onNavigate} />
       </div>
-      <div className="relative flex items-center gap-1 px-2 py-2 shrink-0">
+      <div className="relative flex items-center gap-0.5 px-2 py-1.5 shrink-0">
         <span className="relative flex-1 min-w-0" ref={vaultMenuRef}>
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
             className={'flex items-center gap-1 w-full min-w-0 cursor-pointer rounded px-2 py-1.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-foreground-secondary')}>

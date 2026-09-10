@@ -56,10 +56,21 @@ impl Git {
         }
         Ok(refs)
     }
-/** Switch branches. `remote: false` → plain `git checkout <name>`; `remote:
- *  true` (name like `origin/dev`) → `git switch -c dev --track origin/dev`,
- *  creating the local tracking branch. Name is argv-passed (no shell
- *  injection) and validated so it can never be parsed as a flag. */
+    /// Create and check out a new local branch after validating its name with
+    /// Git's branch ref rules.
+    pub fn create_branch(&self, name: &str) -> Result<(), String> {
+        let name = name.trim();
+        if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
+        let valid = Command::new("git").args(["check-ref-format", "--branch", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !valid.status.success() { return Err(String::from_utf8_lossy(&valid.stderr).trim().to_string()); }
+        let out = Command::new("git").args(["checkout", "-b", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
+        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        Ok(())
+    }
+
+    /// Switch branches. `remote: false` uses `git checkout <name>`; `remote:
+    /// true` uses `git switch -c <short> --track <remote>`. Names are passed as
+    /// argv and validated so Git never parses them as flags.
     pub fn checkout_branch(&self, name: &str, remote: bool) -> Result<(), String> {
         let name = name.trim();
         if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
@@ -106,6 +117,29 @@ mod tests {
         // flag injection and empty names are rejected before reaching git
         assert!(g.checkout_branch("", false).is_err());
         assert!(g.checkout_branch("-x", false).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_branch_validates_and_checks_out() {
+        let dir = temp_git_repo("create-branch");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+
+        g.create_branch("feature/new").unwrap();
+        assert_eq!(g.status_with_branch().unwrap().branch, "feature/new");
+        assert!(g.branches().unwrap().contains(&BranchRef {
+            name: "feature/new".into(),
+            remote: false,
+        }));
+        assert!(g.create_branch("feature/new").is_err());
+        assert!(g.create_branch("bad name").is_err());
+        assert!(g.create_branch("-x").is_err());
+        assert!(g.create_branch("").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
