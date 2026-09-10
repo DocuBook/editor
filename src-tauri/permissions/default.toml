@@ -17,6 +17,7 @@ permissions = [
   "allow-git-add-remote",
   "allow-git-branches",
   "allow-git-checkout",
+  "allow-git-create-branch",
   "allow-git-clone",
   "allow-git-commit",
   "allow-git-init",
@@ -164,6 +165,16 @@ commands.allow = ["git_branches"]
 identifier = "deny-git-branches"
 description = "Denies the git_branches command."
 commands.deny = ["git_branches"]
+
+[[permission]]
+identifier = "allow-git-create-branch"
+description = "Enables the git_create_branch command."
+commands.allow = ["git_create_branch"]
+
+[[permission]]
+identifier = "deny-git-create-branch"
+description = "Denies the git_create_branch command."
+commands.deny = ["git_create_branch"]
 
 [[permission]]
 identifier = "allow-git-checkout"
