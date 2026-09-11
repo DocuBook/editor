@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode, type RefObject } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide from './OnboardingGuide'
@@ -20,8 +20,9 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   const vaultOpen = useVaultStore(s => s.isOpen)
   const vaultPath = useVaultStore(s => s.vaultPath)
   const [onboardingDone, setOnboardingDone] = useState(() => isOnboardingDone())
+  const cursorOffsets = useRef(new Map<string, number>())
 
-  useEffect(() => { clearEditorCache() }, [vaultPath])
+  useEffect(() => { clearEditorCache(); cursorOffsets.current.clear() }, [vaultPath])
 
   // Re-check when vault first opens
   useEffect(() => {
@@ -71,6 +72,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   }
 
   const kind = editorFileKind(file.path)
+  const cursorOffset = cursorOffsets.current.get(file.path)
 
   /** Shared scroll container — all modes use the same container. */
   let inner: ReactNode
@@ -81,14 +83,20 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   } else if (kind === 'text') {
     inner = <PlainTextViewer content={file.content} fileName={file.name} />
   } else if (editMode === 'code') {
-    inner = <MarkdownEditor content={file.frontmatter + (file.editedContent ?? file.content.replace(file.frontmatter, ''))} onChange={v => {
-      const fmMatch = v.match(/^---[\s\S]*?\n---(?:\n|$)/)
-      const newFrontmatter = fmMatch ? fmMatch[0] : ''
-      const body = fmMatch ? v.slice(fmMatch[0].length) : v
-      useEditorStore.getState().setFrontmatter(file.path, newFrontmatter)
-      useEditorStore.getState().setEditedContent(file.path, body)
-      useEditorStore.getState().setTabDirty(file.path, true)
-    }} />
+    inner = <MarkdownEditor
+      key={file.path}
+      content={file.frontmatter + (file.editedContent ?? file.content.replace(file.frontmatter, ''))}
+      cursorOffset={cursorOffset}
+      onCursorOffset={offset => cursorOffsets.current.set(file.path, offset)}
+      onChange={v => {
+        const fmMatch = v.match(/^---[\s\S]*?\n---(?:\n|$)/)
+        const newFrontmatter = fmMatch ? fmMatch[0] : ''
+        const body = fmMatch ? v.slice(fmMatch[0].length) : v
+        useEditorStore.getState().setFrontmatter(file.path, newFrontmatter)
+        useEditorStore.getState().setEditedContent(file.path, body)
+        useEditorStore.getState().setTabDirty(file.path, true)
+      }}
+    />
   } else {
     inner = (
       <Suspense fallback={<div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading editor...</div>}>
@@ -98,6 +106,8 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
           filePath={file.path}
           isDesktop={isDesktop}
           markdown={(file.editedContent ?? file.content).replace(file.frontmatter, '')}
+          cursorOffset={cursorOffset === undefined ? undefined : Math.max(0, cursorOffset - file.frontmatter.length)}
+          onCursorOffset={offset => cursorOffsets.current.set(file.path, file.frontmatter.length + offset)}
           onSync={md => useEditorStore.getState().setEditedContent(file.path, md)}
         />
       </Suspense>
