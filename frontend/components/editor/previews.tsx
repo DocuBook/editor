@@ -43,16 +43,35 @@ export function PlainTextViewer({ content, fileName }: { content: string; fileNa
 }
 
 /** Raw markdown textarea editor (code mode). */
-export function MarkdownEditor({ content, onChange }: { content: string; onChange: (v: string) => void }) {
+export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange }: {
+  content: string
+  cursorOffset?: number
+  onCursorOffset: (offset: number) => void
+  onChange: (v: string) => void
+}) {
   const ref = useRef<HTMLTextAreaElement>(null)
-  useEffect(() => { ref.current?.focus() }, [])
-  // Auto-resize: grow with content so only the outer container scrolls.
+  const initialCursorOffset = useRef(cursorOffset).current
+  // Auto-resize before restoring scroll so the outer container has its final height.
   useEffect(() => {
     const el = ref.current
     if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
   }, [content])
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const offset = Math.min(initialCursorOffset ?? 0, el.value.length)
+    el.focus({ preventScroll: true })
+    el.setSelectionRange(offset, offset)
+    const scroller = el.closest('.editor-content')
+    if (scroller) {
+      const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
+      const line = el.value.slice(0, offset).split('\n').length - 1
+      scroller.scrollTop = Math.max(0, el.offsetTop + line * lineHeight - scroller.clientHeight / 3)
+    }
+  }, [initialCursorOffset])
   return (
-    <textarea ref={ref} value={content} onChange={e => onChange(e.target.value)}
+    <textarea ref={ref} value={content} onChange={e => { onCursorOffset(e.currentTarget.selectionStart); onChange(e.target.value) }}
+      onSelect={e => onCursorOffset(e.currentTarget.selectionStart)}
       placeholder="Start writing in Markdown…"
       className="w-full bg-transparent text-sm text-foreground font-mono leading-relaxed outline-none resize-none placeholder:text-muted pt-4"
       spellCheck={false} />

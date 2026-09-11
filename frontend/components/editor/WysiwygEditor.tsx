@@ -23,6 +23,7 @@ import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
 import { createQueuedMermaidRender } from '../../utils/mermaidRenderCache'
 import { followAiWritingCursor } from '../../utils/aiFollowScroll'
+import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../utils/markdownCursor'
 import { setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
@@ -30,7 +31,15 @@ import type { CachedEditor } from '../../utils/editorFactory'
 import mermaid from 'mermaid'
 ;(mermaid as any).render = createQueuedMermaidRender(mermaid.render)
 
-export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }: { cached: CachedEditor; markdown: string; onSync: (md: string) => void; filePath: string; isDesktop: boolean }) {
+export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, onSync, filePath, isDesktop }: {
+  cached: CachedEditor
+  markdown: string
+  cursorOffset?: number
+  onCursorOffset: (offset: number) => void
+  onSync: (md: string) => void
+  filePath: string
+  isDesktop: boolean
+}) {
   const { editor } = cached
 
   useEffect(() => {
@@ -205,6 +214,11 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }:
   const { setBlockEditor, setFlushEditor } = useEditorStore()
   const onSyncRef = useRef(onSync)
   onSyncRef.current = onSync
+  const onCursorOffsetRef = useRef(onCursorOffset)
+  onCursorOffsetRef.current = onCursorOffset
+  const cursorSnapshotRef = useRef<{ blockId: string; textOffset: number } | null>(null)
+  const initialCursorOffset = useRef(cursorOffset).current
+  const initialMarkdown = useRef(markdown).current
   /** Baseline markdown this instance was loaded from — flushing only writes
    *  when serialized output actually differs (serialization is not idempotent,
    *  it rewrites list formatting). Kept per-mount; the instance itself is
@@ -219,6 +233,24 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }:
   const loadedRef = useRef(cached.loaded)
   const loadedMarkdownRef = useRef(cached.loadedMarkdown)
   const initialLoadRef = useRef(true)
+
+  /** Keep only the local caret. Remote collaboration transactions must not
+   * overwrite this snapshot or move another author's selection. */
+  useEffect(() => {
+    const captureLocalCursor = () => {
+      try {
+        const selection = editor.prosemirrorState.selection
+        if (!selection.empty) return
+        cursorSnapshotRef.current = {
+          blockId: editor.getTextCursorPosition().block.id,
+          textOffset: selection.$head.parent.textBetween(0, selection.$head.parentOffset, '\n', '\n').length,
+        }
+      } catch {}
+    }
+    const unsubscribe = editor.onSelectionChange(captureLocalCursor, false)
+    captureLocalCursor()
+    return unsubscribe
+  }, [editor])
 
   /** Serialize the editor to markdown for persistence: normalize list markers
    *  and trim blank edges. blocksToMarkdownLossy rewrites list formatting, so
@@ -270,19 +302,27 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }:
   /** Register flush-to-store for Save button + explicit switchTab flush. */
   useEffect(() => {
     const sync = () => {
-      /** Only flush when there are real WYSIWYG edits — serialization is not
-       *  idempotent (it rewrites list formatting), so flushing an untouched doc
-       *  would disturb the original markdown on every mode switch. */
-      if (!dirtyRef.current) return
-      const md = serializeMarkdown(editor)
-      if (md && md !== markdownRef.current) {
-        // The instance now holds `md` — sync the load baseline so a later
-        // remount (tab switch back) sees loadedMarkdown === markdown and skips
-        // re-parsing, preserving undo history.
-        Object.assign(cached, { loadedMarkdown: md })
-        loadedMarkdownRef.current = md
-        onSyncRef.current(md)
+      /** Only flush content when there are real WYSIWYG edits — serialization is
+       *  not idempotent. Cursor capture still runs on every mode/tab switch. */
+      let md = markdownRef.current
+      if (dirtyRef.current) {
+        const serialized = serializeMarkdown(editor)
+        if (serialized) md = serialized
+        if (serialized && serialized !== markdownRef.current) {
+          // The instance now holds `md` — sync the load baseline so a later
+          // remount (tab switch back) sees loadedMarkdown === markdown and skips
+          // re-parsing, preserving undo history.
+          Object.assign(cached, { loadedMarkdown: serialized })
+          loadedMarkdownRef.current = serialized
+          onSyncRef.current(serialized)
+        }
       }
+      try {
+        const cursor = cursorSnapshotRef.current
+        if (cursor) {
+          onCursorOffsetRef.current(markdownOffsetForCursor(editor, md, cursor.blockId, cursor.textOffset))
+        }
+      } catch {}
     }
     setFlushEditor(sync)
     return () => setFlushEditor(null)
@@ -313,6 +353,37 @@ export function WysiwygEditor({ cached, markdown, onSync, filePath, isDesktop }:
     queueMicrotask(() => { initialLoadRef.current = false })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by loadedMarkdown comparison
   }, [editor, markdown])
+
+  /** Restore the exact local text position after markdown parsing has replaced blocks. */
+  useEffect(() => {
+    if (initialCursorOffset === undefined) return
+    const position = cursorPositionAtMarkdownOffset(editor, initialMarkdown, initialCursorOffset)
+    if (!position) return
+    const frame = requestAnimationFrame(() => {
+      try {
+        const view = editor.prosemirrorView
+        let cursorPos: number | undefined
+        view.state.doc.descendants((node, pos) => {
+          if (cursorPos !== undefined || node.type.name !== 'blockContainer' || node.attrs.id !== position.block.id) return true
+          node.forEach((child, offset) => {
+            if (cursorPos === undefined && child.type.spec.group === 'blockContent') {
+              const maxOffset = Math.max(0, child.content.size)
+              cursorPos = pos + offset + 2 + Math.min(position.textOffset, maxOffset)
+            }
+          })
+          return false
+        })
+        if (cursorPos === undefined) {
+          editor.setTextCursorPosition(position.block.id, 'start')
+        } else {
+          view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, cursorPos)))
+        }
+        editor.focus()
+        editor.domElement?.querySelector<HTMLElement>(`[data-node-type="blockContainer"][data-id="${position.block.id}"]`)?.scrollIntoView({ block: 'center' })
+      } catch {}
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [editor, initialCursorOffset, initialMarkdown])
 
   return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
     {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
