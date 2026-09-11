@@ -3,36 +3,38 @@ import { create } from 'zustand'
 import { useEditorStore } from './editor'
 
 interface AiChatState {
-  /** True while the chat panel is shown (as opposed to the collapsed FAB). */
+  /** True only while xl-ai prompt actions are shown above the composer. */
   expanded: boolean
+  focusRequest: number
   setExpanded: (v: boolean) => void
-  /** ⌃⌥L / FAB: close an open menu (abort if streaming, reject if reviewing),
-   *  otherwise open the AI menu at the cursor block and show the panel. */
-  toggle: () => void
+  /** Keyboard shortcut request consumed by the mounted composer. */
+  focusInput: () => void
+  /** Composer action opens/closes prompt suggestions without touching active AI work. */
+  togglePrompts: () => void
 }
 
-export const useAiChat = create<AiChatState>((set) => ({
+export const useAiChat = create<AiChatState>((set, get) => ({
   expanded: false,
+  focusRequest: 0,
   setExpanded: (v) => set({ expanded: v }),
-  toggle: () => {
+  focusInput: () => set((state) => ({ expanded: false, focusRequest: state.focusRequest + 1 })),
+  togglePrompts: () => {
     const editor = useEditorStore.getState().blockEditor
-    if (!editor) return
-    const ai = editor.getExtension?.('ai')
+    const ai = editor?.getExtension?.('ai')
     if (!ai) return
     const menu = ai.store.state.aiMenuState
-    if (menu && menu !== 'closed') {
-      if (menu.status === 'thinking' || menu.status === 'ai-writing') {
-        ai.abort?.('dismissed by user').catch(() => {})
-      } else if (menu.status === 'user-reviewing' || menu.status === 'error') {
-        ai.rejectChanges()
-      } else {
-        ai.closeAIMenu()
-      }
+
+    if (get().expanded) {
+      if (menu !== 'closed' && menu.status === 'user-input') ai.closeAIMenu()
       set({ expanded: false })
-    } else {
-      const pos = editor.getTextCursorPosition?.()
-      if (pos?.block?.id) ai.openAIMenuAtBlock(pos.block.id)
-      set({ expanded: true })
+      return
     }
+    if (menu !== 'closed' && menu.status !== 'user-input') return
+    if (menu === 'closed') {
+      const blockId = editor.getTextCursorPosition?.()?.block?.id
+      if (!blockId) return
+      ai.openAIMenuAtBlock(blockId)
+    }
+    set({ expanded: true })
   },
 }))

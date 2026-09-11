@@ -38,7 +38,7 @@ const SHORTCUTS = [
     { keys: '\u2318\u21E7E', desc: 'Toggle WYSIWYG / Markdown' },
   ]},
   { category: 'AI & Settings', items: [
-    { keys: '\u02C6\u2325L', desc: 'Ask AI / Write with AI (toggles floating chat)' },
+    { keys: '\u02C6\u2325L', desc: 'Focus AI composer' },
     { keys: '\u2318,', desc: 'Settings' },
   ]},
   { category: 'Writing', items: [

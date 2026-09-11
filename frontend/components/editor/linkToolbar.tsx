@@ -4,9 +4,11 @@
 import { useEffect, useState } from 'react'
 import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
-import { AIToolbarButton } from '@blocknote/xl-ai'
-import { Link2, Type, ExternalLink } from 'lucide-react'
+import { AIExtension, useAIDictionary } from '@blocknote/xl-ai'
+import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
+import { useAiChat } from '../../stores/aiChat'
+import { resolveAIBlockId } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
 
 /** Open an external URL: native uses the system opener (tauri-plugin-opener →
@@ -188,6 +190,37 @@ export function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPo
   )
 }
 
+/** Formatting-toolbar AI button. Replaces xl-ai's `AIToolbarButton`, which
+ *  throws `Error("No selection")` whenever the editor has no text selection
+ *  (collapsed or node selection, e.g. a selected image) — the toolbar is still
+ *  shown then, so clicking the sparkle crashed. Also opens the extended prompt
+ *  chips (Translate etc.) in one click, mirroring xl-ai's own AIMenu. */
+function AIToolbarButtonSafe() {
+  const editor = useBlockNoteEditor<any, any, any>()
+  const Components = useComponentsContext()!
+  const dict = useAIDictionary()
+  const formattingToolbar = useExtension(FormattingToolbarExtension)
+
+  if (!editor.isEditable) return null
+  const onClick = () => {
+    const blockId = resolveAIBlockId(editor)
+    const ai = editor.getExtension(AIExtension)
+    if (!blockId || !ai) return
+    ai.openAIMenuAtBlock(blockId)
+    formattingToolbar.store.setState(false)
+    useAiChat.getState().setExpanded(true)
+  }
+  return (
+    <Components.Generic.Toolbar.Button
+      className="bn-button"
+      label={dict.formatting_toolbar.ai.tooltip}
+      mainTooltip={dict.formatting_toolbar.ai.tooltip}
+      icon={<Sparkles size={14} />}
+      onClick={onClick}
+    />
+  )
+}
+
 /** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */
 export const FormattingToolbarWithAI = () => {
   const editor = useBlockNoteEditor<any, any, any>()
@@ -201,7 +234,7 @@ export const FormattingToolbarWithAI = () => {
     <FormattingToolbar>
       {getFormattingToolbarItems(blockTypes).filter(el => (el as any).key !== 'createLinkButton')}
       <CreateLinkButtonPreserveUrl />
-      <AIToolbarButton />
+      <AIToolbarButtonSafe />
     </FormattingToolbar>
   )
 }

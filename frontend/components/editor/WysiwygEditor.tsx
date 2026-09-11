@@ -14,7 +14,7 @@ import { combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockFor
 import { Selection, TextSelection } from 'prosemirror-state'
 import { getMathSlashMenuItems } from '@blocknote/math-block'
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
-import { AIExtension, getAISlashMenuItems } from '@blocknote/xl-ai'
+import { AIExtension } from '@blocknote/xl-ai'
 import { useEditorStore } from '../../stores/editor'
 import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
@@ -393,7 +393,6 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     <SuggestionMenuController triggerCharacter="/"
       getItems={async (query) => {
         const defaultItems = getDefaultReactSlashMenuItems(editor)
-        const aiItems = getAISlashMenuItems(editor)
         const mathItems = getMathSlashMenuItems(editor)
         const diagramItems = getDiagramSlashMenuItems(editor).map(item => ({
           ...item,
@@ -414,9 +413,9 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
             })
           },
         }))
-        if (!query) return combineByGroup(defaultItems, mathItems, diagramItems, aiItems)
+        if (!query) return combineByGroup(defaultItems, mathItems, diagramItems)
         const q = query.toLowerCase()
-        return combineByGroup(defaultItems, mathItems, diagramItems, aiItems).filter(i =>
+        return combineByGroup(defaultItems, mathItems, diagramItems).filter(i =>
           i.title?.toLowerCase().includes(q) ||
           (i.aliases || []).some((a: string) => a.includes(q))
         )

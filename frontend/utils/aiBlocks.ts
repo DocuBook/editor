@@ -39,6 +39,35 @@ export function blockIdExists(editor: any, id: string): boolean {
   return find(editor.document);
 }
 
+/**
+ * Resolve the block the formatting-toolbar AI button should open its menu at.
+ *
+ * xl-ai's own `AIToolbarButton` does `const s = editor.getSelection(); if (!s)
+ * throw new Error("No selection")` — but BlockNote's `getSelection()` returns
+ * `undefined` for collapsed AND node selections (`"node" in tr.selection`, e.g.
+ * a selected image), while the formatting toolbar is still shown. Clicking the
+ * sparkle then throws an uncaught error.
+ *
+ * Prefer the last selected block (keeps text-selection semantics so the
+ * selection-aware prompts like Translate appear), otherwise fall back to the
+ * cursor block. `getSelection()` / `getTextCursorPosition()` can also throw on
+ * odd documents, so both are guarded.
+ */
+export function resolveAIBlockId(editor: any): string | undefined {
+  try {
+    const blocks = editor?.getSelection?.()?.blocks;
+    const id = blocks?.length ? blocks[blocks.length - 1]?.id : undefined;
+    if (id) return id;
+  } catch {
+    /* fall through to the cursor block */
+  }
+  try {
+    return editor?.getTextCursorPosition?.()?.block?.id;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Semantic anti-hallucination: referenced ids in applyDocumentOperations must exist in the doc. */
 /**
  * Ensure every operation id/referenceId carries the trailing `$` that
