@@ -36,7 +36,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     if (file) markOnboardingDone()
   }, [file])
 
-  /** ⌃⌥L toggles the floating AI chat (open at cursor / close to ✨ FAB).
+  /** ⌃⌥L focuses the persistent AI composer.
    *  Ctrl/Cmd+Shift+E toggles edit mode (not ⌘E — conflicts with BlockNote's inline-code mark). */
   useKeyboard((e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'E' || e.key === 'e')) {
@@ -47,7 +47,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
       if (active && editorFileKind(active.path) === 'wysiwyg') s.toggleEditMode()
     }
     if (e.ctrlKey && e.altKey && (e.code === 'KeyL' || e.key === 'l' || e.key === 'L')) {
-      e.preventDefault(); useAiChat.getState().toggle()
+      e.preventDefault(); useAiChat.getState().focusInput()
     }
   })
 
@@ -115,16 +115,18 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   }
 
   return (
-    <div className="editor-root flex-1 flex flex-col min-w-0 min-h-0">
+    <div className="editor-root relative isolate flex-1 flex flex-col min-w-0 min-h-0">
       <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
-      <div className="flex-1 flex flex-col min-h-0 relative">
-        <div className="editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 sm:pt-12 sm:px-16">
+      <div className="relative z-0 flex-1 flex flex-col min-h-0">
+        <div className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 sm:pt-12 sm:px-16 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-32' : 'pb-8')}>
           {inner}
         </div>
+        {kind === 'wysiwyg' && editMode === 'editor' && (
+          <div className="editor-ai-rail pointer-events-none absolute inset-x-0 bottom-0 z-50 mx-auto h-0">
+            <Suspense fallback={null}><AiFloatingChat /></Suspense>
+          </div>
+        )}
       </div>
-      {kind === 'wysiwyg' && editMode === 'editor' && (
-        <Suspense fallback={null}><AiFloatingChat /></Suspense>
-      )}
     </div>
   )
 }

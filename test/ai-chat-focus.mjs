@@ -1,11 +1,22 @@
 /**
- * AI chat focus audit — reproduces the "Write anything" UX bug: clicking the
- * suggestion chip should leave the prompt input focused so the user can keep
- * typing (one click, not two).
+ * AI floating-composer e2e — focus and dismissal around the always-mounted
+ * WYSIWYG composer (there is no ✨ FAB anymore).
  *
- * Boots the real server + dist (like trash.mjs), opens a vault with one .md,
- * opens the WYSIWYG tab, opens the floating AI chat via the ✨ FAB, clicks the
- * "Write anything" chip and asserts `document.activeElement` is the input.
+ * Guards the regressions that came with the rewrite:
+ *   1. the extended prompt list (UI prompts) closes on outside mousedown AND Esc;
+ *   2. the formatting-toolbar "Edit with AI" button expands the chips in one
+ *      click for a text selection (used to stay hidden behind the "+" toggle);
+ *   3. after the AI finishes writing and the user Accepts, the editor is
+ *      clickable again (reopening the menu used to re-lock `isEditable`).
+ *
+ * Node-selection handling (a selected image, where `editor.getSelection()` is
+ * undefined) is covered by the `resolveAIBlockId` unit tests instead — a mouse
+ * click on a BlockNote image yields a collapsed caret, so it can't be driven
+ * reliably from this e2e.
+ *
+ * Boots the real server + dist (like trash.mjs); /api/ask_ai is mocked in the
+ * browser with the server's SSE wire format so the full transport chain runs
+ * without a provider (see ai-debug.mjs for the tool-call variant).
  *
  * Run: npm run build && node test/ai-chat-focus.mjs
  * Logs: test/artifacts/ai-chat-focus.{server,browser}.log
@@ -27,6 +38,7 @@ const ok = (name, cond, extra = '') => {
   results.push([cond ? 'PASS' : 'FAIL', name, extra])
   if (!cond) process.exitCode = 1
 }
+const PAGEERRORS = (errors) => errors.filter((e) => e.startsWith('pageerror:'))
 
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
@@ -46,6 +58,11 @@ async function api(cmd, args = {}, cookie = '') {
   return { status: res.status, text: await res.text() }
 }
 
+const textarea = () => page.locator('textarea[placeholder="Send message to AI writing..."]')
+const showPrompts = () => page.locator('button[aria-label="Show AI prompts"]')
+const aiToolbarBtn = () => page.locator('button[aria-label="Edit with AI"]')
+const chip = (name) => page.getByRole('button', { name })
+
 try {
   await waitForServer(BASE)
   const sa = await api('setup_admin', { email: ADMIN.email, password: ADMIN.password })
@@ -64,62 +81,95 @@ try {
   // The API login cookie must reach the browser context (Node fetch ≠ browser).
   await context.addCookies([{ name: 'db_session', value: cookie.split('=').slice(1).join('='), url: BASE }])
   page = await context.newPage()
-  attachLogging(page, 'ai-chat-focus')
-  // Seed persisted vault so the app auto-resumes it on boot (trash.mjs pattern)
+  const log = attachLogging(page, 'ai-chat-focus')
+
+  // Mock the AI transport: a plain token stream is enough to reach review.
+  await page.route('**/api/ask_ai', (route) => {
+    const mockSSE = [
+      'event: ai:token', 'data: "## Summary\\n\\n- point one\\n- point two"', '',
+      'event: ai:tools_done', 'data: ""', '',
+      'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
+    ].join('\n')
+    route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
+  })
+
+  // Seed persisted vault + AI config so the app auto-resumes and the composer
+  // is enabled (aiConfigured = provider ∈ savedProviders).
   await page.addInitScript((vaultPath) => {
     localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
+    localStorage.setItem('docubook:ai-settings', JSON.stringify({ state: {
+      provider: 'openai-compatible', model: 'mock-model', savedProviders: ['openai-compatible'],
+      probeTools: {}, baseUrls: { 'openai-compatible': 'http://mock.invalid/v1' }, models: {},
+    }, version: 0 }))
   }, VAULT)
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
 
-  // Open the .md file in the sidebar → WYSIWYG editor mounts (sidebar shows
-  // names without the .md extension)
-  await page.click('text=test', { timeout: 12000 })
-  // The ✨ FAB appears once the WYSIWYG editor is mounted (lazy chunk)
-  const fab = page.locator('button[aria-label="Ask AI"]')
-  await fab.waitFor({ state: 'visible', timeout: 15000 })
-  ok('fab: visible after opening .md file', true)
+  // ── Composer is always mounted in WYSIWYG edit mode ──
+  await page.locator('[data-testid="desktop-sidebar"]').getByText('test', { exact: true }).click()
+  await page.getByText('Hello', { exact: false }).first().waitFor({ timeout: 12000 })
+  await textarea().waitFor({ state: 'visible', timeout: 15000 })
+  ok('composer: visible after opening .md file', true)
+  ok('composer: enabled when AI is configured', !(await textarea().isDisabled()))
 
-  await fab.click()
-  const input = page.locator('input[placeholder="Send message to AI writing..."]')
-  await input.waitFor({ state: 'visible', timeout: 8000 })
-  // Panel auto-focuses the input on open
-  await page.waitForFunction(() => {
-    const el = document.activeElement
-    return !!el && el.matches('input') && (el.getAttribute('placeholder') || '').includes('Send message')
-  }, { timeout: 4000 })
-  ok('input: auto-focused when chat opens', true)
+  // ── Case A: UI prompts open from the composer and pre-fill it ──
+  await page.locator('.bn-editor').click({ position: { x: 60, y: 40 } })
+  await showPrompts().click()
+  await chip('Continue Writing').waitFor({ timeout: 4000 })
+  await chip('Summarize').waitFor({ timeout: 4000 })
+  await chip('Add Action Items').waitFor({ timeout: 4000 })
+  await chip(/Write Anything/).waitFor({ timeout: 4000 })
+  ok('prompts: no-selection chips render', true)
 
-  // ── Case A: no selection — clicking "Write anything" must keep the input focused ──
-  await page.click('button:has-text("Write anything")', { timeout: 4000 })
-  // Give the chip onClick + rAF-based refocus a moment to settle
-  await page.waitForTimeout(150)
-  const focusInfo = await page.evaluate(() => {
-    const el = document.activeElement
-    if (el && el.matches('input')) return `input:${el.getAttribute('placeholder')}`
-    if (!el) return 'none'
-    return `${el.tagName}.${(el.getAttribute('aria-label') || el.className || '').toString().slice(0, 50)}`
-  })
-  ok('write-anything: input stays focused after chip click', /^input:Send message/.test(focusInfo), focusInfo)
+  await chip(/Write Anything/).click()
+  await chip('Continue Writing').waitFor({ state: 'detached', timeout: 4000 })
+  const prefilled = await textarea().inputValue()
+  ok('write-anything: chip pre-fills the composer', prefilled.trim().length > 0, prefilled.slice(0, 40))
 
-  // ── Case B: WITH selection — "Translate" (pre-fill chip) must behave the same ──
-  await page.click('button[aria-label="Close AI chat"]')
-  // Select the whole document so the selection-aware chip set renders
-  await page.locator('.ProseMirror').click({ position: { x: 60, y: 40 } })
+  // ── Case B: extended prompts dismiss on outside click and Esc ──
+  await textarea().fill('')
+  await showPrompts().click()
+  await chip('Continue Writing').waitFor({ timeout: 4000 })
+  await page.locator('.bn-editor').click({ position: { x: 60, y: 120 } })
+  await chip('Continue Writing').waitFor({ state: 'detached', timeout: 4000 })
+  ok('prompts: outside mousedown dismisses the list', true)
+
+  await showPrompts().click()
+  await chip('Continue Writing').waitFor({ timeout: 4000 })
+  await page.keyboard.press('Escape')
+  await chip('Continue Writing').waitFor({ state: 'detached', timeout: 4000 })
+  ok('prompts: Escape dismisses the list', true)
+
+  // ── Case C: formatting-toolbar AI hand-off with a TEXT selection ──
+  await page.locator('.bn-editor').click({ position: { x: 60, y: 40 } })
   await page.keyboard.press('Meta+a')
-  await page.waitForTimeout(100)
-  const fab2 = page.locator('button[aria-label="Ask AI"]')
-  await fab2.waitFor({ state: 'visible', timeout: 5000 })
-  await fab2.click()
-  await input.waitFor({ state: 'visible', timeout: 8000 })
-  await page.click('button:has-text("Translate")', { timeout: 4000 })
-  await page.waitForTimeout(150)
-  const focusInfo2 = await page.evaluate(() => {
+  await aiToolbarBtn().click({ timeout: 5000 })
+  await chip('Improve Writing').waitFor({ timeout: 4000 })
+  await chip('Fix Spelling').waitFor({ timeout: 4000 })
+  await chip(/Translate/).waitFor({ timeout: 4000 })
+  await chip('Simplify').waitFor({ timeout: 4000 })
+  ok('toolbar AI: text selection expands chips immediately', true)
+  await page.keyboard.press('Escape')
+  await chip('Improve Writing').waitFor({ state: 'detached', timeout: 4000 })
+  ok('toolbar AI: Escape unlocks the editor', (await page.locator('.ProseMirror').getAttribute('contenteditable')) === 'true')
+
+  // ── Case D: after AI finishes writing + Accept, the editor is clickable again ──
+  await page.locator('.bn-editor').click({ position: { x: 60, y: 40 } })
+  await textarea().fill('summarize the note')
+  await page.keyboard.press('Enter')
+  await page.getByRole('button', { name: 'Accept' }).waitFor({ timeout: 8000 })
+  ok('review: Accept/Revert shown after mocked AI write', true)
+  await page.getByRole('button', { name: 'Accept' }).click()
+  await page.locator('.ProseMirror').waitFor({ timeout: 4000 })
+  const editable = await page.locator('.ProseMirror').getAttribute('contenteditable')
+  await page.locator('.bn-editor').click({ position: { x: 60, y: 40 } })
+  const focusedInside = await page.evaluate(() => {
     const el = document.activeElement
-    if (el && el.matches('input')) return `input:${el.getAttribute('placeholder')}:${el.value}`
-    if (!el) return 'none'
-    return `${el.tagName}.${(el.getAttribute('aria-label') || el.className || '').toString().slice(0, 50)}`
+    return !!el && !!el.closest('.ProseMirror')
   })
-  ok('translate: input stays focused and pre-filled after chip click', /^input:Send message/.test(focusInfo2) && !focusInfo2.endsWith(':'), focusInfo2)
+  ok('post-accept: editor is editable again', editable === 'true', `contenteditable=${editable}`)
+  ok('post-accept: click lands a caret inside the editor', focusedInside)
+
+  ok('no page errors during the whole run', PAGEERRORS(log.errors).length === 0, PAGEERRORS(log.errors).slice(0, 2).join(' | '))
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
   process.exitCode = 1

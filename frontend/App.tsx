@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Drawer } from '@mantine/core'
 import { PanelLeftClose } from 'lucide-react'
@@ -185,7 +184,7 @@ export default function App() {
           </div>
         </div>
       )}
-      <Toaster position="bottom-right" theme={colorScheme} richColors offset={{ bottom: 200, right: 16 }} mobileOffset={{ bottom: 96 }} />
+      <Toaster position="bottom-right" theme={colorScheme} richColors offset={{ bottom: 80, right: 16 }} mobileOffset={{ bottom: 96 }} />
     </div>
   )
 }

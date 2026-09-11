@@ -3,8 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAiChat } from '../../../frontend/stores/aiChat'
 import { useEditorStore } from '../../../frontend/stores/editor'
 
-/** Minimal AIExtension mock — mirrors the extension's vanilla store (state +
- *  subscribe) and the methods AiFloatingChat/aiChat toggle actually call. */
+/** Minimal AIExtension mock for prompt-toggle behavior. */
 function makeAi(aiMenuState: unknown) {
   const ai = {
     store: {
@@ -30,64 +29,49 @@ function makeEditor(ai: unknown) {
   }
 }
 
-describe('useAiChat.toggle (⌃⌥L / FAB)', () => {
+describe('useAiChat', () => {
   beforeEach(() => {
-    useAiChat.setState({ expanded: false })
+    useAiChat.setState({ expanded: false, focusRequest: 0 })
     useEditorStore.setState({ blockEditor: null })
   })
 
-  it('is a no-op without a mounted WYSIWYG editor', () => {
-    useAiChat.getState().toggle()
-    expect(useAiChat.getState().expanded).toBe(false)
+  it('requests composer focus and collapses prompt actions', () => {
+    useAiChat.setState({ expanded: true })
+    useAiChat.getState().focusInput()
+    expect(useAiChat.getState()).toMatchObject({ expanded: false, focusRequest: 1 })
   })
 
-  it('is a no-op when the editor has no AI extension', () => {
+  it('does not toggle prompts without an AI-enabled WYSIWYG editor', () => {
+    useAiChat.getState().togglePrompts()
     useEditorStore.setState({ blockEditor: makeEditor(null) })
-    useAiChat.getState().toggle()
+    useAiChat.getState().togglePrompts()
     expect(useAiChat.getState().expanded).toBe(false)
   })
 
-  it('opens the AI menu at the cursor block and expands when closed', () => {
+  it('opens prompts at the cursor block and closes an idle menu', () => {
     const ai = makeAi('closed')
     useEditorStore.setState({ blockEditor: makeEditor(ai) })
-    useAiChat.getState().toggle()
+
+    useAiChat.getState().togglePrompts()
     expect(ai.openAIMenuAtBlock).toHaveBeenCalledWith('b1')
     expect(useAiChat.getState().expanded).toBe(true)
+
+    ai.store.state.aiMenuState = { blockId: 'b1', status: 'user-input' }
+    useAiChat.getState().togglePrompts()
+    expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
+    expect(useAiChat.getState().expanded).toBe(false)
   })
 
-  it('closes a user-input menu and collapses', () => {
-    const ai = makeAi({ blockId: 'b1', status: 'user-input' })
+  it.each(['thinking', 'ai-writing', 'user-reviewing', 'error'])('does not touch active %s work', (status) => {
+    const ai = makeAi({ blockId: 'b1', status })
     useEditorStore.setState({ blockEditor: makeEditor(ai) })
-    useAiChat.getState().toggle()
-    expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
+
+    useAiChat.getState().togglePrompts()
+
+    expect(useAiChat.getState().expanded).toBe(false)
+    expect(ai.openAIMenuAtBlock).not.toHaveBeenCalled()
+    expect(ai.closeAIMenu).not.toHaveBeenCalled()
     expect(ai.abort).not.toHaveBeenCalled()
     expect(ai.rejectChanges).not.toHaveBeenCalled()
-    expect(useAiChat.getState().expanded).toBe(false)
-  })
-
-  it('aborts a streaming request (thinking / ai-writing) and collapses', () => {
-    const ai = makeAi({ blockId: 'b1', status: 'ai-writing' })
-    useEditorStore.setState({ blockEditor: makeEditor(ai) })
-    useAiChat.getState().toggle()
-    expect(ai.abort).toHaveBeenCalledWith(expect.any(String))
-    expect(ai.closeAIMenu).not.toHaveBeenCalled()
-    expect(useAiChat.getState().expanded).toBe(false)
-  })
-
-  it('rejects pending review changes and collapses', () => {
-    const ai = makeAi({ blockId: 'b1', status: 'user-reviewing' })
-    useEditorStore.setState({ blockEditor: makeEditor(ai) })
-    useAiChat.getState().toggle()
-    expect(ai.rejectChanges).toHaveBeenCalledTimes(1)
-    expect(ai.closeAIMenu).not.toHaveBeenCalled()
-    expect(useAiChat.getState().expanded).toBe(false)
-  })
-
-  it('rejects on error state and collapses', () => {
-    const ai = makeAi({ blockId: 'b1', status: 'error', error: new Error('boom') })
-    useEditorStore.setState({ blockEditor: makeEditor(ai) })
-    useAiChat.getState().toggle()
-    expect(ai.rejectChanges).toHaveBeenCalledTimes(1)
-    expect(useAiChat.getState().expanded).toBe(false)
   })
 })

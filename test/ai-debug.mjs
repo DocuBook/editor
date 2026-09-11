@@ -126,13 +126,13 @@ try {
   await page.getByText('notes', { exact: true }).click()
   await page.getByText('hello world', { exact: true }).waitFor()
 
-  // Opening/closing the FAB only toggles editor editability. TipTap emits an
-  // update for that UI-only change; it must not dirty and lossy-serialize the file.
-  await page.getByRole('button', { name: 'Ask AI' }).click()
+  // Opening/closing the prompt list only toggles editor editability. TipTap emits
+  // an update for that UI-only change; it must not dirty and lossy-serialize the file.
+  await page.getByRole('button', { name: 'Show AI prompts' }).click()
   await page.getByPlaceholder('Send message to AI writing...').waitFor()
   await page.keyboard.press('Escape')
   await page.waitForTimeout(2200)
-  ok('FAB open/close preserves raw Markdown bytes', readFileSync(`${VAULT}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
+  ok('prompt open/close preserves raw Markdown bytes', readFileSync(`${VAULT}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
 
   // Select the document content so the AI edit path (update ops) is exercised
   await page.keyboard.press('Meta+a')
@@ -158,12 +158,12 @@ try {
   await page.getByPlaceholder('Send message to AI writing...').waitFor()
   ok('Path B: text-only request renders review', askAiHits === 1)
 
-  // Escape dismisses the chat back to the FAB (old floating-menu parity).
-  // Review keeps the prompt textarea focused, so Escape bubbles from it to
-  // the panel handler.
+  // Escape dismisses the AI review back to the idle composer (the FAB is gone;
+  // the composer stays mounted). The panel listens on window capture so the
+  // event is not swallowed before it reaches us while focus sits on BODY.
   await page.keyboard.press('Escape')
-  await page.getByRole('button', { name: 'Ask AI' }).waitFor()
-  ok('Escape collapses chat to FAB', await page.getByText('DocuBook AI', { exact: true }).count() === 0)
+  await page.getByRole('button', { name: 'Accept' }).waitFor({ state: 'detached' })
+  ok('Escape collapses AI review to the idle composer', await page.getByRole('button', { name: 'Accept' }).count() === 0)
 
   // Switch the persisted probe to true and reload: same mock response now
   // exercises Path A (tools are sent, model returns text, no second ask_ai).
@@ -187,11 +187,10 @@ try {
   ok('Path A: tool request renders review', askAiHits === 2)
   ok('Path A: hostile HTML stays inert', await page.locator('.bn-editor script, .bn-editor [onerror]').count() === 0)
 
-  // Revert now keeps the chat open in input mode (old AIMenu parity) so the
-  // user can keep improving the prompt — the input is already focused, so the
-  // follow-up prompt goes straight to the AI instead of needing a reopen.
+  // Revert closes the review and restores the editor; the composer stays mounted,
+  // so the user can refocus it and send a follow-up prompt straight away.
   await page.getByText('Revert', { exact: true }).click()
-  await page.getByPlaceholder('Send message to AI writing...').waitFor()
+  await page.getByPlaceholder('Send message to AI writing...').click()
   await page.keyboard.type('leave unchanged')
   await page.keyboard.press('Enter')
   await page.locator('[data-sonner-toast]').filter({ hasText: /AI made no document changes/i }).waitFor()

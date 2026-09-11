@@ -395,24 +395,27 @@ body .mobile-sidebar-drawer-body > aside {
   gap: 3px;
 }
 
+/* Tailwind v4 emits range media queries for responsive utilities; Safari 15
+   ignores that syntax. Keep the floating composer responsive with the legacy
+   min-width form supported by the app's oldest WKWebView. */
+.editor-ai-floating {
+    width: calc(100% - 2rem);
+}
+@media (min-width: 640px) {
+    .editor-ai-floating {
+        width: 50%;
+    }
+}
+
 /* Keep the document surface and its tab bar visually centered on wide displays.
    The existing shell/sidebar layout stays unchanged; the rail keeps a small
    breathing space even when the sidebar is open, then caps at 1280px. */
 @media (min-width: 1440px) {
     .editor-tab-bar,
-    .editor-content {
+    .editor-content,
+    .editor-ai-rail {
         width: min(calc(100% - 6rem), 1280px);
         margin-inline: auto;
-    }
-
-    /* The AI FAB/panel is rendered after the scroll area. Anchor it to the
-       editor rail instead of the viewport so it follows the centered content. */
-    .editor-root {
-        position: relative;
-    }
-    .editor-ai-floating {
-        position: absolute;
-        right: calc((100% - min(calc(100% - 6rem), 1280px)) / 2);
     }
 }
 
