@@ -1,25 +1,12 @@
-//! Branch listing and switching — the contract for the status-bar switcher
-//! lives here and must stay in sync with `frontend/components/StatusBar.tsx`:
-//!
-//! Listed (from actual refs, never hardcoded):
-//! - every local branch (`refs/heads/*`) → `remote: false`
-//! - remote-tracking refs (`refs/remotes/*`) → `remote: true` EXCEPT
-//!   `<remote>/HEAD` (symbolic default pointer — not a branch) and refs whose
-//!   local counterpart already exists (dedupe by the name a checkout would
-//!   create, i.e. after the first '/': `origin/feature/x` → `feature/x`).
-//!
-//! Switching: local → `git checkout`; remote → `git switch -c <short>
-//! --track <remote-full>` UNLESS the local branch already exists (plain
-//! checkout — never a "-c" collision).
+//! Branch listing, creation, and safe worktree switching.
 
-use std::process::Command;
+use std::collections::HashSet;
+
+use git2::{build::CheckoutBuilder, Branch, BranchType, ErrorCode, ObjectType, Repository};
 use serde::Serialize;
 
-use super::Git;
+use super::{git_error, Git};
 
-/** A branch for the switcher: local (`remote: false`) or a remote-tracking
- *  ref (`remote: true`, full name like `origin/dev`). Sourced from the actual
- *  refs — never assumed/hardcoded. */
 #[derive(Debug, Serialize, PartialEq)]
 pub struct BranchRef {
     pub name: String,
@@ -27,68 +14,138 @@ pub struct BranchRef {
 }
 
 impl Git {
-/** List branches from actual refs — local (`refs/heads`) first, then
- *  remote-tracking (`refs/remotes`). See the module doc for the full
- *  contract. */
     pub fn branches(&self) -> Result<Vec<BranchRef>, String> {
-        let out = Command::new("git").args(["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes"]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
-        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
-        let mut refs: Vec<BranchRef> = Vec::new();
-        let mut local: Vec<String> = Vec::new();
-        for line in String::from_utf8_lossy(&out.stdout).lines() {
-            let line = line.trim();
-            if let Some(rest) = line.strip_prefix("refs/heads/") {
-                local.push(rest.to_string());
-                refs.push(BranchRef { name: rest.to_string(), remote: false });
-            } else if let Some(rest) = line.strip_prefix("refs/remotes/") {
-                // origin/HEAD (+ <remote>/HEAD) is the symbolic default-branch
-                // pointer, not a branch — never list it ("switch -c HEAD" fatal).
-                if rest.ends_with("/HEAD") { continue; }
-                // The local branch a checkout would create is the name after the
-                // FIRST '/': "origin/feature/x" → "feature/x". Comparing the last
-                // segment would let nested remote branches through dedupe and
-                // then fail with "a branch named ... already exists".
-                let short = rest.split_once('/').map(|(_, b)| b).unwrap_or(rest).to_string();
-                if !local.contains(&short) {
-                    refs.push(BranchRef { name: rest.to_string(), remote: true });
-                }
+        let repo = self.repository()?;
+        let mut result = Vec::new();
+        let mut local_names = HashSet::new();
+
+        for branch in repo.branches(Some(BranchType::Local)).map_err(git_error)? {
+            let (branch, _) = branch.map_err(git_error)?;
+            let name = String::from_utf8_lossy(branch.name_bytes().map_err(git_error)?).to_string();
+            local_names.insert(name.clone());
+            result.push(BranchRef {
+                name,
+                remote: false,
+            });
+        }
+
+        for branch in repo.branches(Some(BranchType::Remote)).map_err(git_error)? {
+            let (branch, _) = branch.map_err(git_error)?;
+            let name = String::from_utf8_lossy(branch.name_bytes().map_err(git_error)?).to_string();
+            if name.ends_with("/HEAD") {
+                continue;
+            }
+            let short = name.split_once('/').map(|(_, rest)| rest).unwrap_or(&name);
+            if !local_names.contains(short) {
+                result.push(BranchRef { name, remote: true });
             }
         }
-        Ok(refs)
-    }
-    /// Create and check out a new local branch after validating its name with
-    /// Git's branch ref rules.
-    pub fn create_branch(&self, name: &str) -> Result<(), String> {
-        let name = name.trim();
-        if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
-        let valid = Command::new("git").args(["check-ref-format", "--branch", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
-        if !valid.status.success() { return Err(String::from_utf8_lossy(&valid.stderr).trim().to_string()); }
-        let out = Command::new("git").args(["checkout", "-b", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
-        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
-        Ok(())
+        Ok(result)
     }
 
-    /// Switch branches. `remote: false` uses `git checkout <name>`; `remote:
-    /// true` uses `git switch -c <short> --track <remote>`. Names are passed as
-    /// argv and validated so Git never parses them as flags.
+    pub fn create_branch(&self, name: &str) -> Result<(), String> {
+        let name = valid_branch_name(name)?;
+        let repo = self.repository()?;
+        let head_commit = repo.head().and_then(|head| head.peel_to_commit());
+        match head_commit {
+            Ok(commit) => {
+                let mut branch = repo.branch(name, &commit, false).map_err(git_error)?;
+                if let Err(error) = checkout_branch_object(&repo, branch.get()) {
+                    let _ = branch.delete();
+                    return Err(error);
+                }
+                repo.set_head(branch.get().name().map_err(git_error)?)
+                    .map_err(git_error)
+            }
+            Err(error) if matches!(error.code(), ErrorCode::UnbornBranch | ErrorCode::NotFound) => {
+                if repo.find_branch(name, BranchType::Local).is_ok() {
+                    return Err(format!("Branch \"{name}\" already exists"));
+                }
+                repo.set_head(&format!("refs/heads/{name}"))
+                    .map_err(git_error)
+            }
+            Err(error) => Err(git_error(error)),
+        }
+    }
+
     pub fn checkout_branch(&self, name: &str, remote: bool) -> Result<(), String> {
         let name = name.trim();
-        if name.is_empty() || name.starts_with('-') { return Err("Invalid branch name".into()); }
-        if remote {
-            let Some((_, short)) = name.split_once('/') else { return Err("Invalid remote branch name".into()); };
-            if short.is_empty() || short.starts_with('-') || short == "HEAD" { return Err("Invalid remote branch name".into()); }
-            // Idempotent: the local tracking branch may already exist (created
-            // earlier, or by a teammate) — plain checkout then, never -c.
-            let local_exists = self.branches().unwrap_or_default().iter().any(|b| !b.remote && b.name == short);
-            let args = if local_exists { vec!["checkout", short] } else { vec!["switch", "-c", short, "--track", name] };
-            let out = Command::new("git").args(&args).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
-            if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
-            return Ok(());
+        if name.is_empty() || name.starts_with('-') {
+            return Err("Invalid branch name".into());
         }
-        let out = Command::new("git").args(["checkout", name]).current_dir(&self.repo_path).output().map_err(|e| e.to_string())?;
-        if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
-        Ok(())
+        let repo = self.repository()?;
+        if !remote {
+            return checkout_local(&repo, valid_branch_name(name)?);
+        }
+
+        let Some((_, short)) = name.split_once('/') else {
+            return Err("Invalid remote branch name".into());
+        };
+        if short.is_empty() || short.starts_with('-') || short == "HEAD" {
+            return Err("Invalid remote branch name".into());
+        }
+        let short =
+            valid_branch_name(short).map_err(|_| "Invalid remote branch name".to_string())?;
+        if repo.find_branch(short, BranchType::Local).is_ok() {
+            return checkout_local(&repo, short);
+        }
+
+        let tracking = repo
+            .find_branch(name, BranchType::Remote)
+            .map_err(git_error)?;
+        let commit = tracking
+            .get()
+            .peel(ObjectType::Commit)
+            .and_then(|object| {
+                object
+                    .into_commit()
+                    .map_err(|_| git2::Error::from_str("Remote branch does not point to a commit"))
+            })
+            .map_err(git_error)?;
+        let mut local = repo.branch(short, &commit, false).map_err(git_error)?;
+        if let Err(error) = local.set_upstream(Some(name)).map_err(git_error) {
+            let _ = local.delete();
+            return Err(error);
+        }
+        if let Err(error) = checkout_branch_object(&repo, local.get()) {
+            let _ = local.delete();
+            return Err(error);
+        }
+        repo.set_head(local.get().name().map_err(git_error)?)
+            .map_err(git_error)
     }
+}
+
+fn valid_branch_name(name: &str) -> Result<&str, String> {
+    let name = name.trim();
+    if name.is_empty()
+        || name.starts_with('-')
+        || !Branch::name_is_valid(name).map_err(git_error)?
+    {
+        Err("Invalid branch name".into())
+    } else {
+        Ok(name)
+    }
+}
+
+fn checkout_local(repo: &Repository, name: &str) -> Result<(), String> {
+    let branch = repo
+        .find_branch(name, BranchType::Local)
+        .map_err(git_error)?;
+    checkout_branch_object(repo, branch.get())?;
+    repo.set_head(branch.get().name().map_err(git_error)?)
+        .map_err(git_error)
+}
+
+fn checkout_branch_object(
+    repo: &Repository,
+    reference: &git2::Reference<'_>,
+) -> Result<(), String> {
+    let object = reference.peel(ObjectType::Commit).map_err(git_error)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.safe();
+    repo.checkout_tree(&object, Some(&mut checkout))
+        .map_err(git_error)
 }
 
 #[cfg(test)]
@@ -96,25 +153,37 @@ mod tests {
     use super::*;
     use crate::git::test_util::temp_git_repo;
 
-    #[test]
-    fn branches_list_and_checkout() {
-        let dir = temp_git_repo("branches");
+    fn committed_repo(tag: &str) -> (std::path::PathBuf, Git) {
+        let dir = temp_git_repo(tag);
         let g = Git::open(dir.to_str().unwrap());
         g.init().unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("a.md"), "a").unwrap();
         g.add_all().unwrap();
         g.commit("first").unwrap();
-        let names = |g: &Git| g.branches().unwrap().into_iter().map(|b| (b.name, b.remote)).collect::<Vec<_>>();
+        (dir, g)
+    }
+
+    #[test]
+    fn branches_list_and_checkout() {
+        let (dir, g) = committed_repo("branches");
+        let names = |g: &Git| {
+            g.branches()
+                .unwrap()
+                .into_iter()
+                .map(|branch| (branch.name, branch.remote))
+                .collect::<Vec<_>>()
+        };
         let base = names(&g);
         assert_eq!(base.len(), 1);
-        Command::new("git").args(["switch", "-c", "dev"]).current_dir(&dir).output().unwrap();
-        let bs = names(&g);
-        assert!(bs.contains(&("dev".to_string(), false)));
-        assert_eq!(bs.len(), 2);
-        g.checkout_branch(base[0].0.as_str(), false).unwrap();
+        let repo = g.repository().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.branch("dev", &head, false).unwrap();
+        drop(head);
+        drop(repo);
         assert!(names(&g).contains(&("dev".to_string(), false)));
-        // flag injection and empty names are rejected before reaching git
+        g.checkout_branch("dev", false).unwrap();
+        assert_eq!(g.status_with_branch().unwrap().branch, "dev");
         assert!(g.checkout_branch("", false).is_err());
         assert!(g.checkout_branch("-x", false).is_err());
         let _ = std::fs::remove_dir_all(&dir);
@@ -122,14 +191,7 @@ mod tests {
 
     #[test]
     fn create_branch_validates_and_checks_out() {
-        let dir = temp_git_repo("create-branch");
-        let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
-        g.set_identity("T", "t@e.c").unwrap();
-        std::fs::write(dir.join("a.md"), "a").unwrap();
-        g.add_all().unwrap();
-        g.commit("first").unwrap();
-
+        let (dir, g) = committed_repo("create-branch");
         g.create_branch("feature/new").unwrap();
         assert_eq!(g.status_with_branch().unwrap().branch, "feature/new");
         assert!(g.branches().unwrap().contains(&BranchRef {
@@ -144,51 +206,75 @@ mod tests {
     }
 
     #[test]
+    fn checkout_preserves_intentionally_deleted_tracked_file() {
+        let (dir, g) = committed_repo("checkout-deleted");
+        let base_branch = g.status_with_branch().unwrap().branch;
+        g.create_branch("other").unwrap();
+        g.checkout_branch(&base_branch, false).unwrap();
+        std::fs::remove_file(dir.join("a.md")).unwrap();
+
+        g.checkout_branch("other", false).unwrap();
+        assert!(!dir.join("a.md").exists());
+        assert!(g.status_with_branch().unwrap().status.contains(".D a.md"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn nested_remote_branch_dedupes_and_checkout_is_idempotent() {
-        let dir = temp_git_repo("branches-nested");
-        let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
-        g.set_identity("T", "t@e.c").unwrap();
-        std::fs::write(dir.join("a.md"), "a").unwrap();
-        g.add_all().unwrap();
-        g.commit("first").unwrap();
-        g.add_remote("origin", "https://example.invalid/repo.git").unwrap();
-        // Local branch "feature/x" AND remote "origin/feature/x" exist
-        Command::new("git").args(["switch", "-c", "feature/x"]).current_dir(&dir).output().unwrap();
-        Command::new("git").args(["update-ref", "refs/remotes/origin/feature/x", "HEAD"]).current_dir(&dir).output().unwrap();
+        let (dir, g) = committed_repo("branches-nested");
+        g.add_remote("origin", "https://example.invalid/repo.git")
+            .unwrap();
+        g.create_branch("feature/x").unwrap();
+        let repo = g.repository().unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        repo.reference(
+            "refs/remotes/origin/feature/x",
+            head,
+            true,
+            "test remote ref",
+        )
+        .unwrap();
+        drop(repo);
         let names = g.branches().unwrap();
-        assert!(names.contains(&BranchRef { name: "feature/x".into(), remote: false }));
-        // Nested remote must be deduped (short name after the FIRST '/')
-        assert!(!names.iter().any(|b| b.remote && b.name == "origin/feature/x"));
-        // Idempotent: local already exists → plain checkout, no "-c" collision
+        assert!(names.contains(&BranchRef {
+            name: "feature/x".into(),
+            remote: false,
+        }));
+        assert!(!names
+            .iter()
+            .any(|branch| branch.remote && branch.name == "origin/feature/x"));
         g.checkout_branch("origin/feature/x", true).unwrap();
-        let state = g.status_with_branch().unwrap();
-        assert_eq!(state.branch, "feature/x");
+        assert_eq!(g.status_with_branch().unwrap().branch, "feature/x");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn branches_include_remote_refs_and_switch_creates_tracking() {
-        let dir = temp_git_repo("branches-remote");
-        let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
-        g.set_identity("T", "t@e.c").unwrap();
-        std::fs::write(dir.join("a.md"), "a").unwrap();
-        g.add_all().unwrap();
-        g.commit("first").unwrap();
-        // Simulate a fetched remote without network: configured remote + ref
-        g.add_remote("origin", "https://example.invalid/repo.git").unwrap();
-        Command::new("git").args(["update-ref", "refs/remotes/origin/feat", "HEAD"]).current_dir(&dir).output().unwrap();
-        // origin/HEAD symbolic default pointer must never be listed
-        Command::new("git").args(["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]).current_dir(&dir).output().unwrap();
+        let (dir, g) = committed_repo("branches-remote");
+        g.add_remote("origin", "https://example.invalid/repo.git")
+            .unwrap();
+        let repo = g.repository().unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        repo.reference("refs/remotes/origin/feat", head, true, "test remote ref")
+            .unwrap();
+        repo.reference_symbolic(
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/feat",
+            true,
+            "test remote head",
+        )
+        .unwrap();
+        drop(repo);
         let names = g.branches().unwrap();
-        assert!(names.contains(&BranchRef { name: "origin/feat".into(), remote: true }));
-        assert!(!names.iter().any(|b| b.name == "origin/HEAD"));
-        // Checking out the remote ref creates a local tracking branch "feat"
+        assert!(names.contains(&BranchRef {
+            name: "origin/feat".into(),
+            remote: true,
+        }));
+        assert!(!names.iter().any(|branch| branch.name == "origin/HEAD"));
         g.checkout_branch("origin/feat", true).unwrap();
         let state = g.status_with_branch().unwrap();
         assert_eq!(state.branch, "feat");
-        // Malformed remote names are rejected
+        assert_eq!(state.upstream, "origin/feat");
         assert!(g.checkout_branch("origin", true).is_err());
         assert!(g.checkout_branch("origin/-x", true).is_err());
         let _ = std::fs::remove_dir_all(&dir);
