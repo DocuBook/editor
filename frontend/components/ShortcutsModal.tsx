@@ -78,8 +78,8 @@ export default function ShortcutsModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener('keydown', h)
   }, [onClose])
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh]" onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} className="bg-surface border border-border rounded-xl w-[480px] max-h-[70vh] overflow-hidden shadow-[0_25px_50px_-12px_var(--color-shadow)]">
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] max-sm:px-4" onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} className="bg-surface border border-border rounded-xl w-[480px] max-w-full max-h-[70vh] overflow-hidden shadow-[0_25px_50px_-12px_var(--color-shadow)]">
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border-subtle">
           <span className="text-[13px] font-semibold text-foreground">Keyboard Shortcuts</span>
           <button onClick={onClose} className="p-1 rounded cursor-pointer bg-transparent text-muted border-none hover:text-foreground-secondary"><X size={16} /></button>
