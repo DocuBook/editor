@@ -25,9 +25,11 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   useEffect(() => { clearEditorCache(); cursorOffsets.current.clear() }, [vaultPath])
 
   // Re-check when vault first opens
+  /* oxlint-disable react/set-state-in-effect -- syncs the guide to vault-open state */
   useEffect(() => {
     if (vaultOpen && !isOnboardingDone()) setOnboardingDone(false)
   }, [vaultOpen])
+  /* oxlint-enable react/set-state-in-effect */
 
   /** Completion is set by REAL progress, not by clicking the onboarding button:
    *  opening a file proves step 1 (create a note) is done. The button only
@@ -72,7 +74,9 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   }
 
   const kind = editorFileKind(file.path)
+  /* oxlint-disable react/refs -- non-reactive per-path cursor cache; promoting it to state adds renders per keystroke */
   const cursorOffset = cursorOffsets.current.get(file.path)
+  /* oxlint-enable react/refs */
 
   /** Shared scroll container — all modes use the same container. */
   let inner: ReactNode

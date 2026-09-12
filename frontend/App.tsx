@@ -75,9 +75,11 @@ export default function App() {
     mq.addEventListener('change', onChange)
     return () => mq.removeEventListener('change', onChange)
   }, [])
+  /* oxlint-disable react/set-state-in-effect -- closes the drawer when the vault/modal state changes */
   useEffect(() => {
     if (!isVaultOpen || status !== 'ready' || modalOpen) setMobileDrawerOpen(false)
   }, [isVaultOpen, modalOpen, status])
+  /* oxlint-enable react/set-state-in-effect */
   useEffect(() => { useAuth.getState().init() }, [])
 
   /** Single git-status poller shared by the editor UI. */

@@ -15,10 +15,12 @@ function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
   const { openFile } = useEditorStore()
   const activeTab = useEditorStore(s => s.activeTab)
 
+  /* oxlint-disable react/set-state-in-effect -- clears backlinks when no tab is active */
   useEffect(() => {
     if (!activeTab) { setItems([]); return }
     invoke<string>('wiki_backlinks', { path: activeTab }).then(s => { try { setItems(JSON.parse(s)) } catch(e) { console.error('Backlinks parse:', e); setItems([]) } }).catch(e => console.error('Backlinks:', e))
   }, [activeTab])
+  /* oxlint-enable react/set-state-in-effect */
 
   if (items.length === 0) return null
   return (
@@ -60,6 +62,9 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     if (creating) setTimeout(() => newInputRef.current?.focus(), 50)
   }, [creating])
 
+  /** Declared before closeContextMenu so it reads an initialized binding (react/immutability). */
+  const [ctxItem, setCtxItem] = useState<{path:string;name:string;type:string}|null>(null)
+  const [ctxPos, setCtxPos] = useState({x:0,y:0})
   const closeContextMenu = () => setCtxItem(null)
 
   // Close popups / menus on click outside
@@ -93,10 +98,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const { name, isOpen, vaultPath, recent, visibleItems, loading, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
-  // Context menu
-  const [ctxItem, setCtxItem] = useState<{path:string;name:string;type:string}|null>(null)
-  const [ctxPos, setCtxPos] = useState({x:0,y:0})
-  const openContextMenu = (item: any, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY}) }
+  const openContextMenu = (item: any, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY }) }
   const [renaming, setRenaming] = useState<{path:string;name:string;type:string}|null>(null)
   const renameRef = useRef<HTMLInputElement>(null)
   const [currentFolder, setCurrentFolder] = useState('')
@@ -104,11 +106,13 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
    *  search is owned by App (works with the sidebar closed), which calls this
    *  callback only while the sidebar is mounted. */
   useEffect(() => registerSearchFolder(setCurrentFolder), [registerSearchFolder])
+  /* oxlint-disable react/set-state-in-effect -- resets local UI state on vault change */
   useEffect(() => {
     setCurrentFolder('')
     setCreating(null)
     setNewName('')
   }, [vaultPath, isOpen])
+  /* oxlint-enable react/set-state-in-effect */
   /** Server-side trash (web only — native uses the system Trash/Finder). */
   const [trashOpen, setTrashOpen] = useState(false)
   const [trashItems, setTrashItems] = useState<{name:string;original:string;deleted_at:number}[]>([])
@@ -156,6 +160,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   })
 
   // Refresh tree on window focus
+  /* oxlint-disable react/set-state-in-effect -- refreshes trash/tree state from disk */
   useEffect(() => {
     if (!isOpen || isTauri) return
     // Read the actual trash contents so the Trash button reflects real state.
@@ -164,6 +169,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     window.addEventListener('focus', h)
     return () => window.removeEventListener('focus', h)
   }, [isOpen, loadTree, loadTrash])
+  /* oxlint-enable react/set-state-in-effect */
 
   /** Shared header icon style - theme tokens only, so +/search/X match in both themes. */
   const iconBtn = 'cursor-pointer p-1 rounded hover:bg-surface-active text-foreground-subtle hover:text-foreground transition-colors'
@@ -195,8 +201,9 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                     if (MARKDOWN_EXTENSIONS.some(e => renaming.path.toLowerCase().endsWith(e)) && !/\.\w{1,10}$/i.test(target)) target = target + '.md'
                     const newPath = dir + target
                     try {
+                      await useEditorStore.getState().flushEditor()
                       await invoke('rename_file', { from: renaming.path, to: newPath })
-                      useEditorStore.getState().renameTab(renaming.path, newPath)
+                      await useEditorStore.getState().renameTab(renaming.path, newPath)
                       /* Keep the create-here target in sync: create_file re-creates missing
                        * parent dirs, so a stale currentFolder would silently recreate the
                        * old folder (A -> Z then new file lands in A/). */

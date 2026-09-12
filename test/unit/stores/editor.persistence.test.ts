@@ -11,7 +11,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 describe('editor store tab persistence', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useEditorStore.setState({ tabs: [], activeTab: null, _flushEditor: null })
+    useEditorStore.setState({ tabs: [], activeTab: null, _flushEditor: null, _aiWriting: false })
   })
 
   it('does not write unchanged files or auto-save when switching tabs', async () => {
@@ -23,10 +23,51 @@ describe('editor store tab persistence', () => {
       activeTab: 'a.md',
     })
 
-    useEditorStore.getState().switchTab('b.md')
+    await useEditorStore.getState().switchTab('b.md')
     await useEditorStore.getState().closeTab('b.md')
 
     expect(invoke).not.toHaveBeenCalledWith('write_file', expect.anything())
+  })
+
+  it('waits for editor settlement before detaching the active tab', async () => {
+    let settle!: () => void
+    const settled = new Promise<void>(resolve => { settle = resolve })
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'a.md',
+      _flushEditor: async () => {
+        await settled
+        useEditorStore.getState().setEditedContent('a.md', 'complete AI result')
+        useEditorStore.getState().setTabDirty('a.md', true)
+      },
+    })
+
+    const switching = useEditorStore.getState().switchTab('b.md')
+    expect(useEditorStore.getState().activeTab).toBe('a.md')
+
+    settle()
+    await switching
+
+    expect(useEditorStore.getState().activeTab).toBe('b.md')
+    expect(useEditorStore.getState().tabs[0]).toMatchObject({ editedContent: 'complete AI result', dirty: true })
+  })
+
+  it('keeps the active tab attached when serialization fails', async () => {
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: null, dirty: true, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'a.md',
+      _flushEditor: async () => { throw new Error('serialize failed') },
+    })
+
+    await useEditorStore.getState().switchTab('b.md')
+
+    expect(useEditorStore.getState().activeTab).toBe('a.md')
   })
 
   it('writes a dirty active tab on close, including content edited to empty', async () => {

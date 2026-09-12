@@ -37,8 +37,8 @@ export interface CachedEditor {
 export { KeepAliveCache } from './keepAliveCache'
 
 /** Create a fresh editor instance bound to the vault + file path.
- *  The AI transport closes over THIS instance, so a stream started in this
- *  tab keeps writing to it even after the user switches away and back.
+ *  The AI transport closes over THIS instance. Active streams are settled by
+ *  WysiwygEditor's exit hook before a tab switch detaches its view.
  *  NOTE: only construct INSIDE a live app (mount) — creating a BlockNote
  *  editor headless (jsdom) touches module-level SideMenu state and throws. */
 export function createBlockEditor(vaultPath: string, _filePath: string): CachedEditor {

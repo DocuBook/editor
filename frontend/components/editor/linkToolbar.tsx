@@ -41,7 +41,9 @@ function LinkUrlForm({ url, text, range, showTextField, onSubmitted }: {
   const { editLink } = useExtension(LinkToolbarExtension)
   const [currentUrl, setCurrentUrl] = useState(url)
   const [currentText, setCurrentText] = useState(text)
+  /* oxlint-disable react/set-state-in-effect -- re-syncs form fields when the link target changes */
   useEffect(() => { setCurrentUrl(url); setCurrentText(text) }, [url, text])
+  /* oxlint-enable react/set-state-in-effect */
   const submit = () => {
     editLink(currentUrl.trim(), currentText, range.from)
     onSubmitted()
@@ -110,7 +112,9 @@ function CreateLinkButtonPreserveUrl() {
       }
     },
   })
+  /* oxlint-disable react/set-state-in-effect -- closes the popover when the selection changes */
   useEffect(() => { setShowPopover(false) }, [state])
+  /* oxlint-enable react/set-state-in-effect */
   /** Ctrl/Cmd+K opens the link form (same shortcut as the default button). */
   useEffect(() => {
     const el = editor.domElement
@@ -247,6 +251,7 @@ function NoteLinkSearch({ onPick }: { onPick: (title: string) => void }) {
   const [results, setResults] = useState<{ path: string; title: string }[]>([])
   const [selected, setSelected] = useState(0)
 
+  /* oxlint-disable react/set-state-in-effect -- clears suggestions when the query is emptied */
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     const t = setTimeout(() => {
@@ -256,6 +261,7 @@ function NoteLinkSearch({ onPick }: { onPick: (title: string) => void }) {
     }, 150)
     return () => clearTimeout(t)
   }, [query])
+  /* oxlint-enable react/set-state-in-effect */
 
   return (
     <div className="border-t border-border-subtle px-3 py-2">

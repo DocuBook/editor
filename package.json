@@ -51,6 +51,7 @@
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
     "lucide-react": "^1.27.0",
+    "mdast-util-from-markdown": "2.0.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-icons": "5.7.0",

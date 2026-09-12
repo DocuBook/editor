@@ -1,11 +1,42 @@
+import { fromMarkdown } from 'mdast-util-from-markdown'
+
 interface CursorBlock {
   id: string
+  content?: unknown
   children?: CursorBlock[]
 }
 
 interface CursorEditor {
   document: CursorBlock[]
-  blocksToMarkdownLossy: (blocks: any[]) => string
+}
+
+interface MarkdownNode {
+  type: string
+  value?: string
+  alt?: string
+  children?: MarkdownNode[]
+  position?: {
+    start: { offset?: number }
+    end: { offset?: number }
+  }
+}
+
+interface SourceCharacter {
+  value: string
+  offset: number
+}
+
+interface SourceBlock {
+  start: number
+  end: number
+  characters: SourceCharacter[]
+  children: SourceBlock[]
+}
+
+interface MappedBlock {
+  block: CursorBlock
+  source: SourceBlock
+  children: MappedBlock[]
 }
 
 export interface MarkdownCursorPosition {
@@ -13,26 +44,8 @@ export interface MarkdownCursorPosition {
   textOffset: number
 }
 
-const cleanMarkdown = (markdown: string) => markdown
-  .trim()
-  .replace(/^\n+/, '')
-  .replace(/\n+$/, '')
-  .replace(/^(\s*)\* /gm, '$1- ')
-
-const containsBlock = (block: CursorBlock, id: string): boolean =>
-  block.id === id || !!block.children?.some(child => containsBlock(child, id))
-
-function findBlock(block: CursorBlock, id: string): CursorBlock | undefined {
-  if (block.id === id) return block
-  for (const child of block.children ?? []) {
-    const found = findBlock(child, id)
-    if (found) return found
-  }
-  return undefined
-}
-
-/** Visible text used to align a BlockNote cursor with its Markdown export. */
-function blockText(block: CursorBlock & { content?: unknown }): string {
+/** Visible text used to align a BlockNote cursor with Markdown AST text nodes. */
+function blockText(block: CursorBlock): string {
   if (typeof block.content === 'string') return block.content
   if (!Array.isArray(block.content)) return ''
   return block.content.map(item => {
@@ -47,91 +60,156 @@ function blockText(block: CursorBlock & { content?: unknown }): string {
   }).join('')
 }
 
-/** Source positions for visible characters, skipping Markdown syntax. */
-function visibleCharacterPositions(source: string, visible: string): number[] {
-  const positions: number[] = []
-  let searchFrom = 0
-  for (const character of visible) {
-    const position = source.indexOf(character, searchFrom)
-    if (position < 0) return positions
-    positions.push(position)
-    searchFrom = position + character.length
+const nodeStart = (node: MarkdownNode) => node.position?.start.offset ?? 0
+const nodeEnd = (node: MarkdownNode) => node.position?.end.offset ?? nodeStart(node)
+
+/** Source positions for each UTF-16 code unit in an AST text value. */
+function valueCharacters(markdown: string, node: MarkdownNode, value: string): SourceCharacter[] {
+  const characters: SourceCharacter[] = []
+  const end = nodeEnd(node)
+  let searchFrom = nodeStart(node)
+  for (let index = 0; index < value.length; index++) {
+    let offset = markdown.indexOf(value[index], searchFrom)
+    if (offset < 0 || offset >= end) offset = Math.min(searchFrom, Math.max(nodeStart(node), end - 1))
+    characters.push({ value: value[index], offset })
+    searchFrom = offset + 1
   }
-  return positions
+  return characters
 }
 
-function sourceOffsetForTextOffset(source: string, visible: string, textOffset: number): number {
-  if (!visible) return 0
-  const positions = visibleCharacterPositions(source, visible)
-  if (textOffset <= 0) return positions[0] ?? 0
-  if (textOffset >= positions.length) return source.length
-  return positions[textOffset - 1] + 1
+function textCharacters(markdown: string, node: MarkdownNode): SourceCharacter[] {
+  if (node.type === 'text' || node.type === 'inlineCode' || node.type === 'code') {
+    return valueCharacters(markdown, node, node.value ?? '')
+  }
+  if (node.type === 'image') return valueCharacters(markdown, node, node.alt ?? '')
+  if (node.type === 'break') return [{ value: '\n', offset: Math.max(nodeStart(node), nodeEnd(node) - 1) }]
+  return (node.children ?? []).flatMap(child => child.type === 'list' ? [] : textCharacters(markdown, child))
 }
 
-function textOffsetForSourceOffset(source: string, visible: string, sourceOffset: number): number {
-  const positions = visibleCharacterPositions(source, visible)
-  return positions.filter(position => position < sourceOffset).length
+function sourceBlock(markdown: string, node: MarkdownNode): SourceBlock {
+  return {
+    start: nodeStart(node),
+    end: nodeEnd(node),
+    characters: textCharacters(markdown, node),
+    children: node.type === 'listItem'
+      ? (node.children ?? []).flatMap(child => child.type === 'list' ? sourceBlocks(markdown, child.children ?? []) : [])
+      : [],
+  }
 }
 
-function blockStarts(editor: CursorEditor, markdown: string): number[] {
-  let searchFrom = 0
-  return editor.document.map((block, index) => {
-    const blockMarkdown = cleanMarkdown(editor.blocksToMarkdownLossy([block]))
-    const found = blockMarkdown ? markdown.indexOf(blockMarkdown, searchFrom) : -1
-    let start = found >= 0 ? found : cleanMarkdown(editor.blocksToMarkdownLossy(editor.document.slice(0, index))).length
-    while (start < markdown.length && markdown[start] === '\n') start++
-    start = Math.min(markdown.length, Math.max(index ? searchFrom : 0, start))
-    searchFrom = start + blockMarkdown.length
-    return start
+/** Lists are AST containers; BlockNote blocks correspond to their list items. */
+function sourceBlocks(markdown: string, nodes: MarkdownNode[]): SourceBlock[] {
+  return nodes.flatMap(node => node.type === 'list'
+    ? sourceBlocks(markdown, node.children ?? [])
+    : [sourceBlock(markdown, node)])
+}
+
+function emptySource(offset: number): SourceBlock {
+  return { start: offset, end: offset, characters: [], children: [] }
+}
+
+function mapBlocks(blocks: CursorBlock[], sources: SourceBlock[], fallbackOffset = 0): MappedBlock[] {
+  return blocks.map((block, index) => {
+    const source = sources[index] ?? emptySource(sources[index - 1]?.end ?? fallbackOffset)
+    return {
+      block,
+      source,
+      children: mapBlocks(block.children ?? [], source.children, source.start),
+    }
   })
 }
 
-function blockIndexAtOffset(starts: number[], offset: number): number {
-  let index = 0
-  while (index + 1 < starts.length && starts[index + 1] <= offset) index++
-  return index
+function mappedDocument(editor: CursorEditor, markdown: string): MappedBlock[] {
+  const root = fromMarkdown(markdown) as MarkdownNode
+  return mapBlocks(editor.document, sourceBlocks(markdown, root.children ?? []))
 }
 
-/** Source offset for a BlockNote block and text position inside that block. */
+function findMappedBlock(blocks: MappedBlock[], id: string): MappedBlock | undefined {
+  for (const block of blocks) {
+    if (block.block.id === id) return block
+    const child = findMappedBlock(block.children, id)
+    if (child) return child
+  }
+  return undefined
+}
+
+/** Align AST text with BlockNote inline content without counting Markdown syntax. */
+function alignedCharacters(mapped: MappedBlock): SourceCharacter[] {
+  const visible = blockText(mapped.block)
+  if (!visible) return mapped.source.characters
+  const aligned: SourceCharacter[] = []
+  let searchFrom = 0
+  for (let index = 0; index < visible.length; index++) {
+    let found = mapped.source.characters.findIndex((character, sourceIndex) => sourceIndex >= searchFrom && character.value === visible[index])
+    if (found < 0) found = Math.min(searchFrom, mapped.source.characters.length - 1)
+    if (found < 0) break
+    aligned.push(mapped.source.characters[found])
+    searchFrom = found + 1
+  }
+  return aligned
+}
+
+function contentStart(mapped: MappedBlock): number {
+  return alignedCharacters(mapped)[0]?.offset ?? mapped.source.start
+}
+
+function sourceOffsetForTextOffset(mapped: MappedBlock, textOffset: number): number {
+  const characters = alignedCharacters(mapped)
+  if (!characters.length) return mapped.source.start
+  if (textOffset <= 0) return characters[0].offset
+  if (textOffset >= characters.length) return Math.min(mapped.source.end, characters[characters.length - 1].offset + 1)
+  return characters[textOffset].offset
+}
+
+function textOffsetForSourceOffset(mapped: MappedBlock, sourceOffset: number): number {
+  return alignedCharacters(mapped).filter(character => character.offset < sourceOffset).length
+}
+
+function blockAtOffset(blocks: MappedBlock[], offset: number): MappedBlock | undefined {
+  let block: MappedBlock | undefined
+  for (const candidate of blocks) {
+    if (candidate.source.start > offset) break
+    block = candidate
+  }
+  if (!block) return undefined
+  if (offset <= block.source.end) return blockAtOffset(block.children, offset) ?? block
+  return block
+}
+
+/** Source offset for a BlockNote block and UTF-16 text position inside it. */
 export function markdownOffsetForCursor(
   editor: CursorEditor,
   markdown: string,
   blockId: string,
   textOffset: number,
 ): number {
-  const index = editor.document.findIndex(block => containsBlock(block, blockId))
-  if (index < 0) return 0
-  const target = findBlock(editor.document[index], blockId) ?? editor.document[index]
-  const start = blockStarts(editor, markdown)[index] ?? 0
-  const source = cleanMarkdown(editor.blocksToMarkdownLossy([editor.document[index]]))
-  return Math.min(markdown.length, start + sourceOffsetForTextOffset(source, blockText(target), textOffset))
+  const mapped = findMappedBlock(mappedDocument(editor, markdown), blockId)
+  if (!mapped) return 0
+  return Math.min(markdown.length, sourceOffsetForTextOffset(mapped, textOffset))
 }
 
-/** Source offset at the start of a BlockNote block. */
+/** Source offset at visible content start of a BlockNote block. */
 export function markdownOffsetForBlock(editor: CursorEditor, markdown: string, blockId: string): number {
-  return markdownOffsetForCursor(editor, markdown, blockId, 0)
+  const mapped = findMappedBlock(mappedDocument(editor, markdown), blockId)
+  return mapped ? Math.min(markdown.length, contentStart(mapped)) : 0
 }
 
-/** Maps a source offset to its BlockNote block and visible text offset. */
+/** Maps a source offset to its deepest BlockNote block and UTF-16 text offset. */
 export function cursorPositionAtMarkdownOffset(
   editor: CursorEditor,
   markdown: string,
   offset: number,
 ): MarkdownCursorPosition | undefined {
-  if (editor.document.length === 0) return undefined
-  const starts = blockStarts(editor, markdown)
-  const index = blockIndexAtOffset(starts, Math.max(0, offset))
-  const block = editor.document[index]
-  if (!block) return undefined
-  const source = cleanMarkdown(editor.blocksToMarkdownLossy([block]))
-  const localOffset = Math.max(0, Math.min(source.length, offset - (starts[index] ?? 0)))
+  const document = mappedDocument(editor, markdown)
+  const mapped = blockAtOffset(document, Math.max(0, Math.min(markdown.length, offset))) ?? document[0]
+  if (!mapped) return undefined
   return {
-    block,
-    textOffset: textOffsetForSourceOffset(source, blockText(block), localOffset),
+    block: mapped.block,
+    textOffset: textOffsetForSourceOffset(mapped, offset),
   }
 }
 
-/** Top-level BlockNote block containing a source offset. */
+/** Deepest BlockNote block containing a source offset. */
 export function blockAtMarkdownOffset(editor: CursorEditor, markdown: string, offset: number): CursorBlock | undefined {
   return cursorPositionAtMarkdownOffset(editor, markdown, offset)?.block
 }

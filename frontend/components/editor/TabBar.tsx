@@ -69,20 +69,24 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       strip.scrollLeft = Math.max(0, sl + left - 8)    // scroll left, -8 margin
     }
   }, [curTab])
+  /* oxlint-disable react/set-state-in-effect -- reset on tab switch; next git poll corrects it */
   useEffect(() => {
     /** Reset disk-dirty on tab switch; next git poll corrects it */
     setHasDiskChanges(false)
   }, [curTab])
+  /* oxlint-enable react/set-state-in-effect */
 
   /** Git status: shared store (single poller from App root) — derive per-tab state. */
   const { isRepo, hasRemote, ahead, upstream, status: gitStatus } = useGitStatus()
 
+  /* oxlint-disable react/set-state-in-effect -- derives per-tab dirty state from the shared git status */
   useEffect(() => {
     const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
     const curFile = useEditorStore.getState().activeTab
     const relevant = curFile ? lines.filter((l: string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
     setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== ' '))
   }, [gitStatus])
+  /* oxlint-enable react/set-state-in-effect */
 
   /** A successful Commit/Push indicator auto-resets to idle after 3s, so the
    *  menu does not stay green forever after a one-shot action. */

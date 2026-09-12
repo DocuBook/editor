@@ -16,6 +16,7 @@ export default function SearchModal({ onClose, onSelect }: { onClose: () => void
   useEffect(() => { inputRef.current?.focus() }, [])
 
   // Search vault when query changes
+  /* oxlint-disable react/set-state-in-effect -- clears results when the query is emptied */
   useEffect(() => {
     if (!query.trim()) { setResults([]); return }
     const timer = setTimeout(() => {
@@ -25,6 +26,7 @@ export default function SearchModal({ onClose, onSelect }: { onClose: () => void
     }, 200)
     return () => clearTimeout(timer)
   }, [query])
+  /* oxlint-enable react/set-state-in-effect */
 
   // Keyboard navigation
   useEffect(() => {

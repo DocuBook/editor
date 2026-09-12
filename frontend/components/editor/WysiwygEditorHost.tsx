@@ -16,12 +16,14 @@ export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, mark
   const [entry, setEntry] = useState<{ vaultPath: string; filePath: string; cached: CachedEditor } | null>(null)
   const ready = entry?.vaultPath === vaultPath && entry.filePath === filePath ? entry.cached : null
 
+  /* oxlint-disable react/set-state-in-effect -- resolves the cached editor after mount */
   useEffect(() => {
     let active = true
     const cached = getEditorCache<CachedEditor>(vaultPath, path => createBlockEditor(vaultPath, path)).get(filePath)
     if (active) setEntry({ vaultPath, filePath, cached })
     return () => { active = false }
   }, [vaultPath, filePath])
+  /* oxlint-enable react/set-state-in-effect */
 
   if (!ready) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading editor...</div>
   return <WysiwygEditor cached={ready} filePath={filePath} isDesktop={isDesktop} markdown={markdown} cursorOffset={cursorOffset} onCursorOffset={onCursorOffset} onSync={onSync} />
