@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import SearchModal from './components/SearchModal'
 import Editor from './components/Editor'
 import SettingsModal from './components/SettingsModal'
+import ShortcutsModal from './components/ShortcutsModal'
 import { Toaster, toast } from 'sonner'
 
 import { useGitPolling } from './stores/gitStatus'
@@ -30,6 +31,9 @@ export default function App() {
   /** Search lives here (not in Sidebar) so ⌘F/⌘P and the modal keep working
    *  with the sidebar closed — Sidebar unmounts when hidden. */
   const [searchOpen, setSearchOpen] = useState(false)
+  /** Shortcuts lives here (not in Sidebar) for the same reason: on mobile it
+   *  must close the drawer and render outside it, like search/settings. */
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
   const [confirmCloseVault, setConfirmCloseVault] = useState(false)
   /** Current create-target folder lives in Sidebar; the modal's onSelect only
    *  needs it while the sidebar is mounted, so Sidebar registers its setter. */
@@ -39,7 +43,7 @@ export default function App() {
     searchFolderRef.current = fn
     return () => { if (searchFolderRef.current === fn) searchFolderRef.current = () => {} }
   }, [])
-  const modalOpen = searchOpen || settingsOpen || confirmCloseVault
+  const modalOpen = searchOpen || settingsOpen || shortcutsOpen || confirmCloseVault
   const sidebarOpen = isDesktop ? desktopSidebarOpen : mobileDrawerOpen
   const drawerOpen = !isDesktop && isVaultOpen && status === 'ready' && mobileDrawerOpen && !modalOpen
   const closeMobileDrawer = useCallback(() => setMobileDrawerOpen(false), [])
@@ -49,13 +53,16 @@ export default function App() {
     else if (!modalOpen) setMobileDrawerOpen(open => !open)
   }, [isDesktop, isVaultOpen, modalOpen, status])
   const openSearch = useCallback(() => {
-    setMobileDrawerOpen(false); setSettingsOpen(false); setConfirmCloseVault(false); setSearchOpen(true)
+    setMobileDrawerOpen(false); setSettingsOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); setSearchOpen(true)
   }, [])
   const openSettings = useCallback(() => {
-    setMobileDrawerOpen(false); setSearchOpen(false); setConfirmCloseVault(false); setSettingsOpen(true)
+    setMobileDrawerOpen(false); setSearchOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); setSettingsOpen(true)
+  }, [])
+  const openShortcuts = useCallback(() => {
+    setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setConfirmCloseVault(false); setShortcutsOpen(true)
   }, [])
   const requestCloseVault = useCallback(() => {
-    setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setConfirmCloseVault(true)
+    setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setShortcutsOpen(false); setConfirmCloseVault(true)
   }, [])
 
   /** Mobile drawer starts closed on every transition; desktop restores its own collapse preference. */
@@ -140,7 +147,7 @@ export default function App() {
     <div className="h-screen flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
         {isVaultOpen && isDesktop && desktopSidebarOpen && (
-          <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
+          <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
         )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
@@ -168,10 +175,11 @@ export default function App() {
         lockScroll
         classNames={{ overlay: 'mobile-sidebar-drawer-overlay', content: 'mobile-sidebar-drawer-content', header: 'mobile-sidebar-drawer-header', title: 'mobile-sidebar-drawer-title', body: 'mobile-sidebar-drawer-body', close: 'mobile-sidebar-drawer-close' }}
       >
-        <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
+        <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
       </Drawer>
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       {confirmCloseVault && (
         <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={() => setConfirmCloseVault(false)}>
           <div className="bg-surface border border-border rounded-xl p-4 w-72 shadow-[0_10px_30px_var(--color-shadow)]" onClick={e => e.stopPropagation()}>

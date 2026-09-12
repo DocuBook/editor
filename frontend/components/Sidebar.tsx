@@ -39,12 +39,13 @@ interface SidebarProps {
   id?: string
   onOpenSettings: () => void
   onOpenSearch: () => void
+  onOpenShortcuts: () => void
   onRequestCloseVault: () => void
   onNavigate?: () => void
   registerSearchFolder: (fn: (path: string) => void) => () => void
 }
 
-export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
+export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortcuts, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
   const [creating, setCreating] = useState<'file'|'folder'|null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const [newName, setNewName] = useState('')
@@ -328,7 +329,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
           <Settings size={14} />
         </button>
       </div>
-      <SidebarFooter />
+      <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
       {ctxItem && (
         <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_var(--color-shadow)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
           <button onClick={async () => {

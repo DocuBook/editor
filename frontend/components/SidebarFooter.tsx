@@ -1,6 +1,5 @@
 import { useRef, useState } from 'react'
 import { Check, ChevronDown, GitBranch, Keyboard } from 'lucide-react'
-import ShortcutsModal from './ShortcutsModal'
 import { useGitStatus, pollGitStatus } from '../stores/gitStatus'
 import { useEditorStore } from '../stores/editor'
 import { invoke } from '../lib/ipc'
@@ -27,10 +26,9 @@ function BranchGroup({ label, branches, current, busy, onSelect }: { label: stri
 }
 
 /** Sidebar footer for global helpers: shortcuts and the current git branch. */
-export default function SidebarFooter() {
+export default function SidebarFooter({ onOpenShortcuts }: { onOpenShortcuts: () => void }) {
   const branch = useGitStatus(s => s.branch)
 
-  const [showShortcuts, setShowShortcuts] = useState(false)
   const [branchOpen, setBranchOpen] = useState(false)
   const [branches, setBranches] = useState<BranchEntry[]>([])
   const [busy, setBusy] = useState<string | null>(null)
@@ -88,11 +86,10 @@ export default function SidebarFooter() {
 
   return (
     <div className="ui-shell relative flex items-center gap-1 px-2 py-1 shrink-0">
-      <button onClick={() => setShowShortcuts(true)} title="Keyboard Shortcuts" aria-label="Keyboard Shortcuts"
+      <button onClick={onOpenShortcuts} title="Keyboard Shortcuts" aria-label="Keyboard Shortcuts"
         className="rounded cursor-pointer text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
         <Keyboard size={15} />
       </button>
-      {showShortcuts && <ShortcutsModal onClose={() => setShowShortcuts(false)} />}
       {branch ? (
         <div className="min-w-0 max-w-40" ref={branchRef}>
           <button onClick={toggleBranchSwitcher} aria-label="Switch branch" aria-expanded={branchOpen} title="Switch branch"
