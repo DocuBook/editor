@@ -24,8 +24,8 @@ COPY --from=web /app/dist /
 
 # ---- server (Rust, musl) ----
 FROM rust:1.94-alpine AS server
-# cmake/clang for aws-lc-rs (reqwest TLS), build-base for ring/cc
-RUN apk add --no-cache musl-dev build-base cmake clang git
+# cmake/clang for native TLS crates; git keeps configured credential helpers available
+RUN apk add --no-cache musl-dev build-base cmake clang git perl
 WORKDIR /src
 # Compile dependencies before application sources so ordinary source changes reuse
 # the expensive release dependency layer.

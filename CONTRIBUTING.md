@@ -130,7 +130,7 @@ editor/
 
 **PR CI validates both runtimes:** lint, type checks, frontend and Rust tests, Linux server tests, browser E2E, desktop DMGs, and multi-platform Docker builds. Heavy E2E, desktop, and Docker jobs may require environment approval. Release artifacts are published only from version tags.
 
-The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates), **fails if a lock changed**, then runs the type check, desktop Rust tests, and frontend tests. Run `cargo test --manifest-path server/Cargo.toml` separately before pushing server changes.
+The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates), **fails if a lock changed**, then runs the type check, desktop Rust tests, server Rust tests, and frontend tests.
 
 ## Release workflow (custom — no semantic-release/changeset)
 
