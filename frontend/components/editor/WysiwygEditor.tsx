@@ -19,6 +19,8 @@ import { useEditorStore } from '../../stores/editor'
 import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
+import { isTauri } from '../../lib/ipc'
+import { findActiveSuggestionItem, isEnterBeforeInput } from '../../utils/slashMenuFallback'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
 import { createQueuedMermaidRender } from '../../utils/mermaidRenderCache'
@@ -80,6 +82,55 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     document.addEventListener('keydown', preserveMermaidIndent, true)
     return () => document.removeEventListener('keydown', preserveMermaidIndent, true)
   }, [editor])
+
+  /** Mobile-web slash-menu Enter fallback (web <640px, non-Tauri only). Soft
+   *  keyboards on iOS/Android can deliver the Enter that should confirm the
+   *  highlighted item without the plain `keydown` `key === 'Enter' &&
+   *  !isComposing` shape BlockNote's suggestion-menu handler matches
+   *  (`useSuggestionMenuKeyboardHandler`): the keyboard IME reports it as a
+   *  `beforeinput` paragraph/line-break insertion (or a `keydown` with keyCode
+   *  13 but no matching `key`). The menu only listens for `keydown`, so the item
+   *  never activates.
+   *
+   *  We resolve the highlighted item from BlockNote's own ARIA wiring and click
+   *  it, which runs the same `onItemClick` the keyboard path would. We only
+   *  intervene while the menu is open and never touch the event otherwise, so
+   *  normal Enter (new block / line break) is unchanged. Desktop (>=640px) and
+   *  Tauri always emit a handled keydown, so they are excluded. */
+  useEffect(() => {
+    if (isTauri || isDesktop) return
+    /** Click the item BlockNote marks active — same `onItemClick` the keyboard
+     *  path would run. Returns false when the menu is closed or nothing is
+     *  highlighted, so callers can leave the event untouched. */
+    const activateSelectedItem = (): boolean => {
+      const selected = findActiveSuggestionItem(editor.domElement)
+      if (!selected) return false
+      selected.click()
+      return true
+    }
+    /** Consume the Enter only once an item actually activated, so the default
+     *  insertion (new block) does not also run. No active item → the event is
+     *  left untouched and normal Enter behavior applies. */
+    const confirmSelectedItem = (event: Event) => {
+      if (event.defaultPrevented || !activateSelectedItem()) return
+      event.preventDefault()
+      event.stopPropagation()
+    }
+    const onBeforeInput = (event: Event) => {
+      if (isEnterBeforeInput(event as InputEvent)) confirmSelectedItem(event)
+    }
+    /** `keyCode` is deliberate: it is the only signal some soft keyboards give
+     *  when `key` arrives as `'Unidentified'` for the physical Enter. */
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Enter' || event.code === 'Enter' || event.keyCode === 13) confirmSelectedItem(event)
+    }
+    document.addEventListener('beforeinput', onBeforeInput, true)
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('beforeinput', onBeforeInput, true)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [editor, isDesktop])
 
   /** Hover hint for [[wikilink]]: native title tooltips get cancelled by
    *  ProseMirror's decoration re-rendering, so render a small floating hint
