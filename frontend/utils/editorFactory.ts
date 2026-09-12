@@ -41,7 +41,7 @@ export { KeepAliveCache } from './keepAliveCache'
  *  WysiwygEditor's exit hook before a tab switch detaches its view.
  *  NOTE: only construct INSIDE a live app (mount) — creating a BlockNote
  *  editor headless (jsdom) touches module-level SideMenu state and throws. */
-export function createBlockEditor(vaultPath: string, _filePath: string): CachedEditor {
+export function createBlockEditor(vaultPath: string, filePath: string): CachedEditor {
   let editor!: BlockNoteEditor<any, any, any>
   editor = BlockNoteEditor.create({
     schema: getSchema(),
@@ -53,7 +53,7 @@ export function createBlockEditor(vaultPath: string, _filePath: string): CachedE
     },
     extensions: [
       AIExtension({
-        transport: createAiTransport({ getEditor: () => editor }),
+        transport: createAiTransport({ getEditor: () => editor, filePath }),
         agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
       }),
       wikilinkStyler,

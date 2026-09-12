@@ -1,8 +1,8 @@
 /**
  * Trash UI e2e (web/Docker) — server-side trash contract:
- *   1. Trash button reads the REAL trash state: disabled while `.trash/` empty.
- *   2. With `.trash/` content → enabled + count badge.
- *   3. Restore from the panel → file back in the tree, button disabled again.
+ *   1. Trash tab is DISABLED while `.trash/` is empty (web has no native trash).
+ *   2. With `.trash/` content → tab enabled and selectable.
+ *   3. Restore from the panel → file back in the tree, tab disabled again.
  *
  * Note: the Linux-only delete→`.trash/` move is covered by the cfg(target_os
  * = "linux") Rust unit test. On macOS dev the delete path goes to the system
@@ -139,12 +139,12 @@ try {
   await page.setViewportSize({ width: 1280, height: 800 })
   await page.getByTestId('desktop-sidebar').waitFor({ state: 'visible' })
 
-  // 1. Empty trash → button disabled (real state read from list_trash)
-  const trashBtn = page.getByTestId('trash-toggle')
-  ok('trash button: disabled when empty', await trashBtn.isDisabled(), '')
-  ok('trash button: no badge when empty', !(await trashBtn.innerText()).includes('1'))
+  // 1. Empty trash → Trash tab disabled (web: no native trash, count 0)
+  const trashTab = page.getByTestId('trash-toggle')
+  ok('trash tab: disabled when empty', await trashTab.isDisabled(), '')
+  ok('trash tab: not selected while the vault panel is active', await trashTab.getAttribute('aria-selected') === 'false')
 
-  // 2. Seed the server-side trash → reload → button enabled + badge
+  // 2. Seed the server-side trash → reload → tab enabled
   mkdirSync(`${VAULT}/.trash`, { recursive: true })
   writeFileSync(`${VAULT}/.trash/1700000000000-notes.md`, '# Notes\n\ncontent')
   const refreshedTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
@@ -152,18 +152,22 @@ try {
   await refreshedTrash
   await page.waitForSelector('text=Empty vault', { timeout: 10000 })
   await page.waitForFunction(() => !document.querySelector('[data-testid="trash-toggle"]')?.disabled)
-  ok('trash button: enabled when trash has files', await trashBtn.isEnabled(), '')
-  ok('trash button: badge shows 1', (await trashBtn.innerText()).includes('1'))
+  ok('trash tab: enabled when trash has files', await trashTab.isEnabled(), '')
 
-  // 3. Open the panel → restore → back in the tree, button disabled again
-  await trashBtn.click()
-  await page.waitForSelector('text=Trash (1)', { timeout: 5000 })
+  // 3. Open the panel → tab selected → restore → back in the tree, tab disabled again
+  await trashTab.click()
+  ok('trash tab: selected after opening the panel', await trashTab.getAttribute('aria-selected') === 'true')
+  const trashPanel = page.locator('section[aria-label="Trash"]')
+  await trashPanel.getByText('Trash (1)').waitFor({ timeout: 5000 })
+  const restoreRow = trashPanel.getByRole('button', { name: 'Put back notes.md' })
+  await restoreRow.waitFor({ timeout: 5000 })
   const restoreResponse = page.waitForResponse(r => r.url().endsWith('/api/restore_file') && r.ok())
-  await page.getByText('notes.md', { exact: true }).click() // restore row
+  await restoreRow.click()
   await restoreResponse
   await page.waitForFunction(() => document.querySelector('[data-testid="trash-toggle"]')?.disabled)
-  ok('trash button: disabled again after restore', await trashBtn.isDisabled(), '')
-  await page.getByRole('button', { name: 'Back' }).click()
+  ok('trash tab: disabled again after restore', await trashTab.isDisabled(), '')
+  ok('restore: row removed from the panel', await restoreRow.count() === 0)
+  await trashPanel.getByRole('button', { name: 'Back' }).click()
   await page.waitForSelector('text=notes', { timeout: 5000 })
   ok('restore: notes.md back in the tree', await page.getByText('notes', { exact: true }).count() >= 1)
 } catch (e) {

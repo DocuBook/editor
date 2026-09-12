@@ -1,13 +1,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
+import { useAiThreads } from '../stores/aiThreads'
 import { invoke, isMacTauri, isTauri } from '../lib/ipc'
-import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, Trash, RotateCcw, ArrowBigUp } from 'lucide-react'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
 import SidebarFooter from './SidebarFooter'
+import AiChatPanel from './panels/AiChatPanel'
+import GitPanel from './panels/GitPanel'
+import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
+import TrashPanel, { type TrashItem } from './panels/TrashPanel'
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
@@ -57,6 +62,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const ctxMenuRef = useRef<HTMLDivElement>(null)
   const vaultMenuRef = useRef<HTMLSpanElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
+  const [activePanel, setActivePanel] = useState<SidebarPanelId>('vault')
 
   useEffect(() => {
     if (creating) setTimeout(() => newInputRef.current?.focus(), 50)
@@ -111,26 +117,56 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     setCurrentFolder('')
     setCreating(null)
     setNewName('')
+    setActivePanel('vault')
   }, [vaultPath, isOpen])
   /* oxlint-enable react/set-state-in-effect */
-  /** Server-side trash (web only — native uses the system Trash/Finder). */
-  const [trashOpen, setTrashOpen] = useState(false)
-  const [trashItems, setTrashItems] = useState<{name:string;original:string;deleted_at:number}[]>([])
+  const [trashItems, setTrashItems] = useState<TrashItem[]>([])
+  const [trashLoading, setTrashLoading] = useState(false)
+  const [trashError, setTrashError] = useState('')
   const loadTrash = useCallback(async () => {
+    setTrashLoading(true)
+    setTrashError('')
     try {
-      // web invoke returns the JSON as a string (must parse); desktop returns
-      // the parsed array — normalize both, never let a non-array reach .map
       const raw = await invoke<string>('list_trash')
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
       setTrashItems(Array.isArray(parsed) ? parsed : [])
-    } catch(e) { console.error(e); setTrashItems([]) }
+    } catch(e) {
+      console.error(e)
+      setTrashError(String(e))
+    } finally {
+      setTrashLoading(false)
+    }
   }, [])
-  const toggleTrash = async () => { if (trashOpen) { setTrashOpen(false); return } await loadTrash(); setTrashOpen(true) }
-  const restoreItem = async (item: {name:string;original:string;deleted_at:number}) => {
-    try { await invoke('restore_file', { trashName: item.name }); toast.success('Restored ' + item.original); await loadTrash(); await loadTree() } catch(e) { console.error(e); toast.error('Restore failed') }
+  const selectPanel = async (panel: SidebarPanelId) => {
+    setShowPlusMenu(false)
+    setVaultMenuOpen(false)
+    closeContextMenu()
+    setActivePanel(panel)
+    if (panel === 'trash') await loadTrash()
+  }
+  const restoreItem = async (item: TrashItem) => {
+    try {
+      await invoke('restore_file', { trashName: item.name })
+      toast.success('Restored ' + item.original)
+      await loadTrash()
+      await loadTree()
+    } catch(e) { console.error(e); toast.error(String(e)) }
+  }
+  const deleteTrashItem = async (item: TrashItem) => {
+    if (!window.confirm(`Delete "${item.original}" permanently? This cannot be undone.`)) return
+    try {
+      await invoke('delete_trash_item', { trashName: item.name })
+      toast.success('Deleted permanently')
+      await loadTrash()
+    } catch(e) { console.error(e); toast.error(String(e)) }
   }
   const emptyTrash = async () => {
-    try { await invoke('empty_trash'); setTrashItems([]); await loadTree() } catch(e) { console.error(e); toast.error('Failed to empty trash') }
+    if (!window.confirm('Permanently delete every item in Trash? This cannot be undone.')) return
+    try {
+      await invoke('empty_trash')
+      await loadTrash()
+      await loadTree()
+    } catch(e) { console.error(e); toast.error(String(e)) }
   }
 
   useEffect(() => {
@@ -150,33 +186,43 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     if (newFile) {
       e.preventDefault()
       if (!isOpen || loading) { toast.error('Open a vault first — press ⌘O'); return }
-      setCreating('file'); setNewName('')
+      setActivePanel('vault'); setCreating('file'); setNewName('')
     }
     if (newFolder) {
       e.preventDefault()
       if (!isOpen || loading) { toast.error('Open a vault first — press ⌘O'); return }
-      setCreating('folder'); setNewName('')
+      setActivePanel('vault'); setCreating('folder'); setNewName('')
     }
   })
 
   // Refresh tree on window focus
   /* oxlint-disable react/set-state-in-effect -- refreshes trash/tree state from disk */
   useEffect(() => {
-    if (!isOpen || isTauri) return
-    // Read the actual trash contents so the Trash button reflects real state.
-    loadTrash()
-    const h = () => loadTree()
+    if (!isOpen && !isTauri) return
+    if (!isTauri || activePanel === 'trash') loadTrash()
+    const h = () => {
+      if (isOpen) void loadTree()
+      if (!isTauri || activePanel === 'trash') void loadTrash()
+    }
     window.addEventListener('focus', h)
     return () => window.removeEventListener('focus', h)
-  }, [isOpen, loadTree, loadTrash])
+  }, [activePanel, isOpen, loadTree, loadTrash])
   /* oxlint-enable react/set-state-in-effect */
 
   /** Shared header icon style - theme tokens only, so +/search/X match in both themes. */
   const iconBtn = 'cursor-pointer p-1 rounded hover:bg-surface-active text-foreground-subtle hover:text-foreground transition-colors'
 
   return (
-    <aside id={id} data-testid={id} className="ui-shell w-56 bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full">
-      {isMacTauri && <div data-tauri-drag-region className="h-12 shrink-0" />}
+    <aside id={id} data-testid={id} className={'ui-shell bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full ' + (isMacTauri ? 'w-64' : 'w-56')}>
+      {isMacTauri ? (
+        <div data-tauri-drag-region className="flex h-12 shrink-0 items-center pl-[72px] pr-2">
+          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} />
+        </div>
+      ) : (
+        <div className="px-2 pt-2">
+          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} />
+        </div>
+      )}
 
       {/* Search modal lives in App so ⌘F/⌘P still work with the sidebar closed. */}
       <div className="px-2 py-2">
@@ -187,11 +233,11 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
         </button>
       </div>
 
-      {isOpen ? (
+      {isOpen && activePanel === 'vault' && (
         <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5">
-            {!trashOpen && loading && <div className="text-foreground-subtle text-xs p-2">Loading...</div>}
-            {!trashOpen && !loading && visibleItems.length === 0 && !creating && <div className="text-foreground-subtle italic text-xs p-2">Empty vault</div>}
-            {!trashOpen && renaming && (
+            {loading && <div className="text-foreground-subtle text-xs p-2">Loading...</div>}
+            {!loading && visibleItems.length === 0 && !creating && <div className="text-foreground-subtle italic text-xs p-2">Empty vault</div>}
+            {renaming && (
               <input ref={renameRef} type="text" defaultValue={stripMarkdownExt(renaming.name)}
                 className="w-full bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none mb-1"
                 onKeyDown={async e => {
@@ -204,6 +250,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                       await useEditorStore.getState().flushEditor()
                       await invoke('rename_file', { from: renaming.path, to: newPath })
                       await useEditorStore.getState().renameTab(renaming.path, newPath)
+                      useAiThreads.getState().renamePath(renaming.path, newPath)
                       /* Keep the create-here target in sync: create_file re-creates missing
                        * parent dirs, so a stale currentFolder would silently recreate the
                        * old folder (A -> Z then new file lands in A/). */
@@ -220,13 +267,13 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                   if (e.key === 'Escape') setRenaming(null)
                 }} />
             )}
-            {!trashOpen && creating && (
+            {creating && (
               <input ref={newInputRef} type="text" value={newName} onChange={e => setNewName(e.target.value)}
                 placeholder={creating === 'file' ? (currentFolder ? 'File in ' + currentFolder + '/' : 'Filename...') : (currentFolder ? 'Folder in ' + currentFolder + '/' : 'Folder name...')}
                 className="w-full bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none mb-1"
                 onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setCreating(null); setNewName('') } }} />
             )}
-            {!trashOpen && visibleItems.map(item => (
+            {visibleItems.map(item => (
               <div key={item.path}>
                 {item.type === '1' ? (
                   <div onClick={() => { toggleFolder(item); setCurrentFolder(item.path) }} onContextMenu={e => { e.preventDefault(); openContextMenu(item, e) }}
@@ -243,39 +290,27 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                 )}
               </div>
             ))}
-            {trashOpen && (
-              <>
-                <div className="flex items-center justify-between px-1 pb-1">
-                  <span className="text-muted uppercase tracking-wider text-xs">Trash ({trashItems.length})</span>
-                  <button onClick={() => setTrashOpen(false)} className="text-xs text-foreground-subtle hover:text-foreground-secondary cursor-pointer bg-transparent border-none">Back</button>
-                </div>
-                {trashItems.length === 0 && <div className="text-foreground-subtle italic text-xs p-2">Trash is empty</div>}
-                {trashItems.map(item => (
-                  <div key={item.name} onClick={() => restoreItem(item)} title="Restore" className="flex items-center gap-2 py-1 pr-2 rounded hover:bg-surface-active cursor-pointer">
-                    <RotateCcw size={13} className="text-foreground-subtle shrink-0" />
-                    <span className="truncate flex-1">{item.original}</span>
-                    <span className="text-[10px] text-muted shrink-0">{new Date(item.deleted_at).toLocaleDateString()}</span>
-                  </div>
-                ))}
-                {trashItems.length > 0 && (
-                  <button onClick={emptyTrash} disabled={trashItems.length === 0} className="w-full mt-1 text-[11px] text-danger cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 bg-transparent border-none py-1">Empty Trash</button>
-                )}
-              </>
-            )}
           </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>
-        )}
-      {isOpen && !isTauri && (
-        <button data-testid="trash-toggle" onClick={toggleTrash} disabled={trashItems.length === 0} className={'flex items-center gap-2 px-3 py-2 border-t border-border-subtle text-[13px] w-full text-left disabled:opacity-40 disabled:cursor-not-allowed ' + (trashOpen ? 'text-foreground-secondary' : 'text-foreground-subtle') + (trashItems.length > 0 ? ' cursor-pointer hover:bg-surface-active' : '')}>
-          <Trash size={14} className="text-foreground-subtle shrink-0" />
-          Trash
-          {trashItems.length > 0 && <span className="ml-auto text-[10px] text-muted">{trashItems.length}</span>}
-        </button>
       )}
-      <div className="max-h-32 overflow-y-auto text-xs">
-        <BacklinksPanel onNavigate={onNavigate} />
-      </div>
+      {isOpen && activePanel === 'ai' && <AiChatPanel />}
+      {isOpen && activePanel === 'git' && <GitPanel />}
+      {(isOpen || isTauri) && activePanel === 'trash' && (
+        <TrashPanel
+          items={trashItems}
+          loading={trashLoading}
+          error={trashError}
+          onRestore={item => void restoreItem(item)}
+          onDelete={item => void deleteTrashItem(item)}
+          onEmpty={() => void emptyTrash()}
+          onBack={() => setActivePanel('vault')}
+        />
+      )}
+      {!isOpen && activePanel !== 'trash' && <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>}
+      {isOpen && activePanel === 'vault' && (
+        <div className="max-h-32 overflow-y-auto text-xs">
+          <BacklinksPanel onNavigate={onNavigate} />
+        </div>
+      )}
       <div className="relative flex items-center gap-0.5 px-2 py-1.5 shrink-0">
         <span className="relative flex-1 min-w-0" ref={vaultMenuRef}>
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
@@ -319,12 +354,12 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           <span className="tip tip-left">Create a file/folder</span>
           {showPlusMenu && (
             <div data-plus-popup className="absolute bottom-full -right-6 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
-              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('file'); setNewName('') }}
+              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('file'); setNewName('') }}
                 className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                 <FileText size={14} /> New File
                 <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
               </button>
-              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setCreating('folder'); setNewName('') }}
+              <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('folder'); setNewName('') }}
                 className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                 <Folder size={14} /> New Folder
                 <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>

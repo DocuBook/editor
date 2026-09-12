@@ -7,7 +7,9 @@
  *   2. the formatting-toolbar "Edit with AI" button expands the chips in one
  *      click for a text selection (used to stay hidden behind the "+" toggle);
  *   3. after the AI finishes writing and the user Accepts, the editor is
- *      clickable again (reopening the menu used to re-lock `isEditable`).
+ *      clickable again (reopening the menu used to re-lock `isEditable`);
+ *   4. the AI Chat tab then lists the document-bound thread and its accordion
+ *      shows the recorded prompt + AI history, collapsing/expanding on click.
  *
  * Node-selection handling (a selected image, where `editor.getSelection()` is
  * undefined) is covered by the `resolveAIBlockId` unit tests instead — a mouse
@@ -168,6 +170,32 @@ try {
   })
   ok('post-accept: editor is editable again', editable === 'true', `contenteditable=${editable}`)
   ok('post-accept: click lands a caret inside the editor', focusedInside)
+
+  // ── Case E: AI Chat tab shows the document-bound thread (prompt + AI history) ──
+  await page.getByTestId('sidebar-panel-ai').click()
+  const chatPanel = page.locator('section[aria-label="AI Chat"]')
+  await chatPanel.waitFor({ state: 'visible', timeout: 5000 })
+  await chatPanel.getByText('Threads (1)').waitFor({ timeout: 5000 })
+  const threadToggle = chatPanel.locator('button[aria-expanded]').first()
+  await threadToggle.waitFor({ timeout: 5000 })
+  const threadLabel = (await threadToggle.innerText()).replace(/\s+/g, ' ')
+  ok('ai chat: thread accordion bound to the document path', threadLabel.includes('summarize the note') && threadLabel.includes('test.md'), threadLabel)
+  ok('ai chat: thread starts expanded', await threadToggle.getAttribute('aria-expanded') === 'true')
+  // Message role labels are CSS-uppercased in the DOM (innerText === 'PROMPT').
+  const promptLabel = chatPanel.getByText(/^prompt$/i)
+  await promptLabel.waitFor({ timeout: 5000 })
+  // The tool-path marker is the recorded AI message for this document thread.
+  await chatPanel.getByText('Document changes ready for review.').waitFor({ timeout: 5000 })
+  ok('ai chat: accordion shows prompt + AI history', true)
+
+  await threadToggle.click()
+  await promptLabel.waitFor({ state: 'detached', timeout: 5000 })
+  ok('ai chat: accordion collapses', await threadToggle.getAttribute('aria-expanded') === 'false')
+
+  await threadToggle.click()
+  await promptLabel.waitFor({ state: 'visible', timeout: 5000 })
+  await chatPanel.getByText('Document changes ready for review.').waitFor({ timeout: 5000 })
+  ok('ai chat: accordion re-expands', await threadToggle.getAttribute('aria-expanded') === 'true')
 
   ok('no page errors during the whole run', PAGEERRORS(log.errors).length === 0, PAGEERRORS(log.errors).slice(0, 2).join(' | '))
 } catch (e) {

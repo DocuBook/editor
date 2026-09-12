@@ -84,7 +84,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
     const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
     const curFile = useEditorStore.getState().activeTab
     const relevant = curFile ? lines.filter((l: string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
-    setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== ' '))
+    setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== '.'))
   }, [gitStatus])
   /* oxlint-enable react/set-state-in-effect */
 
