@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runtime = vi.hoisted(() => ({ isTauri: false }))
+const gitState = vi.hoisted(() => ({ current: { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '' } }))
 const editorState = vi.hoisted(() => ({
   activeTab: 'notes/active-document-with-a-long-name.md' as string | null,
   tabs: [
@@ -29,7 +30,7 @@ vi.mock('../../../frontend/stores/editor', () => ({
   ),
 }))
 vi.mock('../../../frontend/stores/gitStatus', () => ({
-  useGitStatus: () => ({ isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '' }),
+  useGitStatus: () => gitState.current,
 }))
 vi.mock('../../../frontend/lib/ipc', () => ({
   get isTauri() { return runtime.isTauri },
@@ -61,8 +62,21 @@ function renderedTabPaths() {
   return Array.from(document.querySelectorAll<HTMLElement>('[data-tab-path]'), tab => tab.dataset.tabPath)
 }
 
+/** The Actions dropdown renders the Commit entry only once opened. Its disabled
+ *  state encodes the porcelain-derived disk-dirty flag for the ACTIVE file. */
+function commitButton() {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+    .find(button => button.textContent?.trim() === 'Commit')
+}
+
+function openActions() {
+  const actions = document.querySelector<HTMLButtonElement>('button[aria-label="Git actions"]')!
+  act(() => actions.click())
+}
+
 beforeEach(() => {
   runtime.isTauri = false
+  gitState.current = { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '' }
   document.body.innerHTML = '<div id="root"></div>'
   vi.stubGlobal('CSS', { escape: (value: string) => value })
 })
@@ -111,5 +125,37 @@ describe('responsive tabs', () => {
       'notes/last.md',
     ])
     expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
+  })
+})
+
+/** Porcelain `XY path` lines from the git poller: X = index, Y = worktree, '.'
+ *  = unchanged. Only a worktree change (Y !== '.') on the ACTIVE file unlocks
+ *  Commit — a staged-only edit (Y === '.') must not. */
+describe('commit gating from porcelain status', () => {
+  const stagedOnly = 'M. notes/active-document-with-a-long-name.md'
+  const unstaged = '.M notes/active-document-with-a-long-name.md'
+
+  it('leaves Commit disabled for a staged-only active file', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: stagedOnly }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(true)
+  })
+
+  it('enables Commit for an unstaged active file', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: unstaged }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(false)
+  })
+
+  it('ignores worktree changes on a non-active file', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '.M notes/first.md' }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(true)
   })
 })

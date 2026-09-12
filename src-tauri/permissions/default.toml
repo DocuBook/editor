@@ -14,6 +14,8 @@ permissions = [
   "allow-custom-ai-config",
   "allow-delete-api-key",
   "allow-delete-file",
+  "allow-delete-trash-item",
+  "allow-empty-trash",
   "allow-git-add-remote",
   "allow-git-branches",
   "allow-git-checkout",
@@ -29,6 +31,7 @@ permissions = [
   "allow-git-status",
   "allow-health",
   "allow-list-api-keys",
+  "allow-list-trash",
   "allow-list-tree",
   "allow-markdown-preview",
   "allow-md-to-html",
@@ -36,6 +39,7 @@ permissions = [
   "allow-read-file",
   "allow-read-file-binary",
   "allow-rename-file",
+  "allow-restore-file",
   "allow-search-vault",
   "allow-set-api-key",
   "allow-test-connection",
@@ -135,6 +139,26 @@ commands.allow = ["delete_file"]
 identifier = "deny-delete-file"
 description = "Denies the delete_file command."
 commands.deny = ["delete_file"]
+
+[[permission]]
+identifier = "allow-delete-trash-item"
+description = "Enables permanent deletion of one Trash item."
+commands.allow = ["delete_trash_item"]
+
+[[permission]]
+identifier = "deny-delete-trash-item"
+description = "Denies permanent deletion of one Trash item."
+commands.deny = ["delete_trash_item"]
+
+[[permission]]
+identifier = "allow-empty-trash"
+description = "Enables permanent deletion of all Trash items."
+commands.allow = ["empty_trash"]
+
+[[permission]]
+identifier = "deny-empty-trash"
+description = "Denies permanent deletion of all Trash items."
+commands.deny = ["empty_trash"]
 
 [[permission]]
 identifier = "allow-git-add-remote"
@@ -297,6 +321,16 @@ description = "Denies the list_tree command."
 commands.deny = ["list_tree"]
 
 [[permission]]
+identifier = "allow-list-trash"
+description = "Enables listing current Trash items."
+commands.allow = ["list_trash"]
+
+[[permission]]
+identifier = "deny-list-trash"
+description = "Denies listing current Trash items."
+commands.deny = ["list_trash"]
+
+[[permission]]
 identifier = "allow-markdown-preview"
 description = "Enables the markdown_preview command."
 commands.allow = ["markdown_preview"]
@@ -355,6 +389,16 @@ commands.allow = ["rename_file"]
 identifier = "deny-rename-file"
 description = "Denies the rename_file command."
 commands.deny = ["rename_file"]
+
+[[permission]]
+identifier = "allow-restore-file"
+description = "Enables restoring one Trash item."
+commands.allow = ["restore_file"]
+
+[[permission]]
+identifier = "deny-restore-file"
+description = "Denies restoring one Trash item."
+commands.deny = ["restore_file"]
 
 [[permission]]
 identifier = "allow-search-vault"

@@ -1,9 +1,8 @@
-
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
@@ -19,9 +18,16 @@ pub(crate) fn is_ignored_entry(name: &str) -> bool {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrashEntry {
-    pub name: String,      // `{millis}-{original}` inside .trash/
-    pub original: String,  // original file name (prefix stripped)
-    pub deleted_at: u64,   // unix millis (from the prefix)
+    pub name: String,      // stable entry ID; `.trash` name on web, Finder URL on macOS
+    pub original: String,  // original vault-relative path, or Finder display name
+    pub deleted_at: u64,   // unix millis when available
+    pub is_dir: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TrashMetadata {
+    original: String,
+    deleted_at: u64,
 }
 
 /// Filesystem-based vault that wraps a directory path.
@@ -234,53 +240,76 @@ impl Vault {
         Ok(())
     }
 
-/** Move to trash. macOS → system Trash (Finder restore, MEM-012). Linux
- *  (web/Docker) → server-side `.trash/` inside the vault root: persistent in
- *  /data across container rebuilds (the XDG container trash is ephemeral).
- *  Moved name is `{millis}-{name}` so a future restore UI can strip the prefix. */
+/** Move to trash. macOS uses Finder's system Trash; web/Docker and other
+ *  platforms use `.trash/` inside the vault so list/restore remain available. */
     pub fn delete_file(&self, path: &str) -> Result<(), String> {
-        let f = self.safe_path(path)?;
-        #[cfg(target_os = "linux")]
-        {
-            let trash_dir = self.root.join(".trash");
-            std::fs::create_dir_all(&trash_dir).map_err(|e| e.to_string())?;
-            let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-            let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
-            let dst = trash_dir.join(format!("{ts}-{name}"));
-            std::fs::rename(&f, &dst).map_err(|e| format!("Trash: {}", e))?;
+        if path.is_empty() || path == "." || path == ".trash" || path.starts_with(".trash/") {
+            return Err("Invalid trash target".to_string());
         }
-        #[cfg(not(target_os = "linux"))]
+        let f = self.safe_path(path)?;
+        #[cfg(not(target_os = "macos"))]
+        {
+            let trash_dir = self.safe_path(".trash")?;
+            let metadata_dir = self.safe_path(".trash/.metadata")?;
+            std::fs::create_dir_all(&metadata_dir).map_err(|e| e.to_string())?;
+            let name = f.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            let mut ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+            let (trash_name, dst) = loop {
+                let trash_name = format!("{ts}-{name}");
+                let dst = trash_dir.join(&trash_name);
+                if !dst.exists() { break (trash_name, dst); }
+                ts += 1;
+            };
+            let metadata_path = metadata_dir.join(format!("{trash_name}.json"));
+            let metadata = serde_json::to_vec(&TrashMetadata { original: path.to_string(), deleted_at: ts }).map_err(|e| e.to_string())?;
+            std::fs::write(&metadata_path, metadata).map_err(|e| format!("Trash metadata: {e}"))?;
+            if let Err(error) = std::fs::rename(&f, &dst) {
+                let _ = std::fs::remove_file(metadata_path);
+                return Err(format!("Trash: {error}"));
+            }
+        }
+        #[cfg(target_os = "macos")]
         {
             trash::delete(&f).map_err(|e| format!("Trash: {}", e))?;
         }
         Ok(())
     }
 
-/** Resolve a `.trash/` entry name safely (no separators, no `..`). */
-    #[allow(dead_code)] // wired only in the server crate (desktop uses system Trash)
+/** Resolve a `.trash/` entry safely, including symlink containment. */
+    #[allow(dead_code)]
     fn trash_path(&self, name: &str) -> Result<PathBuf, String> {
-        if name.contains('/') || name.contains('\\') || name.contains("..") {
+        if name.is_empty() || name == "." || name == ".." || name.contains('/') || name.contains('\\') {
             return Err("Invalid trash entry".to_string());
         }
-        Ok(self.root.join(".trash").join(name))
+        self.safe_path(&format!(".trash/{name}"))
     }
 
-/** List deleted items (`.trash/`), newest first. Empty on platforms that use
- *  the system trash (macOS) — the server-side trash only exists on Linux. */
-    #[allow(dead_code)] // wired only in the server crate (desktop uses system Trash)
+    fn trash_metadata_path(&self, name: &str) -> Result<PathBuf, String> {
+        let _ = self.trash_path(name)?;
+        self.safe_path(&format!(".trash/.metadata/{name}.json"))
+    }
+
+/** List vault-local deleted items, newest first. */
+    #[allow(dead_code)]
     pub fn list_trash(&self) -> Vec<TrashEntry> {
         let mut entries = Vec::new();
-        if let Ok(read) = std::fs::read_dir(self.root.join(".trash")) {
+        let trash_dir = match self.safe_path(".trash") { Ok(path) => path, Err(_) => return entries };
+        if let Ok(read) = std::fs::read_dir(trash_dir) {
             for e in read.flatten() {
                 let name = e.file_name().to_string_lossy().to_string();
-                let (ts, original): (String, String) = match name.split_once('-') {
+                if name == ".metadata" { continue; }
+                let (ts, fallback_original): (String, String) = match name.split_once('-') {
                     Some((t, o)) if !t.is_empty() && t.chars().all(|c| c.is_ascii_digit()) => (t.to_string(), o.to_string()),
                     _ => (String::new(), name.clone()),
                 };
+                let metadata = self.trash_metadata_path(&name).ok()
+                    .and_then(|path| std::fs::read(path).ok())
+                    .and_then(|data| serde_json::from_slice::<TrashMetadata>(&data).ok());
                 entries.push(TrashEntry {
                     name,
-                    original,
-                    deleted_at: ts.parse().unwrap_or(0),
+                    original: metadata.as_ref().map(|value| value.original.clone()).unwrap_or(fallback_original),
+                    deleted_at: metadata.map(|value| value.deleted_at).unwrap_or_else(|| ts.parse().unwrap_or(0)),
+                    is_dir: e.file_type().map(|kind| kind.is_dir()).unwrap_or(false),
                 });
             }
         }
@@ -288,26 +317,54 @@ impl Vault {
         entries
     }
 
-/** Restore a trash entry to the vault root (strips the `{millis}-` prefix). */
-    #[allow(dead_code)] // wired only in the server crate (desktop uses system Trash)
+/** Restore a vault-local trash entry to the vault root. */
+    #[allow(dead_code)]
     pub fn restore_file(&self, trash_name: &str) -> Result<(), String> {
         let src = self.trash_path(trash_name)?;
-        let original = trash_name.split_once('-').map(|(_, o)| o.to_string()).unwrap_or_else(|| trash_name.to_string());
+        let metadata_path = self.trash_metadata_path(trash_name)?;
+        let fallback = trash_name.split_once('-').map(|(_, original)| original.to_string()).unwrap_or_else(|| trash_name.to_string());
+        let original = std::fs::read(&metadata_path).ok()
+            .and_then(|data| serde_json::from_slice::<TrashMetadata>(&data).ok())
+            .map(|metadata| metadata.original)
+            .unwrap_or(fallback);
         let dst = self.safe_path(&original)?;
         if dst.exists() { return Err(format!("A file named \"{original}\" already exists")); }
+        if let Some(parent) = dst.parent() { std::fs::create_dir_all(parent).map_err(|e| format!("Restore: {e}"))?; }
         std::fs::rename(&src, &dst).map_err(|e| format!("Restore: {}", e))?;
+        let _ = std::fs::remove_file(metadata_path);
         self.invalidate_renderable_cache();
         Ok(())
     }
 
-/** Permanently delete everything in `.trash/`. */
-    #[allow(dead_code)] // wired only in the server crate (desktop uses system Trash)
+    fn remove_trash_path(path: &Path) -> Result<(), String> {
+        let kind = std::fs::symlink_metadata(path).map_err(|e| format!("Delete permanently: {e}"))?.file_type();
+        if kind.is_dir() {
+            std::fs::remove_dir_all(path).map_err(|e| format!("Delete permanently: {e}"))
+        } else {
+            std::fs::remove_file(path).map_err(|e| format!("Delete permanently: {e}"))
+        }
+    }
+
+/** Permanently delete one vault-local trash entry. */
+    #[allow(dead_code)]
+    pub fn delete_trash_item(&self, trash_name: &str) -> Result<(), String> {
+        Self::remove_trash_path(&self.trash_path(trash_name)?)?;
+        let _ = std::fs::remove_file(self.trash_metadata_path(trash_name)?);
+        self.invalidate_renderable_cache();
+        Ok(())
+    }
+
+/** Permanently delete everything in vault-local `.trash/`. */
+    #[allow(dead_code)]
     pub fn empty_trash(&self) -> Result<(), String> {
-        if let Ok(read) = std::fs::read_dir(self.root.join(".trash")) {
-            for e in read.flatten() {
-                let p = e.path();
-                if p.is_dir() { let _ = std::fs::remove_dir_all(&p); } else { let _ = std::fs::remove_file(&p); }
-            }
+        let trash_dir = self.safe_path(".trash")?;
+        let read = match std::fs::read_dir(trash_dir) {
+            Ok(read) => read,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(format!("Empty trash: {error}")),
+        };
+        for entry in read {
+            Self::remove_trash_path(&entry.map_err(|e| format!("Empty trash: {e}"))?.path())?;
         }
         self.invalidate_renderable_cache();
         Ok(())
@@ -470,9 +527,30 @@ mod tests {
         assert!(!dir.join("notes.md").exists());
         let trash = dir.join(".trash");
         assert!(trash.is_dir());
-        let moved: Vec<_> = std::fs::read_dir(&trash).unwrap().flatten().collect();
+        let moved: Vec<_> = std::fs::read_dir(&trash).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy() != ".metadata")
+            .collect();
         assert_eq!(moved.len(), 1);
         assert!(moved[0].file_name().to_string_lossy().ends_with("notes.md"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn delete_and_restore_preserves_original_folder() {
+        let dir = std::env::temp_dir().join("vault-test-trash-original-folder");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("folder")).unwrap();
+        std::fs::write(dir.join("folder/notes.md"), "x").unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+
+        v.delete_file("folder/notes.md").unwrap();
+        let trash = v.list_trash();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].original, "folder/notes.md");
+        v.restore_file(&trash[0].name).unwrap();
+        assert!(dir.join("folder/notes.md").exists());
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -505,8 +583,14 @@ mod tests {
         v.restore_file(&list[1].name).unwrap();
         assert!(dir.join("notes.md").exists());
 
-        // empty: clears everything left
+        // per-item permanent delete cannot escape `.trash`
         std::fs::write(dir.join(".trash/1700000002000-old.md"), "z").unwrap();
+        v.delete_trash_item("1700000002000-old.md").unwrap();
+        assert!(!dir.join(".trash/1700000002000-old.md").exists());
+        assert!(v.delete_trash_item("../notes.md").is_err());
+
+        // empty: clears everything left
+        std::fs::write(dir.join(".trash/1700000003000-last.md"), "z").unwrap();
         v.empty_trash().unwrap();
         assert_eq!(v.list_trash().len(), 0);
         let _ = std::fs::remove_dir_all(&dir);

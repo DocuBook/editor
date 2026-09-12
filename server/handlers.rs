@@ -1,4 +1,3 @@
-// Command handlers (isolated).
 use super::*;
 
 pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result<String, String> {
@@ -75,6 +74,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "delete_file" => sb(state, cmd, args).await,
         "list_trash" => sync(state, cmd, args),
         "restore_file" => sync(state, cmd, args),
+        "delete_trash_item" => sync(state, cmd, args),
         "empty_trash" => sync(state, cmd, args),
         "rename_file" => sync(state, cmd, args),
         "git_settings" => sb(state, cmd, args).await,
@@ -190,6 +190,12 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
             r
         }
+        "delete_trash_item" => {
+            match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.delete_trash_item(&s("trashName")).map(|_| "null".into()),
+                None => Err("No vault".into()),
+            }
+        }
         "empty_trash" => {
             let r = match state.vault.lock().expect("lock").as_ref() {
                 Some(v) => v.empty_trash().map(|_| "null".into()),
@@ -244,9 +250,9 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             match guard.as_ref() {
                 Some(g) if g.is_repo() => {
                     let ws = g.status_with_branch().unwrap_or_default();
-                    Ok(json!({ "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind }).to_string())
+                    Ok(json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind }).to_string())
                 }
-                _ => Ok(r#"{"branch":"","upstream":"","status":"","ahead":0,"behind":0}"#.to_string()),
+                _ => Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","upstream":"","status":"","ahead":0,"behind":0}"#.to_string()),
             }
         }
         "wiki_backlinks" => match state.wiki.lock().expect("lock").as_ref() {
