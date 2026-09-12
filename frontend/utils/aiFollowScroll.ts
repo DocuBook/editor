@@ -22,3 +22,9 @@ export function followAiWritingCursor(block: HTMLElement, margin = 32): void {
     scroller.scrollTop -= (scrollerBox.top + margin) - cursorBox.top
   }
 }
+
+/** Resolve current block node on every frame because ProseMirror may replace it. */
+export function followAiWritingCursorInRoot(root: HTMLElement, blockId: string): void {
+  const block = root.querySelector<HTMLElement>(`[data-node-type="blockContainer"][data-id="${blockId}"]`)
+  if (block) followAiWritingCursor(block)
+}

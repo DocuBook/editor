@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { followAiWritingCursor } from '../../../frontend/utils/aiFollowScroll'
+import { followAiWritingCursor, followAiWritingCursorInRoot } from '../../../frontend/utils/aiFollowScroll'
 
 const rect = (top: number, bottom: number) => ({ top, bottom }) as DOMRect
 
@@ -36,6 +36,18 @@ describe('AI writing follow scroll', () => {
     followAiWritingCursor(block)
 
     expect(scroller.scrollTop).toBe(152)
+  })
+
+  it('queries the current block after ProseMirror replaces its DOM node', () => {
+    const first = elements(null).block
+    const second = elements(rect(210, 220))
+    const root = { querySelector: vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second.block) }
+
+    followAiWritingCursorInRoot(root as unknown as HTMLElement, 'ai-block')
+    followAiWritingCursorInRoot(root as unknown as HTMLElement, 'ai-block')
+
+    expect(root.querySelector).toHaveBeenCalledTimes(2)
+    expect(second.scroller.scrollTop).toBe(152)
   })
 
   it('does nothing while xl-ai has no rendered cursor', () => {

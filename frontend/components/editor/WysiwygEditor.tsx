@@ -3,8 +3,8 @@
  *
  *  Keep-alive host: the `cached` editor INSTANCE is created once per file
  *  (utils/editorFactory) and survives tab switches — only the view
- *  (BlockNoteView) remounts. Markdown is parsed once; undo history and
- *  in-flight AI streams persist across switches. */
+ *  (BlockNoteView) remounts. Markdown is parsed once; undo history persists.
+ *  In-flight AI is settled and serialized before any view detaches. */
 import { useEffect, useRef } from 'react'
 import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, useExtensionState } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
@@ -24,8 +24,9 @@ import { findActiveSuggestionItem, isEnterBeforeInput } from '../../utils/slashM
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
 import { createQueuedMermaidRender } from '../../utils/mermaidRenderCache'
-import { followAiWritingCursor } from '../../utils/aiFollowScroll'
+import { followAiWritingCursorInRoot } from '../../utils/aiFollowScroll'
 import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../utils/markdownCursor'
+import { serializeMarkdown } from '../../utils/markdownSerialization'
 import { setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
@@ -205,13 +206,14 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     return () => { setWikilinkStylerPaused(false); setPreviewRenderingPaused(false); useEditorStore.getState().setAiWriting(false) }
   }, [isAiWriting, editor])
   const followRef = useRef(true)
+  const exitingRef = useRef(false)
   /** Mirrors isAiWriting for the onChange gate (avoids re-subscribing). */
   const aiWritingRef = useRef(false)
   const prevAiWriting = useRef(false)
   /** Settle tab-dirty + undo state once when AI writing ends — the per-flush
    *  onChange is gated during streaming (it fired per token write). */
   useEffect(() => {
-    if (prevAiWriting.current && !isAiWriting) {
+    if (prevAiWriting.current && !isAiWriting && !exitingRef.current) {
       useEditorStore.getState().setTabDirty(filePath, true)
       useEditorStore.getState().setUndoRedoState()
     }
@@ -244,22 +246,15 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     const root = editor.domElement
     if (!root) return
     let raf = 0
-    let blockEl: HTMLElement | null = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
     const scroll = () => {
       if (!followRef.current || raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
-        if (!blockEl) blockEl = root.querySelector(`[data-node-type="blockContainer"][data-id="${aiMenu.blockId}"]`)
-        if (!blockEl) return
-        followAiWritingCursor(blockEl)
+        followAiWritingCursorInRoot(root, aiMenu.blockId)
       })
     }
     const mo = new MutationObserver(scroll)
-    if (blockEl) {
-      mo.observe(blockEl, { childList: true, subtree: true, characterData: true })
-    } else {
-      mo.observe(root, { childList: true, subtree: true, characterData: true })
-    }
+    mo.observe(root, { childList: true, subtree: true, characterData: true })
     return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf) }
   }, [isAiWriting, aiMenu?.blockId, editor])
   const { setBlockEditor, setFlushEditor } = useEditorStore()
@@ -303,18 +298,6 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     return unsubscribe
   }, [editor])
 
-  /** Serialize the editor to markdown for persistence: normalize list markers
-   *  and trim blank edges. blocksToMarkdownLossy rewrites list formatting, so
-   *  this only runs when the doc is actually dirty. Shared by flush + unmount. */
-  const serializeMarkdown = (ed: any): string => {
-    try {
-      return ed.blocksToMarkdownLossy(ed.document)
-        .trim()
-        .replace(/^\n+/, '')
-        .replace(/\n+$/, '')
-        .replace(/^(\s*)\* /gm, '$1- ')
-    } catch { return '' }
-  }
 
   /** Track editor changes — skip initial load (the parse below fires replaceBlocks
    *  before the user has typed anything). */
@@ -327,7 +310,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
       documentRef.current = document
       if (initialLoadRef.current) return
       dirtyRef.current = true
-      if (aiWritingRef.current) return // gate UI store spam during AI streaming — settled once at writing end
+      if (aiWritingRef.current || exitingRef.current) return // exit hook publishes store state after serialization
       useEditorStore.getState().setTabDirty(filePath, true)
       useEditorStore.getState().setUndoRedoState()
     })
@@ -350,23 +333,45 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     }
   }, [editor, setBlockEditor])
 
-  /** Register flush-to-store for Save button + explicit switchTab flush. */
+  /** Register atomic exit: settle AI, serialize, sync cache/store, mark dirty. */
   useEffect(() => {
-    const sync = () => {
+    const sync = async () => {
+      exitingRef.current = true
+      try {
+      const ai = (editor as any).getExtension?.(AIExtension)
+      const isStreaming = () => {
+        const state = ai?.store?.state?.aiMenuState
+        return state !== 'closed' && (state?.status === 'thinking' || state?.status === 'ai-writing')
+      }
+      if (isStreaming()) {
+        let resolveSettled!: () => void
+        const settled = new Promise<void>(resolve => { resolveSettled = resolve })
+        const checkSettled = () => { if (!isStreaming()) resolveSettled() }
+        const unsubscribe = ai.store.subscribe(checkSettled)
+        try {
+          await ai.abort('editor exit')
+          checkSettled()
+          await settled
+        } finally {
+          unsubscribe()
+        }
+      }
+
       /** Only flush content when there are real WYSIWYG edits — serialization is
        *  not idempotent. Cursor capture still runs on every mode/tab switch. */
       let md = markdownRef.current
       if (dirtyRef.current) {
         const serialized = serializeMarkdown(editor)
-        if (serialized) md = serialized
-        if (serialized && serialized !== markdownRef.current) {
-          // The instance now holds `md` — sync the load baseline so a later
-          // remount (tab switch back) sees loadedMarkdown === markdown and skips
-          // re-parsing, preserving undo history.
-          Object.assign(cached, { loadedMarkdown: serialized })
-          loadedMarkdownRef.current = serialized
-          onSyncRef.current(serialized)
-        }
+        if (serialized === null) throw new Error(`Could not serialize ${filePath}`)
+        md = serialized
+        // Update cache + store before dirty. Autosave can only observe a dirty
+        // tab after its complete serialized content is available.
+        Object.assign(cached, { loadedMarkdown: serialized })
+        loadedMarkdownRef.current = serialized
+        markdownRef.current = serialized
+        onSyncRef.current(serialized)
+        useEditorStore.getState().setTabDirty(filePath, true)
+        dirtyRef.current = false
       }
       try {
         const cursor = cursorSnapshotRef.current
@@ -374,12 +379,15 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
           onCursorOffsetRef.current(markdownOffsetForCursor(editor, md, cursor.blockId, cursor.textOffset))
         }
       } catch {}
+      } finally {
+        exitingRef.current = false
+      }
     }
     setFlushEditor(sync)
     return () => setFlushEditor(null)
     /** `cached` is the keep-alive instance (stable per file path) — it is the
      *  load baseline the flush syncs into, so it belongs in the deps. */
-  }, [cached, editor, setFlushEditor])
+  }, [cached, editor, filePath, setFlushEditor])
 
   /** Load markdown into this editor instance when it first mounts OR when the
    *  incoming markdown actually changed (code-mode edits, external changes).

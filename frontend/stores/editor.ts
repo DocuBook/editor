@@ -26,24 +26,24 @@ interface EditorState {
   tabs: Tab[]; activeTab: string | null; editMode: EditMode
   blockEditor: any | null
   canUndo: boolean; canRedo: boolean
-  _flushEditor: (() => void) | null
+  _flushEditor: (() => void | Promise<void>) | null
   /** True while the xl-ai extension is streaming — autosave must not persist a
    *  half-written document (guard 2). Set by WysiwygEditor on AI state change. */
   _aiWriting: boolean
   setAiWriting: (writing: boolean) => void
   setBlockEditor: (e: any) => void
   setUndoRedoState: () => void
-  flushEditor: () => void
-  setFlushEditor: (fn: (() => void) | null) => void
+  flushEditor: () => Promise<void>
+  setFlushEditor: (fn: (() => void | Promise<void>) | null) => void
   undo: () => void
   redo: () => void
   /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it. */
   openFile: (path: string, name: string, createIfMissing?: boolean) => Promise<void>
-  switchTab: (path: string) => void
+  switchTab: (path: string) => Promise<void>
   /** Rename an open file: remaps the tab's path+name so saves, git status and
    *  wiki backlinks keep targeting the NEW path. Flushes first so in-flight WYSIWYG
    *  edits survive the remap (the editor remounts under the new key). */
-  renameTab: (fromPath: string, toPath: string) => void
+  renameTab: (fromPath: string, toPath: string) => Promise<void>
   closeTab: (path: string) => Promise<void>
   closeAllTabs: () => void
   setContent: (path: string, fileContent: string) => void
@@ -58,7 +58,7 @@ interface EditorState {
    *  are marked deleted. */
   reloadAllTabs: () => Promise<void>
   setEditMode: (mode: EditMode) => void
-  toggleEditMode: () => void
+  toggleEditMode: () => Promise<void>
 }
 
 /** Autosave debounce — one timer per tab path; typing in either mode (WYSIWYG
@@ -87,20 +87,33 @@ export const useEditorStore = create<EditorState>((set, get) => {
       s.persistAllDirty().catch(() => toast.error('Auto-save failed — check disk access'))
     }, AUTOSAVE_DELAY_MS))
   }
+  let flushPromise: Promise<void> | null = null
   return {
-  tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void) | null, _aiWriting: false,
+  tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null, _aiWriting: false,
   setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
   setAiWriting: (writing) => { set({ _aiWriting: writing }) },
   setUndoRedoState: () => {
     const state = get().blockEditor?.prosemirrorState
     set({ canUndo: !!state && undoDepth(state) > 0, canRedo: !!state && redoDepth(state) > 0 })
   },
-  flushEditor: () => { try { get()._flushEditor?.() } catch {} },
+  flushEditor: () => {
+    if (!flushPromise) {
+      flushPromise = Promise.resolve().then(() => get()._flushEditor?.()).then(() => undefined).finally(() => { flushPromise = null })
+    }
+    return flushPromise
+  },
   setFlushEditor: (fn) => { set({ _flushEditor: fn }) },
   undo: () => { try { get().blockEditor?.undo() } catch {}; get().setUndoRedoState() },
   redo: () => { try { get().blockEditor?.redo() } catch {}; get().setUndoRedoState() },
 
   openFile: async (path, name, createIfMissing = false) => {
+    if (get().activeTab !== path) {
+      try { await get().flushEditor() } catch (error) {
+        logger.error('editor_exit_failed', { error })
+        toast.error('Could not switch files because editor changes could not be serialized.')
+        return
+      }
+    }
     if (get().tabs.find(t => t.path === path)) { set({ activeTab: path }); return }
     set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }], activeTab: path })
     // Binary/image files are previewed via asset URL, never read as UTF-8 text.
@@ -127,17 +140,22 @@ export const useEditorStore = create<EditorState>((set, get) => {
     }
   },
 
-  switchTab: (path) => {
-    if (get().activeTab !== path) get().flushEditor()
+  switchTab: async (path) => {
+    if (get().activeTab === path) return
+    try { await get().flushEditor() } catch (error) {
+      logger.error('editor_exit_failed', { error })
+      toast.error('Could not switch tabs because editor changes could not be serialized.')
+      return
+    }
     set({ activeTab: path })
   },
 
-  renameTab: (fromPath, toPath) => {
+  renameTab: async (fromPath, toPath) => {
 
     const prefix = fromPath + '/'
     const affected = get().tabs.filter(t => t.path === fromPath || t.path.startsWith(prefix))
     if (affected.length === 0) return
-    if (affected.some(t => t.path === get().activeTab)) get().flushEditor()
+    if (affected.some(t => t.path === get().activeTab)) await get().flushEditor()
     const remap = (path: string) => (path === fromPath ? toPath : toPath + '/' + path.slice(prefix.length))
     const stale = new Set(affected.map(t => t.path))
     const taken = new Set(get().tabs.filter(t => !stale.has(t.path)).map(t => t.path))
@@ -158,7 +176,11 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   closeTab: async (path) => {
     if (get().activeTab === path) {
-      get().flushEditor()
+      try { await get().flushEditor() } catch (error) {
+        logger.error('editor_exit_failed', { error })
+        toast.error('Could not close the tab because editor changes could not be serialized.')
+        return
+      }
       const tab = get().tabs.find(t => t.path === path)
       if (tab?.editedContent !== null && tab?.dirty && !tab.deleted) {
         try { await saveTabToDisk(tab) } catch (error) {
@@ -198,7 +220,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   /** After a branch switch: flush, then re-read every non-dirty text tab. */
   reloadAllTabs: async () => {
-    get().flushEditor()
+    await get().flushEditor()
     const tabs = get().tabs
     for (const t of tabs) {
       if (t.dirty || isBinaryPath(t.path)) continue
@@ -214,7 +236,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   /** Flush WYSIWYG then write every dirty tab to disk — used on app close. */
   persistAllDirty: async () => {
-    get().flushEditor()
+    await get().flushEditor()
     for (const tab of get().tabs) {
       if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
         try { await saveTabToDisk(tab) } catch (error) {
@@ -227,9 +249,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
 
   setEditMode: (mode) => { set({ editMode: mode }) },
   /** Toggle editor mode; flush Editor → store BEFORE switching to Code so edits are not lost. */
-  toggleEditMode: () => {
+  toggleEditMode: async () => {
     const { editMode, flushEditor } = get()
-    if (editMode === 'editor') flushEditor()
+    if (editMode === 'editor') {
+      try { await flushEditor() } catch (error) {
+        logger.error('editor_exit_failed', { error })
+        toast.error('Could not switch modes because editor changes could not be serialized.')
+        return
+      }
+    }
     set({ editMode: editMode === 'editor' ? 'code' : 'editor' })
     /** Mode switch is an app-layer save point (like close tab): the disk then
      *  holds exactly the raw markdown shown in the other mode, so git commit

@@ -2,17 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { blockAtMarkdownOffset, cursorPositionAtMarkdownOffset, markdownOffsetForBlock, markdownOffsetForCursor } from '../../../frontend/utils/markdownCursor'
 
 const blocks = [
-  { id: 'one', markdown: 'First' },
-  { id: 'two', markdown: 'Same' },
-  { id: 'three', markdown: 'Same' },
-  { id: 'four', markdown: 'Fourth paragraph' },
+  { id: 'one', content: 'First' },
+  { id: 'two', content: 'Same' },
+  { id: 'three', content: 'Same' },
+  { id: 'four', content: 'Fourth paragraph' },
 ]
-const editor = {
-  document: blocks,
-  blocksToMarkdownLossy(selected: Array<{ id: string }>) {
-    return selected.map(block => blocks.find(source => source.id === block.id)?.markdown ?? '').join('\n\n')
-  },
-}
+const editor = { document: blocks }
 const markdown = 'First\n\nSame\n\nSame\n\nFourth paragraph'
 
 describe('markdown cursor mapping', () => {
@@ -28,25 +23,44 @@ describe('markdown cursor mapping', () => {
     expect(markdownOffsetForBlock(editor, markdown, 'three')).toBe(markdown.lastIndexOf('Same'))
   })
 
-  it('preserves the character offset across Markdown syntax', () => {
-    const richBlocks = [{ id: 'heading', type: 'heading', content: [{ type: 'text', text: 'Hello' }] }]
-    const richEditor = {
-      document: richBlocks,
-      blocksToMarkdownLossy(selected: Array<{ id: string }>) {
-        return selected[0]?.id === 'heading' ? '# Hello' : ''
-      },
-    }
-    expect(markdownOffsetForCursor(richEditor, '# Hello', 'heading', 3)).toBe(5)
-    expect(cursorPositionAtMarkdownOffset(richEditor, '# Hello', 5)?.textOffset).toBe(3)
+  it('preserves character offsets across Markdown syntax', () => {
+    const richEditor = { document: [{ id: 'heading', content: [{ type: 'text', text: 'Hello' }] }] }
+    expect(markdownOffsetForCursor(richEditor, '# **Hello**', 'heading', 3)).toBe(7)
+    expect(cursorPositionAtMarkdownOffset(richEditor, '# **Hello**', 7)?.textOffset).toBe(3)
   })
 
-  it('maps a nested active block to its top-level parent', () => {
+  it('maps nested list blocks recursively using original source ranges', () => {
     const nested = {
-      document: [{ id: 'parent', markdown: '- Parent\n  - Child', children: [{ id: 'child' }] }],
-      blocksToMarkdownLossy(selected: Array<{ id: string }>) {
-        return selected[0]?.id === 'parent' ? '- Parent\n  - Child' : ''
-      },
+      document: [{
+        id: 'parent',
+        content: [{ type: 'text', text: 'Parent' }],
+        children: [{ id: 'child', content: [{ type: 'text', text: 'Child' }] }],
+      }],
     }
-    expect(markdownOffsetForBlock(nested, '- Parent\n  - Child', 'child')).toBe(0)
+    const source = '+ Parent\n  - Child'
+    const childStart = source.indexOf('Child')
+
+    expect(markdownOffsetForBlock(nested, source, 'parent')).toBe(source.indexOf('Parent'))
+    expect(markdownOffsetForBlock(nested, source, 'child')).toBe(childStart)
+    expect(markdownOffsetForCursor(nested, source, 'child', 3)).toBe(childStart + 3)
+    expect(cursorPositionAtMarkdownOffset(nested, source, childStart + 3)).toEqual({
+      block: nested.document[0].children[0],
+      textOffset: 3,
+    })
+  })
+
+  it('uses raw noncanonical ordered-list markers', () => {
+    const listEditor = { document: [{ id: 'item', content: [{ type: 'text', text: 'Item' }] }] }
+    const source = '7) Item'
+
+    expect(markdownOffsetForBlock(listEditor, source, 'item')).toBe(source.indexOf('Item'))
+  })
+
+  it('counts emoji as two UTF-16 code units like ProseMirror', () => {
+    const emojiEditor = { document: [{ id: 'emoji', content: [{ type: 'text', text: 'A😀B' }] }] }
+    const source = '**A😀B**'
+
+    expect(markdownOffsetForCursor(emojiEditor, source, 'emoji', 3)).toBe(source.indexOf('B'))
+    expect(cursorPositionAtMarkdownOffset(emojiEditor, source, source.indexOf('B'))?.textOffset).toBe(3)
   })
 })

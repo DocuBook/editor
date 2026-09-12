@@ -25,7 +25,7 @@ describe("editor store renameTab", () => {
     });
   });
 
-  it("remaps path and name of the renamed tab, including activeTab", () => {
+  it("remaps path and name of the renamed tab, including activeTab", async () => {
     useEditorStore.setState({
       tabs: [
         {
@@ -49,7 +49,7 @@ describe("editor store renameTab", () => {
       ],
       activeTab: "notes/old.md",
     });
-    useEditorStore.getState().renameTab("notes/old.md", "notes/renamed.md");
+    await useEditorStore.getState().renameTab("notes/old.md", "notes/renamed.md");
 
     const { tabs, activeTab } = useEditorStore.getState();
     expect(tabs.some((t) => t.path === "notes/old.md")).toBe(false);
@@ -61,7 +61,7 @@ describe("editor store renameTab", () => {
     expect(tabs.find((t) => t.path === "journal/day.md")?.name).toBe("day.md");
   });
 
-  it("flushes the renamed tab when active (unsaved WYSIWYG edits reach the store before remap)", () => {
+  it("flushes the renamed tab when active (unsaved WYSIWYG edits reach the store before remap)", async () => {
     const spy = vi.fn();
     useEditorStore.setState({
       tabs: [
@@ -78,12 +78,12 @@ describe("editor store renameTab", () => {
       activeTab: "a.md",
       _flushEditor: spy,
     });
-    useEditorStore.getState().renameTab("a.md", "b.md");
+    await useEditorStore.getState().renameTab("a.md", "b.md");
     expect(spy).toHaveBeenCalledTimes(1);
     expect(useEditorStore.getState().activeTab).toBe("b.md");
   });
 
-  it("does not flush when renaming a non-active tab (it was flushed on last switch)", () => {
+  it("does not flush when renaming a non-active tab (it was flushed on last switch)", async () => {
     const spy = vi.fn();
     useEditorStore.setState({
       tabs: [
@@ -109,7 +109,7 @@ describe("editor store renameTab", () => {
       activeTab: "b.md",
       _flushEditor: spy,
     });
-    useEditorStore.getState().renameTab("a.md", "c.md");
+    await useEditorStore.getState().renameTab("a.md", "c.md");
     expect(spy).not.toHaveBeenCalled();
     expect(useEditorStore.getState().activeTab).toBe("b.md");
     expect(
@@ -117,7 +117,7 @@ describe("editor store renameTab", () => {
     ).toBe("c.md");
   });
 
-  it("drops the old tab when the rename target is already open (no duplicate paths)", () => {
+  it("drops the old tab when the rename target is already open (no duplicate paths)", async () => {
     useEditorStore.setState({
       tabs: [
         {
@@ -141,20 +141,20 @@ describe("editor store renameTab", () => {
       ],
       activeTab: "a.md",
     });
-    useEditorStore.getState().renameTab("a.md", "b.md"); // renaming a.md onto the open b.md
+    await useEditorStore.getState().renameTab("a.md", "b.md"); // renaming a.md onto the open b.md
     const { tabs } = useEditorStore.getState();
     expect(tabs.some((t) => t.path === "a.md")).toBe(false);
     expect(tabs.filter((t) => t.path === "b.md").length).toBe(1); // no duplicate
     expect(useEditorStore.getState().activeTab).toBe("b.md");
   });
 
-  it("is a no-op when the file is not open", () => {
+  it("is a no-op when the file is not open", async () => {
     useEditorStore.setState({ tabs: [], activeTab: null });
-    useEditorStore.getState().renameTab("ghost.md", "real.md");
+    await useEditorStore.getState().renameTab("ghost.md", "real.md");
     expect(useEditorStore.getState().tabs).toEqual([]);
   });
 
-  it("remaps every open tab under a renamed folder (plan/bug.md → task/bug.md)", () => {
+  it("remaps every open tab under a renamed folder (plan/bug.md → task/bug.md)", async () => {
     useEditorStore.setState({
       tabs: [
         { path: "plan/bug.md", name: "bug.md", content: "# bug", frontmatter: "", editedContent: null, dirty: false, deleted: false },
@@ -163,7 +163,7 @@ describe("editor store renameTab", () => {
       ],
       activeTab: "plan/bug.md",
     });
-    useEditorStore.getState().renameTab("plan", "task");
+    await useEditorStore.getState().renameTab("plan", "task");
 
     const { tabs, activeTab } = useEditorStore.getState();
     expect(tabs.some((t) => t.path === "plan/bug.md")).toBe(false);
@@ -175,7 +175,7 @@ describe("editor store renameTab", () => {
     expect(activeTab).toBe("task/bug.md");
   });
 
-  it("flushes an active WYSIWYG tab under the renamed folder before remap", () => {
+  it("flushes an active WYSIWYG tab under the renamed folder before remap", async () => {
     const spy = vi.fn();
     useEditorStore.setState({
       tabs: [
@@ -184,12 +184,12 @@ describe("editor store renameTab", () => {
       activeTab: "plan/deep/x.md",
       _flushEditor: spy,
     });
-    useEditorStore.getState().renameTab("plan", "task");
+    await useEditorStore.getState().renameTab("plan", "task");
     expect(spy).toHaveBeenCalledTimes(1);
     expect(useEditorStore.getState().activeTab).toBe("task/deep/x.md");
   });
 
-  it("drops the stale tab when the folder-rename target is already open (search-opened new path)", () => {
+  it("drops the stale tab when the folder-rename target is already open (search-opened new path)", async () => {
     useEditorStore.setState({
       tabs: [
         { path: "plan/bug.md", name: "bug.md", content: "old", frontmatter: "", editedContent: null, dirty: false, deleted: false },
@@ -197,7 +197,7 @@ describe("editor store renameTab", () => {
       ],
       activeTab: "plan/bug.md",
     });
-    useEditorStore.getState().renameTab("plan", "task");
+    await useEditorStore.getState().renameTab("plan", "task");
 
     const { tabs, activeTab } = useEditorStore.getState();
     expect(tabs.some((t) => t.path === "plan/bug.md")).toBe(false);

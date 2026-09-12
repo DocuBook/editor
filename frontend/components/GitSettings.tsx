@@ -24,7 +24,9 @@ export default function GitSettings() {
       setData(d); setName(d.name); setEmail(d.email); setErr('')
     } catch (e) { setErr(String(e)) }
   }
+  /* oxlint-disable react/set-state-in-effect -- initial async load */
   useEffect(() => { load() }, [])
+  /* oxlint-enable react/set-state-in-effect */
 
   const saveIdentity = async () => {
     setBusy(true); setErr('')

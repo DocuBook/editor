@@ -41,12 +41,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
    *  the key stays in the keychain (SEC-5: keys are backend-only). */
   const [keyInput, setKeyInput] = useState('')
   const keyInputRef = useRef(keyInput)
-  keyInputRef.current = keyInput
 
   /** Custom base URL for the OpenAI-compatible provider (persisted in the store). */
   const [baseUrlInput, setBaseUrlInput] = useState('')
   const baseUrlInputRef = useRef(baseUrlInput)
-  baseUrlInputRef.current = baseUrlInput
 
   /** Custom provider config from the backend — source "env" means Docker
    *  overrides via DB_OPENAI_COMPAT_* → the UI renders read-only. */
@@ -66,11 +64,16 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [])
   const envCustom = customCfg?.source === 'env'
   const envCustomRef = useRef(envCustom)
-  envCustomRef.current = envCustom
-  const customModelRef = useRef(customCfg?.model)
-  customModelRef.current = customCfg?.model
   const probeToolsRef = useRef(probeTools)
-  probeToolsRef.current = probeTools
+  /** Latest-value refs for async probes: synced after commit (never during
+   *  render) and read only from callbacks. Declared before the auto-probe
+   *  effect so the refs are fresh when it runs. */
+  useEffect(() => {
+    keyInputRef.current = keyInput
+    baseUrlInputRef.current = baseUrlInput
+    envCustomRef.current = envCustom
+    probeToolsRef.current = probeTools
+  })
   const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-surface text-warning border border-warning-border ml-2">from env</span>
 
   /** Auto-probe when the selected model changes and has no stored probe yet.
@@ -103,6 +106,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [modelOptions, setModelOptions] = useState<DiscoveredModel[]>([])
   const [modelsLoading, setModelsLoading] = useState(false)
   const [modelsError, setModelsError] = useState<string | null>(null)
+  /* oxlint-disable react/set-state-in-effect -- resets the model list when the provider changes */
   useEffect(() => {
     if (!provider || provider === CUSTOM_PROVIDER_ID) { setModelOptions([]); setModelsError(null); return }
     const p = providers.find(x => x.id === provider)
@@ -121,6 +125,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       .finally(() => { if (!cancelled) setModelsLoading(false) })
     return () => { cancelled = true }
   }, [provider, setModel])
+  /* oxlint-enable react/set-state-in-effect */
 
   const [providerSearch, setProviderSearch] = useState('')
   const [showProviderDropdown, setShowProviderDropdown] = useState(false)
@@ -150,9 +155,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const savedSet = new Set(savedProviders)
 
   /** Keep the custom base URL input in sync with the selected provider. */
+  /* oxlint-disable react/set-state-in-effect -- mirrors the provider's persisted base URL */
   useEffect(() => {
     setBaseUrlInput(useAiSettings.getState().baseUrls[provider] || '')
   }, [provider])
+  /* oxlint-enable react/set-state-in-effect */
 
   /** Resync which providers have saved keys — one batch call instead of one invoke per provider. */
   useEffect(() => {

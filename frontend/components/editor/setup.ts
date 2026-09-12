@@ -37,6 +37,9 @@ const usePreviewRenderingPaused = () => useSyncExternalStore(
 
 /** Keep existing source previews mounted while AI updates their source. New
  * previews use source view until rendering is enabled. */
+/* oxlint-disable react/refs -- deliberate render-time ref caching freezes preview
+ * components during AI writing; moving these reads/writes into effects
+ * reintroduces the preview flicker this wrapper exists to prevent. */
 function StableSourcePreview({ paused, props, language, Preview, fallback }: { paused: boolean; props: any; language: string; Preview: any; fallback: 'block' | 'inline' }) {
   const stableProps = useRef<any | null>(null)
   const stableElement = useRef<any | null>(null)
@@ -80,6 +83,7 @@ function StableSourcePreview({ paused, props, language, Preview, fallback }: { p
 
   return paused ? stableElement.current : createElement(Preview, props)
 }
+/* oxlint-enable react/refs */
 
 
 function createStablePreview(Preview: any, language: string | ((props: any) => string), fallback: 'block' | 'inline') {
