@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDocumentContext } from "../../../frontend/utils/aiBlocks";
+import { buildDocumentContext, CURSOR_MARKER } from "../../../frontend/utils/aiBlocks";
 import { buildAiPrompt } from "../../../frontend/utils/aiPrompt";
 
 describe("buildDocumentContext", () => {
@@ -70,6 +70,115 @@ describe("buildDocumentContext", () => {
       getExtension: () => undefined,
     };
     expect(buildDocumentContext(ed)).not.toContain("Active block type");
+  });
+
+  /** Regression: truncating the document from char 0 dropped the region the
+   *  user was writing in, so "continue writing" was answered from the document
+   *  start on long notes. The window must be centred on the anchored block. */
+  describe("long-document cursor anchoring", () => {
+    /** 200 blocks is far past maxContextChars, so truncation always applies. */
+    const blocks = Array.from({ length: 200 }, (_, index) => ({
+      id: `b${index}`,
+      type: "paragraph",
+      content: [
+        { type: "text", text: `Block ${index} ` + "filler ".repeat(20) },
+      ],
+    }));
+    const CURSOR_ID = "b150";
+
+    function makeLongEditor(anchorId: string) {
+      return {
+        document: blocks,
+        blocksToMarkdownLossy: (value: any[]) =>
+          value.map((block: any) => block.content[0].text).join("\n\n") + "\n",
+        getSelection: () => undefined,
+        getTextCursorPosition: () => ({ block: { id: "stale-first" } }),
+        getExtension: () => ({
+          store: {
+            state: { aiMenuState: { blockId: anchorId, status: "user-input" } },
+          },
+        }),
+      } as any;
+    }
+
+    it("marks the caret and drops the document head on a long document", () => {
+      const context = buildDocumentContext(makeLongEditor(CURSOR_ID));
+      expect(context).toContain(CURSOR_MARKER);
+      // The anchored block survives; the far head is what gets cut.
+      expect(context).toContain("Block 150");
+      expect(context).not.toContain("Block 0 filler");
+    });
+
+    it("keeps the anchor block and immediate successors inside the budget", () => {
+      const context = buildDocumentContext(makeLongEditor(CURSOR_ID));
+      const markerIndex = context.indexOf(CURSOR_MARKER);
+      const after = context.slice(markerIndex + CURSOR_MARKER.length);
+      // Blocks right after the caret are what "continue writing" must follow.
+      expect(after).toContain("Block 151");
+      expect(after).toContain("Block 152");
+      expect(context.length).toBeLessThanOrEqual(
+        12000 + CURSOR_MARKER.length + 200,
+      );
+    });
+
+    it("keeps preceding text when the caret sits near the document end", () => {
+      const context = buildDocumentContext(makeLongEditor("b199"));
+      expect(context).toContain(CURSOR_MARKER);
+      expect(context).toContain("Block 199");
+      // Nothing follows the last block, so the tail is empty but the head is not.
+      expect(context).toContain("Block 19");
+      expect(context).not.toContain("Block 0 filler");
+    });
+
+    it("falls back to a head-capped document when no anchor resolves", () => {
+      const ed: any = { ...makeLongEditor("missing-block") };
+      const context = buildDocumentContext(ed);
+      expect(context).not.toContain(CURSOR_MARKER);
+      expect(context).toContain("Block 0");
+      expect(context).toContain("...[truncated]");
+    });
+
+    it("explains the cursor marker in the compiled prompt", () => {
+      const prompt = buildAiPrompt({
+        mode: "text",
+        messages: [],
+        documentMarkdown: buildDocumentContext(makeLongEditor(CURSOR_ID)),
+        selectedMarkdown: "",
+        userText: "Continue writing",
+        taskRules: "",
+      });
+      const contextMessage = prompt.messages.find(
+        (message) => message.role === "assistant",
+      )?.content;
+      expect(contextMessage).toContain(CURSOR_MARKER);
+      expect(contextMessage).toContain("caret position");
+    });
+
+    it("tells the text policy how to use the cursor marker", () => {
+      const prompt = buildAiPrompt({
+        mode: "text",
+        messages: [],
+        documentMarkdown: "# T\n",
+        selectedMarkdown: "",
+        userText: "Continue writing",
+        taskRules: "",
+      });
+      expect(prompt.messages[0].content).toContain(CURSOR_MARKER);
+      expect(prompt.messages[0].content).toContain("Never output that marker");
+    });
+
+    it("does not emit the marker in tool mode", () => {
+      const prompt = buildAiPrompt({
+        mode: "tool",
+        messages: [],
+        documentState: { selection: false, blocks: [], isEmptyDocument: false },
+        documentMarkdown: "",
+        selectedMarkdown: "",
+        userText: "Edit",
+        taskRules: "",
+      });
+      expect(prompt.messages[0].content).not.toContain(CURSOR_MARKER);
+    });
   });
 });
 
