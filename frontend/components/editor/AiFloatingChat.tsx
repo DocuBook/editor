@@ -175,7 +175,7 @@ export default function AiFloatingChat() {
               key={item.key}
               onClick={item.onItemClick}
               onMouseDown={(e) => e.preventDefault()}
-              className="relative flex min-h-10 min-w-37 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-2.5 text-left text-xs font-medium text-foreground shadow-[0_4px_12px_var(--color-shadow)] cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <span className="flex w-5 shrink-0 items-center justify-center text-accent">{item.icon}</span>
               {item.title}

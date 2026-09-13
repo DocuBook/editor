@@ -200,7 +200,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
           Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
         </button>
         {actionsOpen && (
-          <div className="absolute top-full right-0 mt-1 bg-surface border border-border rounded-lg p-1 min-w-[200px] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
+          <div className="ui-popover absolute top-full right-0 mt-1 p-1 min-w-[200px] z-50">
             {compact && (
               <>
                 <button onClick={() => undo()} disabled={!canUndo}

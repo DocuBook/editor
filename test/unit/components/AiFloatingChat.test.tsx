@@ -81,8 +81,7 @@ describe('AI floating composer', () => {
     const floating = document.querySelector('.editor-ai-floating')!
     const promptAction = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue writing')!
     expect(floating.classList.contains('z-50')).toBe(true)
-    expect(promptAction.classList.contains('bg-surface')).toBe(true)
-    expect(promptAction.classList.contains('border-border')).toBe(true)
+    expect(promptAction.classList.contains('ui-popover')).toBe(true)
     expect(promptAction.querySelector('span')?.classList.contains('text-accent')).toBe(true)
 
     act(() => promptAction.click())

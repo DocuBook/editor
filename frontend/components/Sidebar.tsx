@@ -319,7 +319,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
             <ChevronsUpDown size={14} className="ml-auto shrink-0" />
           </button>
           {vaultMenuOpen && (
-            <div data-vault-menu className="absolute bottom-full left-0 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
+            <div data-vault-menu className="ui-popover absolute bottom-full left-0 mb-1 p-1 w-52 max-w-[calc(100vw-1rem)] z-50">
               {recent.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-foreground-subtle italic">No recent vaults</div>}
               {recent.length > 0 && (
                 <div className="max-h-56 overflow-y-auto">
@@ -353,7 +353,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           </button>
           <span className="tip tip-left">Create a file/folder</span>
           {showPlusMenu && (
-            <div data-plus-popup className="absolute bottom-full -right-6 mb-1 bg-surface border border-border rounded-lg p-1 w-52 max-w-[calc(100vw-1rem)] z-50 shadow-[0_4px_12px_var(--color-shadow)]">
+            <div data-plus-popup className="ui-popover absolute bottom-full -right-6 mb-1 p-1 w-52 max-w-[calc(100vw-1rem)] z-50">
               <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('file'); setNewName('') }}
                 className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                 <FileText size={14} /> New File
@@ -373,7 +373,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       </div>
       <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
       {ctxItem && (
-        <div ref={ctxMenuRef} data-ctx-menu className="fixed bg-surface border border-border rounded-lg p-1 min-w-[120px] z-[100] shadow-[0_4px_12px_var(--color-shadow)]" style={{ top: ctxPos.y, left: ctxPos.x }}>
+        <div ref={ctxMenuRef} data-ctx-menu className="ui-popover fixed p-1 min-w-[120px] z-[100]" style={{ top: ctxPos.y, left: ctxPos.x }}>
           <button onClick={async () => {
               closeContextMenu()
               setRenaming({ path: ctxItem.path, name: ctxItem.name, type: ctxItem.type })

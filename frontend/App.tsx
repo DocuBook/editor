@@ -184,7 +184,7 @@ export default function App() {
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       {confirmCloseVault && (
         <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={() => setConfirmCloseVault(false)}>
-          <div className="bg-surface border border-border rounded-xl p-4 w-72 shadow-[0_10px_30px_var(--color-shadow)]" onClick={e => e.stopPropagation()}>
+          <div className="ui-popover p-4 w-72" onClick={e => e.stopPropagation()}>
             <div className="text-sm font-semibold mb-1">Close vault?</div>
             <div className="text-xs text-foreground-secondary mb-4">Unsaved changes will be saved before closing.</div>
             <div className="flex justify-end gap-2">
