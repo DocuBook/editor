@@ -5,14 +5,14 @@ import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
 import { toast } from 'sonner'
-import { hasAISelection, hasTextSelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
+import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 
 /** Shape of the extension store slice we mirror from AIExtension.store. */
 type AiMenuState = { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any } | 'closed'
 
 export default function AiFloatingChat() {
   const editor = useEditorStore((s) => s.blockEditor)
-  const { expanded, input, focusRequest, setExpanded, setInput } = useAiChat()
+  const { selectionPromptOpen, expanded, input, focusRequest, setExpanded, setInput, setSelectionPromptOpen } = useAiChat()
   const provider = useAiSettings((s) => s.provider)
   const savedProviders = useAiSettings((s) => s.savedProviders)
   const aiConfigured = !!provider && savedProviders.includes(provider)
@@ -37,9 +37,6 @@ export default function AiFloatingChat() {
   const canPrompt = status === 'closed' || status === 'user-input' || status === 'user-reviewing'
   const canTogglePrompts = status === 'closed' || status === 'user-input'
   const promptEnabled = aiConfigured && canPrompt
-  /** Text-selection prompts belong to the formatting toolbar popover. Keeping
-   *  them out of the FAB list avoids a second, redundant entry point. */
-  const hasSelection = hasTextSelection(editor)
 
   useEffect(() => {
     if (focusRequest) inputRef.current?.focus({ preventScroll: true })
@@ -108,7 +105,7 @@ export default function AiFloatingChat() {
   }, [input])
 
   const items = useMemo(() => {
-    if (status !== 'user-input' || hasSelection) return []
+    if (status !== 'user-input' || selectionPromptOpen) return []
     return getDefaultAIMenuItems(editor, 'user-input').map((item) => ({
       ...item,
       onItemClick: () => {
@@ -116,7 +113,7 @@ export default function AiFloatingChat() {
         item.onItemClick((prompt) => useAiChat.getState().focusInput(prompt))
       },
     }))
-  }, [status, editor, setExpanded, hasSelection])
+  }, [status, editor, setExpanded, selectionPromptOpen])
 
   if (!ai) return null
 
@@ -126,6 +123,7 @@ export default function AiFloatingChat() {
     const prompt = input.trim()
     if (!prompt || !aiConfigured) return
     setExpanded(false)
+    setSelectionPromptOpen(false)
     if (!isOpen) {
       if (!openAIMenuAtAnchor(editor)) return
     }
@@ -166,7 +164,7 @@ export default function AiFloatingChat() {
       />
       {/* Selection mode: prompts live in the toolbar popover, so the toggle has
           nothing to open. Typed text still turns this into the send button. */}
-      {(hasInput || !hasSelection) && (
+      {(hasInput || !selectionPromptOpen) && (
         <button
           onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()}
           onMouseDown={(e) => e.preventDefault()}
@@ -192,7 +190,7 @@ export default function AiFloatingChat() {
       ref={rootRef}
       className="editor-ai-floating pointer-events-auto absolute bottom-5 left-1/2 z-50 flex -translate-x-1/2 flex-col items-end gap-2"
     >
-      {aiConfigured && !hasSelection && status === 'user-input' && expanded && !hasInput && items.length > 0 && (
+      {aiConfigured && !selectionPromptOpen && status === 'user-input' && expanded && !hasInput && items.length > 0 && (
         <div className="relative z-30 flex flex-col items-end gap-2">
           {items.map((item) => (
             <button

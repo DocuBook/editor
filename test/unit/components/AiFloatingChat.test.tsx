@@ -49,7 +49,7 @@ function makeAi(aiMenuState: any = 'closed') {
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
   root = createRoot(document.getElementById('root')!)
-  useAiChat.setState({ expanded: false, input: '', focusRequest: 0 })
+  useAiChat.setState({ expanded: false, input: '', focusRequest: 0, selectionPromptOpen: false })
   useAiSettings.setState({ provider: 'openai', savedProviders: ['openai'] })
 })
 
@@ -254,9 +254,11 @@ describe('AI floating composer', () => {
       },
     })
 
+    // The formatting toolbar owns selection-prompt visibility; opening its
+    // popover is what takes the FAB list and its toggle out of the UI.
+    act(() => useAiChat.setState({ selectionPromptOpen: true }))
     act(() => root!.render(<AiFloatingChat />))
 
-    // Text-selection prompts live in the formatting toolbar popover instead.
     expect(useAiChat.getState().expanded).toBe(false)
     expect(document.body.textContent).not.toContain('Continue writing')
     expect(document.body.textContent).not.toContain('Summarize')
@@ -267,6 +269,16 @@ describe('AI floating composer', () => {
     // A stale `expanded` flag must not resurrect the selection prompt list.
     act(() => useAiChat.setState({ expanded: true }))
     expect(document.body.textContent).not.toContain('Continue writing')
+
+    // Closing the toolbar popover hands the UI back to the cursor: the toggle
+    // returns instead of staying permanently hidden. It reads as "Hide" here
+    // because the stale `expanded` flag is still set from the assertion above.
+    act(() => useAiChat.setState({ selectionPromptOpen: false }))
+    expect(document.querySelector('[aria-label="Hide AI prompts"]')).not.toBeNull()
+
+    // A clean cursor-mode entry exposes the "Show" affordance again.
+    act(() => useAiChat.setState({ expanded: false }))
+    expect(document.querySelector('[aria-label="Show AI prompts"]')).not.toBeNull()
   })
 
   it('turns the trigger into send once a toolbar prompt fills the composer in selection mode', () => {
@@ -280,7 +292,10 @@ describe('AI floating composer', () => {
     })
 
     act(() => root!.render(<AiFloatingChat />))
-    act(() => useAiChat.getState().focusInput('Translate to English'))
+    act(() => {
+      useAiChat.setState({ selectionPromptOpen: true })
+      useAiChat.getState().focusInput('Translate to English')
+    })
 
     const textarea = document.querySelector('textarea')!
     expect(textarea.value).toBe('Translate to English')

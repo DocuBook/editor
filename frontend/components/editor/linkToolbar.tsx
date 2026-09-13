@@ -200,12 +200,17 @@ function AIToolbarButtonSafe() {
   const dict = useAIDictionary()
   const formattingToolbar = useExtension(FormattingToolbarExtension)
   const { showSelection } = useExtension(ShowSelectionExtension)
+  const setSelectionPromptOpen = useAiChat((state) => state.setSelectionPromptOpen)
   const [showPopover, setShowPopover] = useState(false)
 
   useEffect(() => {
     showSelection(showPopover, 'aiToolbarPrompts')
-    return () => showSelection(false, 'aiToolbarPrompts')
-  }, [showPopover, showSelection])
+    setSelectionPromptOpen(showPopover)
+    return () => {
+      showSelection(false, 'aiToolbarPrompts')
+      setSelectionPromptOpen(false)
+    }
+  }, [showPopover, showSelection, setSelectionPromptOpen])
 
   if (!editor.isEditable) return null
   const items = getDefaultAIMenuItems(editor, 'user-input')
@@ -217,6 +222,7 @@ function AIToolbarButtonSafe() {
       setShowPopover((open) => !open)
       return
     }
+    setSelectionPromptOpen(false)
     const blockId = openAIMenuAtAnchor(editor)
     if (!blockId) return
     formattingToolbar.store.setState(false)
@@ -229,6 +235,7 @@ function AIToolbarButtonSafe() {
       return
     }
     setShowPopover(false)
+    setSelectionPromptOpen(false)
     formattingToolbar.store.setState(false)
     item.onItemClick((prompt) => useAiChat.getState().focusInput(prompt))
   }
