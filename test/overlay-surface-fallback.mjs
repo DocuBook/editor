@@ -7,6 +7,10 @@
  *   1. an opaque background, so content behind the panel cannot bleed through
  *   2. a box-shadow, so the panel still reads as elevated
  *
+ * Blur/translucency is a dialogs-only enhancement: only .ui-dialog may turn
+ * translucent, and only when the engine supports backdrop-filter. Popovers
+ * always keep the opaque surface.
+ *
  * Strategy: load the REAL built stylesheet twice —
  *   - as-is                              → modern engine (blur path)
  *   - with backdrop-filter @supports blocks removed
@@ -92,16 +96,20 @@ try {
     CSS.supports('backdrop-filter', 'blur(1px)') || CSS.supports('-webkit-backdrop-filter', 'blur(1px)'))
 
   console.log(`[engine ${process.env.BROWSER || 'chromium'}] supportsBlur=${engineSupportsBlur}`)
-  console.log(`[modern stylesheet] bg=${modern.r.popover.bg} blur=${modern.r.popover.blur}`)
-  console.log(`[safari15 fallback] bg=${legacy.r.popover.bg} blur=${legacy.r.popover.blur}`)
+  console.log(`[modern stylesheet] popover bg=${modern.r.popover.bg} blur=${modern.r.popover.blur}`)
+  console.log(`[modern stylesheet] dialog  bg=${modern.r.dialog.bg} blur=${modern.r.dialog.blur}`)
+  console.log(`[safari15 fallback] dialog  bg=${legacy.r.dialog.bg} blur=${legacy.r.dialog.blur}`)
 
   for (const kind of ['popover', 'dialog']) {
+    // Only dialogs opt into blur; popovers keep the opaque surface + shadow.
+    const wantsBlur = kind === 'dialog'
     // ── Untouched stylesheet: behavior tracks the engine's own support ──
-    if (engineSupportsBlur) {
+    if (wantsBlur && engineSupportsBlur) {
       ok(`modern ${kind}: blur applied`, /blur/.test(modern.r[kind].blur), modern.r[kind].blur)
       ok(`modern ${kind}: translucent surface`, /rgba\(/.test(modern.r[kind].bg), modern.r[kind].bg)
     } else {
-      ok(`modern ${kind}: opaque without engine blur`, /^rgb\(/.test(modern.r[kind].bg.trim()), modern.r[kind].bg)
+      ok(`modern ${kind}: opaque surface`, /^rgb\(/.test(modern.r[kind].bg.trim()), modern.r[kind].bg)
+      ok(`modern ${kind}: blur absent`, modern.r[kind].blur === 'none', modern.r[kind].blur)
     }
     ok(`modern ${kind}: shadow retained`, modern.r[kind].shadow !== 'none', modern.r[kind].shadow)
 

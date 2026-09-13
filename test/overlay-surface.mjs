@@ -7,6 +7,7 @@
  *     on engines where backdrop blur does not render
  *   - translucency must only apply when blur is actually supported, so an
  *     engine without blur keeps an opaque, readable panel
+ *   - blur/translucency is dialogs-only: popovers always stay opaque
  *
  * Run against more than one engine:
  *   npm run build && node test/overlay-surface.mjs
@@ -96,16 +97,19 @@ try {
 
     // rgba() means an alpha channel is present, i.e. translucent.
     const isTranslucent = /rgba\(/.test(s.bg)
-    if (supportsBlur) {
+    // Only dialogs opt into blur; popovers keep the opaque surface + shadow.
+    const wantsBlur = cls === 'ui-dialog'
+    if (wantsBlur && supportsBlur) {
       // Blur is available: expect the diffusion to be installed...
       ok(`${cls}: blur applied when supported`, /blur/.test(s.blur), s.blur)
       // ...and the surface may become translucent because the blur backs it.
       ok(`${cls}: translucent when blur supported`, isTranslucent, s.bg)
     } else {
-      // No blur: translucency would leave content bleeding through, so the
-      // opaque surface must remain AND the shadow must carry separation.
-      ok(`${cls}: stays opaque without blur`, !isTranslucent, s.bg)
-      ok(`${cls}: blur not applied without support`, s.blur === 'none', s.blur)
+      // No blur (or a popover, which never blurs): translucency would leave
+      // content bleeding through, so the opaque surface must remain AND the
+      // shadow must carry separation.
+      ok(`${cls}: stays opaque`, !isTranslucent, s.bg)
+      ok(`${cls}: blur not applied`, s.blur === 'none', s.blur)
     }
   }
 } catch (e) {

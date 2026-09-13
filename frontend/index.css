@@ -34,7 +34,8 @@
     --color-shadow: rgb(0 0 0 / 35%);
     /* Elevated floating surfaces. Two tiers only: popovers (menus, selects)
        sit close to their anchor; dialogs (modals) sit above the whole shell.
-       Translucent variants feed the blur @supports block further down. */
+       The raised (translucent) variant feeds the dialogs-only blur block
+       further down. */
     --color-surface-raised: rgb(22 22 24 / 82%);
     --shadow-popover: 0 4px 12px var(--color-shadow);
     --shadow-dialog: 0 25px 50px -12px var(--color-shadow);
@@ -154,9 +155,8 @@ body {
 
    Elevation is a box-shadow, NOT a backdrop-filter: the app's oldest target
    (WKWebView macOS 12 / Safari 15) does not reliably render backdrop blur.
-   Blur is layered on below as progressive enhancement, and the surface color
-   only becomes translucent inside that block — an engine without blur keeps
-   the fully opaque surface and a readable shadow edge. */
+   Popovers keep the opaque surface + shadow; only dialogs opt into the
+   blur/translucency enhancement layered on below. */
 .ui-popover,
 .ui-dialog {
     background: var(--color-surface);
@@ -171,7 +171,10 @@ body {
     box-shadow: var(--shadow-dialog);
 }
 
-/* Blur the content behind the surface — progressive enhancement only.
+/* Blur the content behind the dialog surface — progressive enhancement only,
+   and dialogs only. Popovers keep the opaque surface + shadow: they sit close
+   to their anchor, so translucency there reads as bleed-through rather than
+   elevation.
 
    Guarded by @supports so an engine without blur keeps the opaque surface
    above instead of a translucent panel with nothing behind it.
@@ -186,23 +189,20 @@ body {
    -webkit- only, which would drop blur on engines that implement the standard
    property but not the alias. Separate rules survive to the build output. */
 @supports (backdrop-filter: blur(1px)) {
-    .ui-popover,
     .ui-dialog {
         backdrop-filter: blur(12px) saturate(140%);
     }
 }
 @supports (-webkit-backdrop-filter: blur(1px)) {
-    .ui-popover,
     .ui-dialog {
         -webkit-backdrop-filter: blur(12px) saturate(140%);
     }
 }
 
-/* Translucency is gated on blur support so the surface only becomes see-through
-   when it can actually diffuse what is behind it. Engines that fail both guards
-   above keep --color-surface. */
+/* Translucency is gated on blur support so the dialog surface only becomes
+   see-through when it can actually diffuse what is behind it. Engines that
+   fail both guards above keep --color-surface. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    .ui-popover,
     .ui-dialog {
         background: var(--color-surface-raised);
     }
