@@ -37,7 +37,14 @@ impl Git {
         let workdir = repo.workdir().ok_or("Repository has no working tree")?;
         let mut index = repo.index().map_err(git_error)?;
         match std::fs::symlink_metadata(workdir.join(path)) {
-            Ok(_) => index.add_path(path).map_err(git_error)?,
+            Ok(_) => {
+                if index.get_path(path, 0).is_none()
+                    && repo.status_should_ignore(path).map_err(git_error)?
+                {
+                    return Err("Path is ignored by .gitignore".into());
+                }
+                index.add_path(path).map_err(git_error)?
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 index.remove_path(path).map_err(git_error)?
             }
@@ -76,6 +83,105 @@ mod tests {
     }
 
     #[test]
+    fn default_gitignore_tracks_supported_formats_only() {
+        let dir = temp_git_repo("stage-whitelist");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+
+        let supported = [
+            "note.md",
+            "page.mdx",
+            "image.png",
+            "image.jpg",
+            "image.jpeg",
+            "image.gif",
+            "image.webp",
+            "image.ico",
+            "image.svg",
+            "document.pdf",
+            "audio.mp3",
+            "video.mp4",
+            "video.mov",
+            "video.avi",
+        ];
+        for name in supported {
+            std::fs::write(dir.join(name), "content").unwrap();
+        }
+        std::fs::create_dir_all(dir.join("assets")).unwrap();
+        std::fs::write(dir.join("assets/IMAGE.PNG"), "content").unwrap();
+        let excluded = [
+            "notes.txt",
+            "image.bmp",
+            "image.avif",
+            "archive.zip",
+            "archive.tar",
+            "archive.gz",
+            "archive.rar",
+            "binary.exe",
+            "binary.dmg",
+            "binary.pkg",
+            "binary.bin",
+        ];
+        for name in excluded {
+            std::fs::write(dir.join(name), "ignored").unwrap();
+        }
+        std::fs::write(dir.join(".env"), "SECRET=value").unwrap();
+        std::fs::write(dir.join(".env.local"), "SECRET=value").unwrap();
+        std::fs::write(dir.join(".DS_Store"), "ignored").unwrap();
+        std::fs::write(dir.join(".hidden.md"), "ignored").unwrap();
+        std::fs::create_dir_all(dir.join(".trash")).unwrap();
+        std::fs::write(dir.join(".trash/deleted.md"), "ignored").unwrap();
+        std::fs::create_dir_all(dir.join("node_modules/package")).unwrap();
+        std::fs::write(dir.join("node_modules/package/readme.md"), "ignored").unwrap();
+
+        let status = g.status_with_branch().unwrap().status;
+        assert!(status.contains("?? note.md"));
+        for name in excluded.into_iter().chain([
+            ".env",
+            ".env.local",
+            ".DS_Store",
+            ".hidden.md",
+            ".trash/deleted.md",
+            "node_modules/package/readme.md",
+        ]) {
+            assert!(!status.contains(name), "{name}");
+        }
+
+        g.add_all().unwrap();
+        let index = g.repository().unwrap().index().unwrap();
+        for name in supported {
+            assert!(index.get_path(Path::new(name), 0).is_some(), "{name}");
+        }
+        assert!(index.get_path(Path::new("assets/IMAGE.PNG"), 0).is_some());
+        assert!(index.get_path(Path::new(".gitignore"), 0).is_some());
+        for name in excluded.into_iter().chain([
+            ".env",
+            ".env.local",
+            ".DS_Store",
+            ".hidden.md",
+            ".trash/deleted.md",
+            "node_modules/package/readme.md",
+        ]) {
+            assert!(index.get_path(Path::new(name), 0).is_none(), "{name}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stage_path_rejects_ignored_untracked_file() {
+        let dir = temp_git_repo("stage-ignored-path");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init().unwrap();
+        std::fs::write(dir.join(".env"), "SECRET=value").unwrap();
+
+        assert_eq!(
+            g.stage_path(".env").unwrap_err(),
+            "Path is ignored by .gitignore"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn add_all_excludes_trash_and_stages_deletions() {
         let dir = temp_git_repo("stage-all");
         let g = Git::open(dir.to_str().unwrap());
@@ -91,8 +197,7 @@ mod tests {
         g.add_all().unwrap();
         let status = g.status_with_branch().unwrap().status;
         assert!(status.contains("D. old.md"));
-        assert!(status.contains("?? .trash/deleted.md"));
-        assert!(!status.contains("A. .trash/deleted.md"));
+        assert!(!status.contains(".trash/deleted.md"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
