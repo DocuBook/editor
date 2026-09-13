@@ -394,20 +394,95 @@ export function buildTaskFormattingRules(userText: string): string {
   return "";
 }
 
-/** Document context for text-only prompts: Markdown plus selection block types.
- *  Tool prompts use xl-ai's metadata.documentState instead. */
+/** Budget split for the cursor-anchored window: text before the cursor is
+ *  supporting context, text after it carries what "continue" must follow. */
+const CONTEXT_BEFORE_RATIO = 0.4;
+/** Marker inserted at the anchored block so the model knows where the caret is;
+ *  text-only models never see a cursor otherwise. */
+export const CURSOR_MARKER = "<!-- cursor -->";
+
+/** Locate the anchored block's index in the flattened document so the window
+ *  can be centred on it. Returns -1 when the block cannot be resolved. */
+function flattenBlocks(blocks: any[]): any[] {
+  return blocks.flatMap((block) => [
+    block,
+    ...(block?.children?.length ? flattenBlocks(block.children) : []),
+  ]);
+}
+
+/**
+ * Cursor-anchored Markdown context for the text-only (non-tool) path.
+ *
+ * Truncating the whole document from char 0 drops exactly the region the user
+ * is writing in, so "continue writing" was answered from the document *start*
+ * on long notes. Instead, window the Markdown around the anchored block and
+ * mark the caret, so the model always sees local context and where to resume.
+ */
 export function buildDocumentContext(editor: any): string {
   if (!editor) return "";
   try {
-    const md = editor.blocksToMarkdownLossy(editor.document);
-    const selCtx = describeSelection(editor);
     const MAX = AI_FORMATTING_RULES.maxContextChars;
-    const trimmed =
-      md.length > MAX ? md.substring(0, MAX) + "\n...[truncated]" : md;
-    return trimmed + selCtx;
+    const selCtx = describeSelection(editor);
+    const anchorId = resolveActiveBlockId(editor);
+    const block = anchorId ? findBlock(editor, anchorId) : null;
+    if (!block) {
+      const md = editor.blocksToMarkdownLossy(editor.document);
+      return trimContext(md, MAX) + selCtx;
+    }
+
+    // Render the document up to and including the anchored block's siblings.
+    // Splitting on the anchor's own Markdown is lossy for repeated text, so
+    // walk real block boundaries instead: parent index for top-level blocks,
+    // sibling index for nested ones.
+    const flat = flattenBlocks(Array.isArray(editor.document) ? editor.document : []);
+    const anchorIndex = flat.indexOf(block);
+    const before = flat.slice(0, anchorIndex);
+    const after = flat.slice(anchorIndex + 1);
+
+    const beforeMd = before.length ? editor.blocksToMarkdownLossy(before) : "";
+    const anchorMd = editor.blocksToMarkdownLossy([block]);
+    const afterMd = after.length ? editor.blocksToMarkdownLossy(after) : "";
+
+    // Anchor block must survive verbatim: it carries the caret and the style
+    // the continuation has to match. Budget the rest around it.
+    const anchorBudget = anchorMd.length + CURSOR_MARKER.length;
+    const remaining = Math.max(0, MAX - anchorBudget);
+    const beforeBudget = Math.floor(remaining * CONTEXT_BEFORE_RATIO);
+    const afterBudget = remaining - beforeBudget;
+
+    const head = tailTruncate(beforeMd, beforeBudget);
+    const tail = headTruncate(afterMd, afterBudget);
+
+    const marked = /\n$/.test(anchorMd)
+      ? anchorMd + CURSOR_MARKER + "\n"
+      : anchorMd + "\n" + CURSOR_MARKER + "\n";
+    return head + marked + tail + selCtx;
   } catch {
     return "";
   }
+}
+
+/** Keep the LAST `budget` chars — the text closest to the anchor. */
+function tailTruncate(text: string, budget: number): string {
+  if (text.length <= budget) return text;
+  if (budget <= 0) return "";
+  const sliced = text.slice(-budget);
+  const firstBreak = sliced.indexOf("\n");
+  return "...[truncated]\n" + (firstBreak >= 0 ? sliced.slice(firstBreak + 1) : sliced);
+}
+
+/** Keep the FIRST `budget` chars — the text that immediate continuation follows. */
+function headTruncate(text: string, budget: number): string {
+  if (text.length <= budget) return text;
+  if (budget <= 0) return "";
+  const sliced = text.slice(0, budget);
+  const lastBreak = sliced.lastIndexOf("\n");
+  return (lastBreak > 0 ? sliced.slice(0, lastBreak) : sliced) + "\n...[truncated]";
+}
+
+/** Fallback path (no resolvable anchor): cap the document at `max` chars. */
+function trimContext(text: string, max: number): string {
+  return text.length > max ? text.substring(0, max) + "\n...[truncated]" : text;
 }
 
 /** Selection block-type summary for the text prompt. Falls back to the AI menu's

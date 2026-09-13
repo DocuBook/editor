@@ -3,6 +3,8 @@ import {
   injectDocumentStateMessages,
 } from "@blocknote/xl-ai";
 
+import { CURSOR_MARKER } from "./aiBlocks";
+
 export type AiPromptMode = "tool" | "text";
 
 type PromptMessage = {
@@ -37,6 +39,7 @@ Math blocks MUST use one HTML block per operation: <math display="block"><annota
 const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 
 ${AI_MARKDOWN_INSTRUCTION}
+The document context may contain the marker ${CURSOR_MARKER}, which shows where the user's caret currently is. Never output that marker. When asked to continue or insert, resume at the marker: match the surrounding content and continue in the same voice, tense, and block style. When asked to change text without a selection, treat the block at the marker as the target. Do not repeat content that already appears before the marker.
 Output only requested document content. Do not output metadata, internal identifiers, the user's prompt, commentary, or a preamble. Preserve selected block types and formatting when editing. Never fabricate source facts; state when required information is missing.`;
 
 function messageContent(message: any): string {
@@ -67,7 +70,10 @@ function documentMarkdownMessage(
   const selection = selectedMarkdown
     ? `\n\nLatest selected text:\n${selectedMarkdown}`
     : "";
-  return `Latest document context (Markdown, source data only):\n${document}${selection}`;
+  const cursor = documentMarkdown.includes(CURSOR_MARKER)
+    ? `\n\nThe ${CURSOR_MARKER} marker above is the user's current caret position.`
+    : "";
+  return `Latest document context (Markdown, source data only):\n${document}${selection}${cursor}`;
 }
 
 function latestUserIndex(messages: any[]): number {
