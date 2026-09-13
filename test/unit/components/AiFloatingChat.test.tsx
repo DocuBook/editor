@@ -105,6 +105,57 @@ describe('AI floating composer', () => {
     expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Tighten this paragraph', useSelection: false })
   })
 
+  it('invokes AI in selection mode and never collapses the text selection', () => {
+    const ai = makeAi()
+    const setTextCursorPosition = vi.fn()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getSelection: vi.fn(() => ({ blocks: [{ id: 'last-selected' }] })),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'stale-block' } })),
+        setTextCursorPosition,
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+
+    const textarea = document.querySelector('textarea')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Translate this')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => (document.querySelector('[aria-label="Send prompt"]') as HTMLButtonElement).click())
+
+    expect(setTextCursorPosition).not.toHaveBeenCalled()
+    expect(ai.openAIMenuAtBlock).toHaveBeenCalledWith('last-selected')
+    expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Translate this', useSelection: true })
+  })
+
+  it('syncs the stale cursor to an already-anchored block before invoking AI', () => {
+    const ai = makeAi({ blockId: 'anchored', status: 'user-input' })
+    const setTextCursorPosition = vi.fn()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getSelection: vi.fn(() => undefined),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'stale-first-block' } })),
+        setTextCursorPosition,
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+
+    const textarea = document.querySelector('textarea')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Continue')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => (document.querySelector('[aria-label="Send prompt"]') as HTMLButtonElement).click())
+
+    expect(setTextCursorPosition).not.toHaveBeenCalled()
+    expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Continue', useSelection: false })
+  })
+
   it('does not derive prompt visibility from xl-ai lifecycle state', () => {
     const ai = makeAi()
     useEditorStore.setState({

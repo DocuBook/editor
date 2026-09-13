@@ -42,6 +42,35 @@ describe("buildDocumentContext", () => {
   it("returns empty for missing editor", () => {
     expect(buildDocumentContext(null)).toBe("");
   });
+
+  it("describes the anchored block type when focus lost the live selection", () => {
+    const ed: any = {
+      document: [
+        { id: "b1", type: "heading", level: 2, content: [{ type: "text", text: "Title" }] },
+      ],
+      blocksToMarkdownLossy: () => "## Title\n",
+      getSelection: () => undefined,
+      getTextCursorPosition: () => ({ block: { id: "stale-first" } }),
+      getExtension: () =>
+        ({ store: { state: { aiMenuState: { blockId: "b1", status: "user-input" } } } }),
+    };
+    const context = buildDocumentContext(ed);
+    expect(context).toContain("Active block type");
+    expect(context).toContain("heading level 2");
+  });
+
+  it("omits the active-block hint when nothing is resolvable", () => {
+    const ed: any = {
+      document: [],
+      blocksToMarkdownLossy: () => "",
+      getSelection: () => undefined,
+      getTextCursorPosition: () => {
+        throw new Error("boom");
+      },
+      getExtension: () => undefined,
+    };
+    expect(buildDocumentContext(ed)).not.toContain("Active block type");
+  });
 });
 
 describe("buildAiPrompt document state", () => {

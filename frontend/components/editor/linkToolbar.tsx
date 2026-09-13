@@ -4,11 +4,11 @@
 import { useEffect, useState } from 'react'
 import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
-import { AIExtension, useAIDictionary } from '@blocknote/xl-ai'
+import { useAIDictionary } from '@blocknote/xl-ai'
 import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
-import { resolveAIBlockId } from '../../utils/aiBlocks'
+import { openAIMenuAtAnchor } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
 
 /** Open an external URL: native uses the system opener (tauri-plugin-opener →
@@ -207,10 +207,8 @@ function AIToolbarButtonSafe() {
 
   if (!editor.isEditable) return null
   const onClick = () => {
-    const blockId = resolveAIBlockId(editor)
-    const ai = editor.getExtension(AIExtension)
-    if (!blockId || !ai) return
-    ai.openAIMenuAtBlock(blockId)
+    const blockId = openAIMenuAtAnchor(editor)
+    if (!blockId) return
     formattingToolbar.store.setState(false)
     useAiChat.getState().setExpanded(true)
   }

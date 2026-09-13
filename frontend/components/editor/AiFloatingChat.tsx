@@ -4,6 +4,7 @@ import { AIExtension, getDefaultAIMenuItems } from '@blocknote/xl-ai'
 import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
+import { openAIMenuAtAnchor } from '../../utils/aiBlocks'
 
 /** Shape of the extension store slice we mirror from AIExtension.store. */
 type AiMenuState = { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any } | 'closed'
@@ -111,9 +112,7 @@ export default function AiFloatingChat() {
     if (!prompt || !aiConfigured) return
     setExpanded(false)
     if (!isOpen) {
-      const blockId = editor?.getTextCursorPosition?.()?.block?.id
-      if (!blockId) return
-      ai.openAIMenuAtBlock(blockId)
+      if (!openAIMenuAtAnchor(editor)) return
     }
     ai.invokeAI({ userPrompt: prompt, useSelection: editor!.getSelection() !== undefined })
     setInput('')

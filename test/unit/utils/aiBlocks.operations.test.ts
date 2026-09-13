@@ -233,6 +233,29 @@ describe("buildApplyDocumentInput", () => {
     expect(received).not.toContain("\\\\$");
   });
 
+  it("anchors add on the AI menu block when the live cursor is stale (focus lost)", async () => {
+    const editor: any = mockEditor({ cursorBlockId: "stale-first" });
+    editor.document = [
+      { id: "stale-first", type: "paragraph", content: [{ type: "text", text: "first" }] },
+      { id: "anchored", type: "paragraph", content: [{ type: "text", text: "target" }] },
+    ];
+    editor.getExtension = () => ({
+      store: { state: { aiMenuState: { blockId: "anchored", status: "user-input" } } },
+    });
+    const input = await buildApplyDocumentInput(editor, "Hello world");
+    expect(input.operations[0].referenceId).toBe("anchored$");
+  });
+
+  it("keeps the live cursor anchor when the menu anchor matches it", async () => {
+    const editor: any = mockEditor({ cursorBlockId: "b-cursor" });
+    editor.document = [{ id: "b-cursor", type: "paragraph", content: [{ type: "text", text: "x" }] }];
+    editor.getExtension = () => ({
+      store: { state: { aiMenuState: { blockId: "b-cursor", status: "user-input" } } },
+    });
+    const input = await buildApplyDocumentInput(editor, "Hello world");
+    expect(input.operations[0].referenceId).toBe("b-cursor$");
+  });
+
   it("anchors add on prevBlock when cursor block is empty (xl-ai deletes it)", async () => {
     const editor = mockEditor({ cursorBlockId: "b-empty" });
     editor.getTextCursorPosition = () => ({

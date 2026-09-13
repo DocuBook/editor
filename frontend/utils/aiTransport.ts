@@ -191,10 +191,6 @@ async function runSendMessages(
         }))
       : undefined;
   const editor = deps.getEditor();
-  const sel = editor?.getSelection();
-  const selText = sel?.blocks?.length
-    ? editor.blocksToMarkdownLossy(sel.blocks)
-    : "";
 
   return new ReadableStream({
     async start(controller) {
@@ -247,6 +243,13 @@ async function runSendMessages(
         /** Use current editor state as dynamic document context; retrieval is
          *  intentionally outside this prompt pipeline until semantic search exists. */
         const docContext = buildDocumentContext(editor);
+        /** Resolve selection text as late as possible: submitting from the
+         *  floating composer moves focus to a <textarea>, so an eager read can
+         *  miss the selection or see a stale cursor. */
+        const sel = editor?.getSelection?.();
+        const selText = sel?.blocks?.length
+          ? editor.blocksToMarkdownLossy(sel.blocks)
+          : "";
         const userText = latestUserText(messages);
         const taskRules = buildTaskFormattingRules(userText);
         const useTools = supportsTools && !!tools;
