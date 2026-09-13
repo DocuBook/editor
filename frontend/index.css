@@ -469,6 +469,8 @@ body .mobile-sidebar-drawer-body > aside {
    min-width form supported by the app's oldest WKWebView. */
 .editor-ai-floating {
     width: calc(100% - 2rem);
+    max-width: 100%;
+    overflow-x: hidden;
 }
 @media (min-width: 640px) {
     .editor-ai-floating {

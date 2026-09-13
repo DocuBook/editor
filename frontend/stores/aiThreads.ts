@@ -16,6 +16,8 @@ export interface AiThread {
   id: string
   title: string
   filePath: string
+  /** Absolute vault identity keeps histories isolated while surviving reopen. */
+  vaultPath?: string
   createdAt: number
   updatedAt: number
   messages: AiThreadMessage[]
@@ -28,7 +30,8 @@ interface AiThreadsState {
   renamePath: (fromPath: string, toPath: string) => void
   removeThread: (id: string) => void
   clearThreads: () => void
-  beginExchange: (userText: string, filePath?: string) => { threadId: string; assistantId: string } | null
+  updateLatestAssistantStatus: (threadId: string, status: string) => void
+  beginExchange: (userText: string, filePath?: string, vaultPath?: string) => { threadId: string; assistantId: string } | null
   setMessageContent: (threadId: string, messageId: string, content: string) => void
   finishMessage: (threadId: string, messageId: string, status: AiMessageStatus, content?: string) => void
 }
@@ -79,19 +82,33 @@ export const useAiThreads = create<AiThreadsState>()(
 
       clearThreads: () => set({ threads: [], activeThreadId: null }),
 
-      beginExchange: (userText, filePath = '') => {
+      updateLatestAssistantStatus: (threadId, status) => set(state => ({
+        threads: updateThread(state.threads, threadId, thread => ({
+          ...thread,
+          updatedAt: Date.now(),
+          messages: thread.messages.map((message, index, messages) => {
+            const latestAssistant = messages.findLastIndex(item => item.role === 'assistant')
+            return index === latestAssistant && message.status === 'done'
+              ? { ...message, content: message.content.replace(/Document changes (?:ready for review|accepted by editor|reverted by editor)\.?$/, status) }
+              : message
+          }),
+        })),
+      })),
+
+      beginExchange: (userText, filePath = '', vaultPath = '') => {
         const prompt = userText.trim()
         if (!prompt) return null
 
         const state = get()
         const existing = filePath
-          ? state.threads.find(thread => thread.filePath === filePath)
-          : state.threads.find(thread => thread.id === state.activeThreadId)
+          ? state.threads.find(thread => thread.filePath === filePath && (thread.vaultPath ?? '') === vaultPath)
+          : state.threads.find(thread => thread.id === state.activeThreadId && (thread.vaultPath ?? '') === vaultPath)
         const now = Date.now()
         const target: AiThread = existing ?? {
           id: uuid(),
           title: titleFromPrompt(prompt),
           filePath,
+          vaultPath,
           createdAt: now,
           updatedAt: now,
           messages: [],
@@ -105,6 +122,7 @@ export const useAiThreads = create<AiThreadsState>()(
             ...thread,
             title: thread.messages.length === 0 ? titleFromPrompt(prompt) : thread.title,
             filePath: filePath || thread.filePath,
+            vaultPath: vaultPath || thread.vaultPath,
             updatedAt: now,
             messages: [
               ...thread.messages,
@@ -137,7 +155,12 @@ export const useAiThreads = create<AiThreadsState>()(
     }),
     {
       name: 'docubook:ai-threads',
-      version: 1,
+      version: 2,
+      migrate: (persisted: any) => ({
+        ...persisted,
+        // Older records had no vault identity and must not leak into a vault.
+        threads: (persisted?.threads ?? []).map((thread: AiThread) => ({ ...thread, vaultPath: thread.vaultPath ?? '' })),
+      }),
       partialize: state => ({ threads: state.threads, activeThreadId: state.activeThreadId }),
     },
   ),

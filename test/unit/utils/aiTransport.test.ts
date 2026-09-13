@@ -157,5 +157,8 @@ describe('createAiTransport thread history', () => {
     expect(assistant[0].status).toBe('done')
     // The tool marker is appended once, never per emitted part.
     expect(assistant[0].content.split('Document changes ready for review.').length - 1).toBe(1)
+
+    useAiThreads.getState().updateLatestAssistantStatus(threads[0].id, 'Document accepted by editor.')
+    expect(useAiThreads.getState().threads[0].messages.at(-1)?.content).toContain('Document accepted by editor.')
   })
 })

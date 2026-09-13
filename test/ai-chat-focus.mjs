@@ -63,7 +63,10 @@ async function api(cmd, args = {}, cookie = '') {
 const textarea = () => page.locator('textarea[placeholder="Send message to AI writing..."]')
 const showPrompts = () => page.locator('button[aria-label="Show AI prompts"]')
 const aiToolbarBtn = () => page.locator('button[aria-label="Edit with AI"]')
-const chip = (name) => page.getByRole('button', { name })
+/** Prompt chips exist in two shapes: the composer's own FAB list renders real
+ *  <button>s, while xl-ai's toolbar suggestion menu renders <div role="option">.
+ *  Match both, otherwise one of the two entry points silently stops being tested. */
+const chip = (name) => page.getByRole('button', { name }).or(page.getByRole('option', { name }))
 
 try {
   await waitForServer(BASE)
@@ -185,8 +188,10 @@ try {
   const promptLabel = chatPanel.getByText(/^prompt$/i)
   await promptLabel.waitFor({ timeout: 5000 })
   // The tool-path marker is the recorded AI message for this document thread.
-  await chatPanel.getByText('Document changes ready for review.').waitFor({ timeout: 5000 })
-  ok('ai chat: accordion shows prompt + AI history', true)
+  // Accept was clicked above, so the persisted history must show the accepted
+  // status instead of the stale "ready for review" marker.
+  await chatPanel.getByText('Document accepted by editor.').waitFor({ timeout: 5000 })
+  ok('ai chat: accordion shows prompt + accepted AI history', true)
 
   await threadToggle.click()
   await promptLabel.waitFor({ state: 'detached', timeout: 5000 })
@@ -194,8 +199,8 @@ try {
 
   await threadToggle.click()
   await promptLabel.waitFor({ state: 'visible', timeout: 5000 })
-  await chatPanel.getByText('Document changes ready for review.').waitFor({ timeout: 5000 })
-  ok('ai chat: accordion re-expands', await threadToggle.getAttribute('aria-expanded') === 'true')
+  await chatPanel.getByText('Document accepted by editor.').waitFor({ timeout: 5000 })
+  ok('ai chat: accordion re-expands with accepted status', await threadToggle.getAttribute('aria-expanded') === 'true')
 
   ok('no page errors during the whole run', PAGEERRORS(log.errors).length === 0, PAGEERRORS(log.errors).slice(0, 2).join(' | '))
 } catch (e) {

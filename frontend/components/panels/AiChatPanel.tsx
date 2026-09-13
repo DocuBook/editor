@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { BotMessageSquare, ChevronRight, Loader2, X } from 'lucide-react'
 import { useAiThreads } from '../../stores/aiThreads'
+import { useVaultStore } from '../../stores/vault'
 
 const timeLabel = (value: number) => new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(value)
 
 export default function AiChatPanel() {
   const { threads, activeThreadId, setActiveThread, removeThread } = useAiThreads()
-  const ordered = useMemo(() => threads.filter(thread => thread.messages.length > 0).sort((a, b) => b.updatedAt - a.updatedAt), [threads])
+  const vaultPath = useVaultStore(s => s.vaultPath)
+  const ordered = useMemo(() => threads.filter(thread => thread.messages.length > 0 && (thread.vaultPath ?? '') === vaultPath).sort((a, b) => b.updatedAt - a.updatedAt), [threads, vaultPath])
   const active = ordered.find(thread => thread.id === activeThreadId)
   const lastMessageContent = active && active.messages.length > 0 ? active.messages[active.messages.length - 1].content : ''
   const endRef = useRef<HTMLDivElement>(null)
@@ -16,7 +18,7 @@ export default function AiChatPanel() {
   }, [active?.id, active?.messages.length, lastMessageContent])
 
   return (
-    <section aria-label="AI Chat" className="flex min-h-0 flex-1 flex-col text-xs">
+    <section aria-label="AI Chat" className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden text-xs">
       <div className="shrink-0 border-b border-border-subtle px-3 py-2">
         <span className="font-medium text-foreground-secondary">Threads ({ordered.length})</span>
       </div>
@@ -61,7 +63,7 @@ export default function AiChatPanel() {
                 </div>
 
                 {expanded && (
-                  <div id={contentId} className="border-t border-border-subtle bg-surface p-2">
+                  <div id={contentId} className="min-w-0 border-t border-border-subtle bg-surface p-2">
                     <div className="mb-2 text-[9px] text-muted">{timeLabel(thread.updatedAt)}</div>
                     {thread.messages.map(message => (
                       <div
