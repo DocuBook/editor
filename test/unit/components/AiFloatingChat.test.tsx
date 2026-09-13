@@ -18,6 +18,8 @@ import AiFloatingChat from '../../../frontend/components/editor/AiFloatingChat'
 import { useAiChat } from '../../../frontend/stores/aiChat'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useEditorStore } from '../../../frontend/stores/editor'
+import { useVaultStore } from '../../../frontend/stores/vault'
+import { useAiThreads } from '../../../frontend/stores/aiThreads'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -50,6 +52,7 @@ beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
   root = createRoot(document.getElementById('root')!)
   useAiChat.setState({ expanded: false, input: '', focusRequest: 0, selectionPromptOpen: false })
+  useAiThreads.setState({ threads: [], activeThreadId: null })
   useAiSettings.setState({ provider: 'openai', savedProviders: ['openai'] })
 })
 
@@ -192,6 +195,68 @@ describe('AI floating composer', () => {
 
     expect(useAiChat.getState().expanded).toBe(false)
     expect(document.body.textContent).not.toContain('Continue writing')
+  })
+
+  /* Regression: the transport records "Document changes ready for review." when a
+   *  tool call arrives, and nothing rewrote it on Accept/Revert — the AI Chat
+   *  panel kept claiming the change was still pending. */
+  it('settles the persisted thread status when the review is accepted or reverted', () => {
+    const ai = makeAi({ blockId: 'b1', status: 'user-reviewing' })
+    useEditorStore.setState({
+      activeTab: 'note.md',
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+    useVaultStore.setState({ vaultPath: '/vaults/mine' })
+    useAiThreads.setState({
+      threads: [{
+        id: 'thread-1', title: 'summarize the note', filePath: 'note.md', vaultPath: '/vaults/mine',
+        createdAt: 0, updatedAt: 0,
+        messages: [
+          { id: 'm1', role: 'user', content: 'summarize the note', status: 'done', createdAt: 0 },
+          { id: 'm2', role: 'assistant', content: 'AI response\n\nDocument changes ready for review.', status: 'done', createdAt: 0 },
+        ],
+      }],
+      activeThreadId: 'thread-1',
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (Array.from(document.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Accept') as HTMLButtonElement).click())
+
+    expect(ai.acceptChanges).toHaveBeenCalledTimes(1)
+    expect(useAiThreads.getState().threads[0].messages[1].content).toContain('Document accepted by editor.')
+    expect(useAiThreads.getState().threads[0].messages[1].content).not.toContain('ready for review')
+  })
+
+  it('leaves threads of other documents untouched when settling status', () => {
+    const ai = makeAi({ blockId: 'b1', status: 'user-reviewing' })
+    useEditorStore.setState({
+      activeTab: 'note.md',
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+    useVaultStore.setState({ vaultPath: '/vaults/mine' })
+    useAiThreads.setState({
+      threads: [{
+        id: 'thread-other', title: 'other', filePath: 'other.md', vaultPath: '/vaults/mine',
+        createdAt: 0, updatedAt: 0,
+        messages: [
+          { id: 'm1', role: 'assistant', content: 'Other\n\nDocument changes ready for review.', status: 'done', createdAt: 0 },
+        ],
+      }],
+      activeThreadId: null,
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (Array.from(document.querySelectorAll('button')).find(b => b.textContent?.trim() === 'Accept') as HTMLButtonElement).click())
+
+    expect(useAiThreads.getState().threads[0].messages[0].content).toContain('Document changes ready for review.')
   })
 
   it.each([

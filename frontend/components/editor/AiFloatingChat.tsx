@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 import { ListFilterPlus, ArrowUp, Check, RotateCcw, Loader2 } from 'lucide-react'
 import { AIExtension, getDefaultAIMenuItems } from '@blocknote/xl-ai'
 import { useEditorStore } from '../../stores/editor'
+import { useVaultStore } from '../../stores/vault'
 import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
+import { useAiThreads } from '../../stores/aiThreads'
 import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 
@@ -12,6 +14,8 @@ type AiMenuState = { blockId: string; status: 'user-input' | 'thinking' | 'ai-wr
 
 export default function AiFloatingChat() {
   const editor = useEditorStore((s) => s.blockEditor)
+  const activeTab = useEditorStore((s) => s.activeTab)
+  const vaultPath = useVaultStore((s) => s.vaultPath)
   const { selectionPromptOpen, expanded, input, focusRequest, setExpanded, setInput, setSelectionPromptOpen } = useAiChat()
   const provider = useAiSettings((s) => s.provider)
   const savedProviders = useAiSettings((s) => s.savedProviders)
@@ -137,13 +141,29 @@ export default function AiFloatingChat() {
     setInput('')
   }
 
+  /** Mirror xl-ai's accept/reject into the persisted thread history. The
+   *  transport records the "ready for review" marker when a tool call arrives,
+   *  so a finished review must rewrite that marker or the panel keeps claiming
+   *  the change is still pending. Resolved by file+vault, the same identity the
+   *  transport used when it created the thread. */
+  const settleThreadStatus = (status: string) => {
+    const path = activeTab ?? ''
+    if (!path) return
+    const thread = useAiThreads.getState().threads.find(
+      (item) => item.filePath === path && (item.vaultPath ?? '') === (vaultPath ?? ''),
+    )
+    if (thread) useAiThreads.getState().updateLatestAssistantStatus(thread.id, status)
+  }
+
   /** AIExtension closes the menu, re-enables the editor, and restores focus. */
   const accept = () => {
     setExpanded(false)
+    settleThreadStatus('Document accepted by editor.')
     ai.acceptChanges()
   }
   const revert = () => {
     setExpanded(false)
+    settleThreadStatus('Document reverted by editor.')
     ai.rejectChanges()
   }
 
