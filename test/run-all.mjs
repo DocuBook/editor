@@ -10,7 +10,7 @@
  */
 import { spawnSync } from 'node:child_process'
 
-const SUITES = ['web-smoke', 'trash', 'theme-check', 'ai-debug', 'ai-chat-focus']
+const SUITES = ['web-smoke', 'trash', 'theme-check', 'ai-debug', 'ai-chat-focus', 'overlay-surface', 'overlay-surface-fallback']
 const results = []
 
 for (const suite of SUITES) {

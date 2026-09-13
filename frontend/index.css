@@ -32,6 +32,12 @@
     --color-success-border: rgb(16 185 129 / 30%);
     --color-overlay: rgb(0 0 0 / 45%);
     --color-shadow: rgb(0 0 0 / 35%);
+    /* Elevated floating surfaces. Two tiers only: popovers (menus, selects)
+       sit close to their anchor; dialogs (modals) sit above the whole shell.
+       Translucent variants feed the blur @supports block further down. */
+    --color-surface-raised: rgb(22 22 24 / 82%);
+    --shadow-popover: 0 4px 12px var(--color-shadow);
+    --shadow-dialog: 0 25px 50px -12px var(--color-shadow);
 }
 
 [data-theme="light"] {
@@ -64,6 +70,9 @@
     --color-success-border: #10b981;
     --color-overlay: rgb(9 9 11 / 40%);
     --color-shadow: rgb(9 9 11 / 22%);
+    --color-surface-raised: rgb(246 246 247 / 82%);
+    --shadow-popover: 0 4px 12px var(--color-shadow);
+    --shadow-dialog: 0 25px 50px -12px var(--color-shadow);
 }
 
 @layer base {
@@ -136,6 +145,66 @@ body {
         border: 0;
         border-radius: 0;
         padding-inline: 0;
+    }
+}
+
+/* Floating surfaces — single source of truth for popovers and dialogs.
+   Every overlay owns surface bg, border, radius, and elevation here, so
+   call sites cannot drift into ad-hoc shadow/radius strings.
+
+   Elevation is a box-shadow, NOT a backdrop-filter: the app's oldest target
+   (WKWebView macOS 12 / Safari 15) does not reliably render backdrop blur.
+   Blur is layered on below as progressive enhancement, and the surface color
+   only becomes translucent inside that block — an engine without blur keeps
+   the fully opaque surface and a readable shadow edge. */
+.ui-popover,
+.ui-dialog {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+}
+.ui-popover {
+    border-radius: 8px;
+    box-shadow: var(--shadow-popover);
+}
+.ui-dialog {
+    border-radius: 12px;
+    box-shadow: var(--shadow-dialog);
+}
+
+/* Blur the content behind the surface — progressive enhancement only.
+
+   Guarded by @supports so an engine without blur keeps the opaque surface
+   above instead of a translucent panel with nothing behind it.
+
+   Safari 15 (the oldest supported target, see vite.config.ts build.target)
+   reports @supports true via its -webkit- alias, so the shadow is deliberately
+   NOT removed here: Safari 15 needs it as the separation cue, and keeping it
+   costs nothing on engines where blur does render.
+
+   The two vendor forms are declared in separate rules on purpose. Lightning
+   CSS transpiles against `safari15` and collapses same-rule prefixed pairs to
+   -webkit- only, which would drop blur on engines that implement the standard
+   property but not the alias. Separate rules survive to the build output. */
+@supports (backdrop-filter: blur(1px)) {
+    .ui-popover,
+    .ui-dialog {
+        backdrop-filter: blur(12px) saturate(140%);
+    }
+}
+@supports (-webkit-backdrop-filter: blur(1px)) {
+    .ui-popover,
+    .ui-dialog {
+        -webkit-backdrop-filter: blur(12px) saturate(140%);
+    }
+}
+
+/* Translucency is gated on blur support so the surface only becomes see-through
+   when it can actually diffuse what is behind it. Engines that fail both guards
+   above keep --color-surface. */
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    .ui-popover,
+    .ui-dialog {
+        background: var(--color-surface-raised);
     }
 }
 

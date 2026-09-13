@@ -100,7 +100,7 @@ export default function SidebarFooter({ onOpenShortcuts }: { onOpenShortcuts: ()
             <ChevronDown size={11} className={'ml-auto transition-transform text-muted shrink-0 ' + (branchOpen ? 'rotate-180' : '')} />
           </button>
           {branchOpen && (
-            <div className="absolute bottom-full left-2 right-2 mb-1 bg-surface border border-border rounded-lg p-1 z-50 shadow-[0_4px_12px_var(--color-shadow)]">
+            <div className="ui-popover absolute bottom-full left-2 right-2 mb-1 p-1 z-50">
               <form onSubmit={e => { e.preventDefault(); void createBranch() }} className="px-2 py-1.5 border-b border-border-subtle">
                 <input autoFocus value={newBranchName} onChange={e => setNewBranchName(e.target.value)} disabled={busy !== null}
                   placeholder="Type to create a branch..." aria-label="Create branch"

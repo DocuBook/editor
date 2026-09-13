@@ -261,8 +261,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div data-testid="settings-modal" className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] max-sm:px-4" onClick={onClose}>
-      <div className="bg-surface border border-border rounded-xl w-[540px] max-w-full max-h-[80vh] overflow-hidden shadow-[0_25px_50px_-12px_var(--color-shadow)]" onClick={e => e.stopPropagation()}>
+    <div data-testid="settings-modal" className="fixed inset-0 z-50 flex items-start justify-center pt-[8vh] max-sm:px-4 bg-overlay" onClick={onClose}>
+      <div className="ui-dialog w-[540px] max-w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-border-subtle">
           <div className="flex items-center gap-3">
             <h2 className="text-[13px] font-semibold text-foreground">Settings</h2>
@@ -302,7 +302,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <ChevronsUpDown size={14} className="text-muted shrink-0" />
             </div>
             {showProviderDropdown && providerDropdownPos && (
-              <div style={providerDropdownPos} className="max-h-[280px] bg-surface border border-border rounded-lg z-[200] shadow-[0_8px_24px_var(--color-shadow)] overflow-clip">
+              <div style={providerDropdownPos} className="ui-popover max-h-[280px] z-[200] overflow-clip">
                 <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                   <Search size={14} className="text-muted shrink-0" />
                   <input ref={searchRef} type="text" value={providerSearch} onChange={e => { setProviderSearch(e.target.value); setProviderHighlightIdx(0) }}
@@ -367,7 +367,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   <ChevronsUpDown size={14} className="text-muted shrink-0 ml-auto" />
                 </div>
                 {showModelDropdown && modelDropdownPos && (
-                  <div style={modelDropdownPos} className="max-h-[240px] bg-surface border border-border rounded-lg z-[200] shadow-[0_8px_24px_var(--color-shadow)] overflow-clip">
+                  <div style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-clip">
                     <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                       <Search size={14} className="text-muted shrink-0" />
                       <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}

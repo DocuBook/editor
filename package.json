@@ -17,7 +17,9 @@
     "test:e2e:trash": "node test/trash.mjs",
     "test:e2e:theme": "node test/theme-check.mjs",
     "test:e2e:ai": "node test/ai-debug.mjs",
-    "test:e2e:ai-pre": "node test/ai-pre-flicker.mjs"
+    "test:e2e:ai-pre": "node test/ai-pre-flicker.mjs",
+    "test:e2e:overlay": "node test/overlay-surface.mjs",
+    "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs"
   },
   "dependencies": {
     "@blocknote/core": "0.54.2",
