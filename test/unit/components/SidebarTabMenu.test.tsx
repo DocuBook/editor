@@ -33,7 +33,7 @@ describe('SidebarTabMenu', () => {
     renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 0, isNative: true })
 
     expect(tabs()).toHaveLength(4)
-    expect(tabs().map(tab => tab.getAttribute('aria-label'))).toEqual(['Vault', 'AI Chat', 'History', 'Trash'])
+    expect(tabs().map(tab => tab.getAttribute('aria-label'))).toEqual(['Vault', 'AI Chat', 'Changes', 'Trash'])
     expect(tabById('sidebar-panel-vault')).not.toBeNull()
     expect(tabById('sidebar-panel-ai')).not.toBeNull()
     expect(tabById('sidebar-panel-git')).not.toBeNull()
@@ -41,7 +41,7 @@ describe('SidebarTabMenu', () => {
   })
 
   it('shows the title text only on the active tab', () => {
-    const labels: Record<SidebarPanelId, string> = { vault: 'Vault', ai: 'AI Chat', git: 'History', trash: 'Trash' }
+    const labels: Record<SidebarPanelId, string> = { vault: 'Vault', ai: 'AI Chat', git: 'Changes', trash: 'Trash' }
     for (const active of ['vault', 'ai', 'git', 'trash'] as SidebarPanelId[]) {
       if (root) act(() => root!.unmount())
       renderMenu({ active, onChange: vi.fn(), trashCount: 5, isNative: true })

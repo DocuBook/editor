@@ -213,7 +213,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const iconBtn = 'cursor-pointer p-1 rounded hover:bg-surface-active text-foreground-subtle hover:text-foreground transition-colors'
 
   return (
-    <aside id={id} data-testid={id} className={'ui-shell bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full ' + (isMacTauri ? 'w-64' : 'w-56')}>
+    <aside id={id} data-testid={id} className={'ui-shell bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full ' + (isTauri ? 'w-68' : 'w-56')}>
       {isMacTauri ? (
         <div data-tauri-drag-region className="flex h-12 shrink-0 items-center pl-[72px] pr-2">
           <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} />

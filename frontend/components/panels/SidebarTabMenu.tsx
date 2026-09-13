@@ -12,7 +12,7 @@ interface SidebarTabMenuProps {
 const ITEMS = [
   { id: 'vault' as const, label: 'Vault', Icon: FolderTree },
   { id: 'ai' as const, label: 'AI Chat', Icon: BotMessageSquare },
-  { id: 'git' as const, label: 'History', Icon: GitMerge },
+  { id: 'git' as const, label: 'Changes', Icon: GitMerge },
   { id: 'trash' as const, label: 'Trash', Icon: Trash },
 ]
 

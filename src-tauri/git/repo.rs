@@ -1,9 +1,45 @@
 //! Repository lifecycle: existence check, initialization, and remote clone.
 
+use std::io::Write;
+
 use git2::{build::RepoBuilder, FetchOptions, Repository};
 
 use super::remote::is_remote_url;
 use super::{auto_proxy, credential_config, git_error, remote_callbacks, Git};
+
+/// Track only explicitly declared vault formats from `frontend/utils/fileKind.ts`.
+const DEFAULT_GITIGNORE: &str = r#"# DocuBook: track supported vault files only.
+*
+!*/
+
+# Markdown
+!*.[mM][dD]
+!*.[mM][dD][xX]
+
+# Images
+!*.[pP][nN][gG]
+!*.[jJ][pP][gG]
+!*.[jJ][pP][eE][gG]
+!*.[gG][iI][fF]
+!*.[wW][eE][bB][pP]
+!*.[iI][cC][oO]
+!*.[sS][vV][gG]
+
+# Documents and media
+!*.[pP][dD][fF]
+!*.[mM][pP]3
+!*.[mM][pP]4
+!*.[mM][oO][vV]
+!*.[aA][vV][iI]
+
+# Never track hidden files or generated trees.
+.*
+node_modules/
+.trash/
+
+# Keep this policy in the repository.
+!/.gitignore
+"#;
 
 impl Git {
     pub fn is_repo(&self) -> bool {
@@ -11,9 +47,19 @@ impl Git {
     }
 
     pub fn init(&self) -> Result<(), String> {
-        Repository::init(&self.repo_path)
-            .map(|_| ())
-            .map_err(git_error)
+        Repository::init(&self.repo_path).map_err(git_error)?;
+        let path = std::path::Path::new(&self.repo_path).join(".gitignore");
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(mut file) => file
+                .write_all(DEFAULT_GITIGNORE.as_bytes())
+                .map_err(|error| error.to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     /// Clone into `parent/<url-name>` through libgit2. Local sources remain
@@ -95,12 +141,28 @@ mod tests {
     }
 
     #[test]
-    fn init_creates_a_repo() {
+    fn init_creates_a_repo_and_default_gitignore() {
         let dir = temp_git_repo("init");
         let g = Git::open(dir.to_str().unwrap());
         assert!(!g.is_repo());
         g.init().unwrap();
         assert!(g.is_repo());
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            DEFAULT_GITIGNORE
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn init_preserves_existing_gitignore() {
+        let dir = temp_git_repo("init-existing-ignore");
+        std::fs::write(dir.join(".gitignore"), "custom\n").unwrap();
+        Git::open(dir.to_str().unwrap()).init().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            "custom\n"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
