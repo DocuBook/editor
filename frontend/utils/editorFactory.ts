@@ -18,10 +18,11 @@ import { en as baseDict } from '@blocknote/core/locales'
 import { locales as mathLocales } from '@blocknote/math-block'
 import { locales as diagramLocales } from '@blocknote/diagram-block'
 import { en as aiDict } from '@blocknote/xl-ai/locales'
-import { AIExtension } from '@blocknote/xl-ai'
+import { AIExtension, aiDocumentFormats } from '@blocknote/xl-ai'
 import { fileUrl, isAbsoluteUrl, isSafeImageUrl } from '../lib/ipc'
 import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { createAiTransport } from './aiTransport'
+import { createSelectionAwareDocumentStateBuilder } from './aiBlocks'
 
 export interface CachedEditor {
   editor: BlockNoteEditor<any, any, any>
@@ -54,6 +55,9 @@ export function createBlockEditor(vaultPath: string, filePath: string): CachedEd
     extensions: [
       AIExtension({
         transport: createAiTransport({ getEditor: () => editor, filePath }),
+        documentStateBuilder: createSelectionAwareDocumentStateBuilder(
+          aiDocumentFormats.html.defaultDocumentStateBuilder,
+        ),
         agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
       }),
       wikilinkStyler,

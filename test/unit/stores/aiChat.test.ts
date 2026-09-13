@@ -31,14 +31,14 @@ function makeEditor(ai: unknown) {
 
 describe('useAiChat', () => {
   beforeEach(() => {
-    useAiChat.setState({ expanded: false, focusRequest: 0 })
+    useAiChat.setState({ expanded: false, input: '', focusRequest: 0 })
     useEditorStore.setState({ blockEditor: null })
   })
 
-  it('requests composer focus and collapses prompt actions', () => {
+  it('requests composer focus, carries a toolbar prompt, and collapses prompt actions', () => {
     useAiChat.setState({ expanded: true })
-    useAiChat.getState().focusInput()
-    expect(useAiChat.getState()).toMatchObject({ expanded: false, focusRequest: 1 })
+    useAiChat.getState().focusInput('Translate to English')
+    expect(useAiChat.getState()).toMatchObject({ expanded: false, input: 'Translate to English', focusRequest: 1 })
   })
 
   it('does not toggle prompts without an AI-enabled WYSIWYG editor', () => {
@@ -60,6 +60,23 @@ describe('useAiChat', () => {
     useAiChat.getState().togglePrompts()
     expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
     expect(useAiChat.getState().expanded).toBe(false)
+  })
+
+  it('does not open the FAB prompt list while text is selected', () => {
+    const ai = makeAi('closed')
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getSelection: vi.fn(() => ({ blocks: [{ id: 'selected' }] })),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'selected' } })),
+      },
+    })
+
+    // Selection prompts belong to the formatting toolbar popover.
+    useAiChat.getState().togglePrompts()
+
+    expect(useAiChat.getState().expanded).toBe(false)
+    expect(ai.openAIMenuAtBlock).not.toHaveBeenCalled()
   })
 
   it.each(['thinking', 'ai-writing', 'user-reviewing', 'error'])('does not touch active %s work', (status) => {
