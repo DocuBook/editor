@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import { useEditorStore } from './editor'
+import { openAIMenuAtAnchor } from '../utils/aiBlocks'
 
 interface AiChatState {
   /** True only while xl-ai prompt actions are shown above the composer. */
@@ -31,9 +32,7 @@ export const useAiChat = create<AiChatState>((set, get) => ({
     }
     if (menu !== 'closed' && menu.status !== 'user-input') return
     if (menu === 'closed') {
-      const blockId = editor.getTextCursorPosition?.()?.block?.id
-      if (!blockId) return
-      ai.openAIMenuAtBlock(blockId)
+      if (!openAIMenuAtAnchor(editor)) return
     }
     set({ expanded: true })
   },

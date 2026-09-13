@@ -1,3 +1,4 @@
+import { AIExtension } from "@blocknote/xl-ai";
 import { mathDollarToMathML } from "./mathMarkdown";
 
 /** Close an unbalanced code fence so markdown parses cleanly (low-level models often forget the closing ```). */
@@ -66,6 +67,87 @@ export function resolveAIBlockId(editor: any): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Open the xl-ai menu at the resolved block and keep the editor's text cursor
+ * in sync with it.
+ *
+ * xl-ai re-reads the LIVE cursor when building the request
+ * (`buildAIRequest` → `getTextCursorPosition()` and `defaultDocumentStateBuilder`),
+ * so if the cursor is stale when the menu opens, the document state sent to the
+ * model carries the wrong block. Operations then reference ids the model never
+ * saw and the block ID is reported as unrecognized. Anchoring the cursor at open
+ * time (focus is still on the editor) makes every later read consistent.
+ *
+ * Returns the anchored block id (or undefined when nothing is resolvable).
+ */
+export function openAIMenuAtAnchor(editor: any): string | undefined {
+  let selection: any;
+  try {
+    selection = editor?.getSelection?.();
+  } catch {
+    selection = undefined;
+  }
+
+  // A normal-chat submit can happen while focus is in the floating textarea.
+  // Restore the editor's last selection before resolving the cursor anchor, but
+  // never do this for an active text selection because focus/cursor operations
+  // can collapse it before invokeAI reads useSelection.
+  if (!selection?.blocks?.length) {
+    try {
+      editor?.focus?.();
+    } catch {
+      /* fall back to the last available editor selection */
+    }
+  }
+
+  const blockId = resolveAIBlockId(editor);
+  let ai: any;
+  try {
+    ai = editor?.getExtension?.(AIExtension);
+  } catch {
+    ai = undefined;
+  }
+  if (!blockId || !ai?.openAIMenuAtBlock) return undefined;
+  try {
+    // Reposition only for cursor mode. Moving the cursor during a text
+    // selection collapses the selection before invokeAI can use it.
+    if (
+      !selection?.blocks?.length &&
+      editor.getTextCursorPosition?.()?.block?.id !== blockId
+    ) {
+      editor.setTextCursorPosition?.(blockId, "end");
+    }
+  } catch {
+    /* selection may be unavailable — the menu anchor still holds */
+  }
+  ai.openAIMenuAtBlock(blockId);
+  return blockId;
+}
+
+/**
+ * Resolve the block the AI should treat as its anchor when assembling document
+ * context, tolerating a host that has lost editor focus.
+ *
+ * Sending from the floating composer moves DOM focus into a `<textarea>`, and
+ * xl-ai locks the editor (`isEditable = false`) while its menu is open. In that
+ * state `getTextCursorPosition()` can resolve to a stale/fallback block, so the
+ * context would no longer match the block the user picked — operations then
+ * reference an id the model never saw (`block ID not recognized`).
+ *
+ * Prefer the menu's anchored block (set by `openAIMenuAtBlock` from a
+ * focus-time-resolved id) and fall back to the live cursor.
+ */
+export function resolveActiveBlockId(editor: any): string | undefined {
+  try {
+    const menu = editor?.getExtension?.(AIExtension)?.store?.state?.aiMenuState;
+    if (menu && menu !== "closed" && typeof menu.blockId === "string")
+      return menu.blockId;
+  } catch {
+    /* fall through to the live cursor */
+  }
+  return resolveAIBlockId(editor);
 }
 
 /** Semantic anti-hallucination: referenced ids in applyDocumentOperations must exist in the doc. */
@@ -168,10 +250,7 @@ export function buildDocumentContext(editor: any): string {
   if (!editor) return "";
   try {
     const md = editor.blocksToMarkdownLossy(editor.document);
-    const sel = editor.getSelection();
-    const selCtx = sel?.blocks?.length
-      ? `\n\nSelection block types (preserve on edit):\n${sel.blocks.map((b: any) => `- ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`
-      : "";
+    const selCtx = describeSelection(editor);
     const MAX = AI_FORMATTING_RULES.maxContextChars;
     const trimmed =
       md.length > MAX ? md.substring(0, MAX) + "\n...[truncated]" : md;
@@ -179,6 +258,25 @@ export function buildDocumentContext(editor: any): string {
   } catch {
     return "";
   }
+}
+
+/** Selection block-type summary for the text prompt. Falls back to the AI menu's
+ *  anchored block when the editor has lost focus (composer submit), so the model
+ *  still learns the block type it must preserve on edit. */
+function describeSelection(editor: any): string {
+  try {
+    const sel = editor.getSelection();
+    if (sel?.blocks?.length)
+      return `\n\nSelection block types (preserve on edit):\n${sel.blocks.map((b: any) => `- ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`;
+  } catch {
+    /* fall through to the anchored block */
+  }
+  const id = resolveActiveBlockId(editor);
+  if (!id) return "";
+  const block = findBlock(editor, id);
+  return block?.type
+    ? `\n\nActive block type (preserve on edit):\n- ${block.type}${block.level ? " level " + block.level : ""}`
+    : "";
 }
 
 /** True when a tool call carries at least one operation — structural check used
@@ -365,17 +463,24 @@ export async function buildApplyDocumentInput(
       return { type: "applyDocumentOperations", operations };
     }
     const cursor = editor.getTextCursorPosition();
+    /** Focus-loss tolerant anchor: when the user submits from the floating
+     *  composer, the editor is locked and unfocused, so `getTextCursorPosition()`
+     *  can be stale. Prefer the AI menu's anchored block (resolved at invoke time)
+     *  when it disagrees with the live cursor. */
+    const anchored = findBlock(editor, resolveActiveBlockId(editor) || "");
     /** xl-ai deletes the empty cursor block before executing (deleteEmptyCursorBlock
      *  in onStart, when the doc has other content) — anchoring on it fails
      *  validation with "referenceId not found". Anchor on the previous block
      *  instead when the cursor block is empty (exactly the block xl-ai removes).
      *  Single-empty-block docs are safe: there xl-ai does NOT delete it. */
-    const cursorBlock = cursor?.block;
-    const cursorEmpty =
-      !!cursorBlock &&
-      (!cursorBlock.content || cursorBlock.content.length === 0);
-    const refBlock =
-      cursorEmpty && cursor.prevBlock ? cursor.prevBlock : cursorBlock;
+    const useAnchored = !!anchored && anchored.id !== cursor?.block?.id;
+    const refBlock = useAnchored
+      ? anchored
+      : cursor?.block &&
+          (!cursor.block.content || cursor.block.content.length === 0) &&
+          cursor.prevBlock
+        ? cursor.prevBlock
+        : cursor?.block;
     return {
       type: "applyDocumentOperations",
       operations: [
