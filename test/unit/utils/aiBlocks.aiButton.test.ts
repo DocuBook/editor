@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  createSelectionAwareDocumentStateBuilder,
   openAIMenuAtAnchor,
   resolveActiveBlockId,
   resolveAIBlockId,
@@ -9,6 +10,40 @@ import {
  *  `editor.getSelection()` was undefined (collapsed / node selection such as a
  *  selected image) even though the formatting toolbar was shown. The safe
  *  resolver must fall back to the cursor block instead of throwing. */
+describe("createSelectionAwareDocumentStateBuilder", () => {
+  it("keeps selected blocks and only nearby context blocks", async () => {
+    const blocks = Array.from({ length: 6 }, (_, index) => ({
+      id: `b${index}`,
+      type: "paragraph",
+    }));
+    const editor: any = {
+      document: blocks,
+      blocksToHTMLLossy: (value: any[]) => `<p>${value[0].id}</p>`,
+    };
+    const fallback = vi.fn();
+    const builder = createSelectionAwareDocumentStateBuilder(fallback);
+    const state = await builder({ editor, selectedBlocks: [blocks[3]] });
+
+    expect(fallback).not.toHaveBeenCalled();
+    expect(state.selection).toBe(true);
+    expect(state.selectedBlocks).toEqual([{ id: "b3$", block: "<p>b3</p>" }]);
+    expect(state.blocks).toEqual([
+      { block: "<p>b1</p>" },
+      { block: "<p>b2</p>" },
+      { block: "<p>b4</p>" },
+      { block: "<p>b5</p>" },
+    ]);
+  });
+
+  it("delegates cursor requests to xl-ai's default builder", async () => {
+    const fallback = vi.fn().mockResolvedValue({ selection: false });
+    const builder = createSelectionAwareDocumentStateBuilder(fallback);
+    const request = { editor: {}, selectedBlocks: undefined };
+    await expect(builder(request)).resolves.toEqual({ selection: false });
+    expect(fallback).toHaveBeenCalledWith(request);
+  });
+});
+
 describe("resolveAIBlockId", () => {
   it("uses the last block of an active text selection", () => {
     const editor: any = {

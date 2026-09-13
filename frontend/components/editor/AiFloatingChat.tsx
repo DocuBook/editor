@@ -1,21 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { ListFilterPlus, ArrowUp, Check, RotateCcw, Loader2 } from 'lucide-react'
 import { AIExtension, getDefaultAIMenuItems } from '@blocknote/xl-ai'
 import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
-import { openAIMenuAtAnchor } from '../../utils/aiBlocks'
+import { toast } from 'sonner'
+import { hasAISelection, hasTextSelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 
 /** Shape of the extension store slice we mirror from AIExtension.store. */
 type AiMenuState = { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any } | 'closed'
 
 export default function AiFloatingChat() {
   const editor = useEditorStore((s) => s.blockEditor)
-  const { expanded, focusRequest, setExpanded } = useAiChat()
+  const { expanded, input, focusRequest, setExpanded, setInput } = useAiChat()
   const provider = useAiSettings((s) => s.provider)
   const savedProviders = useAiSettings((s) => s.savedProviders)
   const aiConfigured = !!provider && savedProviders.includes(provider)
-  const [input, setInput] = useState('')
+
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
@@ -36,9 +37,23 @@ export default function AiFloatingChat() {
   const canPrompt = status === 'closed' || status === 'user-input' || status === 'user-reviewing'
   const canTogglePrompts = status === 'closed' || status === 'user-input'
   const promptEnabled = aiConfigured && canPrompt
+  /** Text-selection prompts belong to the formatting toolbar popover. Keeping
+   *  them out of the FAB list avoids a second, redundant entry point. */
+  const hasSelection = hasTextSelection(editor)
 
   useEffect(() => {
     if (focusRequest) inputRef.current?.focus({ preventScroll: true })
+  }, [focusRequest])
+
+  /** Keep the caret at the end of a toolbar-injected prompt. Without this the
+   *  textarea scrolls back to its first line once it grows past max-h, so a
+   *  "Translate" prompt appears to start at the top of the box. */
+  useEffect(() => {
+    if (!focusRequest) return
+    const el = inputRef.current
+    if (!el) return
+    el.setSelectionRange(el.value.length, el.value.length)
+    el.scrollTop = el.scrollHeight
   }, [focusRequest])
 
   const close = useCallback(() => {
@@ -93,15 +108,15 @@ export default function AiFloatingChat() {
   }, [input])
 
   const items = useMemo(() => {
-    if (status !== 'user-input') return []
+    if (status !== 'user-input' || hasSelection) return []
     return getDefaultAIMenuItems(editor, 'user-input').map((item) => ({
       ...item,
       onItemClick: () => {
         setExpanded(false)
-        item.onItemClick(setInput)
+        item.onItemClick((prompt) => useAiChat.getState().focusInput(prompt))
       },
     }))
-  }, [status, editor, setExpanded])
+  }, [status, editor, setExpanded, hasSelection])
 
   if (!ai) return null
 
@@ -114,7 +129,13 @@ export default function AiFloatingChat() {
     if (!isOpen) {
       if (!openAIMenuAtAnchor(editor)) return
     }
-    ai.invokeAI({ userPrompt: prompt, useSelection: editor!.getSelection() !== undefined })
+    const useSelection = hasAISelection(editor)
+    if (useSelection && !restoreAISelection(editor)) {
+      toast.error('Text selection is no longer available. Select the text again.')
+      ai.closeAIMenu()
+      return
+    }
+    ai.invokeAI({ userPrompt: prompt, useSelection })
     setInput('')
   }
 
@@ -131,7 +152,7 @@ export default function AiFloatingChat() {
   /** Composer stays visible in WYSIWYG. Empty action toggles xl-ai prompts;
    *  entered text turns it into submit. Enter sends and Shift+Enter adds a line. */
   const promptInput = (
-    <div className="relative isolate z-20 flex w-full min-w-0 items-end gap-2 rounded-lg border border-border bg-surface p-2 shadow-[0_4px_12px_var(--color-shadow)]">
+    <div className="relative isolate z-20 flex w-full min-w-0 items-end gap-2 rounded-lg border border-border bg-surface p-2 shadow-popover">
       <textarea
         ref={inputRef}
         value={input}
@@ -143,22 +164,26 @@ export default function AiFloatingChat() {
         title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'}
         className="min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-0 py-1.5 text-xs leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 max-h-30"
       />
-      <button
-        onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()}
-        onMouseDown={(e) => e.preventDefault()}
-        disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)}
-        aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'}
-        aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined}
-        title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'}
-        className={
-          'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' +
-          (hasInput
-            ? 'bg-accent text-on-accent shadow-[0_4px_10px_var(--color-shadow)] hover:bg-accent-hover'
-            : 'bg-transparent text-foreground hover:bg-surface-active')
-        }
-      >
-        {hasInput ? <ArrowUp size={16} /> : <ListFilterPlus size={16} />}
-      </button>
+      {/* Selection mode: prompts live in the toolbar popover, so the toggle has
+          nothing to open. Typed text still turns this into the send button. */}
+      {(hasInput || !hasSelection) && (
+        <button
+          onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()}
+          onMouseDown={(e) => e.preventDefault()}
+          disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)}
+          aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'}
+          aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined}
+          title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'}
+          className={
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' +
+            (hasInput
+              ? 'bg-accent text-on-accent shadow-[0_4px_10px_var(--color-shadow)] hover:bg-accent-hover'
+              : 'bg-transparent text-foreground hover:bg-surface-active')
+          }
+        >
+          {hasInput ? <ArrowUp size={16} /> : <ListFilterPlus size={16} />}
+        </button>
+      )}
     </div>
   )
 
@@ -167,7 +192,7 @@ export default function AiFloatingChat() {
       ref={rootRef}
       className="editor-ai-floating pointer-events-auto absolute bottom-5 left-1/2 z-50 flex -translate-x-1/2 flex-col items-end gap-2"
     >
-      {aiConfigured && status === 'user-input' && expanded && !hasInput && items.length > 0 && (
+      {aiConfigured && !hasSelection && status === 'user-input' && expanded && !hasInput && items.length > 0 && (
         <div className="relative z-30 flex flex-col items-end gap-2">
           {items.map((item) => (
             <button
@@ -184,7 +209,7 @@ export default function AiFloatingChat() {
       )}
 
       {(status === 'thinking' || status === 'ai-writing') && (
-        <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-surface px-3 py-3 shadow-[0_4px_12px_var(--color-shadow)]">
+        <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-surface px-3 py-3 shadow-popover">
           <span className="flex items-center gap-2 text-xs text-foreground-secondary">
             <Loader2 size={13} className="animate-spin text-accent" />
             {status === 'thinking' ? 'Thinking…' : 'Writing…'}
@@ -196,7 +221,7 @@ export default function AiFloatingChat() {
       )}
 
       {status === 'user-reviewing' && (
-        <div className="flex w-full items-center justify-end gap-2 rounded-xl border border-border bg-surface px-3 py-3 shadow-[0_4px_12px_var(--color-shadow)]">
+        <div className="flex w-full items-center justify-end gap-2 rounded-xl border border-border bg-surface px-3 py-3 shadow-popover">
           <span className="mr-auto text-xs text-foreground-secondary">Review the changes</span>
           <button onClick={revert} onMouseDown={(e) => e.preventDefault()} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
             Revert
@@ -209,7 +234,7 @@ export default function AiFloatingChat() {
       )}
 
       {status === 'error' && (
-        <div className="w-full rounded-xl border border-border bg-surface px-3 py-3 shadow-[0_4px_12px_var(--color-shadow)]">
+        <div className="w-full rounded-xl border border-border bg-surface px-3 py-3 shadow-popover">
           <div className="mb-2 wrap-break-word text-[11px] text-danger">
             {typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}
           </div>

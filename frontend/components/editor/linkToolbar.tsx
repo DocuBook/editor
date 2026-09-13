@@ -4,12 +4,13 @@
 import { useEffect, useState } from 'react'
 import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
-import { useAIDictionary } from '@blocknote/xl-ai'
+import { getDefaultAIMenuItems, useAIDictionary } from '@blocknote/xl-ai'
 import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
-import { openAIMenuAtAnchor } from '../../utils/aiBlocks'
+import { captureAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
+import { toast } from 'sonner'
 
 /** Open an external URL: native uses the system opener (tauri-plugin-opener →
  *  macOS `open` → default browser); web falls back to window.open. Same user
@@ -133,7 +134,7 @@ function CreateLinkButtonPreserveUrl() {
           secondaryTooltip="⌘K" icon={<Link2 size={14} />}
           onClick={() => setShowPopover(o => !o)} />
       </Components.Generic.Popover.Trigger>
-      <Components.Generic.Popover.Content className="bn-popover-content bn-form-popover w-[300px]" variant="form-popover">
+      <Components.Generic.Popover.Content className="bn-popover-content bn-form-popover w-75" variant="form-popover">
         <LinkUrlForm url={state.url} text={state.text} range={state.range} showTextField={false}
           onSubmitted={() => { setShowPopover(false); formattingToolbar.store.setState(false) }} />
         <NoteLinkSearch onPick={(title) => {
@@ -194,32 +195,72 @@ export function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPo
   )
 }
 
-/** Formatting-toolbar AI button. Replaces xl-ai's `AIToolbarButton`, which
- *  throws `Error("No selection")` whenever the editor has no text selection
- *  (collapsed or node selection, e.g. a selected image) — the toolbar is still
- *  shown then, so clicking the sparkle crashed. Also opens the extended prompt
- *  chips (Translate etc.) in one click, mirroring xl-ai's own AIMenu. */
+/** Formatting-toolbar AI button. Text-selection prompts stay beside their
+ *  selection; cursor/node prompts keep using the floating composer. */
 function AIToolbarButtonSafe() {
   const editor = useBlockNoteEditor<any, any, any>()
   const Components = useComponentsContext()!
   const dict = useAIDictionary()
   const formattingToolbar = useExtension(FormattingToolbarExtension)
+  const { showSelection } = useExtension(ShowSelectionExtension)
+  const [showPopover, setShowPopover] = useState(false)
+
+  useEffect(() => {
+    showSelection(showPopover, 'aiToolbarPrompts')
+    return () => showSelection(false, 'aiToolbarPrompts')
+  }, [showPopover, showSelection])
 
   if (!editor.isEditable) return null
+  const items = getDefaultAIMenuItems(editor, 'user-input')
   const onClick = () => {
+    let hasSelection = false
+    try { hasSelection = !!editor.getSelection()?.blocks?.length } catch { /* use cursor mode */ }
+    if (hasSelection) {
+      captureAISelection(editor)
+      setShowPopover((open) => !open)
+      return
+    }
     const blockId = openAIMenuAtAnchor(editor)
     if (!blockId) return
     formattingToolbar.store.setState(false)
     useAiChat.getState().setExpanded(true)
   }
+  const selectPrompt = (item: (typeof items)[number]) => {
+    if (!restoreAISelection(editor) || !openAIMenuAtAnchor(editor)) {
+      toast.error('Text selection is no longer available. Select the text again.')
+      setShowPopover(false)
+      return
+    }
+    setShowPopover(false)
+    formattingToolbar.store.setState(false)
+    item.onItemClick((prompt) => useAiChat.getState().focusInput(prompt))
+  }
   return (
-    <Components.Generic.Toolbar.Button
-      className="bn-button"
-      label={dict.formatting_toolbar.ai.tooltip}
-      mainTooltip={dict.formatting_toolbar.ai.tooltip}
-      icon={<Sparkles size={14} />}
-      onClick={onClick}
-    />
+    <Components.Generic.Popover.Root open={showPopover} onOpenChange={setShowPopover}>
+      <Components.Generic.Popover.Trigger>
+        <Components.Generic.Toolbar.Button
+          className="bn-button"
+          label={dict.formatting_toolbar.ai.tooltip}
+          mainTooltip={dict.formatting_toolbar.ai.tooltip}
+          icon={<Sparkles size={14} />}
+          onClick={onClick}
+        />
+      </Components.Generic.Popover.Trigger>
+      <Components.Generic.Popover.Content className="bn-popover-content p-1" variant="form-popover">
+        <Components.SuggestionMenu.Root id="ai-toolbar-suggestion-menu">
+          {items.map((item, index) => (
+            <Components.SuggestionMenu.Item
+              key={item.key}
+              id={`ai-toolbar-suggestion-${index}`}
+              className="bn-suggestion-menu-item bn-suggestion-menu-item-small"
+              isSelected={false}
+              item={item}
+              onClick={() => selectPrompt(item)}
+            />
+          ))}
+        </Components.SuggestionMenu.Root>
+      </Components.Generic.Popover.Content>
+    </Components.Generic.Popover.Root>
   )
 }
 
@@ -272,7 +313,7 @@ function NoteLinkSearch({ onPick }: { onPick: (title: string) => void }) {
         }}
         placeholder="Search notes to link…"
         className="w-full bg-transparent border-b border-border px-1 py-1 text-sm text-foreground outline-none" />
-      <div className="max-h-[160px] overflow-y-auto mt-1">
+      <div className="max-h-40 overflow-y-auto mt-1">
         {results.length === 0 && query && <div className="px-1 py-1 text-xs text-muted">No notes found</div>}
         {results.map((r, i) => (
           <div key={r.path} onClick={() => onPick(r.title)} onMouseEnter={() => setSelected(i)}

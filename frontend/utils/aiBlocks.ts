@@ -1,5 +1,149 @@
 import { AIExtension } from "@blocknote/xl-ai";
+import { TextSelection } from "prosemirror-state";
 import { mathDollarToMathML } from "./mathMarkdown";
+
+type AISelectionSnapshot = {
+  blocks: any[];
+  anchor: number;
+  head: number;
+  doc: unknown;
+};
+
+/** Selection must survive focus moving from the editor into the AI composer. */
+const aiSelectionSnapshots = new WeakMap<object, AISelectionSnapshot>();
+
+export function getAISelectionSnapshot(editor: any): any[] | undefined {
+  const snapshot = editor && typeof editor === "object"
+    ? aiSelectionSnapshots.get(editor)
+    : undefined;
+  return snapshot?.blocks.length ? snapshot.blocks : undefined;
+}
+
+function liveAISelection(editor: any): { blocks: any[]; anchor: number; head: number; doc: unknown } | undefined {
+  try {
+    const blocks = editor?.getSelection?.()?.blocks;
+    const view = editor?.prosemirrorView;
+    const selection = view?.state?.selection;
+    if (
+      !blocks?.length ||
+      !selection ||
+      selection.empty ||
+      !Number.isInteger(selection.anchor) ||
+      !Number.isInteger(selection.head)
+    ) return undefined;
+    return {
+      blocks: blocks.map((block: any) => ({ ...block })),
+      anchor: selection.anchor,
+      head: selection.head,
+      doc: view.state.doc,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Capture before focus moves into custom AI UI. Missing live selection leaves
+ * an existing snapshot intact; cursor-mode menu opening clears it explicitly. */
+export function captureAISelection(editor: any): boolean {
+  const snapshot = liveAISelection(editor);
+  if (!snapshot || !editor || typeof editor !== "object") return false;
+  aiSelectionSnapshots.set(editor, snapshot);
+  return true;
+}
+
+export function hasAISelection(editor: any): boolean {
+  return !!liveAISelection(editor) || !!getAISelectionSnapshot(editor)?.length;
+}
+
+/** BlockNote-level check: is a text/block range selected right now? Unlike
+ *  `hasAISelection` this does not need a live ProseMirror range, so it stays
+ *  correct for the formatting-toolbar popover (which takes focus off the
+ *  editor) and for node selections. Used to decide which prompt entry point
+ *  owns the UI: toolbar popover for selection, FAB list for cursor mode. */
+export function hasTextSelection(editor: any): boolean {
+  try {
+    return !!editor?.getSelection?.()?.blocks?.length;
+  } catch {
+    return false;
+  }
+}
+
+/** Restore exact text offsets; BlockNote.setSelection selects whole blocks and
+ * throws for the common single-block selection case. */
+export function restoreAISelection(editor: any): boolean {
+  const live = liveAISelection(editor);
+  const snapshot = editor && typeof editor === "object"
+    ? aiSelectionSnapshots.get(editor)
+    : undefined;
+  if (!snapshot) return !!live;
+  if (snapshot.blocks.some((block) => !blockIdExists(editor, block.id))) return false;
+  try {
+    const view = editor.prosemirrorView;
+    if (!view || view.state.doc !== snapshot.doc) return false;
+    const selection = TextSelection.create(
+      view.state.doc,
+      snapshot.anchor,
+      snapshot.head,
+    );
+    view.dispatch(view.state.tr.setSelection(selection));
+    return !!editor.getSelectionCutBlocks?.(true)?.blocks?.length;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Keep selection requests small without changing xl-ai's document-state schema.
+ * The stock HTML builder includes every document block even when a selection is
+ * active. Tool operations only need ids for selected blocks; nearby blocks are
+ * included without ids as lightweight structural context.
+ */
+export function createSelectionAwareDocumentStateBuilder(defaultBuilder: any) {
+  return async (request: any) => {
+    if (!request?.selectedBlocks?.length) return defaultBuilder(request);
+    const editor = request.editor;
+    const flatten = (blocks: any[]): any[] => blocks.flatMap((block) => [
+      block,
+      ...(block?.children?.length ? flatten(block.children) : []),
+    ]);
+    const documentBlocks = flatten(Array.isArray(editor?.document) ? editor.document : []);
+    const selectedIds = new Set(
+      request.selectedBlocks.map((block: any) => String(block?.id ?? "")),
+    );
+    const selectedIndexes = documentBlocks
+      .map((block, index) => selectedIds.has(String(block?.id)) ? index : -1)
+      .filter((index) => index >= 0);
+    const first = selectedIndexes.length ? Math.min(...selectedIndexes) : 0;
+    const last = selectedIndexes.length ? Math.max(...selectedIndexes) : -1;
+    const contextBlocks = last >= 0
+      ? documentBlocks.slice(Math.max(0, first - 2), last + 3)
+      : [];
+    const convert = async (block: any) => ({
+      id: block.id,
+      block: await editor.blocksToHTMLLossy([block]),
+    });
+    const selectedBlocks = await Promise.all(
+      request.selectedBlocks.map(convert),
+    );
+    const selectedSet = new Set(selectedBlocks.map((block: any) => block.id));
+    const blocks = await Promise.all(
+      contextBlocks
+        .filter((block) => !selectedSet.has(block.id))
+        .map(async (block) => ({
+          block: await editor.blocksToHTMLLossy([block]),
+        })),
+    );
+    return {
+      isEmptyDocument: documentBlocks.length === 0,
+      selection: true,
+      selectedBlocks: selectedBlocks.map((block: any) => ({
+        ...block,
+        id: `${String(block.id)}$`,
+      })),
+      blocks,
+    };
+  };
+}
 
 /** Close an unbalanced code fence so markdown parses cleanly (low-level models often forget the closing ```). */
 export function normalizeMarkdown(text: string): string {
@@ -102,6 +246,12 @@ export function openAIMenuAtAnchor(editor: any): string | undefined {
     }
   }
 
+  const selectedBlocks = selection?.blocks?.length ? selection.blocks : undefined;
+  if (selectedBlocks?.length) {
+    captureAISelection(editor);
+  } else if (editor && typeof editor === "object") {
+    aiSelectionSnapshots.delete(editor);
+  }
   const blockId = resolveAIBlockId(editor);
   let ai: any;
   try {
@@ -439,23 +589,31 @@ export async function buildApplyDocumentInput(
       mathDollarToMathML(text),
     );
     if (!parsed?.length) return null;
-    const sel = editor.getSelection();
-    if (sel?.blocks?.length) {
-      const formatted = inheritFormatOnReplace(sel.blocks, parsed);
+    let sel: any;
+    try {
+      sel = editor.getSelection();
+    } catch {
+      sel = undefined;
+    }
+    const selectedBlocks = sel?.blocks?.length
+      ? sel.blocks
+      : getAISelectionSnapshot(editor);
+    if (selectedBlocks?.length) {
+      const formatted = inheritFormatOnReplace(selectedBlocks, parsed);
       /** Update ops map 1:1 onto the selection; extra blocks (model returned more than selected)
        *  become an add-op after the last selected block — never an "undefined$" id that fails validation. */
       const operations: any[] = formatted
-        .slice(0, sel.blocks.length)
+        .slice(0, selectedBlocks.length)
         .map((block: any, i: number) => ({
           type: "update",
-          id: sel.blocks[i]?.id + "$",
+          id: selectedBlocks[i]?.id + "$",
           block: editor.blocksToHTMLLossy([block]),
         }));
-      const extras = formatted.slice(sel.blocks.length);
+      const extras = formatted.slice(selectedBlocks.length);
       if (extras.length) {
         operations.push({
           type: "add",
-          referenceId: sel.blocks[sel.blocks.length - 1]?.id + "$",
+          referenceId: selectedBlocks[selectedBlocks.length - 1]?.id + "$",
           position: "after",
           blocks: extras.map((b: any) => editor.blocksToHTMLLossy([b])),
         });

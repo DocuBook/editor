@@ -3,6 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Schema } from 'prosemirror-model'
+import { EditorState, TextSelection } from 'prosemirror-state'
 
 vi.mock('@blocknote/xl-ai', () => ({
   AIExtension: 'ai',
@@ -47,7 +49,7 @@ function makeAi(aiMenuState: any = 'closed') {
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
   root = createRoot(document.getElementById('root')!)
-  useAiChat.setState({ expanded: false, focusRequest: 0 })
+  useAiChat.setState({ expanded: false, input: '', focusRequest: 0 })
   useAiSettings.setState({ provider: 'openai', savedProviders: ['openai'] })
 })
 
@@ -88,8 +90,9 @@ describe('AI floating composer', () => {
     expect(document.body.textContent).not.toContain('Continue writing')
 
     act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
-    act(() => useAiChat.getState().focusInput())
+    act(() => useAiChat.getState().focusInput('Tighten this paragraph'))
     expect(document.activeElement).toBe(textarea)
+    expect(textarea.value).toBe('Tighten this paragraph')
     expect(document.body.textContent).not.toContain('Continue writing')
 
     act(() => {
@@ -108,10 +111,27 @@ describe('AI floating composer', () => {
   it('invokes AI in selection mode and never collapses the text selection', () => {
     const ai = makeAi()
     const setTextCursorPosition = vi.fn()
+    const schema = new Schema({
+      nodes: {
+        doc: { content: 'block+' },
+        paragraph: { content: 'text*', group: 'block' },
+        text: { group: 'inline' },
+      },
+    })
+    const doc = schema.node('doc', null, [schema.node('paragraph', null, schema.text('hello'))])
+    let state = EditorState.create({ doc, selection: TextSelection.create(doc, 1, 5) })
+    const prosemirrorView = {
+      get state() { return state },
+      dispatch: vi.fn((tr) => { state = state.apply(tr) }),
+    }
+    const selectedBlocks = [{ id: 'last-selected' }]
     useEditorStore.setState({
       blockEditor: {
+        document: selectedBlocks,
+        prosemirrorView,
         getExtension: vi.fn(() => ai),
-        getSelection: vi.fn(() => ({ blocks: [{ id: 'last-selected' }] })),
+        getSelection: vi.fn(() => ({ blocks: selectedBlocks })),
+        getSelectionCutBlocks: vi.fn(() => ({ blocks: selectedBlocks })),
         getTextCursorPosition: vi.fn(() => ({ block: { id: 'stale-block' } })),
         setTextCursorPosition,
       },
@@ -127,6 +147,7 @@ describe('AI floating composer', () => {
     act(() => (document.querySelector('[aria-label="Send prompt"]') as HTMLButtonElement).click())
 
     expect(setTextCursorPosition).not.toHaveBeenCalled()
+    expect(prosemirrorView.dispatch).toHaveBeenCalled()
     expect(ai.openAIMenuAtBlock).toHaveBeenCalledWith('last-selected')
     expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Translate this', useSelection: true })
   })
@@ -221,6 +242,56 @@ describe('AI floating composer', () => {
     expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
     expect(useAiChat.getState().expanded).toBe(false)
     expect(document.body.textContent).not.toContain('Continue writing')
+  })
+
+  it('keeps the FAB prompt list out of selection mode', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getSelection: vi.fn(() => ({ blocks: [{ id: 'selected' }] })),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'selected' } })),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+
+    // Text-selection prompts live in the formatting toolbar popover instead.
+    expect(useAiChat.getState().expanded).toBe(false)
+    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Summarize')
+    expect(ai.openAIMenuAtBlock).not.toHaveBeenCalled()
+    // The toggle is not a dead control in this mode: it is simply absent.
+    expect(document.querySelector('[aria-label="Show AI prompts"]')).toBeNull()
+
+    // A stale `expanded` flag must not resurrect the selection prompt list.
+    act(() => useAiChat.setState({ expanded: true }))
+    expect(document.body.textContent).not.toContain('Continue writing')
+  })
+
+  it('turns the trigger into send once a toolbar prompt fills the composer in selection mode', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getSelection: vi.fn(() => ({ blocks: [{ id: 'selected' }] })),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'selected' } })),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => useAiChat.getState().focusInput('Translate to English'))
+
+    const textarea = document.querySelector('textarea')!
+    expect(textarea.value).toBe('Translate to English')
+    expect(document.activeElement).toBe(textarea)
+    // Toolbar prompts append at the caret, so the caret sits at the end and the
+    // box is scrolled to the last line instead of showing the first one.
+    expect(textarea.selectionStart).toBe('Translate to English'.length)
+    expect(textarea.selectionEnd).toBe('Translate to English'.length)
+    expect(textarea.scrollTop).toBe(textarea.scrollHeight)
+    expect(document.querySelector('[aria-label="Send prompt"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="Show AI prompts"]')).toBeNull()
   })
 
   it('disables an unconfigured composer and points to API key settings', () => {

@@ -198,6 +198,8 @@ async function runSendMessages(
       controller.enqueue({ type: "text-start", id });
       let closed = false;
       let fullText = "";
+      let requestStartedAt = 0;
+      let firstTokenAt = 0;
       /** Batched text streaming: flush pending deltas on a short timer. Path A
        *  (tools) buffers text and decides at the end — meaningful ops win, so
        *  live typing is skipped; Path B (no tools) streams live. */
@@ -217,6 +219,14 @@ async function runSendMessages(
           } catch {}
           return;
         }
+        if (!firstTokenAt) {
+          firstTokenAt = performance.now();
+          if (import.meta.env.DEV && requestStartedAt) {
+            console.debug("[ai] first token", {
+              ttftMs: Math.round(firstTokenAt - requestStartedAt),
+            });
+          }
+        }
         fullText += e.payload;
         pendingDelta += e.payload;
         if (!bufferText && !flushTimer)
@@ -234,25 +244,32 @@ async function runSendMessages(
       let streamTruncated = false;
       const unsubDone = await listen<{ truncated?: boolean }>("ai:done", (e) => {
         streamTruncated = e.payload?.truncated === true;
+        if (import.meta.env.DEV && requestStartedAt) {
+          console.debug("[ai] stream complete", {
+            durationMs: Math.round(performance.now() - requestStartedAt),
+            ttftMs: firstTokenAt ? Math.round(firstTokenAt - requestStartedAt) : null,
+          });
+        }
       });
       /** Propagate xl-ai abort → Rust cancel (stops the in-flight reqwest stream). */
       abortSignal?.addEventListener?.("abort", () => {
         invoke("cancel_ai").catch(() => {});
       });
       try {
-        /** Use current editor state as dynamic document context; retrieval is
-         *  intentionally outside this prompt pipeline until semantic search exists. */
-        const docContext = buildDocumentContext(editor);
+        const useTools = supportsTools && !!tools;
+        /** Markdown is only used by the text-only fallback. Tool mode gets the
+         *  canonical (selection-aware) documentState from xl-ai metadata, so
+         *  avoid serializing the full document a second time. */
+        const docContext = useTools ? "" : buildDocumentContext(editor);
         /** Resolve selection text as late as possible: submitting from the
          *  floating composer moves focus to a <textarea>, so an eager read can
          *  miss the selection or see a stale cursor. */
-        const sel = editor?.getSelection?.();
+        const sel = useTools ? undefined : editor?.getSelection?.();
         const selText = sel?.blocks?.length
           ? editor.blocksToMarkdownLossy(sel.blocks)
           : "";
         const userText = latestUserText(messages);
         const taskRules = buildTaskFormattingRules(userText);
-        const useTools = supportsTools && !!tools;
         bufferText = useTools;
         const documentState = [...messages]
           .reverse()
@@ -285,6 +302,19 @@ async function runSendMessages(
             ...basePrompt,
             retryFeedback: errorFeedback,
           }).messages;
+          if (import.meta.env.DEV) {
+            console.debug("[ai] prompt metrics", {
+              mode: useTools ? "tool" : "text",
+              documentStateBytes: JSON.stringify(documentState ?? {}).length,
+              documentMarkdownChars: docContext.length,
+              selectedMarkdownChars: selText.length,
+              promptChars: msgs.reduce((total, message) => total + String(message.content ?? "").length, 0),
+              messageCount: msgs.length,
+              attempt: attempts + 1,
+            });
+          }
+          requestStartedAt = performance.now();
+          firstTokenAt = 0;
           await invoke("ask_ai", {
             messages: JSON.stringify(msgs),
             ...(useTools ? { tools: JSON.stringify(tools) } : {}),
