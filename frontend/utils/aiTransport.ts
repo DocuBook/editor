@@ -93,7 +93,9 @@ export interface AiTransportDeps {
    *  converting text output into operations. */
   getEditor: () => any | null;
   /** Vault-relative file bound to this keep-alive editor instance. */
-  filePath?: string;
+  filePath?: string
+  /** Absolute vault identity used to isolate persisted thread history. */
+  vaultPath?: string;
 }
 
 /** Create the xl-ai ChatTransport. `reconnectToStream` is unsupported (the Rust
@@ -102,7 +104,7 @@ export function createAiTransport(deps: AiTransportDeps) {
   return {
     sendMessages: async (args: any) => {
       const stream = await runSendMessages(args, deps);
-      return recordThreadHistory(stream, args, deps.filePath ?? "");
+      return recordThreadHistory(stream, args, deps.filePath ?? "", deps.vaultPath ?? "");
     },
     reconnectToStream: async () => null,
   };
@@ -110,8 +112,8 @@ export function createAiTransport(deps: AiTransportDeps) {
 
 /** Pass-through stream middleware. History is updated from transport parts, so
  *  a file/menu tab switch cannot lose an in-flight response from a keep-alive editor. */
-function recordThreadHistory(source: ReadableStream<any>, args: any, filePath: string): ReadableStream<any> {
-  const exchange = useAiThreads.getState().beginExchange(latestUserText(args?.messages || []), filePath);
+function recordThreadHistory(source: ReadableStream<any>, args: any, filePath: string, vaultPath: string): ReadableStream<any> {
+  const exchange = useAiThreads.getState().beginExchange(latestUserText(args?.messages || []), filePath, vaultPath);
   if (!exchange) return source;
 
   const reader = source.getReader();

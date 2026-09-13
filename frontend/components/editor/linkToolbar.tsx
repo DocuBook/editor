@@ -1,6 +1,3 @@
-/** Link toolbar overrides + note linker — vault-relative links preserve as-typed URLs
- *  (BlockNote's default https-forces them, mangling ./folder.md) and the link
- *  popover merges a vault-note search into one bubble-menu icon. */
 import { useEffect, useState } from 'react'
 import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
