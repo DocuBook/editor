@@ -73,6 +73,9 @@ const stageButton = (path: string) => document.querySelector<HTMLButtonElement>(
 const syncButton = (label: string) =>
   Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent?.trim() === label)
 
+const syncMenuButton = () => document.querySelector<HTMLButtonElement>('[aria-label="Git sync actions"]')
+const openSync = () => act(() => syncMenuButton()!.click())
+
 const confirmDialog = () => document.querySelector<HTMLElement>('[role="alertdialog"]')
 
 const dialogButton = (label: string) =>
@@ -238,11 +241,27 @@ describe('GitPanel', () => {
     expect(editorState.openFile).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md')
   })
 
-  it('polls git status on refresh', () => {
+  it('uses the Sync menu instead of a standalone refresh action', () => {
     renderPanel()
 
-    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Refresh git changes"]')!.click())
-    expect(pollGitStatus).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[aria-label="Refresh git changes"]')).toBeNull()
+    expect(syncMenuButton()).not.toBeNull()
+    expect(syncButton('Fetch')).toBeUndefined()
+    openSync()
+    expect(syncButton('Fetch')).toBeDefined()
+  })
+
+  it('uses the shared local sidebar popover geometry', () => {
+    renderPanel()
+    openSync()
+
+    const panel = document.querySelector('[aria-label="Git Panel"]')!
+    const popover = panel.querySelector('.ui-popover') as HTMLElement
+    expect(popover).not.toBeNull()
+    expect(popover.className).toContain('absolute')
+    expect(popover.className).toContain('inset-x-0')
+    expect(popover.className).not.toContain('fixed')
+    expect(popover.parentElement?.closest('[aria-label="Git Panel"]')).toBe(panel)
   })
 
   it('shows branch, ahead and behind', () => {
@@ -272,6 +291,7 @@ describe('GitPanel — remote sync', () => {
   it('fetches the resolved remote and refreshes the status', async () => {
     invoke.mockResolvedValue(syncOutcome())
     renderPanel()
+    openSync()
 
     act(() => syncButton('Fetch')!.click())
     await flush()
@@ -284,6 +304,7 @@ describe('GitPanel — remote sync', () => {
   it('rebases onto the remote branch and surfaces conflicts', async () => {
     invoke.mockResolvedValue(syncOutcome({ success: false, message: 'origin/main has conflicts — resolve them and commit', conflicts: ['notes/a.md'] }))
     renderPanel()
+    openSync()
 
     act(() => syncButton('Rebase')!.click())
     await flush()
@@ -297,6 +318,7 @@ describe('GitPanel — remote sync', () => {
   it('merges the remote branch and reports the outcome', async () => {
     invoke.mockResolvedValue(syncOutcome({ message: 'Fast-forwarded to origin/main' }))
     renderPanel()
+    openSync()
 
     act(() => syncButton('Merge')!.click())
     await flush()
@@ -309,34 +331,38 @@ describe('GitPanel — remote sync', () => {
   it('keeps a conflicted merge for Commit instead of resolving it', async () => {
     invoke.mockResolvedValue(syncOutcome({ success: false, message: 'origin/main has conflicts — resolve them and commit', conflicts: ['notes/a.md'] }))
     renderPanel()
+    openSync()
 
     act(() => syncButton('Merge')!.click())
     await flush()
 
     expect(document.body.textContent).toContain('origin/main has conflicts')
     expect(document.body.textContent).not.toContain('Fast-forwarded')
+    expect(syncMenuButton()!.textContent).not.toContain('Synced')
   })
 
-  it('disables sync actions when no remote resolves', () => {
+  it('disables Sync when no remote resolves', () => {
+    gitState.hasRemote = false
     gitState.pushTarget = ''
     gitState.remotes = []
     renderPanel()
 
-    expect(syncButton('Fetch')!.disabled).toBe(true)
-    expect(syncButton('Rebase')!.disabled).toBe(true)
-    expect(syncButton('Merge')!.disabled).toBe(true)
-    expect(document.body.textContent).toContain('no remote')
+    expect(syncMenuButton()!.disabled).toBe(true)
+    expect(syncButton('Fetch')).toBeUndefined()
+    expect(document.body.textContent).toContain('Add a remote in Git settings to sync.')
   })
 
   it('offers a remote selector when several remotes exist', () => {
     gitState.remotes = ['origin', 'backup']
     gitState.pushTarget = 'origin'
     renderPanel()
+    openSync()
 
     const select = document.querySelector<HTMLSelectElement>('select[aria-label="Sync remote"]')
     expect(select).not.toBeNull()
     expect(Array.from(select!.options, option => option.value)).toEqual(['origin', 'backup'])
-    expect(document.body.textContent).toContain('origin/main')
+    expect(document.body.textContent).not.toContain('origin/main')
+    expect(syncMenuButton()!.title).toBe('Sync main with origin')
   })
 
   it('syncs with the remote picked from the selector', async () => {
@@ -344,6 +370,7 @@ describe('GitPanel — remote sync', () => {
     gitState.pushTarget = 'origin'
     invoke.mockResolvedValue(syncOutcome())
     renderPanel()
+    openSync()
 
     const select = document.querySelector<HTMLSelectElement>('select[aria-label="Sync remote"]')!
     /** A real user picks an option (setting `value`) and the browser then fires
@@ -367,6 +394,7 @@ describe('GitPanel — remote sync', () => {
     gitState.pushTarget = 'origin'
     invoke.mockResolvedValue(syncOutcome())
     renderPanel()
+    openSync()
 
     const select = document.querySelector<HTMLSelectElement>('select[aria-label="Sync remote"]')!
     act(() => {
@@ -378,8 +406,8 @@ describe('GitPanel — remote sync', () => {
     gitState.remotes = ['origin']
     act(() => root!.render(<GitPanel />))
 
-    expect(document.body.textContent).toContain('origin/main')
-    expect(document.body.textContent).not.toContain('default branch')
+    expect(document.body.textContent).not.toContain('origin/main')
+    expect(syncMenuButton()!.title).toBe('Sync main with origin')
 
     act(() => syncButton('Fetch')!.click())
     await flush()
@@ -390,6 +418,7 @@ describe('GitPanel — remote sync', () => {
   it('disables Rebase on a repository with no commits yet', () => {
     gitState.hasCommits = false
     renderPanel()
+    openSync()
 
     const rebase = syncButton('Rebase')!
     expect(rebase.disabled).toBe(true)
@@ -430,7 +459,7 @@ describe('GitPanel — remote sync', () => {
     expect(document.body.textContent).toContain('system Git')
     expect(syncButton('Continue')).toBeUndefined()
     expect(syncButton('Abort')).toBeUndefined()
-    expect(syncButton('Fetch')!.disabled).toBe(true)
+    expect(syncMenuButton()!.disabled).toBe(true)
     expect(invoke).not.toHaveBeenCalled()
   })
 
@@ -446,6 +475,7 @@ describe('GitPanel — remote sync', () => {
   it('disables Rebase on a fresh repository but keeps Merge available', () => {
     gitState.hasCommits = false
     renderPanel()
+    openSync()
 
     expect(syncButton('Rebase')!.disabled).toBe(true)
     expect(syncButton('Rebase')!.title).toContain('No local commits yet')
