@@ -8,16 +8,7 @@ import { invoke, isMacTauri, isTauri } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
-
-
-/** Sanitize a filename for use in a git commit message: strip control
- *  characters, newlines, and trailing dots (Windows-invalid). */
-const sanitizeCommitName = (rawName: string) =>
-  Array.from(rawName)
-    .filter(char => { const code = char.charCodeAt(0); return code > 0x1f && code !== 0x7f })
-    .join('')
-    .replace(/\.+$/g, '')
-    .trim() || 'changes'
+import { autoCommitMessage } from '../../utils/commitMessage'
 
 export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
@@ -77,7 +68,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   /* oxlint-enable react/set-state-in-effect */
 
   /** Git status: shared store (single poller from App root) — derive per-tab state. */
-  const { isRepo, hasRemote, ahead, upstream, status: gitStatus } = useGitStatus()
+  const { isRepo, hasRemote, ahead, upstream, status: gitStatus, repoState = 'clean' } = useGitStatus()
 
   /* oxlint-disable react/set-state-in-effect -- derives per-tab dirty state from the shared git status */
   useEffect(() => {
@@ -99,6 +90,12 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
     return () => clearTimeout(t)
   }, [commitState, pushState])
 
+  /** TabBar only sees the active tab, so a merge unlocks Commit even when that
+   *  tab looks clean. Rebase and foreign states use their own completion flow.
+   *  Unsaved tabs still block committing stale disk content. */
+  const merging = repoState === 'merge'
+  const committableState = repoState === 'clean' || merging
+
   const commit = async () => {
     if (commitState === 'busy') return
     setCommitState('busy')
@@ -107,8 +104,13 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
        *  app-layer concern (mode switch, close tab, app close); the button is
        *  disabled while a tab is unsaved so we never commit stale content. */
       await invoke('git_stage')
-      const rawName = tabs.find(t => t.path === activeTab)?.name || 'changes'
-      const res = await invoke<string>('git_commit', { message: `Auto-commit: ${sanitizeCommitName(rawName)}` })
+      /** Re-read the index after staging so the message summarises what is
+       *  actually committed (the 3s poller may still hold the pre-stage state). */
+      let status = ''
+      try { status = JSON.parse(await invoke<string>('git_status')).status || '' } catch { status = '' }
+      const fallbackName = tabs.find(t => t.path === activeTab)?.name
+      const message = await autoCommitMessage(status, fallbackName)
+      const res = await invoke<string>('git_commit', { message })
       const d = JSON.parse(res)
       if (d.error) { setGitMsg(p => ({ ...p, commit: d.error })); setCommitState('error'); return }
       if (d.message === 'Nothing to commit') { setCommitState('idle'); setGitMsg(p => ({ ...p, commit: '' })); toast.info('Nothing to commit'); return }
@@ -221,14 +223,15 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
                 <div className="border-t border-border-subtle my-1" />
               </>
             )}
-            <button onClick={commit} disabled={!isRepo || hasUnsaved || !hasDiskChanges || commitState === 'busy'}
+            <button onClick={commit} disabled={!isRepo || hasUnsaved || !committableState || (!hasDiskChanges && !merging) || commitState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={commitState === 'done' ? 'text-success shrink-0' : commitState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
               <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
             </button>
             {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-danger break-words max-w-[220px]">{gitMsg.commit}</div>}
             {hasUnsaved && isRepo && <div className="px-2.5 pb-1.5 text-[10px] text-muted">Unsaved changes — switch mode or close the tab to save first</div>}
-            <button onClick={push} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
+            {!hasDiskChanges && merging && !hasUnsaved && <div className="px-2.5 pb-1.5 text-[10px] text-muted">Merge in progress — Commit records the resolved working tree</div>}
+            <button onClick={() => void push()} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
               className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
               <span className={pushState === 'done' ? 'text-success shrink-0' : pushState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
               <span>{pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed ✓' : pushState === 'error' ? 'Push failed' : 'Push'}</span>

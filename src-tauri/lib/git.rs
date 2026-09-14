@@ -25,29 +25,31 @@ pub async fn git_clone(
 }
 
 #[tauri::command]
-pub fn git_init(state: State<AppState>) -> Result<(), String> {
+pub fn git_init(branch: String, state: State<AppState>) -> Result<String, String> {
     match state.git.lock().expect("lock").as_ref() {
-        Some(g) => g.init(),
+        Some(g) => serde_json::to_string(&g.init(&branch)?).map_err(|e| e.to_string()),
         None => Err("No vault".into()),
     }
 }
 
 #[tauri::command]
 pub fn git_settings(state: State<AppState>) -> Result<String, String> {
+    let default_branch = crate::git::repo::configured_initial_branch();
     match state.git.lock().expect("lock").as_ref() {
         Some(g) if g.is_repo() => {
             let (name, email) = g.identity()?;
             let remotes = g.remotes()?;
             Ok(serde_json::json!({
                 "isRepo": true, "name": name, "email": email,
+                "defaultBranch": default_branch,
                 "remotes": remotes.iter().map(|(n, u)| serde_json::json!({ "name": n, "url": u })).collect::<Vec<_>>(),
             }).to_string())
         }
         Some(_) => {
-            Ok(r#"{"isRepo":false,"noVault":false,"name":"","email":"","remotes":[]}"#.to_string())
+            Ok(serde_json::json!({"isRepo": false, "noVault": false, "name": "", "email": "", "defaultBranch": default_branch, "remotes": []}).to_string())
         }
         None => {
-            Ok(r#"{"isRepo":false,"noVault":true,"name":"","email":"","remotes":[]}"#.to_string())
+            Ok(serde_json::json!({"isRepo": false, "noVault": true, "name": "", "email": "", "defaultBranch": default_branch, "remotes": []}).to_string())
         }
     }
 }
@@ -66,6 +68,118 @@ pub fn git_remove_remote(name: String, state: State<AppState>) -> Result<(), Str
         Some(g) => g.remove_remote(&name),
         None => Err("No vault".into()),
     }
+}
+
+/// Remote connectivity/state check — network, so off the main thread.
+#[tauri::command]
+pub async fn git_remote_probe(name: String, state: State<'_, AppState>) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).probe_remote(&name))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Fetch a remote's branches into `refs/remotes/<name>/*` — network, off-thread.
+#[tauri::command]
+pub async fn git_fetch(name: String, state: State<'_, AppState>) -> Result<(), String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::git::Git::open(&repo_path).fetch_remote(&name)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Reconcile the current branch with `<name>/<branch>` — fast-forward, adopt,
+/// or merge commit. Never force-pushes; conflicts are reported back.
+#[tauri::command]
+pub async fn git_remote_merge(
+    name: String,
+    branch: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).merge_remote(&name, &branch))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Rebase the current branch onto `<name>/<branch>` (`branch` empty = the
+/// remote's default) — network, off-thread. Conflicts come back as data.
+#[tauri::command]
+pub async fn git_rebase(
+    name: String,
+    branch: String,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).rebase_remote(&name, &branch))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Resume a stopped rebase after its conflicts were resolved and staged.
+#[tauri::command]
+pub async fn git_rebase_continue(state: State<'_, AppState>) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).rebase_continue())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Undo an in-progress rebase.
+#[tauri::command]
+pub async fn git_rebase_abort(state: State<'_, AppState>) -> Result<(), String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::git::Git::open(&repo_path).rebase_abort()
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Abandon an in-progress merge (discards the conflicting local changes).
+#[tauri::command]
+pub async fn git_merge_abort(state: State<'_, AppState>) -> Result<(), String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::git::Git::open(&repo_path).merge_abort()
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -105,14 +219,18 @@ pub async fn git_commit(message: String, state: State<'_, AppState>) -> Result<S
 }
 
 #[tauri::command]
-pub async fn git_push_only(state: State<'_, AppState>) -> Result<String, String> {
+pub async fn git_push_only(
+    remote: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
     // git push hits the network — off the main thread.
     let res = tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).push_checked())
+        let target = remote.as_deref().filter(|name| !name.is_empty());
+        serde_json::to_string(&crate::git::Git::open(&repo_path).push_checked_to(target))
             .map_err(|e| e.to_string())
     })
     .await
@@ -171,17 +289,21 @@ pub async fn git_status(state: State<'_, AppState>) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
         None => {
-            return Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","status":""}"#.to_string())
+            return Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","upstream":"","status":"","ahead":0,"behind":0,"pushTarget":"","hasCommits":false,"remotes":[],"state":"clean"}"#.to_string())
         }
     };
     // Repository scanning can touch many files — keep the 3s poll off the UI thread.
     let res = tauri::async_runtime::spawn_blocking(move || {
         let g = crate::git::Git::open(&repo_path);
         if !g.is_repo() {
-            return serde_json::json!({ "isRepo": false, "hasRemote": false, "branch": "", "upstream": "", "status": "", "ahead": 0, "behind": 0 });
+            return serde_json::json!({ "isRepo": false, "hasRemote": false, "branch": "", "upstream": "", "status": "", "ahead": 0, "behind": 0, "pushTarget": "", "hasCommits": false, "remotes": [], "state": "clean" });
         }
         let ws = g.status_with_branch().unwrap_or_default();
-        serde_json::json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind })
+        let remotes = g
+            .remotes()
+            .map(|list| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>())
+            .unwrap_or_default();
+        serde_json::json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind, "pushTarget": g.push_target(), "hasCommits": g.has_commits(), "remotes": remotes, "state": ws.state })
     })
     .await
     .map_err(|e| e.to_string())?;

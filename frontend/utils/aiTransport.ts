@@ -14,7 +14,7 @@
  */
 import { invoke, listen } from "../lib/ipc";
 import { toast } from "sonner";
-import { useAiSettings, CUSTOM_PROVIDER_ID } from "../stores/aiSettings";
+import { useAiSettings } from "../stores/aiSettings";
 import { useAiThreads } from "../stores/aiThreads";
 
 import {
@@ -30,7 +30,7 @@ import {
   suffixOperationIds,
 } from "./aiBlocks";
 import { buildAiPrompt } from "./aiPrompt";
-import { resolveRequestModel, isTextOnly } from "./aiProbe";
+import { isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
@@ -46,47 +46,7 @@ function safeAiTransportError(error: unknown) {
 /** Provider catalog — small manual list (was a 2.17 MB generated file); model
  *  lists are discovered at runtime via backend `list_models`. Import statically. */
 import { PROVIDERS } from "../data/providers";
-
-/** Read saved AI config from persisted store for Rust backend. The API key is
- *  intentionally NOT sent — the backend resolves it from the keychain (SEC-5). */
-async function getAiConfig(): Promise<{
-  provider?: string;
-  model?: string;
-  baseUrl?: string;
-}> {
-  try {
-    const st = useAiSettings.getState();
-    const p = st.provider
-      ? PROVIDERS.find((x) => x.id === st.provider)
-      : undefined;
-    /** Custom OpenAI-compatible endpoints aren't in the catalog — their base URL
-     *  lives in the store and is bound server-side at save time. */
-    const baseUrl =
-      p?.api ||
-      (st.provider === CUSTOM_PROVIDER_ID
-        ? st.baseUrls[st.provider]
-        : undefined);
-    let envModel: string | undefined;
-    if (st.provider === CUSTOM_PROVIDER_ID) {
-      try {
-        const raw = await invoke<string>("custom_ai_config");
-        const config = JSON.parse(raw);
-        if (config?.source === "env" && typeof config.model === "string")
-          envModel = config.model;
-      } catch {
-        /** Backward compatibility: older backends or unavailable config keep the saved model. */
-      }
-    }
-    return {
-      provider: st.provider || undefined,
-      model: resolveRequestModel(st.provider, st.model, envModel) || undefined,
-      baseUrl,
-    };
-  } catch {
-    console.error("[ai] getAiConfig failed");
-    return {};
-  }
-}
+import { getAiConfig } from "./aiConfig";
 
 export interface AiTransportDeps {
   /** Live BlockNote editor — used for selection text, semantic validation and

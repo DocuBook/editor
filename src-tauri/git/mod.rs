@@ -12,6 +12,7 @@ pub mod remote;
 pub mod repo;
 pub mod staging;
 pub mod status;
+pub mod sync;
 
 #[cfg(test)]
 pub(crate) mod test_util;

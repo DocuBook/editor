@@ -43,7 +43,51 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                 .map_err(|e| e.to_string())?
         }
         "git_push_only" => {
-            tokio::task::spawn_blocking(move || cmds::git_push_only(&st))
+            let remote = args
+                .get("remote")
+                .and_then(|v| v.as_str())
+                .map(|v| v.to_string())
+                .filter(|v| !v.is_empty());
+            tokio::task::spawn_blocking(move || cmds::git_push_only(&st, remote.as_deref()))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_remote_probe" => {
+            let name = s("name");
+            tokio::task::spawn_blocking(move || cmds::git_remote_probe(&st, &name))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_fetch" => {
+            let name = s("name");
+            tokio::task::spawn_blocking(move || cmds::git_fetch(&st, &name))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_remote_merge" => {
+            let (name, branch) = (s("name"), s("branch"));
+            tokio::task::spawn_blocking(move || cmds::git_remote_merge(&st, &name, &branch))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_rebase" => {
+            let (name, branch) = (s("name"), s("branch"));
+            tokio::task::spawn_blocking(move || cmds::git_rebase(&st, &name, &branch))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_rebase_continue" => {
+            tokio::task::spawn_blocking(move || cmds::git_rebase_continue(&st))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_rebase_abort" => {
+            tokio::task::spawn_blocking(move || cmds::git_rebase_abort(&st))
+                .await
+                .map_err(|e| e.to_string())?
+        }
+        "git_merge_abort" => {
+            tokio::task::spawn_blocking(move || cmds::git_merge_abort(&st))
                 .await
                 .map_err(|e| e.to_string())?
         }
@@ -81,7 +125,12 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "git_add_remote" => sb(state, cmd, args).await,
         "git_remove_remote" => sb(state, cmd, args).await,
         "git_set_identity" => sb(state, cmd, args).await,
-        "git_init" => sb(state, cmd, args).await,
+        "git_init" => {
+            let branch = s("branch");
+            tokio::task::spawn_blocking(move || cmds::git_init(&st, &branch))
+                .await
+                .map_err(|e| e.to_string())?
+        }
         "git_stage" => sb(state, cmd, args).await,
         "git_status" => sb(state, cmd, args).await,
         "wiki_backlinks" => sync(state, cmd, args),
@@ -232,7 +281,8 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             None => Err("No vault".into()),
         },
         "git_init" => match state.git.lock().expect("lock").as_ref() {
-            Some(g) => g.init().map(|_| "null".into()),
+            Some(g) => serde_json::to_string(&g.init(&s("branch"))?)
+                .map_err(|e| e.to_string()),
             None => Err("No vault".into()),
         },
         "git_stage" => {
@@ -250,9 +300,13 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             match guard.as_ref() {
                 Some(g) if g.is_repo() => {
                     let ws = g.status_with_branch().unwrap_or_default();
-                    Ok(json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind }).to_string())
+                    let remotes = g
+                        .remotes()
+                        .map(|list| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>())
+                        .unwrap_or_default();
+                    Ok(json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind, "pushTarget": g.push_target(), "hasCommits": g.has_commits(), "remotes": remotes, "state": ws.state }).to_string())
                 }
-                _ => Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","upstream":"","status":"","ahead":0,"behind":0}"#.to_string()),
+                _ => Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","upstream":"","status":"","ahead":0,"behind":0,"pushTarget":"","hasCommits":false,"remotes":[],"state":"clean"}"#.to_string()),
             }
         }
         "wiki_backlinks" => match state.wiki.lock().expect("lock").as_ref() {

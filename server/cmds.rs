@@ -68,12 +68,96 @@ pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, Stri
     serde_json::to_string(&git::Git::open(&repo_path).commit_all(message)).map_err(|e| e.to_string())
 }
 
-pub(crate) fn git_push_only(state: &AppState) -> Result<String, String> {
+pub(crate) fn git_push_only(state: &AppState, remote: Option<&str>) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).push_checked()).map_err(|e| e.to_string())
+    serde_json::to_string(&git::Git::open(&repo_path).push_checked_to(remote))
+        .map_err(|e| e.to_string())
+}
+
+/** Initialize the vault repository on `branch` (empty = configured default).
+ *  Existing repositories are reported, never re-initialized. */
+pub(crate) fn git_init(state: &AppState, branch: &str) -> Result<String, String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) => serde_json::to_string(&g.init(branch)?).map_err(|e| e.to_string()),
+        None => Err("No vault".into()),
+    }
+}
+
+/** Connect to a remote and report reachability/default branch without fetching. */
+pub(crate) fn git_remote_probe(state: &AppState, name: &str) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    serde_json::to_string(&git::Git::open(&repo_path).probe_remote(name)).map_err(|e| e.to_string())
+}
+
+/** Fetch a remote's branches into the `refs/remotes/<name>` namespace. */
+pub(crate) fn git_fetch(state: &AppState, name: &str) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    git::Git::open(&repo_path)
+        .fetch_remote(name)
+        .map(|_| "null".into())
+}
+
+/** Reconcile the current branch with `<name>/<branch>` (fast-forward, adopt, or
+ *  merge commit). Never force-pushes; conflicts come back to the UI. */
+pub(crate) fn git_remote_merge(state: &AppState, name: &str, branch: &str) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    serde_json::to_string(&git::Git::open(&repo_path).merge_remote(name, branch))
+        .map_err(|e| e.to_string())
+}
+
+/** Rebase the current branch onto `<name>/<branch>` (`branch` empty = the
+ *  remote's default). Conflicts come back to the UI as data. */
+pub(crate) fn git_rebase(state: &AppState, name: &str, branch: &str) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    serde_json::to_string(&git::Git::open(&repo_path).rebase_remote(name, branch))
+        .map_err(|e| e.to_string())
+}
+
+/** Resume a stopped rebase after its conflicts were resolved and staged. */
+pub(crate) fn git_rebase_continue(state: &AppState) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    serde_json::to_string(&git::Git::open(&repo_path).rebase_continue())
+        .map_err(|e| e.to_string())
+}
+
+/** Undo an in-progress rebase. */
+pub(crate) fn git_rebase_abort(state: &AppState) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    git::Git::open(&repo_path)
+        .rebase_abort()
+        .map(|_| "null".into())
+}
+
+/** Abandon an in-progress merge (discards the conflicting local changes). */
+pub(crate) fn git_merge_abort(state: &AppState) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    git::Git::open(&repo_path)
+        .merge_abort()
+        .map(|_| "null".into())
 }
 
 pub(crate) fn git_branches(state: &AppState) -> Result<String, String> {
@@ -104,20 +188,22 @@ pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Resu
 }
 
 pub(crate) fn git_settings(state: &AppState) -> Result<String, String> {
+    let default_branch = git::repo::configured_initial_branch();
     match state.git.lock().expect("lock").as_ref() {
         Some(g) if g.is_repo() => {
             let (name, email) = g.identity()?;
             let remotes = g.remotes()?;
             Ok(json!({
                 "isRepo": true, "name": name, "email": email,
+                "defaultBranch": default_branch,
                 "remotes": remotes.iter().map(|(n, u)| json!({ "name": n, "url": u })).collect::<Vec<_>>(),
             }).to_string())
         }
         Some(_) => {
-            Ok(r#"{"isRepo":false,"noVault":false,"name":"","email":"","remotes":[]}"#.to_string())
+            Ok(json!({"isRepo": false, "noVault": false, "name": "", "email": "", "defaultBranch": default_branch, "remotes": []}).to_string())
         }
         None => {
-            Ok(r#"{"isRepo":false,"noVault":true,"name":"","email":"","remotes":[]}"#.to_string())
+            Ok(json!({"isRepo": false, "noVault": true, "name": "", "email": "", "defaultBranch": default_branch, "remotes": []}).to_string())
         }
     }
 }

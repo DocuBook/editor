@@ -1,12 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
-import { Plus, X, GitBranch } from 'lucide-react'
+import { Plus, X, GitBranch, RefreshCw } from 'lucide-react'
+import { pollGitStatus } from '../stores/gitStatus'
 
+interface GitRemote { name: string; url: string }
 interface GitSettingsData {
   isRepo: boolean; noVault: boolean; name: string; email: string
-  remotes: { name: string; url: string }[]
+  /** `init.defaultBranch` from git config, else `master` — prefills the branch field. */
+  defaultBranch: string
+  remotes: GitRemote[]
 }
+interface InitResult { created: boolean; branch: string }
+interface RemoteProbe { reachable: boolean; empty: boolean; defaultBranch: string; branches: number; error: string }
 
 /** Git settings section: commit identity + remotes + auth guidance. */
 export default function GitSettings() {
@@ -15,13 +21,22 @@ export default function GitSettings() {
   const [email, setEmail] = useState('')
   const [remoteName, setRemoteName] = useState('origin')
   const [remoteUrl, setRemoteUrl] = useState('')
+  const [initialBranch, setInitialBranch] = useState('master')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [confirmRemove, setConfirmRemove] = useState<GitRemote | null>(null)
+  const cancelRemoveRef = useRef<HTMLButtonElement>(null)
+  const [probes, setProbes] = useState<Record<string, RemoteProbe>>({})
+  const [remoteBusy, setRemoteBusy] = useState('')
+  /** Only the first load prefills the branch field, so a later refresh cannot
+   *  clobber a branch name the user is still typing. */
+  const branchPrefilled = useRef(false)
 
   const load = async () => {
     try {
       const d = JSON.parse(await invoke<string>('git_settings'))
       setData(d); setName(d.name); setEmail(d.email); setErr('')
+      if (!branchPrefilled.current) { branchPrefilled.current = true; setInitialBranch(d.defaultBranch || 'master') }
     } catch (e) { setErr(String(e)) }
   }
   /* oxlint-disable react/set-state-in-effect -- initial async load */
@@ -35,19 +50,49 @@ export default function GitSettings() {
   }
   const addRemote = async () => {
     setBusy(true); setErr('')
-    try { await invoke('git_add_remote', { name: remoteName, url: remoteUrl }); setRemoteUrl(''); await load() }
-    catch (e) { setErr(String(e)) } finally { setBusy(false) }
+    try {
+      await invoke('git_add_remote', { name: remoteName, url: remoteUrl })
+      toast.success(`Remote ${remoteName} added`)
+      setRemoteUrl('')
+      await load(); await pollGitStatus()
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
-  const removeRemote = async (name: string) => {
+  /** Removing a remote is local-only — the hosted repository is untouched. That
+   *  is easy to misread, so it is confirmed before it happens. */
+  const removeRemote = async (remote: GitRemote) => {
+    setConfirmRemove(null)
     setBusy(true); setErr('')
-    try { await invoke('git_remove_remote', { name }); await load() }
-    catch (e) { setErr(String(e)) } finally { setBusy(false) }
+    try {
+      await invoke('git_remove_remote', { name: remote.name })
+      toast.success(`Remote ${remote.name} removed — the hosted repository is unaffected`)
+      await load(); await pollGitStatus()
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
   const initRepo = async () => {
     setBusy(true); setErr('')
-    try { await invoke('git_init'); toast.success('Git repository initialized'); await load() }
-    catch (e) { setErr(String(e)) } finally { setBusy(false) }
+    try {
+      const res: InitResult = JSON.parse(await invoke<string>('git_init', { branch: initialBranch }))
+      toast.success(res.created ? `Git repository initialized on ${res.branch}` : `Already a git repository on ${res.branch}`)
+      await load(); await pollGitStatus()
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+
+  /** Connectivity + state of a remote, without transferring objects. An
+   *  unreachable remote is reported inline next to it: the probe is a per-remote
+   *  diagnostic, and a failed probe leaves the settings form perfectly usable. */
+  const checkRemote = async (remote: GitRemote) => {
+    setRemoteBusy(remote.name); setErr('')
+    try {
+      const probe: RemoteProbe = JSON.parse(await invoke<string>('git_remote_probe', { name: remote.name }))
+      setProbes(prev => ({ ...prev, [remote.name]: probe }))
+    } catch (e) { setProbes(prev => ({ ...prev, [remote.name]: { reachable: false, empty: false, defaultBranch: '', branches: 0, error: String(e) } })) } finally { setRemoteBusy('') }
+  }
+
+  /** A modal must be dismissible from the keyboard, not only by clicking it. */
+  const cancelRemove = () => {
+    setConfirmRemove(null)
+    cancelRemoveRef.current?.focus()
   }
 
   if (!data) return <div className="text-xs text-muted py-2">Loading git settings…</div>
@@ -59,13 +104,25 @@ export default function GitSettings() {
   if (!data.isRepo) return (
     <div className="text-xs text-muted leading-relaxed flex flex-col gap-3">
       <div>This vault is not a git repository yet — publishing is unavailable until it is. You can initialize one below, or open/clone a git repository from the welcome screen.</div>
+      <label className="flex items-center gap-2 self-start text-muted">
+        <span>Default branch</span>
+        <input value={initialBranch} onChange={e => setInitialBranch(e.target.value)} placeholder="master" disabled={busy}
+          className="w-36 bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono" />
+      </label>
       <button onClick={initRepo} disabled={busy} className="self-start px-3 py-1.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-xs whitespace-nowrap flex items-center gap-1">
         <GitBranch size={12} /> {busy ? 'Initializing…' : 'Initialize git repository'}
       </button>
+      <div className="text-[10px] text-muted">
+        This branch name is assumed to match the branch on the remote (e.g. <span className="font-mono">master</span>). If the remote uses another
+        name, the first push creates a second branch there instead of updating it. If the repository already exists on GitHub/GitLab, initialize here
+        first and then add the remote below — an existing local repository is never re-initialized.
+      </div>
+      {err && <div className="text-[11px] text-danger">{err}</div>}
     </div>
   )
 
   const inputCls = 'w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono'
+  const rowBtnCls = 'px-2 py-0.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-[11px] whitespace-nowrap'
   return (
     <div className="flex flex-col gap-4 text-xs">
       {/* Commit identity */}
@@ -85,16 +142,37 @@ export default function GitSettings() {
         {data.remotes.length === 0
           ? <div className="text-muted mb-2">No remotes — add one to push.</div>
           : data.remotes.map(r => (
-            <div key={r.name} className="flex items-center gap-2 py-1 border-b border-border-subtle last:border-none">
-              <span className="font-mono text-foreground">{r.name}</span>
-              <span className="text-muted truncate">{r.url}</span>
-              <button onClick={() => removeRemote(r.name)} disabled={busy} aria-label={'Remove ' + r.name} className="ml-auto text-muted hover:text-danger cursor-pointer bg-transparent border-none p-0.5"><X size={12} /></button>
+            <div key={r.name} className="py-1 border-b border-border-subtle last:border-none">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-foreground">{r.name}</span>
+                <span className="text-muted truncate">{r.url}</span>
+                <div className="ml-auto flex items-center gap-1 shrink-0">
+                  <button onClick={() => checkRemote(r)} disabled={remoteBusy === r.name} aria-label={'Check ' + r.name}
+                    className={rowBtnCls + ' flex items-center gap-1'}><RefreshCw size={10} /> Check</button>
+                  <button onClick={() => setConfirmRemove(r)} disabled={busy} aria-label={'Remove ' + r.name} className="text-muted hover:text-danger cursor-pointer bg-transparent border-none p-0.5"><X size={12} /></button>
+                </div>
+              </div>
+              {probes[r.name] && (
+                <div className="text-[10px] text-muted mt-0.5">
+                  {probes[r.name].reachable
+                    ? probes[r.name].empty
+                      ? 'Reachable — no branches yet (push to publish).'
+                      : `Reachable — ${probes[r.name].branches} branch(es), default ${probes[r.name].defaultBranch || 'unknown'}.`
+                    : <span className="text-danger">Unreachable — {probes[r.name].error}</span>}
+                </div>
+              )}
             </div>
           ))}
         <div className="flex gap-2 mt-2">
           <input value={remoteName} onChange={e => setRemoteName(e.target.value)} placeholder="origin" className={inputCls + ' !w-24'} />
           <input value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} placeholder="https://github.com/user/repo.git" className={inputCls} />
           <button onClick={addRemote} disabled={busy || !remoteUrl.trim()} className="shrink-0 px-3 py-1.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-xs whitespace-nowrap flex items-center gap-1"><Plus size={12} /> Add</button>
+        </div>
+        <div className="text-[10px] text-muted mt-1.5 leading-relaxed">
+          Multiple remotes are supported: each needs a unique name (e.g. <span className="font-mono">origin</span>, <span className="font-mono">backup</span>).
+          Which one Push uses is decided by the current branch: its upstream after the first push, otherwise{' '}
+          <span className="font-mono">branch.&lt;branch&gt;.pushRemote</span>, <span className="font-mono">remote.pushDefault</span>, then <span className="font-mono">origin</span>.
+          Fetch, Rebase, and Merge live in the Changes panel, where the remote to sync with can be picked.
         </div>
       </div>
 
@@ -104,6 +182,20 @@ export default function GitSettings() {
         Private repositories need credentials configured on this machine — the app uses them automatically: HTTPS → git credential helper (macOS Keychain), SSH → keys in ~/.ssh. Public repos need no setup.
       </div>
       {err && <div className="text-[11px] text-danger">{err}</div>}
+
+      {confirmRemove && (
+        <div role="alertdialog" aria-modal="true" aria-label="Remove remote" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={cancelRemove} onKeyDown={e => { if (e.key === 'Escape') cancelRemove() }}>
+          <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
+            <div className="text-sm font-semibold mb-1">Remove remote “{confirmRemove.name}”?</div>
+            <div className="text-xs text-foreground-secondary mb-2 break-all font-mono">{confirmRemove.url}</div>
+            <div className="text-xs text-foreground-secondary mb-4">This only unlinks the remote from this local repository — the hosted repository and its history are not deleted.</div>
+            <div className="flex justify-end gap-2">
+              <button ref={cancelRemoveRef} autoFocus onClick={cancelRemove} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
+              <button onClick={() => void removeRemote(confirmRemove)} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Remove</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

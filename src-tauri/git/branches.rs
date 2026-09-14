@@ -156,7 +156,7 @@ mod tests {
     fn committed_repo(tag: &str) -> (std::path::PathBuf, Git) {
         let dir = temp_git_repo(tag);
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("a.md"), "a").unwrap();
         g.add_all().unwrap();
