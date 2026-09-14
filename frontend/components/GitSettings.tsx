@@ -96,6 +96,12 @@ export default function GitSettings() {
   }
 
   if (!data) return <div className="text-xs text-muted py-2">Loading git settings…</div>
+  /** Buttons need to read as buttons: `surface-hover` sits too close to the panel
+   *  surface in both themes, so interactive controls carry either an accent fill
+   *  (primary), a raised fill plus border (secondary), or the danger token. */
+  const btnPrimary = 'px-3 py-1.5 rounded-md bg-accent text-on-accent border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-xs whitespace-nowrap hover:bg-accent-hover transition-colors'
+  const btnSecondary = 'px-3 py-1.5 rounded-md bg-surface-active text-foreground border border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-xs whitespace-nowrap hover:bg-surface-hover transition-colors'
+  const btnDanger = 'px-3 py-1.5 rounded-md bg-danger text-on-danger border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-xs whitespace-nowrap hover:bg-danger-hover transition-colors'
   if (data.noVault) return (
     <div className="text-xs text-muted leading-relaxed">
       No vault is open — open or create a vault first, then return here to set up git (identity, remotes, publishing).
@@ -107,9 +113,9 @@ export default function GitSettings() {
       <label className="flex items-center gap-2 self-start text-muted">
         <span>Default branch</span>
         <input value={initialBranch} onChange={e => setInitialBranch(e.target.value)} placeholder="master" disabled={busy}
-          className="w-36 bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono" />
+          className="w-36 bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono focus:border-accent" />
       </label>
-      <button onClick={initRepo} disabled={busy} className="self-start px-3 py-1.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-xs whitespace-nowrap flex items-center gap-1">
+      <button onClick={initRepo} disabled={busy} className={'self-start flex items-center gap-1 ' + btnPrimary}>
         <GitBranch size={12} /> {busy ? 'Initializing…' : 'Initialize git repository'}
       </button>
       <div className="text-[10px] text-muted">
@@ -121,8 +127,8 @@ export default function GitSettings() {
     </div>
   )
 
-  const inputCls = 'w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono'
-  const rowBtnCls = 'px-2 py-0.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-[11px] whitespace-nowrap'
+  const inputCls = 'w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono focus:border-accent'
+  const rowBtnCls = 'px-2 py-0.5 rounded-md bg-surface-active text-foreground-secondary border border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-[11px] whitespace-nowrap hover:text-foreground transition-colors'
   return (
     <div className="flex flex-col gap-4 text-xs">
       {/* Commit identity */}
@@ -131,7 +137,7 @@ export default function GitSettings() {
         <div className="flex gap-2">
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" className={inputCls} />
           <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className={inputCls} />
-          <button onClick={saveIdentity} disabled={busy} className="shrink-0 px-3 py-1.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-xs whitespace-nowrap">{busy ? '…' : 'Save'}</button>
+          <button onClick={saveIdentity} disabled={busy} className={'shrink-0 ' + btnPrimary}>{busy ? '…' : 'Save'}</button>
         </div>
         <div className="text-[10px] text-muted mt-1">Stored per-vault (local git config) — your global git config is untouched. Required before committing.</div>
       </div>
@@ -149,7 +155,8 @@ export default function GitSettings() {
                 <div className="ml-auto flex items-center gap-1 shrink-0">
                   <button onClick={() => checkRemote(r)} disabled={remoteBusy === r.name} aria-label={'Check ' + r.name}
                     className={rowBtnCls + ' flex items-center gap-1'}><RefreshCw size={10} /> Check</button>
-                  <button onClick={() => setConfirmRemove(r)} disabled={busy} aria-label={'Remove ' + r.name} className="text-muted hover:text-danger cursor-pointer bg-transparent border-none p-0.5"><X size={12} /></button>
+                  <button onClick={() => setConfirmRemove(r)} disabled={busy} aria-label={'Remove ' + r.name}
+                    className="flex size-6 shrink-0 items-center justify-center rounded-md bg-transparent text-foreground-subtle border border-border cursor-pointer hover:text-danger hover:border-danger disabled:opacity-40 disabled:cursor-not-allowed transition-colors"><X size={12} /></button>
                 </div>
               </div>
               {probes[r.name] && (
@@ -164,9 +171,9 @@ export default function GitSettings() {
             </div>
           ))}
         <div className="flex gap-2 mt-2">
-          <input value={remoteName} onChange={e => setRemoteName(e.target.value)} placeholder="origin" className={inputCls + ' !w-24'} />
+          <input value={remoteName} onChange={e => setRemoteName(e.target.value)} placeholder="origin" className={inputCls + ' w-24!'} />
           <input value={remoteUrl} onChange={e => setRemoteUrl(e.target.value)} placeholder="https://github.com/user/repo.git" className={inputCls} />
-          <button onClick={addRemote} disabled={busy || !remoteUrl.trim()} className="shrink-0 px-3 py-1.5 rounded-md bg-surface-hover text-foreground border-none cursor-pointer disabled:opacity-40 text-xs whitespace-nowrap flex items-center gap-1"><Plus size={12} /> Add</button>
+          <button onClick={addRemote} disabled={busy || !remoteUrl.trim()} className={'shrink-0 flex items-center gap-1 ' + btnPrimary}><Plus size={12} /> Add</button>
         </div>
         <div className="text-[10px] text-muted mt-1.5 leading-relaxed">
           Multiple remotes are supported: each needs a unique name (e.g. <span className="font-mono">origin</span>, <span className="font-mono">backup</span>).
@@ -190,8 +197,8 @@ export default function GitSettings() {
             <div className="text-xs text-foreground-secondary mb-2 break-all font-mono">{confirmRemove.url}</div>
             <div className="text-xs text-foreground-secondary mb-4">This only unlinks the remote from this local repository — the hosted repository and its history are not deleted.</div>
             <div className="flex justify-end gap-2">
-              <button ref={cancelRemoveRef} autoFocus onClick={cancelRemove} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
-              <button onClick={() => void removeRemote(confirmRemove)} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Remove</button>
+              <button ref={cancelRemoveRef} autoFocus onClick={cancelRemove} className={'border border-border bg-transparent text-foreground-secondary hover:bg-surface-active ' + btnSecondary}>{'Cancel'}</button>
+              <button onClick={() => void removeRemote(confirmRemove)} className={btnDanger}>Remove</button>
             </div>
           </div>
         </div>
