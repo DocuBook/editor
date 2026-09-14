@@ -195,7 +195,7 @@ export default function AiFloatingChat() {
           className={
             'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' +
             (hasInput
-              ? 'bg-accent text-on-accent shadow-[0_4px_10px_var(--color-shadow)] hover:bg-accent-hover'
+              ? 'bg-accent text-on-accent shadow-popover hover:bg-accent-hover'
               : 'bg-transparent text-foreground hover:bg-surface-active')
           }
         >

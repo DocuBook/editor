@@ -273,7 +273,7 @@ body .mobile-sidebar-drawer-close {
     background: var(--color-surface);
     border: 1px solid var(--color-border-subtle);
     border-radius: 8px;
-    box-shadow: 0 4px 12px var(--color-shadow);
+    box-shadow: var(--shadow-popover);
 }
 body .mobile-sidebar-drawer-close:hover {
     background: var(--color-surface-active);
