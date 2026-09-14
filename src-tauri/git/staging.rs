@@ -71,7 +71,7 @@ mod tests {
     fn stage_path_stages_only_that_file() {
         let dir = temp_git_repo("stage-path");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         std::fs::write(dir.join("a.md"), "a").unwrap();
         std::fs::write(dir.join("b.md"), "b").unwrap();
         g.stage_path("a.md").unwrap();
@@ -86,7 +86,7 @@ mod tests {
     fn default_gitignore_tracks_supported_formats_only() {
         let dir = temp_git_repo("stage-whitelist");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
 
         let supported = [
             "note.md",
@@ -171,7 +171,7 @@ mod tests {
     fn stage_path_rejects_ignored_untracked_file() {
         let dir = temp_git_repo("stage-ignored-path");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         std::fs::write(dir.join(".env"), "SECRET=value").unwrap();
 
         assert_eq!(
@@ -185,7 +185,7 @@ mod tests {
     fn add_all_excludes_trash_and_stages_deletions() {
         let dir = temp_git_repo("stage-all");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("old.md"), "old").unwrap();
         g.add_all().unwrap();
@@ -208,7 +208,7 @@ mod tests {
 
         let dir = temp_git_repo("stage-broken-symlink");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         symlink("missing-target", dir.join("link.md")).unwrap();
         g.stage_path("link.md").unwrap();
 

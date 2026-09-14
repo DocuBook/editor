@@ -48,12 +48,18 @@ impl Git {
             )
             .map_err(git_error)?;
         if repo.state() == RepositoryState::Merge {
-            repo.cleanup_state().map_err(|error| {
-                format!(
-                    "Commit {id} created but merge state cleanup failed: {}",
-                    git_error(error)
-                )
-            })?;
+            let state_error = repo.cleanup_state().err().map(git_error);
+            let marker_error = crate::git::sync::clear_app_merge_marker(&repo).err();
+            if state_error.is_some() || marker_error.is_some() {
+                let errors = [state_error, marker_error]
+                    .into_iter()
+                    .flatten()
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return Err(format!(
+                    "Commit {id} created but merge cleanup failed: {errors}"
+                ));
+            }
         }
         Ok(id.to_string())
     }
@@ -90,9 +96,17 @@ impl Git {
         }
     }
 
+    /// True only when HEAD resolves to a commit. A fresh repository has an
+    /// unborn HEAD reference that exists but points at nothing — that reports
+    /// `false`, otherwise the UI would offer a push with nothing to push.
     pub(crate) fn has_commits(&self) -> bool {
         self.repository()
-            .and_then(|repo| repo.head().map_err(git_error).map(|_| ()))
+            .and_then(|repo| {
+                repo.head()
+                    .and_then(|head| head.peel_to_commit())
+                    .map(|_| ())
+                    .map_err(git_error)
+            })
             .is_ok()
     }
 }
@@ -123,7 +137,7 @@ fn commit_needed(repo: &Repository, index: &Index) -> Result<bool, String> {
     }
 }
 
-fn ensure_commit_policy_supported(repo: &Repository) -> Result<(), String> {
+pub(crate) fn ensure_commit_policy_supported(repo: &Repository) -> Result<(), String> {
     ensure_no_active_hooks(repo, &["pre-commit", "prepare-commit-msg", "commit-msg"])?;
     let config = repo.config().map_err(git_error)?;
     match config.get_bool("commit.gpgSign") {
@@ -188,7 +202,7 @@ mod tests {
     fn commit_all_flow() {
         let dir = temp_git_repo("commit-all");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         let r1 = g.commit_all("Auto-commit: x");
         assert!(r1.success);
@@ -206,7 +220,7 @@ mod tests {
     fn merge_commit_keeps_all_parents_and_cleans_state() {
         let dir = temp_git_repo("commit-merge");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("base.md"), "base").unwrap();
         g.add_all().unwrap();
@@ -244,10 +258,28 @@ mod tests {
     }
 
     #[test]
+    fn has_commits_is_false_for_an_unborn_head() {
+        let dir = temp_git_repo("commit-unborn");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("main").unwrap();
+
+        // Fresh repository: HEAD is an unborn symbolic ref, not a commit.
+        assert!(!g.has_commits());
+
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+        assert!(g.has_commits());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn commit_rejects_policy_libgit2_cannot_enforce() {
         let dir = temp_git_repo("commit-policy");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("a.md"), "a").unwrap();
         g.add_all().unwrap();

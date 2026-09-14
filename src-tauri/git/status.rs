@@ -1,6 +1,6 @@
 //! Worktree status feeding the shared Git UI poller.
 
-use git2::{Repository, Status, StatusOptions};
+use git2::{Repository, RepositoryState, Status, StatusOptions};
 use serde::Serialize;
 
 use super::{git_error, Git};
@@ -12,6 +12,9 @@ pub struct WorktreeStatus {
     pub status: String,
     pub ahead: usize,
     pub behind: usize,
+    /// In-progress operation (`clean`, `merge`, `rebase`, …) — the UI needs it
+    /// to offer Continue/Abort instead of a fresh sync.
+    pub state: String,
 }
 
 impl Git {
@@ -49,7 +52,26 @@ impl Git {
             status,
             ahead,
             behind,
+            state: state_name(repo.state()).to_string(),
         })
+    }
+}
+
+/** Stable machine-readable name for the repository state (`git status` style). */
+fn state_name(state: RepositoryState) -> &'static str {
+    match state {
+        RepositoryState::Clean => "clean",
+        RepositoryState::Merge => "merge",
+        RepositoryState::Revert => "revert",
+        RepositoryState::RevertSequence => "revert-sequence",
+        RepositoryState::CherryPick => "cherry-pick",
+        RepositoryState::CherryPickSequence => "cherry-pick-sequence",
+        RepositoryState::Bisect => "bisect",
+        RepositoryState::Rebase => "rebase",
+        RepositoryState::RebaseInteractive => "rebase-interactive",
+        RepositoryState::RebaseMerge => "rebase-merge",
+        RepositoryState::ApplyMailbox => "apply-mailbox",
+        RepositoryState::ApplyMailboxOrRebase => "apply-mailbox-or-rebase",
     }
 }
 
@@ -129,7 +151,7 @@ mod tests {
     fn reports_branch_index_worktree_and_untracked_status() {
         let dir = temp_git_repo("status");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("tracked.md"), "one").unwrap();
         g.add_all().unwrap();

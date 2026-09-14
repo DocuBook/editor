@@ -17,7 +17,34 @@ pub struct PushResult {
 }
 
 impl Git {
+    /// Default-target push — the command layer passes an explicit remote when a
+    /// branch has no upstream yet, so this wrapper is exercised by tests.
+    #[allow(dead_code)]
     pub fn push_checked(&self) -> PushResult {
+        self.push_checked_to(None)
+    }
+
+    /// Remote a push would use right now (`branch.<b>.pushRemote`,
+    /// `remote.pushDefault`, `branch.<b>.remote`, upstream remote, `origin`,
+    /// then the first remote). Empty when nothing resolves.
+    pub fn push_target(&self) -> String {
+        let Ok(status) = self.status_with_branch() else {
+            return String::new();
+        };
+        let Ok(repo) = self.repository() else {
+            return String::new();
+        };
+        let Ok(config) = repo.config() else {
+            return String::new();
+        };
+        push_remote(&repo, &config, &status.branch, &status.upstream).unwrap_or_default()
+    }
+
+    /// Push the current branch. `override_remote` selects the target for a
+    /// branch with no upstream yet (the multi-remote first push in the UI);
+    /// once an upstream exists, the push follows it and the override is
+    /// rejected rather than silently retargeted.
+    pub fn push_checked_to(&self, override_remote: Option<&str>) -> PushResult {
         if !self.is_repo() {
             return push_error("Not a git repo");
         }
@@ -44,9 +71,25 @@ impl Git {
         if let Err(error) = ensure_push_policy_supported(&repo, &config) {
             return push_error(&error);
         }
-        let remote_name = match push_remote(&repo, &config, &status.branch, &status.upstream) {
-            Ok(name) => name,
-            Err(error) => return push_error(&error),
+        let remote_name = match override_remote {
+            Some(name) => {
+                if !no_upstream {
+                    return push_error(
+                        "This branch already tracks an upstream remote; push follows it",
+                    );
+                }
+                if name.trim().is_empty() {
+                    return push_error("No git remote selected");
+                }
+                if let Err(error) = repo.find_remote(name) {
+                    return push_error(&git_error(error));
+                }
+                name.to_string()
+            }
+            None => match push_remote(&repo, &config, &status.branch, &status.upstream) {
+                Ok(name) => name,
+                Err(error) => return push_error(&error),
+            },
         };
         let mut remote = match repo.find_remote(&remote_name) {
             Ok(remote) => remote,
@@ -281,7 +324,7 @@ mod tests {
     fn push_checked_nothing_to_push_without_remote() {
         let dir = temp_git_repo("push-checked");
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         let result = g.push_checked();
         assert!(result.success);
         assert_eq!(result.message, "Nothing to push");
@@ -294,7 +337,7 @@ mod tests {
         let remote_dir = temp_git_repo("push-remote");
         git2::Repository::init_bare(&remote_dir).unwrap();
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("a.md"), "a").unwrap();
         g.add_all().unwrap();
@@ -325,7 +368,7 @@ mod tests {
         git2::Repository::init_bare(&origin_dir).unwrap();
         git2::Repository::init_bare(&publish_dir).unwrap();
         let g = Git::open(dir.to_str().unwrap());
-        g.init().unwrap();
+        g.init("").unwrap();
         g.set_identity("T", "t@e.c").unwrap();
         std::fs::write(dir.join("a.md"), "a").unwrap();
         g.add_all().unwrap();
@@ -356,5 +399,85 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let _ = std::fs::remove_dir_all(&origin_dir);
         let _ = std::fs::remove_dir_all(&publish_dir);
+    }
+
+    #[test]
+    fn push_target_prefers_origin_over_other_remotes() {
+        let dir = temp_git_repo("push-target");
+        let first = temp_git_repo("push-target-first");
+        let origin = temp_git_repo("push-target-origin");
+        git2::Repository::init_bare(&first).unwrap();
+        git2::Repository::init_bare(&origin).unwrap();
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("main").unwrap();
+        assert_eq!(g.push_target(), "", "no remote yet");
+        {
+            let repo = g.repository().unwrap();
+            repo.remote("publish", first.to_str().unwrap()).unwrap();
+        }
+        assert_eq!(g.push_target(), "publish");
+        {
+            let repo = g.repository().unwrap();
+            repo.remote("origin", origin.to_str().unwrap()).unwrap();
+        }
+        assert_eq!(g.push_target(), "origin");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&first);
+        let _ = std::fs::remove_dir_all(&origin);
+    }
+
+    #[test]
+    fn push_checked_to_explicit_remote_sets_that_upstream() {
+        let dir = temp_git_repo("push-explicit");
+        let gitlab = temp_git_repo("push-explicit-gitlab");
+        git2::Repository::init_bare(&gitlab).unwrap();
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("main").unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+        {
+            let repo = g.repository().unwrap();
+            repo.remote("gitlab", gitlab.to_str().unwrap()).unwrap();
+        }
+
+        let result = g.push_checked_to(Some("gitlab"));
+        assert!(result.success, "{}", result.error);
+        let status = g.status_with_branch().unwrap();
+        assert_eq!(status.upstream, format!("gitlab/{}", status.branch));
+        assert_eq!(status.ahead, 0);
+        assert!(git2::Repository::open_bare(&gitlab)
+            .unwrap()
+            .refname_to_id(&format!("refs/heads/{}", status.branch))
+            .is_ok());
+
+        // Once tracking exists the override is refused instead of retargeting.
+        let again = g.push_checked_to(Some("gitlab"));
+        assert!(!again.success);
+        assert!(again.error.contains("tracks an upstream"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&gitlab);
+    }
+
+    #[test]
+    fn push_checked_to_rejects_unknown_remote() {
+        let dir = temp_git_repo("push-unknown-remote");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("main").unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+        {
+            let repo = g.repository().unwrap();
+            repo.remote("origin", temp_git_repo("push-unknown-origin").to_str().unwrap())
+                .unwrap();
+        }
+        let result = g.push_checked_to(Some("missing"));
+        assert!(!result.success);
+        assert!(!result.error.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

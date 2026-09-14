@@ -16,9 +16,18 @@ interface GitStatusState {
   /** Local commits not yet on the upstream branch (drives Push gating). */
   ahead: number
   behind: number
+  /** Remote `git push` resolves to for the current branch; empty without remotes. */
+  pushTarget: string
+  /** False on a fresh repository — no commit exists yet to push. */
+  hasCommits: boolean
+  /** Configured remote names, in config order — more than one is supported. */
+  remotes: string[]
+  /** In-progress git operation (`clean`, `merge`, `rebase`, …): the UI offers
+   *  Continue/Abort instead of starting a new sync. */
+  repoState: string
 }
 
-const EMPTY_GIT_STATUS: GitStatusState = { isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0 }
+const EMPTY_GIT_STATUS: GitStatusState = { isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' }
 
 export const useGitStatus = create<GitStatusState>(() => EMPTY_GIT_STATUS)
 
@@ -30,7 +39,7 @@ export async function pollGitStatus() {
   try {
     const s = await invoke<string>('git_status')
     const d = JSON.parse(s)
-    useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', upstream: d.upstream || '', status: d.status || '', ahead: d.ahead ?? 0, behind: d.behind ?? 0 })
+    useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', upstream: d.upstream || '', status: d.status || '', ahead: d.ahead ?? 0, behind: d.behind ?? 0, pushTarget: d.pushTarget || '', hasCommits: d.hasCommits === true, remotes: Array.isArray(d.remotes) ? d.remotes : [], repoState: d.state || 'clean' })
   } catch {
     useGitStatus.setState(EMPTY_GIT_STATUS)
   }

@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runtime = vi.hoisted(() => ({ isTauri: false }))
-const gitState = vi.hoisted(() => ({ current: { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '' } }))
+const gitState = vi.hoisted(() => ({ current: { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'clean' as string } }))
 const editorState = vi.hoisted(() => ({
   activeTab: 'notes/active-document-with-a-long-name.md' as string | null,
   tabs: [
@@ -40,6 +40,7 @@ vi.mock('../../../frontend/lib/ipc', () => ({
 vi.mock('sonner', () => ({ toast: { info: vi.fn() } }))
 
 import { TabBar } from '../../../frontend/components/editor/TabBar'
+import { invoke } from '../../../frontend/lib/ipc'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -76,7 +77,7 @@ function openActions() {
 
 beforeEach(() => {
   runtime.isTauri = false
-  gitState.current = { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '' }
+  gitState.current = { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'clean' }
   document.body.innerHTML = '<div id="root"></div>'
   vi.stubGlobal('CSS', { escape: (value: string) => value })
 })
@@ -136,7 +137,7 @@ describe('commit gating from porcelain status', () => {
   const unstaged = '.M notes/active-document-with-a-long-name.md'
 
   it('leaves Commit disabled for a staged-only active file', () => {
-    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: stagedOnly }
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: stagedOnly, repoState: 'clean' }
     renderTabBar(true)
     openActions()
 
@@ -144,7 +145,7 @@ describe('commit gating from porcelain status', () => {
   })
 
   it('enables Commit for an unstaged active file', () => {
-    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: unstaged }
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: unstaged, repoState: 'clean' }
     renderTabBar(true)
     openActions()
 
@@ -152,10 +153,81 @@ describe('commit gating from porcelain status', () => {
   })
 
   it('ignores worktree changes on a non-active file', () => {
-    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '.M notes/first.md' }
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '.M notes/first.md', repoState: 'clean' }
     renderTabBar(true)
     openActions()
 
     expect(commitButton()?.disabled).toBe(true)
+  })
+
+  it('enables Commit during a merge even when the active tab looks clean', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'merge' }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(false)
+    expect(document.body.textContent).toContain('Merge in progress — Commit records the resolved working tree')
+  })
+
+  it('keeps Commit disabled while a rebase uses Continue', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '.M notes/active-document-with-a-long-name.md', repoState: 'rebase' }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(true)
+    expect(document.body.textContent).not.toContain('Commit records the resolved working tree')
+  })
+
+  it('keeps Commit disabled during unsupported repository operations', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'revert' }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(true)
+  })
+
+  it('enables Commit while a conflict is in the index', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: 'UU notes/other.md', repoState: 'merge' }
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(false)
+  })
+
+  it('still blocks Commit during a merge while the active tab is unsaved', () => {
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'merge' }
+    editorState.tabs[1].dirty = true
+    renderTabBar(true)
+    openActions()
+
+    expect(commitButton()?.disabled).toBe(true)
+    expect(document.body.textContent).toContain('Unsaved changes')
+
+    editorState.tabs[1].dirty = false
+  })
+})
+
+/** The Commit action no longer hardcodes `Auto-commit: <file>` — it builds a
+ *  conventional subject from the changed-file list (AI when configured, the
+ *  deterministic fallback otherwise). */
+describe('auto commit message', () => {
+  it('commits with a conventional message derived from the changed files', async () => {
+    const status = '.M notes/active-document-with-a-long-name.md'
+    gitState.current = { isRepo: true, hasRemote: false, ahead: 0, upstream: '', status, repoState: 'clean' }
+    const invokeMock = vi.mocked(invoke)
+    invokeMock.mockImplementation((async (cmd: string) => {
+      if (cmd === 'git_status') return JSON.stringify({ status })
+      if (cmd === 'git_commit') return JSON.stringify({ success: true, commit: 'abcdef1234', message: 'Committed', error: '' })
+      return undefined
+    }) as typeof invoke)
+
+    renderTabBar(true)
+    openActions()
+    await act(async () => { commitButton()!.click() })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+
+    const commitCall = invokeMock.mock.calls.find(([cmd]) => cmd === 'git_commit')
+    expect(commitCall).toBeTruthy()
+    expect((commitCall![1] as { message: string }).message).toBe('docs(notes): update active-document-with-a-long-name.md')
   })
 })

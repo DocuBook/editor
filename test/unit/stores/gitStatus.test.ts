@@ -9,7 +9,7 @@ import { useAuth } from '../../../frontend/stores/auth'
 describe('pollGitStatus (skip polling while unauthenticated)', () => {
   beforeEach(() => {
     invoke.mockReset()
-    useGitStatus.setState({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0 })
+    useGitStatus.setState({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' })
     useAuth.setState({ status: 'login' })
   })
 
@@ -20,17 +20,24 @@ describe('pollGitStatus (skip polling while unauthenticated)', () => {
 
   it('polls and updates state when authenticated', async () => {
     useAuth.setState({ status: 'ready' })
-    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1 }))
+    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1, pushTarget: 'origin', hasCommits: true, remotes: ['origin', 'backup'], state: 'rebase' }))
     await pollGitStatus()
     expect(invoke).toHaveBeenCalledWith('git_status')
-    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1 })
+    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1, pushTarget: 'origin', hasCommits: true, remotes: ['origin', 'backup'], repoState: 'rebase' })
   })
 
   it('resets state when the poll fails', async () => {
     useAuth.setState({ status: 'ready' })
-    useGitStatus.setState({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: 'X', ahead: 1, behind: 0 })
+    useGitStatus.setState({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: 'X', ahead: 1, behind: 0, pushTarget: 'origin', hasCommits: true, remotes: ['origin'], repoState: 'clean' })
     invoke.mockRejectedValue(new Error('network'))
     await pollGitStatus()
-    expect(useGitStatus.getState()).toEqual({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0 })
+    expect(useGitStatus.getState()).toEqual({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' })
+  })
+
+  it('defaults the multi-remote fields when the server omits them', async () => {
+    useAuth.setState({ status: 'ready' })
+    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', upstream: '', status: '', ahead: 0, behind: 0 }))
+    await pollGitStatus()
+    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' })
   })
 })
