@@ -5,6 +5,7 @@ import { useEditorStore } from '../stores/editor'
 import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
+import SidebarPopover from './SidebarPopover'
 
 interface BranchEntry { name: string; remote: boolean }
 
@@ -85,13 +86,13 @@ export default function SidebarFooter({ onOpenShortcuts }: { onOpenShortcuts: ()
   const remoteBranches = branches.filter(entry => entry.remote)
 
   return (
-    <div className="ui-shell relative flex items-center gap-1 px-2 py-1 shrink-0">
+    <div ref={branchRef} className="ui-shell relative flex items-center gap-1 px-2 py-1 shrink-0">
       <button onClick={onOpenShortcuts} title="Keyboard Shortcuts" aria-label="Keyboard Shortcuts"
         className="rounded cursor-pointer text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
         <Keyboard size={15} />
       </button>
       {branch ? (
-        <div className="min-w-0 max-w-40" ref={branchRef}>
+        <div className="min-w-0 max-w-40">
           <button onClick={toggleBranchSwitcher} aria-label="Switch branch" aria-expanded={branchOpen} title="Switch branch"
             className="flex items-center gap-1 min-w-0 rounded cursor-pointer text-foreground-subtle hover:text-foreground hover:bg-surface-active px-2 py-1.5 text-left">
             <GitBranch size={13} className="shrink-0" />
@@ -100,7 +101,7 @@ export default function SidebarFooter({ onOpenShortcuts }: { onOpenShortcuts: ()
             <ChevronDown size={11} className={'ml-auto transition-transform text-muted shrink-0 ' + (branchOpen ? 'rotate-180' : '')} />
           </button>
           {branchOpen && (
-            <div className="ui-popover absolute bottom-full left-2 right-2 mb-1 p-1 z-50">
+            <SidebarPopover side="top">
               <form onSubmit={e => { e.preventDefault(); void createBranch() }} className="px-2 py-1.5 border-b border-border-subtle">
                 <input autoFocus value={newBranchName} onChange={e => setNewBranchName(e.target.value)} disabled={busy !== null}
                   placeholder="Type to create a branch..." aria-label="Create branch"
@@ -112,7 +113,7 @@ export default function SidebarFooter({ onOpenShortcuts }: { onOpenShortcuts: ()
                 {branches.length === 0 && !error && <div className="px-2.5 py-2 text-[11px] text-muted">No branches found</div>}
                 {error && <div className="px-2.5 py-1 text-[10px] text-danger wrap-break-word">{error}</div>}
               </div>
-            </div>
+            </SidebarPopover>
           )}
         </div>
       ) : (

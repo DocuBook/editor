@@ -1,9 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, File, GitBranch, GitMerge, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, Download, File, GitBranch, GitMerge } from 'lucide-react'
 import { invoke } from '../../lib/ipc'
 import { useGitStatus, pollGitStatus } from '../../stores/gitStatus'
 import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
+import { useClickOutside } from '../../hooks/useClickOutside'
+import SidebarPopover from '../SidebarPopover'
 
 interface GitEntry {
   x: string
@@ -98,13 +100,17 @@ function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (
 /** Remote sync actions. Conflicts are never resolved silently: a merge leaves
  *  the worktree for Commit, a rebase is kept on disk for Continue/Abort. */
 function SyncBar() {
-  const { hasRemote, hasCommits, upstream, pushTarget = '', remotes = [], repoState = 'clean' } = useGitStatus()
+  const { branch, ahead = 0, behind = 0, hasRemote, hasCommits, pushTarget = '', remotes = [], repoState = 'clean' } = useGitStatus()
   const [selected, setSelected] = useState('')
-  const [busy, setBusy] = useState('')
+  const [syncOpen, setSyncOpen] = useState(false)
+  const [syncState, setSyncState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const [activeAction, setActiveAction] = useState('')
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
   const [confirmAbort, setConfirmAbort] = useState<'merge' | 'rebase' | null>(null)
+  const syncRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<HTMLDivElement>(null)
+  useClickOutside(syncRef, () => setSyncOpen(false))
 
   const rebasing = repoState.startsWith('rebase')
   const merging = repoState === 'merge'
@@ -116,17 +122,28 @@ function SyncBar() {
    *  push target keeps the panel usable instead of stranding it on a dead name. */
   const isSelectable = remotes.includes(selected)
   const activeRemote = isSelectable ? selected : pushTarget || remotes[0] || ''
-  /** Only follow the upstream branch when it belongs to the selected remote;
-   *  otherwise the backend resolves the remote's own default branch. */
-  const targetBranch = upstream && activeRemote && upstream.startsWith(`${activeRemote}/`)
-    ? upstream.slice(activeRemote.length + 1)
-    : ''
-  const targetLabel = activeRemote ? `${activeRemote}/${targetBranch || 'default branch'}` : 'no remote'
+  /** Sidebar branch picker and this panel consume the same store field. Never
+   *  derive a second branch from an upstream label such as `origin/master`. */
+  const targetBranch = branch && !branch.startsWith('(') ? branch : ''
+  const busy = syncState === 'busy'
 
-  const run = async (label: string, action: () => Promise<string | undefined>) => {
-    setBusy(label); setErr(''); setNotice('')
-    try { await action() }
-    catch (e) { setErr(String(e)) } finally { setBusy('') }
+  useEffect(() => {
+    if (syncState !== 'done') return
+    const timer = setTimeout(() => setSyncState('idle'), 3000)
+    return () => clearTimeout(timer)
+  }, [syncState])
+
+  const run = async (label: string, action: () => Promise<boolean | void>) => {
+    if (busy) return
+    setActiveAction(label); setSyncState('busy'); setErr(''); setNotice('')
+    try {
+      const success = await action()
+      setSyncState(success === false ? 'idle' : 'done')
+      setSyncOpen(false)
+    } catch (e) {
+      setErr(String(e))
+      setSyncState('error')
+    }
   }
 
   const afterSync = async () => {
@@ -135,11 +152,11 @@ function SyncBar() {
   }
 
   const report = (outcome: SyncOutcome) => {
-    if (outcome.error) { setErr(outcome.error); return false }
     if (outcome.conflicts.length > 0) {
       setNotice(`${outcome.message}: ${outcome.conflicts.join(', ')}`)
       return false
     }
+    if (!outcome.success || outcome.error) throw new Error(outcome.error || outcome.message)
     setNotice(outcome.message)
     return true
   }
@@ -152,19 +169,22 @@ function SyncBar() {
 
   const mergeRemote = () => run('merge', async () => {
     await invoke('git_fetch', { name: activeRemote })
-    report(JSON.parse(await invoke<string>('git_remote_merge', { name: activeRemote, branch: targetBranch })))
+    const success = report(JSON.parse(await invoke<string>('git_remote_merge', { name: activeRemote, branch: targetBranch })))
     await afterSync()
+    return success
   })
 
   const rebaseRemote = () => run('rebase', async () => {
     await invoke('git_fetch', { name: activeRemote })
-    report(JSON.parse(await invoke<string>('git_rebase', { name: activeRemote, branch: targetBranch })))
+    const success = report(JSON.parse(await invoke<string>('git_rebase', { name: activeRemote, branch: targetBranch })))
     await afterSync()
+    return success
   })
 
   const continueRebase = () => run('continue', async () => {
-    report(JSON.parse(await invoke<string>('git_rebase_continue')))
+    const success = report(JSON.parse(await invoke<string>('git_rebase_continue')))
     await afterSync()
+    return success
   })
 
   const abort = () => run('abort', async () => {
@@ -175,8 +195,17 @@ function SyncBar() {
     await afterSync()
   })
 
-  const btn = 'rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'
+  const btn = 'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] cursor-pointer border-none bg-transparent text-foreground-secondary hover:bg-surface-active hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
+  const operationBtn = 'rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'
   const idle = !inProgress && !!activeRemote && hasRemote
+  const actionLabel = (action: 'fetch' | 'rebase' | 'merge', idleLabel: string, busyLabel: string, doneLabel: string) =>
+    busy && activeAction === action ? busyLabel :
+      syncState === 'done' && activeAction === action ? doneLabel :
+        syncState === 'error' && activeAction === action ? `${idleLabel} failed` : idleLabel
+  const actionClass = (action: 'fetch' | 'rebase' | 'merge') =>
+    busy && activeAction === action ? 'text-accent' :
+      syncState === 'done' && activeAction === action ? 'text-success' :
+        syncState === 'error' && activeAction === action ? 'text-danger' : 'text-foreground-secondary'
   /** Keep the pre-existing escape hatch even though Cancel holds focus by
    *  default: a modal that cannot be dismissed from the keyboard is a trap. */
   const cancelAbort = () => {
@@ -185,40 +214,61 @@ function SyncBar() {
   }
 
   return (
-    <div className="border-b border-border-subtle px-3 py-2 text-[11px]">
-      <div className="flex flex-wrap items-center gap-1.5">
-        {remotes.length > 1 && (
-          <select
-            aria-label="Sync remote"
-            value={activeRemote}
-            onChange={e => setSelected(e.target.value)}
-            disabled={inProgress}
-            className="rounded border border-border-subtle bg-background px-1 py-1 text-[11px] font-mono text-foreground outline-none"
-          >
-            {remotes.map(name => <option key={name} value={name}>{name}</option>)}
-          </select>
-        )}
+    <div ref={syncRef} className="relative border-b border-border-subtle px-3 py-2 text-[11px]">
+      <div className="flex items-center gap-2">
+        <GitBranch size={13} className="shrink-0 text-foreground-subtle" />
+        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground-secondary">{branch || 'no branch'}</span>
+        {ahead > 0 && <span className="text-[10px] text-muted">↑{ahead}</span>}
+        {behind > 0 && <span className="text-[10px] text-muted">↓{behind}</span>}
         {rebasing || merging ? (
-          <>
-            {rebasing && <button type="button" className={btn} onClick={continueRebase} disabled={busy !== ''}>Continue</button>}
-            <button type="button" className={btn} onClick={() => setConfirmAbort(rebasing ? 'rebase' : 'merge')} disabled={busy !== ''}>Abort</button>
-          </>
+          <div className="flex items-center gap-1.5">
+          {rebasing && <button type="button" className={operationBtn} onClick={continueRebase} disabled={busy}>Continue</button>}
+          <button type="button" className={operationBtn} onClick={() => setConfirmAbort(rebasing ? 'rebase' : 'merge')} disabled={busy}>Abort</button>
+          </div>
         ) : (
-          <>
-            <button type="button" className={btn} onClick={fetchRemote} disabled={!idle || busy !== ''}>{busy === 'fetch' ? 'Fetching…' : 'Fetch'}</button>
+          <span className="relative">
             <button
               type="button"
-              className={btn}
-              onClick={rebaseRemote}
-              disabled={!idle || !hasCommits || busy !== ''}
-              title={hasCommits ? undefined : 'No local commits yet — Merge brings in the remote branch instead'}
+              aria-label="Git sync actions"
+              aria-expanded={syncOpen}
+              onClick={() => setSyncOpen(open => !open)}
+              disabled={!idle || busy}
+              title={activeRemote && targetBranch ? `Sync ${targetBranch} with ${activeRemote}` : 'Sync current branch'}
+              className="flex items-center gap-1 rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {busy === 'rebase' ? 'Rebasing…' : 'Rebase'}
+              {busy && activeAction === 'fetch' ? 'Fetching…' : busy && activeAction === 'rebase' ? 'Rebasing…' : busy && activeAction === 'merge' ? 'Merging…' : syncState === 'error' ? 'Sync failed' : syncState === 'done' ? `${activeAction} done` : 'Git sync'}
+              <ChevronDown size={11} className={'transition-transform ' + (syncOpen ? 'rotate-180' : '')} />
             </button>
-            <button type="button" className={btn} onClick={mergeRemote} disabled={!idle || busy !== ''}>{busy === 'merge' ? 'Merging…' : 'Merge'}</button>
-          </>
+          </span>
         )}
-        <span className="ml-auto truncate font-mono text-[10px] text-muted">{targetLabel}</span>
+        {syncOpen && (
+          <SidebarPopover side="bottom">
+            {remotes.length > 1 && (
+              <label className="block border-b border-border-subtle px-2 py-1.5 text-[10px] text-muted">
+                Remote
+                <select
+                  aria-label="Sync remote"
+                  value={activeRemote}
+                  onChange={e => setSelected(e.target.value)}
+                  disabled={busy}
+                  className="mt-1 w-full rounded border border-border-subtle bg-background px-1 py-1 text-[11px] font-mono text-foreground outline-none"
+                >
+                  {remotes.map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </label>
+            )}
+            <button type="button" className={btn} onClick={fetchRemote} disabled={busy}>
+              <Download size={12} className={actionClass('fetch')} /> {actionLabel('fetch', 'Fetch', 'Fetching…', 'Fetched')}
+            </button>
+            <button type="button" className={btn} onClick={rebaseRemote} disabled={!hasCommits || !targetBranch || busy} title={hasCommits ? undefined : 'No local commits yet — Merge brings in the remote branch instead'}>
+              <GitBranch size={12} className={actionClass('rebase')} /> {actionLabel('rebase', 'Rebase', 'Rebasing…', 'Rebased')}
+            </button>
+            <button type="button" className={btn} onClick={mergeRemote} disabled={!targetBranch || busy}>
+              <GitMerge size={12} className={actionClass('merge')} /> {actionLabel('merge', 'Merge', 'Merging…', 'Merged')}
+            </button>
+            {remotes.length > 1 && <div className="border-t border-border-subtle px-2 py-1.5 text-[10px] text-muted">Push still follows branch upstream.</div>}
+          </SidebarPopover>
+        )}
       </div>
 
       {merging && (
@@ -232,9 +282,7 @@ function SyncBar() {
           A {repoState} is in progress — finish or abort it with system Git. Fetch, Rebase, and Merge stay disabled until the repository is clean again.
         </div>
       )}
-      {!inProgress && remotes.length > 1 && (
-        <div className="mt-1.5 text-[10px] text-muted">Several remotes — pick the one to sync with. Push still follows the branch upstream.</div>
-      )}
+      {!hasRemote && <div className="mt-1.5 text-[10px] text-muted">Add a remote in Git settings to sync.</div>}
       {notice && <div className="mt-1.5 text-[10px] text-foreground-secondary">{notice}</div>}
       {err && <div className="mt-1.5 text-[10px] text-danger">{err}</div>}
 
@@ -281,23 +329,15 @@ export default function GitPanel() {
 
   return (
     <section aria-label="Git Panel" className="flex min-h-0 flex-1 flex-col text-xs">
-      <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-2">
-        <GitBranch size={13} className="shrink-0 text-foreground-subtle" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground-secondary">{branch || 'no branch'}</span>
-        {ahead > 0 && <span className="text-[10px] text-muted">↑{ahead}</span>}
-        {behind > 0 && <span className="text-[10px] text-muted">↓{behind}</span>}
-        <button
-          type="button"
-          onClick={() => void pollGitStatus()}
-          aria-label="Refresh git changes"
-          title="Refresh"
-          className="rounded p-1 text-foreground-subtle cursor-pointer hover:bg-surface-active hover:text-foreground"
-        >
-          <RefreshCw size={12} />
-        </button>
-      </div>
-
       {isRepo && <SyncBar />}
+      {!isRepo && (
+        <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-2">
+          <GitBranch size={13} className="shrink-0 text-foreground-subtle" />
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground-secondary">{branch || 'no branch'}</span>
+          {ahead > 0 && <span className="text-[10px] text-muted">↑{ahead}</span>}
+          {behind > 0 && <span className="text-[10px] text-muted">↓{behind}</span>}
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto p-2">
         {!isRepo && (

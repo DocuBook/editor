@@ -22,8 +22,15 @@ permissions = [
   "allow-git-create-branch",
   "allow-git-clone",
   "allow-git-commit",
+  "allow-git-fetch",
   "allow-git-init",
+  "allow-git-merge-abort",
   "allow-git-push-only",
+  "allow-git-rebase",
+  "allow-git-rebase-abort",
+  "allow-git-rebase-continue",
+  "allow-git-remote-merge",
+  "allow-git-remote-probe",
   "allow-git-remove-remote",
   "allow-git-set-identity",
   "allow-git-settings",
@@ -219,6 +226,76 @@ commands.allow = ["git_commit"]
 identifier = "deny-git-commit"
 description = "Denies the git_commit command."
 commands.deny = ["git_commit"]
+
+[[permission]]
+identifier = "allow-git-fetch"
+description = "Enables the git_fetch command."
+commands.allow = ["git_fetch"]
+
+[[permission]]
+identifier = "deny-git-fetch"
+description = "Denies the git_fetch command."
+commands.deny = ["git_fetch"]
+
+[[permission]]
+identifier = "allow-git-merge-abort"
+description = "Enables the git_merge_abort command."
+commands.allow = ["git_merge_abort"]
+
+[[permission]]
+identifier = "deny-git-merge-abort"
+description = "Denies the git_merge_abort command."
+commands.deny = ["git_merge_abort"]
+
+[[permission]]
+identifier = "allow-git-rebase"
+description = "Enables the git_rebase command."
+commands.allow = ["git_rebase"]
+
+[[permission]]
+identifier = "deny-git-rebase"
+description = "Denies the git_rebase command."
+commands.deny = ["git_rebase"]
+
+[[permission]]
+identifier = "allow-git-rebase-abort"
+description = "Enables the git_rebase_abort command."
+commands.allow = ["git_rebase_abort"]
+
+[[permission]]
+identifier = "deny-git-rebase-abort"
+description = "Denies the git_rebase_abort command."
+commands.deny = ["git_rebase_abort"]
+
+[[permission]]
+identifier = "allow-git-rebase-continue"
+description = "Enables the git_rebase_continue command."
+commands.allow = ["git_rebase_continue"]
+
+[[permission]]
+identifier = "deny-git-rebase-continue"
+description = "Denies the git_rebase_continue command."
+commands.deny = ["git_rebase_continue"]
+
+[[permission]]
+identifier = "allow-git-remote-merge"
+description = "Enables the git_remote_merge command."
+commands.allow = ["git_remote_merge"]
+
+[[permission]]
+identifier = "deny-git-remote-merge"
+description = "Denies the git_remote_merge command."
+commands.deny = ["git_remote_merge"]
+
+[[permission]]
+identifier = "allow-git-remote-probe"
+description = "Enables the git_remote_probe command."
+commands.allow = ["git_remote_probe"]
+
+[[permission]]
+identifier = "deny-git-remote-probe"
+description = "Denies the git_remote_probe command."
+commands.deny = ["git_remote_probe"]
 
 [[permission]]
 identifier = "allow-git-push-only"
