@@ -126,12 +126,19 @@ function SyncBar() {
    *  derive a second branch from an upstream label such as `origin/master`. */
   const targetBranch = branch && !branch.startsWith('(') ? branch : ''
   const busy = syncState === 'busy'
+  /** The UI only surfaces facts it can read from the repository state and never
+   *  pre-judges whether an operation is legal — same contract as the Actions
+   *  menu, where the backend owns that decision. The worktree is therefore not a
+   *  gate: git allows a merge with local changes when paths do not overlap, and
+   *  the backend refuses with its own message when they do. */
   const syncDisabledReason = !hasRemote ? 'Add a remote in Git settings to sync.' : !targetBranch ? 'No branch checked out.' : ''
   /** A fresh repository has no commits, so `behind` cannot describe what Merge
    *  would bring in — it adopts the remote branch instead. Rebasing is what
    *  needs local history, so only Rebase keys off `hasCommits`. */
   const unmatchedBehind = !hasCommits ? true : behind > 0
   const incoming = unmatchedBehind && !inProgress && !!activeRemote && !!targetBranch
+  /** Disabled reasons state the observable fact, not a verdict: `behind` is
+   *  known locally, while the backend still decides if the operation can run. */
   const rebaseDisabledReason = !incoming || !hasCommits ? 'Nothing to rebase — remote has no new commits.' : ''
   const mergeDisabledReason = !incoming ? 'Nothing to merge — remote has no new commits.' : ''
   const locked = !!syncDisabledReason || busy
