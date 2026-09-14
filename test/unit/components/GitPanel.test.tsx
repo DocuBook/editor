@@ -450,7 +450,7 @@ describe('GitPanel — remote sync', () => {
     expect(syncButton('Merge')!.textContent).toContain('↓2')
   })
 
-  it('keeps Merge available with local changes, since the backend judges safety', () => {
+  it('keeps Merge and Rebase available with local changes, since the backend judges safety', () => {
     gitState.behind = 1
     gitState.status = '.M notes/dirty.md'
     renderPanel()
@@ -458,6 +458,17 @@ describe('GitPanel — remote sync', () => {
 
     expect(syncButton('Merge')!.disabled).toBe(false)
     expect(syncButton('Rebase')!.disabled).toBe(false)
+  })
+
+  it('does not treat staged or untracked work as a sync gate', () => {
+    gitState.behind = 1
+    gitState.status = ['M. notes/staged.md', '?? notes/untracked.md', 'UU notes/conflicted.md'].join('\n')
+    renderPanel()
+    openSync()
+
+    expect(syncButton('Merge')!.disabled).toBe(false)
+    expect(syncButton('Rebase')!.disabled).toBe(false)
+    expect(document.body.textContent).not.toContain('Commit your local changes')
   })
 
   it('swaps the sync actions for Continue/Abort during a rebase', () => {
