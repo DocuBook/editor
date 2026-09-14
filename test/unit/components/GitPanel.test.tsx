@@ -69,9 +69,10 @@ const rowByPath = (path: string) => document.querySelector<HTMLButtonElement>(`b
 /** The Stage action lives beside a conflict row, not inside its open-file button. */
 const stageButton = (path: string) => document.querySelector<HTMLButtonElement>(`button[aria-label="Stage ${path}"]`)
 
-/** SyncBar buttons (Fetch/Rebase/Merge/Continue/Abort) — matched by exact text. */
+/** SyncBar buttons (Fetch/Rebase/Merge/Continue/Abort) — matched on the leading
+ *  label, because an action may also carry a badge such as the incoming ↓n. */
 const syncButton = (label: string) =>
-  Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent?.trim() === label)
+  Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent?.trim().startsWith(label))
 
 const syncMenuButton = () => document.querySelector<HTMLButtonElement>('[aria-label="Git sync actions"]')
 const openSync = () => act(() => syncMenuButton()!.click())
@@ -302,6 +303,7 @@ describe('GitPanel — remote sync', () => {
   })
 
   it('rebases onto the remote branch and surfaces conflicts', async () => {
+    gitState.behind = 1
     invoke.mockResolvedValue(syncOutcome({ success: false, message: 'origin/main has conflicts — resolve them and commit', conflicts: ['notes/a.md'] }))
     renderPanel()
     openSync()
@@ -316,6 +318,7 @@ describe('GitPanel — remote sync', () => {
   })
 
   it('merges the remote branch and reports the outcome', async () => {
+    gitState.behind = 1
     invoke.mockResolvedValue(syncOutcome({ message: 'Fast-forwarded to origin/main' }))
     renderPanel()
     openSync()
@@ -329,6 +332,7 @@ describe('GitPanel — remote sync', () => {
   })
 
   it('keeps a conflicted merge for Commit instead of resolving it', async () => {
+    gitState.behind = 1
     invoke.mockResolvedValue(syncOutcome({ success: false, message: 'origin/main has conflicts — resolve them and commit', conflicts: ['notes/a.md'] }))
     renderPanel()
     openSync()
@@ -424,6 +428,36 @@ describe('GitPanel — remote sync', () => {
     expect(rebase.disabled).toBe(true)
     expect(rebase.title).toContain('No local commits yet')
     expect(syncButton('Merge')!.disabled).toBe(false)
+  })
+
+  it('locks Rebase and Merge until the remote is actually ahead', () => {
+    gitState.behind = 0
+    renderPanel()
+    openSync()
+
+    expect(syncButton('Rebase')!.disabled).toBe(true)
+    expect(syncButton('Merge')!.disabled).toBe(true)
+    expect(syncButton('Fetch')!.disabled).toBe(false)
+    expect(document.body.textContent).toContain('remote has no new commits')
+  })
+
+  it('shows the incoming commit count next to the actions that use it', () => {
+    gitState.behind = 2
+    renderPanel()
+    openSync()
+
+    expect(syncButton('Rebase')!.textContent).toContain('↓2')
+    expect(syncButton('Merge')!.textContent).toContain('↓2')
+  })
+
+  it('keeps Merge available with local changes, since the backend judges safety', () => {
+    gitState.behind = 1
+    gitState.status = '.M notes/dirty.md'
+    renderPanel()
+    openSync()
+
+    expect(syncButton('Merge')!.disabled).toBe(false)
+    expect(syncButton('Rebase')!.disabled).toBe(false)
   })
 
   it('swaps the sync actions for Continue/Abort during a rebase', () => {

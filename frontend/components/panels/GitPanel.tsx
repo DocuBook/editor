@@ -126,6 +126,16 @@ function SyncBar() {
    *  derive a second branch from an upstream label such as `origin/master`. */
   const targetBranch = branch && !branch.startsWith('(') ? branch : ''
   const busy = syncState === 'busy'
+  const syncDisabledReason = !hasRemote ? 'Add a remote in Git settings to sync.' : !targetBranch ? 'No branch checked out.' : ''
+  /** A fresh repository has no commits, so `behind` cannot describe what Merge
+   *  would bring in — it adopts the remote branch instead. Rebasing is what
+   *  needs local history, so only Rebase keys off `hasCommits`. */
+  const unmatchedBehind = !hasCommits ? true : behind > 0
+  const incoming = unmatchedBehind && !inProgress && !!activeRemote && !!targetBranch
+  const rebaseDisabledReason = !incoming || !hasCommits ? 'Nothing to rebase — remote has no new commits.' : ''
+  const mergeDisabledReason = !incoming ? 'Nothing to merge — remote has no new commits.' : ''
+  const locked = !!syncDisabledReason || busy
+  const actionHint = (reason: string, title: string) => (!busy && reason ? reason : title)
 
   useEffect(() => {
     if (syncState !== 'done') return
@@ -198,6 +208,7 @@ function SyncBar() {
   const btn = 'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] cursor-pointer border-none bg-transparent text-foreground-secondary hover:bg-surface-active hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
   const operationBtn = 'rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'
   const idle = !inProgress && !!activeRemote && hasRemote
+  const showHints = syncOpen
   const actionLabel = (action: 'fetch' | 'rebase' | 'merge', idleLabel: string, busyLabel: string, doneLabel: string) =>
     busy && activeAction === action ? busyLabel :
       syncState === 'done' && activeAction === action ? doneLabel :
@@ -257,15 +268,25 @@ function SyncBar() {
                 </select>
               </label>
             )}
-            <button type="button" className={btn} onClick={fetchRemote} disabled={busy}>
+            <button type="button" className={btn} onClick={fetchRemote} disabled={locked} title={locked && syncDisabledReason ? syncDisabledReason : `Fetch ${activeRemote}`}>
               <Download size={12} className={actionClass('fetch')} /> {actionLabel('fetch', 'Fetch', 'Fetching…', 'Fetched')}
             </button>
-            <button type="button" className={btn} onClick={rebaseRemote} disabled={!hasCommits || !targetBranch || busy} title={hasCommits ? undefined : 'No local commits yet — Merge brings in the remote branch instead'}>
+            <button
+              type="button"
+              className={btn}
+              onClick={rebaseRemote}
+              disabled={locked || !incoming || !hasCommits}
+              title={hasCommits ? actionHint(rebaseDisabledReason, `Rebase ${targetBranch} onto ${activeRemote}/${targetBranch}`) : 'No local commits yet — Merge brings in the remote branch instead'}
+            >
               <GitBranch size={12} className={actionClass('rebase')} /> {actionLabel('rebase', 'Rebase', 'Rebasing…', 'Rebased')}
+              {showHints && !busy && incoming && <span className="ml-auto text-[10px] text-muted">↓{behind}</span>}
             </button>
-            <button type="button" className={btn} onClick={mergeRemote} disabled={!targetBranch || busy}>
+            <button type="button" className={btn} onClick={mergeRemote} disabled={locked || !!mergeDisabledReason} title={actionHint(mergeDisabledReason, `Merge ${activeRemote}/${targetBranch} into ${targetBranch}`)}>
               <GitMerge size={12} className={actionClass('merge')} /> {actionLabel('merge', 'Merge', 'Merging…', 'Merged')}
+              {showHints && !busy && incoming && <span className="ml-auto text-[10px] text-muted">↓{behind}</span>}
             </button>
+            {showHints && !busy && mergeDisabledReason && <div className="px-2.5 pb-1 text-[10px] text-muted">{mergeDisabledReason}</div>}
+            {showHints && !busy && !mergeDisabledReason && rebaseDisabledReason && <div className="px-2.5 pb-1 text-[10px] text-muted">{rebaseDisabledReason}</div>}
             {remotes.length > 1 && <div className="border-t border-border-subtle px-2 py-1.5 text-[10px] text-muted">Push still follows branch upstream.</div>}
           </SidebarPopover>
         )}
