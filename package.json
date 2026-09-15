@@ -19,7 +19,8 @@
     "test:e2e:ai": "node test/ai-debug.mjs",
     "test:e2e:ai-pre": "node test/ai-pre-flicker.mjs",
     "test:e2e:overlay": "node test/overlay-surface.mjs",
-    "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs"
+    "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs",
+    "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs"
   },
   "dependencies": {
     "@blocknote/core": "0.54.2",

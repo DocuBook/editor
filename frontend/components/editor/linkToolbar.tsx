@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, type LinkToolbarProps } from '@blocknote/react'
+import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, TextAlignButton, NestBlockButton, UnnestBlockButton, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
 import { getDefaultAIMenuItems, useAIDictionary } from '@blocknote/xl-ai'
 import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
@@ -8,6 +8,7 @@ import { useAiChat } from '../../stores/aiChat'
 import { captureAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
+import { FormattingToolbarPopover } from './FormattingToolbarPopover'
 
 /** Open an external URL: native uses the system opener (tauri-plugin-opener →
  *  macOS `open` → default browser); web falls back to window.open. Same user
@@ -268,8 +269,22 @@ function AIToolbarButtonSafe() {
   )
 }
 
+/* Keys of the built-in formatting-toolbar items grouped into the compact panel.
+   `getFormattingToolbarItems()` returns rendered ELEMENTS (e.g.
+   `<BasicTextStyleButton basicTextStyle="underline" key="underlineStyleButton" />`),
+   so `key` is the only handle on them — their props are already resolved, there is
+   no onClick to re-dispatch. The panel therefore re-instantiates the public
+   controls instead of reusing these elements. */
+const GROUPED_KEYS = [
+  'textAlignLeftButton',
+  'textAlignCenterButton',
+  'textAlignRightButton',
+  'nestBlockButton',
+  'unnestBlockButton',
+] as string[]
+
 /** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */
-export const FormattingToolbarWithAI = () => {
+export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {}) => {
   const editor = useBlockNoteEditor<any, any, any>()
   const blockTypes = blockTypeSelectItems(editor.dictionary)
     .filter(item => item.type !== 'heading' || (Number(item.props?.level) <= 5 && item.props?.isToggleable !== true))
@@ -277,11 +292,37 @@ export const FormattingToolbarWithAI = () => {
       ? { ...item, props: Object.fromEntries(Object.entries(item.props ?? {}).filter(([key]) => key !== 'isToggleable')) }
       : item)
 
+  const items = getFormattingToolbarItems(blockTypes).filter(el => (el as any).key !== 'createLinkButton')
+  // Both branches keep the upstream array order — only the split point moves.
+  if (!compact) {
+    return (
+      <FormattingToolbar>
+        {items}
+        <CreateLinkButtonPreserveUrl />
+        <AIToolbarButtonSafe />
+      </FormattingToolbar>
+    )
+  }
+
+  /* Compact layout: keep block type, the full inline-mark set (bold, italic,
+     code, highlight, colour) and the app's own Link/AI actions on the row; move
+     what otherwise gets clipped — underline, strikethrough, alignment, indent —
+     into the overflow panel. Splitting on element KEYS (not on index) keeps the
+     row correct if upstream reorders or adds items. */
+  const onRow = items.filter(el => !GROUPED_KEYS.includes((el as any).key))
+
   return (
     <FormattingToolbar>
-      {getFormattingToolbarItems(blockTypes).filter(el => (el as any).key !== 'createLinkButton')}
+      {onRow}
       <CreateLinkButtonPreserveUrl />
       <AIToolbarButtonSafe />
+      <FormattingToolbarPopover label="More formatting">
+        <TextAlignButton textAlignment="left" />
+        <TextAlignButton textAlignment="center" />
+        <TextAlignButton textAlignment="right" />
+        <NestBlockButton />
+        <UnnestBlockButton />
+      </FormattingToolbarPopover>
     </FormattingToolbar>
   )
 }
