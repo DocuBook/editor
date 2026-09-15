@@ -5,8 +5,8 @@
  *  (utils/editorFactory) and survives tab switches — only the view
  *  (BlockNoteView) remounts. Markdown is parsed once; undo history persists.
  *  In-flight AI is settled and serialized before any view detaches. */
-import { useEffect, useRef } from 'react'
-import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, useExtensionState } from '@blocknote/react'
+import { useCallback, useEffect, useRef } from 'react'
+import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, useExtensionState, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
@@ -444,10 +444,19 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     return () => cancelAnimationFrame(frame)
   }, [editor, initialCursorOffset, initialMarkdown])
 
+  const compact = !isTauri && !isDesktop
+  /* FormattingToolbarController takes the toolbar as a component TYPE and
+     renders it, so an inline arrow would be a new type on every editor update
+     and remount the whole toolbar (losing open popovers). */
+  const renderFormattingToolbar = useCallback(
+    (props: FormattingToolbarProps) => <FormattingToolbarWithAI {...props} compact={compact} />,
+    [compact],
+  )
+
   return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
     {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
      *  built-in block-anchored AIMenuController is intentionally not rendered. */}
-    <FormattingToolbarController formattingToolbar={FormattingToolbarWithAI} />
+    <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
     <LinkToolbarController linkToolbar={WikiLinkToolbar} />
     <SuggestionMenuController triggerCharacter="/"
       getItems={async (query) => {
