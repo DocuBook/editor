@@ -3,6 +3,8 @@
  *   1. Trash tab is DISABLED while `.trash/` is empty (web has no native trash).
  *   2. With `.trash/` content → tab enabled and selectable.
  *   3. Restore from the panel → file back in the tree, tab disabled again.
+ *   4. Delete from the panel → in-app confirmation gates it, cancel is a no-op,
+ *      confirm permanently deletes the item.
  *
  * Note: the Linux-only delete→`.trash/` move is covered by the cfg(target_os
  * = "linux") Rust unit test. On macOS dev the delete path goes to the system
@@ -154,21 +156,66 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-testid="trash-toggle"]')?.disabled)
   ok('trash tab: enabled when trash has files', await trashTab.isEnabled(), '')
 
-  // 3. Open the panel → tab selected → restore → back in the tree, tab disabled again
+  // 3. Open the panel → tab selected, then exercise delete and restore.
   await trashTab.click()
   ok('trash tab: selected after opening the panel', await trashTab.getAttribute('aria-selected') === 'true')
   const trashPanel = page.locator('section[aria-label="Trash"]')
   await trashPanel.getByText('Trash (1)').waitFor({ timeout: 5000 })
-  const restoreRow = trashPanel.getByRole('button', { name: 'Put back notes.md' })
-  await restoreRow.waitFor({ timeout: 5000 })
+
+  // 4. Delete → in-app confirmation gates it; cancel is a no-op, confirm deletes.
+  writeFileSync(`${VAULT}/.trash/1700000004000-doomed.md`, '# Doomed\n')
+  const reseededTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
+  await trashTab.click()
+  await reseededTrash
+  const deleteCheckbox = trashPanel.getByRole('checkbox', { name: 'Select doomed.md' })
+  await deleteCheckbox.check()
+  await trashPanel.getByRole('button', { name: 'Delete' }).click()
+  const dialog = trashPanel.getByRole('alertdialog', { name: 'Delete permanently' })
+  await dialog.waitFor({ timeout: 5000 })
+  ok('delete: confirmation names the item', (await dialog.textContent())?.includes('doomed.md') === true)
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+  await dialog.waitFor({ state: 'detached' })
+  ok('delete: cancel leaves the item in the panel', await deleteCheckbox.count() === 1)
+
+  const deleteResponse = page.waitForResponse(r => r.url().endsWith('/api/delete_trash_item') && r.ok())
+  await trashPanel.getByRole('button', { name: 'Delete' }).click()
+  await dialog.waitFor({ timeout: 5000 })
+  await dialog.getByRole('button', { name: 'Delete' }).click()
+  await deleteResponse
+  ok('delete: confirmed item is gone from the panel', await trashPanel.getByRole('checkbox', { name: 'Select doomed.md' }).count() === 0)
+
+  // 6. A permission failure must offer the System Settings pane, not a dead toast.
+  //    The web server has no macOS privacy gate, so stub the command to fail the
+  //    way the desktop backend does and assert the dialog (not a toast) appears.
+  await page.route('**/api/restore_file', route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ error: 'TRASH_PERMISSION:accessibility' }),
+  }))
+  writeFileSync(`${VAULT}/.trash/1700000005000-locked.md`, '# Locked\n')
+  await trashTab.click()
+  await trashPanel.getByText('locked.md', { exact: true }).waitFor({ timeout: 5000 })
+  await trashPanel.getByRole('checkbox', { name: 'Select locked.md' }).check()
+  await trashPanel.getByRole('button', { name: 'Put back' }).click()
+  const permissionDialog = page.getByRole('alertdialog', { name: 'Permission required' })
+  await permissionDialog.waitFor({ timeout: 5000 })
+  ok('permission: dialog replaces the toast', await permissionDialog.textContent().then(t => t?.includes('Accessibility') === true))
+  await permissionDialog.getByRole('button', { name: 'Open System Settings' }).waitFor()
+  await permissionDialog.getByRole('button', { name: 'Not now' }).click()
+  await permissionDialog.waitFor({ state: 'detached' })
+  await page.unroute('**/api/restore_file')
+
+  // 5. Restore → file back in the tree, tab disabled again
+  const restoreCheckbox = trashPanel.getByRole('checkbox', { name: 'Select notes.md' })
+  await restoreCheckbox.check()
   const restoreResponse = page.waitForResponse(r => r.url().endsWith('/api/restore_file') && r.ok())
-  await restoreRow.click()
+  await trashPanel.getByRole('button', { name: 'Put back' }).click()
   await restoreResponse
   await page.waitForFunction(() => document.querySelector('[data-testid="trash-toggle"]')?.disabled)
   ok('trash tab: disabled again after restore', await trashTab.isDisabled(), '')
-  ok('restore: row removed from the panel', await restoreRow.count() === 0)
-  await trashPanel.getByRole('button', { name: 'Back' }).click()
-  await page.waitForSelector('text=notes', { timeout: 5000 })
+  ok('restore: row removed from the panel', await restoreCheckbox.count() === 0)
+  await page.getByTestId('sidebar-panel-vault').click()
+  await page.getByText('notes', { exact: true }).waitFor({ timeout: 5000 })
   ok('restore: notes.md back in the tree', await page.getByText('notes', { exact: true }).count() >= 1)
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])

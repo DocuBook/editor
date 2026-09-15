@@ -15,7 +15,6 @@ permissions = [
   "allow-delete-api-key",
   "allow-delete-file",
   "allow-delete-trash-item",
-  "allow-empty-trash",
   "allow-git-add-remote",
   "allow-git-branches",
   "allow-git-checkout",
@@ -156,16 +155,6 @@ commands.allow = ["delete_trash_item"]
 identifier = "deny-delete-trash-item"
 description = "Denies permanent deletion of one Trash item."
 commands.deny = ["delete_trash_item"]
-
-[[permission]]
-identifier = "allow-empty-trash"
-description = "Enables permanent deletion of all Trash items."
-commands.allow = ["empty_trash"]
-
-[[permission]]
-identifier = "deny-empty-trash"
-description = "Denies permanent deletion of all Trash items."
-commands.deny = ["empty_trash"]
 
 [[permission]]
 identifier = "allow-git-add-remote"
@@ -431,6 +420,16 @@ commands.deny = ["md_to_html"]
 identifier = "allow-open-vault"
 description = "Enables the open_vault command."
 commands.allow = ["open_vault"]
+
+[[permission]]
+identifier = "allow-open-system-settings"
+description = "Enables deep-linking to a macOS System Settings pane."
+commands.allow = ["open_system_settings"]
+
+[[permission]]
+identifier = "deny-open-system-settings"
+description = "Denies deep-linking to a macOS System Settings pane."
+commands.deny = ["open_system_settings"]
 
 [[permission]]
 identifier = "deny-open-vault"

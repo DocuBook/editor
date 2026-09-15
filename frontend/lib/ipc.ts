@@ -226,6 +226,47 @@ export async function fileUrl(vaultPath: string, relPath: string): Promise<strin
   return `/api/file?path=${encodeURIComponent(abs)}`
 }
 
+/** macOS privacy panes the app can deep-link to. Kept in one place so both the
+ *  Rust command and the UI reason about the same set. */
+export type SystemSettingsPane = 'accessibility' | 'automation' | 'files'
+
+/** Sentinel the Rust side prepends to permission failures (`TRASH_PERMISSION_PREFIX`).
+ *  A prefix rather than a parsed message keeps the two sides loosely coupled. */
+const TRASH_PERMISSION_PREFIX = 'TRASH_PERMISSION:'
+
+/** Detect a macOS privacy-permission failure and extract the pane to grant.
+ *  Returns null for ordinary command errors, which callers surface as-is. */
+export function trashPermissionError(error: unknown): { pane: SystemSettingsPane; message: string } | null {
+  const raw = String(error)
+  const at = raw.indexOf(TRASH_PERMISSION_PREFIX)
+  if (at === -1) return null
+  const pane = raw.slice(at + TRASH_PERMISSION_PREFIX.length).trim().split(/\s/)[0]
+  const known: SystemSettingsPane[] = ['accessibility', 'automation', 'files']
+  return {
+    pane: known.find(k => k === pane) ?? 'automation',
+    message: humanizePane(pane),
+  }
+}
+
+function humanizePane(pane: string): string {
+  if (pane === 'accessibility') return 'Put Back needs Accessibility access to move items out of the Trash.'
+  if (pane === 'files') return 'Trash access needs Full Disk Access.'
+  return 'Trash access needs permission to control Finder.'
+}
+
+/** Open the specific macOS System Settings pane a failed action needs. Falls
+ *  back to a no-op elsewhere — callers keep the written instructions visible. */
+export async function openSystemSettings(pane: SystemSettingsPane): Promise<boolean> {
+  if (!isTauri) return false
+  try {
+    await invoke('open_system_settings', { pane })
+    return true
+  } catch (e) {
+    console.error(e)
+    return false
+  }
+}
+
 /** Minimal MIME map for previewed binary files (images etc). */
 const MIME_BY_EXT: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',

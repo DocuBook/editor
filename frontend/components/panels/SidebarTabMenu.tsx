@@ -7,6 +7,9 @@ interface SidebarTabMenuProps {
   onChange: (panel: SidebarPanelId) => void
   trashCount: number
   isNative: boolean
+  /** Locks every tab while a Trash batch action runs — switching panels would
+   *  unmount TrashPanel mid-flight and let a second batch start concurrently. */
+  disabled?: boolean
 }
 
 const ITEMS = [
@@ -16,12 +19,12 @@ const ITEMS = [
   { id: 'trash' as const, label: 'Trash', Icon: Trash },
 ]
 
-export default function SidebarTabMenu({ active, onChange, trashCount, isNative }: SidebarTabMenuProps) {
+export default function SidebarTabMenu({ active, onChange, trashCount, isNative, disabled: locked = false }: SidebarTabMenuProps) {
   return (
     <div role="tablist" aria-label="Sidebar panels" className="flex w-full min-w-0 items-center gap-0.5 rounded-lg border border-border-subtle bg-background p-0.5">
       {ITEMS.map(({ id, label, Icon }) => {
         const selected = id === active
-        const disabled = id === 'trash' && !isNative && trashCount === 0
+        const disabled = locked || (id === 'trash' && !isNative && trashCount === 0)
         return (
           <button
             key={id}

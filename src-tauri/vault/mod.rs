@@ -354,22 +354,6 @@ impl Vault {
         Ok(())
     }
 
-/** Permanently delete everything in vault-local `.trash/`. */
-    #[allow(dead_code)]
-    pub fn empty_trash(&self) -> Result<(), String> {
-        let trash_dir = self.safe_path(".trash")?;
-        let read = match std::fs::read_dir(trash_dir) {
-            Ok(read) => read,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(format!("Empty trash: {error}")),
-        };
-        for entry in read {
-            Self::remove_trash_path(&entry.map_err(|e| format!("Empty trash: {e}"))?.path())?;
-        }
-        self.invalidate_renderable_cache();
-        Ok(())
-    }
-
 /** Rename/move a file or directory. */
     pub fn rename_file(&self, from: &str, to: &str) -> Result<(), String> {
         let src = self.safe_path(from)?;
@@ -589,10 +573,6 @@ mod tests {
         assert!(!dir.join(".trash/1700000002000-old.md").exists());
         assert!(v.delete_trash_item("../notes.md").is_err());
 
-        // empty: clears everything left
-        std::fs::write(dir.join(".trash/1700000003000-last.md"), "z").unwrap();
-        v.empty_trash().unwrap();
-        assert_eq!(v.list_trash().len(), 0);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

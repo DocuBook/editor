@@ -583,4 +583,37 @@ mod api_tests {
         .await;
         assert_eq!(s, StatusCode::OK, "{b}");
     }
+
+    /** `open_system_settings` is a macOS privacy deep link with no web analogue.
+     *  It must answer instead of failing: the command surface stays at parity and
+     *  a stray call cannot surface as "Unknown command". */
+    #[tokio::test]
+    async fn open_system_settings_is_a_noop_on_web() {
+        let (app, _) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = headers
+            .get(header::SET_COOKIE)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .split(';')
+            .next()
+            .unwrap()
+            .to_string();
+
+        let (s, _, b) = post_with(
+            &app,
+            "/api/open_system_settings",
+            json!({"pane": "accessibility"}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+        assert!(b.contains("null"), "{b}");
+    }
 }
