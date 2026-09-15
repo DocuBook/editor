@@ -10,7 +10,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let root: Root | null
 
-function renderMenu(props: { active: SidebarPanelId; onChange: (panel: SidebarPanelId) => void; trashCount: number; isNative: boolean }) {
+function renderMenu(props: { active: SidebarPanelId; onChange: (panel: SidebarPanelId) => void; trashCount: number; isNative: boolean; disabled?: boolean }) {
   root = createRoot(document.getElementById('root')!)
   act(() => root!.render(<SidebarTabMenu {...props} />))
 }
@@ -103,6 +103,15 @@ describe('SidebarTabMenu', () => {
     renderMenu({ active: 'vault', onChange, trashCount: 0, isNative: false })
 
     act(() => tabById('trash-toggle').click())
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('locks every tab while a trash batch action is in flight', () => {
+    const onChange = vi.fn()
+    renderMenu({ active: 'trash', onChange, trashCount: 3, isNative: true, disabled: true })
+
+    for (const tab of tabs()) expect(tab.disabled).toBe(true)
+    act(() => tabById('sidebar-panel-vault').click())
     expect(onChange).not.toHaveBeenCalled()
   })
 })

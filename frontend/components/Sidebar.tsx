@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { useAiThreads } from '../stores/aiThreads'
-import { invoke, isMacTauri, isTauri } from '../lib/ipc'
+import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
 import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
@@ -14,6 +14,7 @@ import AiChatPanel from './panels/AiChatPanel'
 import GitPanel from './panels/GitPanel'
 import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
+import PermissionDialog from './PermissionDialog'
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
@@ -124,16 +125,20 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const [trashItems, setTrashItems] = useState<TrashItem[]>([])
   const [trashLoading, setTrashLoading] = useState(false)
   const [trashError, setTrashError] = useState('')
-  const loadTrash = useCallback(async () => {
+  const [trashBusy, setTrashBusy] = useState(false)
+  const [permission, setPermission] = useState<{ pane: 'accessibility' | 'automation' | 'files'; message: string } | null>(null)
+  const loadTrash = useCallback(async (): Promise<boolean> => {
     setTrashLoading(true)
     setTrashError('')
     try {
       const raw = await invoke<string>('list_trash')
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
       setTrashItems(Array.isArray(parsed) ? parsed : [])
+      return true
     } catch(e) {
       console.error(e)
       setTrashError(String(e))
+      return false
     } finally {
       setTrashLoading(false)
     }
@@ -145,29 +150,43 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     setActivePanel(panel)
     if (panel === 'trash') await loadTrash()
   }
-  const restoreItem = async (item: TrashItem) => {
-    try {
-      await invoke('restore_file', { trashName: item.name })
-      toast.success('Restored ' + item.original)
-      await loadTrash()
-      await loadTree()
-    } catch(e) { console.error(e); toast.error(String(e)) }
-  }
-  const deleteTrashItem = async (item: TrashItem) => {
-    if (!window.confirm(`Delete "${item.original}" permanently? This cannot be undone.`)) return
-    try {
-      await invoke('delete_trash_item', { trashName: item.name })
-      toast.success('Deleted permanently')
-      await loadTrash()
-    } catch(e) { console.error(e); toast.error(String(e)) }
-  }
-  const emptyTrash = async () => {
-    if (!window.confirm('Permanently delete every item in Trash? This cannot be undone.')) return
-    try {
-      await invoke('empty_trash')
-      await loadTrash()
-      await loadTree()
-    } catch(e) { console.error(e); toast.error(String(e)) }
+  const runTrashAction = async (command: 'restore_file' | 'delete_trash_item', items: TrashItem[]) => {
+    const failed: unknown[] = []
+    for (const item of items) {
+      try { await invoke(command, { trashName: item.name }) }
+      catch(e) { console.error(e); failed.push(e) }
+    }
+    /** A privacy-permission failure is actionable, so it opens the dialog that
+     *  deep-links the System Settings pane. Checking the first failure is enough:
+     *  a batch fails uniformly when the grant is missing. */
+    const denied = failed.map(trashPermissionError).find(Boolean)
+    if (denied) {
+      setPermission(denied)
+    } else if (failed.length) {
+      toast.error(`${items.length - failed.length} completed; ${failed.length} failed: ${String(failed[0])}`)
+    }
+    /** Drop the completed items before the refresh: if `list_trash` fails, the
+     *  panel would otherwise keep showing deleted entries as still-ticked, and
+     *  the next click would re-issue deletes against paths that are gone. */
+    if (failed.length === 0) {
+      const names = new Set(items.map(item => item.name))
+      setTrashItems(previous => previous.filter(item => !names.has(item.name)))
+    }
+    const refreshed = await loadTrash()
+    if (!refreshed && !failed.length) toast.error('Trash action completed, but the Trash view could not be refreshed')
+    if (command === 'restore_file' && items.length > failed.length) {
+      try { await loadTree() }
+      catch (e) {
+        console.error(e)
+        toast.error(`Trash action completed, but the vault view could not be refreshed: ${String(e)}`)
+        return false
+      }
+    }
+    if (failed.length === 0) {
+      const completed = items.length
+      toast.success(`${completed} item${completed === 1 ? '' : 's'} ${command === 'restore_file' ? 'restored' : 'deleted permanently'}`)
+    }
+    return failed.length === 0
   }
 
   useEffect(() => {
@@ -215,13 +234,14 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
 
   return (
     <aside id={id} data-testid={id} className={'ui-shell bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full ' + (isTauri ? 'w-68' : 'w-56')}>
+      {permission && <PermissionDialog pane={permission.pane} message={permission.message} onClose={() => setPermission(null)} />}
       {isMacTauri ? (
         <div data-tauri-drag-region className="flex h-12 shrink-0 items-center pl-18 pr-2">
-          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} />
+          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} disabled={trashBusy} />
         </div>
       ) : (
         <div className="px-2 pt-2">
-          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} />
+          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} disabled={trashBusy} />
         </div>
       )}
 
@@ -300,10 +320,10 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           items={trashItems}
           loading={trashLoading}
           error={trashError}
-          onRestore={item => void restoreItem(item)}
-          onDelete={item => void deleteTrashItem(item)}
-          onEmpty={() => void emptyTrash()}
-          onBack={() => setActivePanel('vault')}
+          busy={trashBusy}
+          onRestore={items => runTrashAction('restore_file', items)}
+          onDelete={items => runTrashAction('delete_trash_item', items)}
+          onBusyChange={setTrashBusy}
         />
       )}
       {!isOpen && activePanel !== 'trash' && <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>}
@@ -314,7 +334,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       )}
       <div ref={sidebarActionsRef} className="relative flex items-center gap-0.5 px-2 py-1.5 shrink-0">
         <span className="flex-1 min-w-0">
-          <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
+          <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading || trashBusy} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
             className={'flex items-center gap-1 w-full min-w-0 cursor-pointer rounded px-2 py-1.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-foreground-secondary')}>
             <span className="text-xs font-semibold uppercase tracking-wider truncate">{name}</span>
             <ChevronsUpDown size={14} className="ml-auto shrink-0" />
@@ -348,8 +368,8 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                   </div>
                 )}
                 <div className="border-t border-border-subtle my-1" />
-                <button onClick={() => { setVaultMenuOpen(false); onNavigate(); openVault() }} className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active"><FolderOpen size={14} /> Open Vault</button>
-                <button onClick={() => { setVaultMenuOpen(false); onRequestCloseVault() }} className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active"><X size={14} /> Close Vault</button>
+                <button onClick={() => { if (trashBusy) return; setVaultMenuOpen(false); onNavigate(); void openVault() }} disabled={trashBusy} className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active disabled:cursor-not-allowed disabled:opacity-40"><FolderOpen size={14} /> Open Vault</button>
+                <button onClick={() => { if (trashBusy) return; setVaultMenuOpen(false); onRequestCloseVault() }} disabled={trashBusy} className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active disabled:cursor-not-allowed disabled:opacity-40"><X size={14} /> Close Vault</button>
               </div>
             )}
             {showPlusMenu && (

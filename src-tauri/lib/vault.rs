@@ -10,13 +10,27 @@ fn run_osascript(language: Option<&str>, script: &str, args: &[&str]) -> Result<
         return Ok(String::from_utf8_lossy(&output.stdout).trim().to_string());
     }
     let error = String::from_utf8_lossy(&output.stderr);
-    if error.contains("not allowed to send keystrokes") {
-        return Err("Put Back requires DocuBook Editor access in System Settings > Privacy & Security > Accessibility".to_string());
-    }
-    if error.contains("Not authorized") || error.contains("-1743") {
-        return Err("Trash access requires DocuBook Editor permission in System Settings > Privacy & Security > Automation".to_string());
+    /* macOS gates these behind a one-time grant, and the error text is the only
+     * signal that distinguishes "not allowed yet" from a real failure. Prefix the
+     * message with a stable code so the UI can offer the matching System Settings
+     * deep link instead of a dead-end toast. */
+    if error.contains("not allowed to send keystrokes") || error.contains("-1743") || error.contains("Not authorized") {
+        return Err(format!("{TRASH_PERMISSION_PREFIX}{}", permission_settings_hint(&error)));
     }
     Err(format!("Trash: {}", error.trim()))
+}
+
+/** Permission-scoped trash failures carry this prefix so the frontend can tell
+ *  them apart from ordinary command errors and deep-link the right pane. */
+pub(crate) const TRASH_PERMISSION_PREFIX: &str = "TRASH_PERMISSION:";
+
+/** Map an osascript permission failure to the System Settings pane the user must
+ *  grant. Keystroke automation (Finder "Put Back" via ⌘⌫) needs Accessibility;
+ *  talking to Finder itself needs Automation. */
+#[cfg(target_os = "macos")]
+fn permission_settings_hint(error: &str) -> &'static str {
+    if error.contains("not allowed to send keystrokes") { "accessibility" }
+    else { "automation" }
 }
 
 #[cfg(target_os = "macos")]
@@ -72,11 +86,6 @@ function run(argv) {
   finder.delete(matches[0])
 }
 "#, &[url]).map(|_| ())
-}
-
-#[cfg(target_os = "macos")]
-fn empty_system_trash() -> Result<(), String> {
-    run_osascript(None, "tell application \"Finder\" to empty trash", &[]).map(|_| ())
 }
 
 /** Rebuild the wiki index after a file mutation. The index is a snapshot taken
@@ -214,22 +223,43 @@ pub fn delete_trash_item(trash_name: &str, state: State<AppState>) -> Result<(),
 }
 
 #[tauri::command]
-pub fn empty_trash(state: State<AppState>) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    { let _ = state; empty_system_trash() }
-    #[cfg(not(target_os = "macos"))]
-    { match state.vault.lock().expect("lock").as_ref() {
-        Some(v) => v.empty_trash(), None => Err("No vault".to_string()),
-    } }
-}
-
-#[tauri::command]
 pub fn rename_file(from: &str, to: &str, state: State<AppState>) -> Result<(), String> {
     let r = match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.rename_file(from, to), None => Err("No vault".to_string())
     };
     if r.is_ok() { rescan_wiki(&state); }
     r
+}
+
+/** macOS System Settings panes the app can deep-link to. `open "x-apple.systempreferences:…"`
+ *  is the documented way to land the user directly on the pane they must toggle —
+ *  far better UX than telling them to navigate Privacy & Security by hand. */
+#[cfg(target_os = "macos")]
+fn system_settings_url(pane: &str) -> Option<&'static str> {
+    match pane {
+        "accessibility" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"),
+        "automation" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation"),
+        "files" => Some("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"),
+        _ => None,
+    }
+}
+
+/** Open a System Settings pane. macOS opens the URL; other platforms (and the
+ *  web build, which never calls this) report unsupported so the UI can fall back
+ *  to plain instructions. */
+#[tauri::command]
+pub fn open_system_settings(pane: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let url = system_settings_url(pane).ok_or_else(|| format!("Unknown settings pane: {pane}"))?;
+        std::process::Command::new("open")
+            .arg(url)
+            .status()
+            .map_err(|e| format!("Could not open System Settings: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = pane; Err("System Settings deep links are macOS-only".to_string()) }
 }
 
 #[cfg(test)]
@@ -245,5 +275,23 @@ mod tests {
         assert!(!valid_vault_name("../evil"));
         assert!(!valid_vault_name("a/b"));
         assert!(!valid_vault_name("a\\b"));
+    }
+
+    /** The permission pane is the only thing the UI acts on, so pin the mapping
+     *  from raw osascript stderr to a known-settings id. */
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permission_errors_map_to_settings_panes() {
+        assert_eq!(permission_settings_hint("execution error: ... not allowed to send keystrokes ..."), "accessibility");
+        assert_eq!(permission_settings_hint("Not authorized to send Apple events"), "automation");
+        assert_eq!(permission_settings_hint("\n\nError: -1743"), "automation");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn permission_failures_carry_the_prefix_and_the_hint() {
+        let url = system_settings_url("accessibility").expect("known pane");
+        assert!(url.starts_with("x-apple.systempreferences:"));
+        assert!(system_settings_url("nonsense").is_none());
     }
 }

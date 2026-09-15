@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { invoke, listen, isAbsoluteUrl, isSafeImageUrl } from '../../../frontend/lib/ipc'
+import { invoke, listen, isAbsoluteUrl, isSafeImageUrl, trashPermissionError } from '../../../frontend/lib/ipc'
 
 function sseStream(chunks: Array<string | Uint8Array>) {
   const encoder = new TextEncoder()
@@ -48,6 +48,26 @@ describe('isSafeImageUrl', () => {
     expect(isSafeImageUrl('file:///etc/passwd')).toBe(false)
     expect(isSafeImageUrl('vbscript:msgbox(1)')).toBe(false)
     expect(isSafeImageUrl('http://example.com/a.png')).toBe(false) // https-only for remote
+  })
+})
+
+describe('trashPermissionError', () => {
+  it('maps a prefixed permission failure to its System Settings pane', () => {
+    expect(trashPermissionError('TRASH_PERMISSION:accessibility')).toEqual({
+      pane: 'accessibility',
+      message: 'Put Back needs Accessibility access to move items out of the Trash.',
+    })
+    expect(trashPermissionError(new Error('TRASH_PERMISSION:automation'))?.pane).toBe('automation')
+  })
+
+  it('ignores ordinary command errors so they surface verbatim', () => {
+    expect(trashPermissionError('Trash: item not found')).toBeNull()
+    expect(trashPermissionError('No vault')).toBeNull()
+    expect(trashPermissionError(undefined)).toBeNull()
+  })
+
+  it('falls back to Automation for an unrecognised pane', () => {
+    expect(trashPermissionError('TRASH_PERMISSION:something-new')?.pane).toBe('automation')
   })
 })
 

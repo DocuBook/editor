@@ -119,7 +119,6 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "list_trash" => sync(state, cmd, args),
         "restore_file" => sync(state, cmd, args),
         "delete_trash_item" => sync(state, cmd, args),
-        "empty_trash" => sync(state, cmd, args),
         "rename_file" => sync(state, cmd, args),
         "git_settings" => sb(state, cmd, args).await,
         "git_add_remote" => sb(state, cmd, args).await,
@@ -143,6 +142,12 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "set_custom_endpoint" => sync(state, cmd, args),
         "delete_api_key" => sync(state, cmd, args),
         "list_api_keys" => sync(state, cmd, args),
+        // macOS-only deep link into Privacy & Security. The web build has no
+        // privacy gate (trash lives in `.trash/` inside the vault), so this is a
+        // deliberate no-op rather than an error: the UI reaches it only after a
+        // permission failure, which the server never produces. Answering keeps
+        // the command surface at parity and avoids a misleading "Unknown command".
+        "open_system_settings" => Ok("null".to_string()),
         "web_vaults" => sync(state, cmd, args),
         "web_vault_root" => sync(state, cmd, args),
         "setup_status" => sync(state, cmd, args),
@@ -244,16 +249,6 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 Some(v) => v.delete_trash_item(&s("trashName")).map(|_| "null".into()),
                 None => Err("No vault".into()),
             }
-        }
-        "empty_trash" => {
-            let r = match state.vault.lock().expect("lock").as_ref() {
-                Some(v) => v.empty_trash().map(|_| "null".into()),
-                None => Err("No vault".into()),
-            };
-            if r.is_ok() {
-                cmds::rescan_wiki(state);
-            }
-            r
         }
         "rename_file" => {
             let r = match state.vault.lock().expect("lock").as_ref() {
