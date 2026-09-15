@@ -6,6 +6,7 @@ import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
 import { captureAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
+import { looksLikeLink, resolveLinkInput } from '../../utils/linkInput'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { FormattingToolbarPopover } from './FormattingToolbarPopover'
@@ -29,11 +30,10 @@ async function openExternal(url: string) {
  *  Vault links must round-trip verbatim; bare web domains pasted into the
  *  editor are still https-ified by BlockNote's pasteHandler, so the form
  *  never needs to force a protocol. */
-function LinkUrlForm({ url, text, range, showTextField, onSubmitted }: {
+function LinkUrlForm({ url, text, range, onSubmitted }: {
   url: string
   text: string
   range: { from: number; to: number }
-  showTextField?: boolean
   onSubmitted: () => void
 }) {
   const Components = useComponentsContext()!
@@ -50,17 +50,15 @@ function LinkUrlForm({ url, text, range, showTextField, onSubmitted }: {
   return (
     <Components.Generic.Form.Root>
       <Components.Generic.Form.TextInput className="bn-text-input" name="url" icon={<Link2 size={14} />} autoFocus
-        placeholder="https://… or ./folder.md" value={currentUrl}
+        placeholder="Paste URL or vault path…" value={currentUrl}
         onChange={e => setCurrentUrl(e.currentTarget.value)}
         onSubmit={submit}
         onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
-      {showTextField !== false && (
-        <Components.Generic.Form.TextInput className="bn-text-input" name="title" icon={<Type size={14} />}
-          placeholder="Text" value={currentText}
-          onChange={e => setCurrentText(e.currentTarget.value)}
-          onSubmit={submit}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
-      )}
+      <Components.Generic.Form.TextInput className="bn-text-input" name="title" icon={<Type size={14} />}
+        placeholder="Text" value={currentText}
+        onChange={e => setCurrentText(e.currentTarget.value)}
+        onSubmit={submit}
+        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
     </Components.Generic.Form.Root>
   )
 }
@@ -133,12 +131,12 @@ function CreateLinkButtonPreserveUrl() {
           onClick={() => setShowPopover(o => !o)} />
       </Components.Generic.Popover.Trigger>
       <Components.Generic.Popover.Content className="bn-popover-content bn-form-popover w-75" variant="form-popover">
-        <LinkUrlForm url={state.url} text={state.text} range={state.range} showTextField={false}
-          onSubmitted={() => { setShowPopover(false); formattingToolbar.store.setState(false) }} />
-        <NoteLinkSearch onPick={(title) => {
-          try { editor.insertInlineContent([{ type: 'text', text: `[[${title}]]`, styles: {} }] as any) } catch (e) { console.error('insert wikilink:', e) }
-          setShowPopover(false); formattingToolbar.store.setState(false)
-        }} />
+        <LinkOrNoteForm url={state.url} text={state.text} range={state.range}
+          onSubmitted={() => { setShowPopover(false); formattingToolbar.store.setState(false) }}
+          onPickWikilink={(title) => {
+            try { editor.insertInlineContent([{ type: 'text', text: `[[${title}]]`, styles: {} }] as any) } catch (e) { console.error('insert wikilink:', e) }
+            setShowPopover(false); formattingToolbar.store.setState(false)
+          }} />
       </Components.Generic.Popover.Content>
     </Components.Generic.Popover.Root>
   )
@@ -327,46 +325,74 @@ export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {})
   )
 }
 
-/** "Link a note" — search vault notes (name + content via wiki_suggest) and
- *  pick → caller inserts a `[[wikilink]]`. Lives inside the merged link popover
- *  (one bubble-menu icon), not a separate button. */
-function NoteLinkSearch({ onPick }: { onPick: (title: string) => void }) {
-  const [query, setQuery] = useState('')
+/** Merged link form (formatting-toolbar "Link" + Ctrl/Cmd+K): ONE input for
+ *  both link targets and vault notes — previously a URL form plus a second
+ *  "link a vault note" search sat stacked in the same popover. Enter submits a
+ *  link target through editLink AS-TYPED (no https:// forcing, vault-relative
+ *  paths round-trip verbatim); a note-name query instead queries wiki_suggest
+ *  (name + content) and inserts `[[title]]` on pick. The split lives in
+ *  utils/linkInput so it is unit-testable. */
+function LinkOrNoteForm({ url, text, range, onSubmitted, onPickWikilink }: {
+  url: string
+  text: string
+  range: { from: number; to: number }
+  onSubmitted: () => void
+  onPickWikilink: (title: string) => void
+}) {
+  const Components = useComponentsContext()!
+  const { editLink } = useExtension(LinkToolbarExtension)
+  const [value, setValue] = useState(url)
   const [results, setResults] = useState<{ path: string; title: string }[]>([])
   const [selected, setSelected] = useState(0)
-
+  const linkTarget = looksLikeLink(value.trim())
+  /* oxlint-disable react/set-state-in-effect -- re-syncs the field when the link target changes */
+  useEffect(() => { setValue(url) }, [url])
+  /* oxlint-enable react/set-state-in-effect */
   /* oxlint-disable react/set-state-in-effect -- clears suggestions when the query is emptied */
   useEffect(() => {
-    if (!query.trim()) { setResults([]); return }
+    const q = value.trim()
+    if (!q || linkTarget) { setResults([]); return }
     const t = setTimeout(() => {
-      invoke<string>('wiki_suggest', { query: query.trim() }).then(s => {
+      invoke<string>('wiki_suggest', { query: q }).then(s => {
         try { setResults(JSON.parse(s)); setSelected(0) } catch {}
       }).catch(() => {})
     }, 150)
     return () => clearTimeout(t)
-  }, [query])
+  }, [value, linkTarget])
   /* oxlint-enable react/set-state-in-effect */
-
+  const submit = () => {
+    const action = resolveLinkInput(value, results, selected)
+    if (!action) return
+    if (action.kind === 'wikilink') { onPickWikilink(action.title); return }
+    editLink(action.target, text, range.from)
+    onSubmitted()
+  }
   return (
-    <div className="border-t border-border-subtle px-3 py-2">
-      <div className="text-[10px] text-muted uppercase tracking-wider mb-1">or link a vault note</div>
-      <input type="text" value={query} onChange={e => setQuery(e.target.value)}
+    <Components.Generic.Form.Root>
+      <Components.Generic.Form.TextInput className="bn-text-input" name="url" icon={<Link2 size={14} />} autoFocus
+        placeholder="Paste URL or type to suggest…" value={value}
+        onChange={e => setValue(e.currentTarget.value)}
         onKeyDown={e => {
-          if (e.key === 'Enter' && results[selected]) { e.preventDefault(); onPick(results[selected].title) }
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            submit()
+          }
+          if (linkTarget) return
           if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(i => Math.min(i + 1, results.length - 1)) }
           if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(i => Math.max(i - 1, 0)) }
-        }}
-        placeholder="Search notes to link…"
-        className="w-full bg-transparent border-b border-border px-1 py-1 text-sm text-foreground outline-none" />
-      <div className="max-h-40 overflow-y-auto mt-1">
-        {results.length === 0 && query && <div className="px-1 py-1 text-xs text-muted">No notes found</div>}
-        {results.map((r, i) => (
-          <div key={r.path} onClick={() => onPick(r.title)} onMouseEnter={() => setSelected(i)}
-            className={'px-1 py-1 text-sm cursor-pointer rounded ' + (i === selected ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
-            {r.title}
-          </div>
-        ))}
-      </div>
-    </div>
+        }} />
+      {!linkTarget && (results.length > 0 || !!value.trim()) && (
+        <div className="max-h-40 overflow-y-auto">
+          {results.length === 0 && <div className="px-1 py-1 text-xs text-muted">No notes found — ↵ links as typed</div>}
+          {results.map((r, i) => (
+            <div key={r.path} onClick={() => onPickWikilink(r.title)} onMouseEnter={() => setSelected(i)}
+              className={'px-1 py-1 text-sm cursor-pointer rounded ' + (i === selected ? 'bg-surface-active text-foreground' : 'text-foreground-secondary')}>
+              {r.title}
+            </div>
+          ))}
+        </div>
+      )}
+    </Components.Generic.Form.Root>
   )
 }
