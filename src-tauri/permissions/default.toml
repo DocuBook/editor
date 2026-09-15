@@ -22,6 +22,7 @@ permissions = [
   "allow-git-clone",
   "allow-git-commit",
   "allow-git-fetch",
+  "allow-git-pull",
   "allow-git-init",
   "allow-git-merge-abort",
   "allow-git-push-only",
@@ -225,6 +226,16 @@ commands.allow = ["git_fetch"]
 identifier = "deny-git-fetch"
 description = "Denies the git_fetch command."
 commands.deny = ["git_fetch"]
+
+[[permission]]
+identifier = "allow-git-pull"
+description = "Enables the git_pull command."
+commands.allow = ["git_pull"]
+
+[[permission]]
+identifier = "deny-git-pull"
+description = "Denies the git_pull command."
+commands.deny = ["git_pull"]
 
 [[permission]]
 identifier = "allow-git-merge-abort"

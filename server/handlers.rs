@@ -64,6 +64,15 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                 .await
                 .map_err(|e| e.to_string())?
         }
+        "git_pull" => {
+            let request = serde_json::from_value(
+                args.get("request").cloned().unwrap_or(Value::Null),
+            )
+            .map_err(|error| format!("Invalid GitPullRequest: {error}"))?;
+            tokio::task::spawn_blocking(move || cmds::git_pull(&st, request))
+                .await
+                .map_err(|e| e.to_string())?
+        }
         "git_remote_merge" => {
             let (name, branch) = (s("name"), s("branch"));
             tokio::task::spawn_blocking(move || cmds::git_remote_merge(&st, &name, &branch))

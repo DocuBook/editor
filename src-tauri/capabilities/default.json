@@ -26,6 +26,7 @@
     "allow-git-clone",
     "allow-git-commit",
     "allow-git-fetch",
+    "allow-git-pull",
     "allow-git-init",
     "allow-git-merge-abort",
     "allow-git-push-only",

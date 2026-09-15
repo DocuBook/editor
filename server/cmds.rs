@@ -106,6 +106,18 @@ pub(crate) fn git_fetch(state: &AppState, name: &str) -> Result<String, String> 
         .map(|_| "null".into())
 }
 
+/** Fetch and reconcile through the shared libgit2 pull API. */
+pub(crate) fn git_pull(
+    state: &AppState,
+    request: git::sync::GitPullRequest,
+) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    serde_json::to_string(&git::Git::open(&repo_path).pull(request)).map_err(|e| e.to_string())
+}
+
 /** Reconcile the current branch with `<name>/<branch>` (fast-forward, adopt, or
  *  merge commit). Never force-pushes; conflicts come back to the UI. */
 pub(crate) fn git_remote_merge(state: &AppState, name: &str, branch: &str) -> Result<String, String> {
