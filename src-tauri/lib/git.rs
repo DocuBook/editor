@@ -99,6 +99,25 @@ pub async fn git_fetch(name: String, state: State<'_, AppState>) -> Result<(), S
     .map_err(|e| e.to_string())?
 }
 
+/// Fetch and reconcile in one libgit2 operation. `request.strategy` accepts
+/// `auto`, `rebase`, or `merge`; auto keeps the common one-local-commit case linear.
+#[tauri::command]
+pub async fn git_pull(
+    request: crate::git::sync::GitPullRequest,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).pull(request))
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Reconcile the current branch with `<name>/<branch>` — fast-forward, adopt,
 /// or merge commit. Never force-pushes; conflicts are reported back.
 #[tauri::command]

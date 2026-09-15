@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, Download, File, GitBranch, GitMerge } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, File, GitBranch, GitMerge, GitPullRequest, RefreshCw } from 'lucide-react'
 import { invoke } from '../../lib/ipc'
 import { useGitStatus, pollGitStatus } from '../../stores/gitStatus'
 import { useEditorStore } from '../../stores/editor'
@@ -14,6 +14,15 @@ interface GitEntry {
 }
 
 interface SyncOutcome { success: boolean; message: string; error: string; conflicts: string[] }
+interface PullOutcome extends SyncOutcome {
+  state: 'upToDate' | 'fastForwarded' | 'adopted' | 'rebased' | 'merged' | 'conflicts' | 'failed'
+  strategy: 'none' | 'fastForward' | 'rebase' | 'merge'
+  remote: string
+  branch: string
+  remoteChanged: boolean
+  ahead: number
+  behind: number
+}
 
 const parseStatus = (status: string): GitEntry[] => status
   .split('\n')
@@ -178,6 +187,19 @@ function SyncBar() {
     return true
   }
 
+  const pullRemote = () => run('pull', async () => {
+    try {
+      const outcome: PullOutcome = JSON.parse(await invoke<string>('git_pull', {
+        request: { remote: activeRemote, branch: targetBranch, strategy: 'auto' },
+      }))
+      const success = report(outcome)
+      if (success && outcome.remoteChanged) setNotice(`${outcome.message} · ${outcome.remote} changed during fetch`)
+      return success
+    } finally {
+      await afterSync()
+    }
+  })
+
   const fetchRemote = () => run('fetch', async () => {
     await invoke('git_fetch', { name: activeRemote })
     setNotice(`Fetched ${activeRemote}`)
@@ -216,11 +238,11 @@ function SyncBar() {
   const operationBtn = 'rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'
   const idle = !inProgress && !!activeRemote && hasRemote
   const showHints = syncOpen
-  const actionLabel = (action: 'fetch' | 'rebase' | 'merge', idleLabel: string, busyLabel: string, doneLabel: string) =>
+  const actionLabel = (action: 'pull' | 'fetch' | 'rebase' | 'merge', idleLabel: string, busyLabel: string, doneLabel: string) =>
     busy && activeAction === action ? busyLabel :
       syncState === 'done' && activeAction === action ? doneLabel :
         syncState === 'error' && activeAction === action ? `${idleLabel} failed` : idleLabel
-  const actionClass = (action: 'fetch' | 'rebase' | 'merge') =>
+  const actionClass = (action: 'pull' | 'fetch' | 'rebase' | 'merge') =>
     busy && activeAction === action ? 'text-accent' :
       syncState === 'done' && activeAction === action ? 'text-success' :
         syncState === 'error' && activeAction === action ? 'text-danger' : 'text-foreground-secondary'
@@ -254,7 +276,7 @@ function SyncBar() {
               title={activeRemote && targetBranch ? `Sync ${targetBranch} with ${activeRemote}` : 'Sync current branch'}
               className="flex items-center gap-1 rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {busy && activeAction === 'fetch' ? 'Fetching…' : busy && activeAction === 'rebase' ? 'Rebasing…' : busy && activeAction === 'merge' ? 'Merging…' : syncState === 'error' ? 'Sync failed' : syncState === 'done' ? `${activeAction} done` : 'Git sync'}
+              {busy && activeAction === 'pull' ? 'Pulling…' : busy && activeAction === 'fetch' ? 'Fetching…' : busy && activeAction === 'rebase' ? 'Rebasing…' : busy && activeAction === 'merge' ? 'Merging…' : syncState === 'error' ? 'Sync failed' : syncState === 'done' ? `${activeAction} done` : 'Git sync'}
               <ChevronDown size={11} className={'transition-transform ' + (syncOpen ? 'rotate-180' : '')} />
             </button>
           </span>
@@ -276,7 +298,10 @@ function SyncBar() {
               </label>
             )}
             <button type="button" className={btn} onClick={fetchRemote} disabled={locked} title={locked && syncDisabledReason ? syncDisabledReason : `Fetch ${activeRemote}`}>
-              <Download size={12} className={actionClass('fetch')} /> {actionLabel('fetch', 'Fetch', 'Fetching…', 'Fetched')}
+              <RefreshCw size={12} className={actionClass('fetch')} /> {actionLabel('fetch', 'Fetch', 'Fetching…', 'Fetched')}
+            </button>
+            <button type="button" className={btn} onClick={pullRemote} disabled={locked} title={locked && syncDisabledReason ? syncDisabledReason : `Pull ${activeRemote}/${targetBranch} with automatic rebase or merge`}>
+              <GitPullRequest size={12} className={actionClass('pull')} /> {actionLabel('pull', 'Pull', 'Pulling…', 'Pulled')}
             </button>
             <button
               type="button"

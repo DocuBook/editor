@@ -86,6 +86,9 @@ const dialogButton = (label: string) =>
 const syncOutcome = (overrides: Partial<{ success: boolean; message: string; error: string; conflicts: string[] }> = {}) =>
   JSON.stringify({ success: true, message: 'Ready', error: '', conflicts: [], ...overrides })
 
+const pullOutcome = (overrides: Partial<{ success: boolean; state: string; strategy: string; remote: string; branch: string; remoteChanged: boolean; ahead: number; behind: number; message: string; error: string; conflicts: string[] }> = {}) =>
+  JSON.stringify({ success: true, state: 'upToDate', strategy: 'none', remote: 'origin', branch: 'main', remoteChanged: false, ahead: 0, behind: 0, message: 'Already up to date with origin/main', error: '', conflicts: [], ...overrides })
+
 const flush = () => act(async () => { await Promise.resolve() })
 
 beforeEach(() => {
@@ -289,6 +292,43 @@ describe('GitPanel', () => {
 })
 
 describe('GitPanel — remote sync', () => {
+  it('pulls through GitPullRequest and reports a changed origin', async () => {
+    invoke.mockResolvedValue(pullOutcome({ state: 'rebased', strategy: 'rebase', remoteChanged: true, ahead: 1, behind: 2, message: 'Rebased onto origin/main' }))
+    renderPanel()
+    openSync()
+
+    act(() => syncButton('Pull')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_pull', {
+      request: { remote: 'origin', branch: 'main', strategy: 'auto' },
+    })
+    expect(document.body.textContent).toContain('origin changed during fetch')
+    expect(pollGitStatus).toHaveBeenCalled()
+    expect(vaultTree.loadTree).toHaveBeenCalled()
+  })
+
+  it('refreshes status when Pull fails after fetching', async () => {
+    invoke.mockResolvedValue(pullOutcome({ success: false, state: 'failed', error: 'Pull failed' }))
+    renderPanel()
+    openSync()
+
+    act(() => syncButton('Pull')!.click())
+    await flush()
+
+    expect(document.body.textContent).toContain('Pull failed')
+    expect(pollGitStatus).toHaveBeenCalled()
+    expect(vaultTree.loadTree).toHaveBeenCalled()
+  })
+
+  it('uses RefreshCw for Fetch', () => {
+    renderPanel()
+    openSync()
+
+    expect(syncButton('Fetch')!.querySelector('.lucide-refresh-cw')).not.toBeNull()
+    expect(syncButton('Fetch')!.querySelector('.lucide-download')).toBeNull()
+  })
+
   it('fetches the resolved remote and refreshes the status', async () => {
     invoke.mockResolvedValue(syncOutcome())
     renderPanel()

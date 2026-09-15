@@ -388,12 +388,41 @@ mod api_tests {
         .await;
         assert_eq!(s, StatusCode::OK);
 
-        // no cookie → 401 on protected command
+        // no cookie → 401 on protected commands, including mutating git IPC
         let (s, _, b) = post(&app, "/api/web_vault_root", json!({})).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "{b}");
+        let (s, _, b) = post(
+            &app,
+            "/api/git_pull",
+            json!({"request": {"remote": "origin", "branch": "main", "strategy": "auto"}}),
+        )
+        .await;
         assert_eq!(s, StatusCode::UNAUTHORIZED, "{b}");
         // setup_status stays public
         let (s, _, _) = post(&app, "/api/setup_status", json!({})).await;
         assert_eq!(s, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn git_pull_rejects_an_invalid_ipc_request() {
+        let (app, _) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+
+        let (status, _, body) = post_with(
+            &app,
+            "/api/git_pull",
+            json!({"request": {"remote": "origin", "branch": "main", "strategy": "squash"}}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("Invalid GitPullRequest"), "{body}");
     }
 
     #[tokio::test]
