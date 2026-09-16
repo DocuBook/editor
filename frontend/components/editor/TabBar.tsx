@@ -1,34 +1,22 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { X, ChevronLeft, ChevronRight, Command, ArrowBigUp, PanelLeft, ChevronDown, GitCommitHorizontal, Upload, Search } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Command, ArrowBigUp, PanelLeft, ChevronDown, Search } from 'lucide-react'
 import { BsMarkdown } from 'react-icons/bs'
 import { TbBlocks } from 'react-icons/tb'
 import { useEditorStore } from '../../stores/editor'
-import { useGitStatus } from '../../stores/gitStatus'
-import { invoke, isMacTauri, isTauri } from '../../lib/ipc'
-import { toast } from 'sonner'
+import { isMacTauri, isTauri } from '../../lib/ipc'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
-import { autoCommitMessage } from '../../utils/commitMessage'
 
 export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
-  const [hasDiskChanges, setHasDiskChanges] = useState(false)
-  /** Actions dropdown (Commit / Push) — one state machine per action.
-   *  'busy' guards double-clicks; 'done' auto-resets to 'idle' (below). */
   const [actionsOpen, setActionsOpen] = useState(false)
-
-  const [commitState, setCommitState] = useState<'idle'|'busy'|'done'|'error'>('idle')
-  const [pushState, setPushState] = useState<'idle'|'busy'|'done'|'error'>('idle')
-  const [gitMsg, setGitMsg] = useState<{ commit: string; push: string }>({ commit: '', push: '' })
   const actionsRef = useRef<HTMLSpanElement>(null)
   useClickOutside(actionsRef, () => setActionsOpen(false))
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
-  const hasUnsaved = file?.dirty ?? false
   /** Compact web (<640px, Docker/web only — native macOS untouched):
    *  single row keeps [panel|search] + tabs + Actions; undo/redo + mode
-   *  toggle move into the Actions menu. JS conditional (not CSS hidden)
-   *  so WKWebView is never affected. Reuses isDesktop prop — no new MQ. */
+   *  toggle move into the Actions menu. Git actions live in Changes. */
   const compact = !isTauri && !isDesktop
   const showInlineEditing = !compact
   const visibleTabs = compact ? tabs.filter(tab => tab.path === activeTab) : tabs
@@ -60,77 +48,6 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       strip.scrollLeft = Math.max(0, sl + left - 8)    // scroll left, -8 margin
     }
   }, [curTab])
-  /* oxlint-disable react/set-state-in-effect -- reset on tab switch; next git poll corrects it */
-  useEffect(() => {
-    /** Reset disk-dirty on tab switch; next git poll corrects it */
-    setHasDiskChanges(false)
-  }, [curTab])
-  /* oxlint-enable react/set-state-in-effect */
-
-  /** Git status: shared store (single poller from App root) — derive per-tab state. */
-  const { isRepo, hasRemote, ahead, upstream, status: gitStatus, repoState = 'clean' } = useGitStatus()
-
-  /* oxlint-disable react/set-state-in-effect -- derives per-tab dirty state from the shared git status */
-  useEffect(() => {
-    const lines = gitStatus.trim() ? gitStatus.split('\n').filter((l: string) => l.trim()) : []
-    const curFile = useEditorStore.getState().activeTab
-    const relevant = curFile ? lines.filter((l: string) => l.length > 3 && l.substring(3).trim() === curFile) : lines
-    setHasDiskChanges(relevant.some((l: string) => l.length > 1 && l[1] !== '.'))
-  }, [gitStatus])
-  /* oxlint-enable react/set-state-in-effect */
-
-  /** A successful Commit/Push indicator auto-resets to idle after 3s, so the
-   *  menu does not stay green forever after a one-shot action. */
-  useEffect(() => {
-    if (commitState !== 'done' && pushState !== 'done') return
-    const t = setTimeout(() => {
-      setCommitState(x => (x === 'done' ? 'idle' : x))
-      setPushState(x => (x === 'done' ? 'idle' : x))
-    }, 3000)
-    return () => clearTimeout(t)
-  }, [commitState, pushState])
-
-  /** TabBar only sees the active tab, so a merge unlocks Commit even when that
-   *  tab looks clean. Rebase and foreign states use their own completion flow.
-   *  Unsaved tabs still block committing stale disk content. */
-  const merging = repoState === 'merge'
-  const committableState = repoState === 'clean' || merging
-
-  const commit = async () => {
-    if (commitState === 'busy') return
-    setCommitState('busy')
-    try {
-      /** Commit ships the working tree — NO save here. Persisting to disk is an
-       *  app-layer concern (mode switch, close tab, app close); the button is
-       *  disabled while a tab is unsaved so we never commit stale content. */
-      await invoke('git_stage')
-      /** Re-read the index after staging so the message summarises what is
-       *  actually committed (the 3s poller may still hold the pre-stage state). */
-      let status = ''
-      try { status = JSON.parse(await invoke<string>('git_status')).status || '' } catch { status = '' }
-      const fallbackName = tabs.find(t => t.path === activeTab)?.name
-      const message = await autoCommitMessage(status, fallbackName)
-      const res = await invoke<string>('git_commit', { message })
-      const d = JSON.parse(res)
-      if (d.error) { setGitMsg(p => ({ ...p, commit: d.error })); setCommitState('error'); return }
-      if (d.message === 'Nothing to commit') { setCommitState('idle'); setGitMsg(p => ({ ...p, commit: '' })); toast.info('Nothing to commit'); return }
-      setGitMsg(p => ({ ...p, commit: d.commit ? d.commit.substring(0, 7) : 'committed' }))
-      setCommitState('done')
-    } catch { setGitMsg(p => ({ ...p, commit: 'Commit failed' })); setCommitState('error') }
-  }
-
-  const push = async () => {
-    if (pushState === 'busy') return
-    setPushState('busy')
-    try {
-      const res = await invoke<string>('git_push_only')
-      const d = JSON.parse(res)
-      if (d.error) { setGitMsg(p => ({ ...p, push: d.error })); setPushState('error'); return }
-      if (d.message === 'Nothing to push') { setPushState('idle'); setGitMsg(p => ({ ...p, push: '' })); toast.info('Nothing to push'); return }
-      setGitMsg(p => ({ ...p, push: 'Pushed ✓' }))
-      setPushState('done')
-    } catch { setGitMsg(p => ({ ...p, push: 'Push failed' })); setPushState('error') }
-  }
 
   return (
     <div data-tauri-drag-region={isMacTauri ? true : undefined} className={'editor-tab-bar ui-shell relative z-30 h-12 flex items-center flex-nowrap shrink-0 text-xs ' + (compact ? 'gap-2 pl-4 pr-4 ' : 'gap-3 pr-6 ') + (!compact && isMacTauri && !sidebarOpen ? 'pl-20' : !compact ? 'pl-6' : '')}>
@@ -196,52 +113,33 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       </span>
       )}
 
-      <span className="relative shrink-0" ref={actionsRef}>
-        <button onClick={() => setActionsOpen(o => !o)} aria-label="Git actions" aria-expanded={actionsOpen}
-          className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
-          Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
-        </button>
-        {actionsOpen && (
-          <div className="ui-popover absolute top-full right-0 mt-1 p-1 min-w-[200px] z-50">
-            {compact && (
-              <>
-                <button onClick={() => undo()} disabled={!canUndo}
-                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                  <span className="text-foreground-secondary shrink-0"><ChevronLeft size={14} /></span>
-                  <span>Undo</span>
-                </button>
-                <button onClick={() => redo()} disabled={!canRedo}
-                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                  <span className="text-foreground-secondary shrink-0"><ChevronRight size={14} /></span>
-                  <span>Redo</span>
-                </button>
-                <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
-                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                  <span className="text-foreground-secondary shrink-0">{editMode === 'editor' ? <BsMarkdown size={14} /> : <TbBlocks size={14} />}</span>
-                  <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
-                </button>
-                <div className="border-t border-border-subtle my-1" />
-              </>
-            )}
-            <button onClick={commit} disabled={!isRepo || hasUnsaved || !committableState || (!hasDiskChanges && !merging) || commitState === 'busy'}
-              className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-              <span className={commitState === 'done' ? 'text-success shrink-0' : commitState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><GitCommitHorizontal size={14} /></span>
-              <span>{commitState === 'busy' ? 'Committing…' : commitState === 'done' ? `Committed ${gitMsg.commit}` : commitState === 'error' ? 'Commit failed' : 'Commit'}</span>
-            </button>
-            {commitState === 'error' && gitMsg.commit && <div className="px-2.5 pb-1.5 text-[10px] text-danger break-words max-w-[220px]">{gitMsg.commit}</div>}
-            {hasUnsaved && isRepo && <div className="px-2.5 pb-1.5 text-[10px] text-muted">Unsaved changes — switch mode or close the tab to save first</div>}
-            {!hasDiskChanges && merging && !hasUnsaved && <div className="px-2.5 pb-1.5 text-[10px] text-muted">Merge in progress — Commit records the resolved working tree</div>}
-            <button onClick={() => void push()} disabled={!isRepo || !hasRemote || (!!upstream && ahead <= 0) || pushState === 'busy'}
-              className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-              <span className={pushState === 'done' ? 'text-success shrink-0' : pushState === 'error' ? 'text-danger shrink-0' : 'text-foreground-secondary shrink-0'}><Upload size={14} /></span>
-              <span>{pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed ✓' : pushState === 'error' ? 'Push failed' : 'Push'}</span>
-              {upstream && ahead > 0 && <span className="ml-auto text-[10px] text-muted">↑{ahead}</span>}
-              {!upstream && hasRemote && <span className="ml-auto text-[10px] text-muted">new branch</span>}
-            </button>
-            {pushState === 'error' && gitMsg.push && <div className="px-2.5 pb-1.5 text-[10px] text-danger break-words max-w-[220px]">{gitMsg.push}</div>}
-          </div>
-        )}
-      </span>
+      {compact && (
+        <span className="relative shrink-0" ref={actionsRef}>
+          <button onClick={() => setActionsOpen(o => !o)} aria-label="Editor actions" aria-expanded={actionsOpen}
+            className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
+            Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
+          </button>
+          {actionsOpen && (
+            <div className="ui-popover absolute top-full right-0 mt-1 min-w-50 p-1 z-50">
+              <button onClick={() => undo()} disabled={!canUndo}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                <span className="text-foreground-secondary shrink-0"><ChevronLeft size={14} /></span>
+                <span>Undo</span>
+              </button>
+              <button onClick={() => redo()} disabled={!canRedo}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                <span className="text-foreground-secondary shrink-0"><ChevronRight size={14} /></span>
+                <span>Redo</span>
+              </button>
+              <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
+                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                <span className="text-foreground-secondary shrink-0">{editMode === 'editor' ? <BsMarkdown size={14} /> : <TbBlocks size={14} />}</span>
+                <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
+              </button>
+            </div>
+          )}
+        </span>
+      )}
     </div>
   )
 }

@@ -1,10 +1,9 @@
 /**
  * Auto-generated commit messages for the Commit action.
  *
- * The message is summarised by the configured AI from the changed-file list
- * only (no diff scan): conventional `<type>(<scope>): <subject>` plus optional
- * body bullets. When AI is unconfigured or fails, a deterministic fallback
- * derived from the file list is used so Commit never blocks.
+ * The message is summarised by the configured AI from changed-file and diff
+ * statistics. The result uses the app's `Auto commit : subject` format. When
+ * AI is unavailable, a deterministic fallback is used.
  */
 import { invoke, listen } from '../lib/ipc'
 import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
@@ -17,21 +16,18 @@ export interface CommitFile {
 }
 
 const SUBJECT_MAX = 100
-const BULLET_MAX = 100
-const MAX_BULLETS = 5
+
 /** Hard cap on the AI round-trip; past it the fallback message is used so a
  *  stalled provider never blocks Commit. */
 const AI_MESSAGE_TIMEOUT_MS = 20_000
 
 const COMMIT_SYSTEM_PROMPT = [
-  'You write git commit messages from a list of changed files.',
-  'Reply with ONLY the commit message — no code fences, no quotes, no explanation.',
-  'First line: `<type>(<scope>): <subject>`.',
-  'type is one of feat, fix, docs, chore, refactor, style, test, perf, build, ci.',
-  'scope is a short lowercase area derived from the paths; omit it when unclear.',
-  'subject is imperative, lowercase, no trailing period, at most 100 characters.',
-  `Then optionally a blank line and up to ${MAX_BULLETS} body bullets, each starting with "- " and at most ${BULLET_MAX} characters, describing what changed.`,
-  'Omit the body entirely for a trivial single change.',
+  'You summarise a git diff for a commit message.',
+  'Reply with ONLY the requested text — no code fences, quotes, or explanation.',
+  'The first line MUST be `Auto commit : ` followed by a concise summary of the largest or most meaningful diff.',
+  'The subject must be at most 100 characters including the prefix, specific, and plain language; do not use conventional commit types or scopes.',
+  'Return only one subject line; do not add a body, file list, or explanation.',
+  'Prefer the largest diff/stat impact when choosing the subject.',
 ].join(' ')
 
 /** Porcelain `XY path` lines → commit files. Staged entries (index !== '.')
@@ -51,27 +47,13 @@ export function parseCommitFiles(status: string): CommitFile[] {
   }))
 }
 
-/** Deterministic fallback when AI is unavailable: never collapses to a single
- *  generic word, always conventional `<type>(<scope>): <subject>`. */
+/** Deterministic fallback matching the same simple format as the AI output. */
 export function fallbackCommitMessage(files: CommitFile[], fallbackName?: string): string {
-  if (files.length === 0) {
-    const name = fallbackName?.trim()
-    return sanitizeCommitMessage(name ? `docs: update ${name}` : 'chore: update vault')
-  }
-  const scope = commonScope(files)
-  const type = files.every(file => /\.(md|mdx)$/i.test(file.path)) ? 'docs' : 'chore'
-  const action = files.every(file => file.status === 'A') ? 'add'
-    : files.every(file => file.status === 'D') ? 'remove'
-    : files.every(file => file.status === 'R') ? 'rename'
-    : 'update'
-  const target = files.length === 1 ? basename(files[0].path) : `${files.length} files`
-  const header = `${type}${scope ? `(${scope})` : ''}: ${action} ${target}`
-  const body = files.length > 1 ? files.slice(0, MAX_BULLETS).map(file => `- ${file.path}`) : []
-  return sanitizeCommitMessage([header, ...(body.length > 0 ? ['', ...body] : [])].join('\n'))
+  const target = files.length === 1 ? basename(files[0].path) : files.length > 1 ? `${files.length} files` : fallbackName?.trim() || 'vault'
+  return sanitizeCommitMessage(`Auto commit : update ${target}`)
 }
 
-/** Normalise model output: strip fences, force a single clamped subject line,
- *  keep only bullet body lines (each clamped), drop everything else. */
+/** Normalise model output: force the requested prefix and clamp to one subject line. */
 export function sanitizeCommitMessage(raw: string): string {
   const lines = raw
     .replace(/```[a-z]*\n?/gi, '')
@@ -80,19 +62,16 @@ export function sanitizeCommitMessage(raw: string): string {
     .map(line => line.replace(/[\p{Cc}]/gu, ' ').trim())
   const subjectIndex = lines.findIndex(Boolean)
   if (subjectIndex === -1) return ''
-  const subject = clamp(lines[subjectIndex].replace(/^[-*]\s+/, ''), SUBJECT_MAX)
-  const body = lines.slice(subjectIndex + 1)
-    .filter(line => line.startsWith('-'))
-    .map(line => clamp(line.replace(/\s+/g, ' '), BULLET_MAX))
-    .slice(0, MAX_BULLETS)
-  return [subject, ...(body.length > 0 ? ['', ...body] : [])].join('\n')
+  const rawSubject = lines[subjectIndex].replace(/^[-*]\s+/, '').replace(/^Auto commit\s*:\s*/i, '').trim()
+  const subject = clamp(`Auto commit : ${rawSubject}`, SUBJECT_MAX)
+  return subject
 }
 
 /** Ask the configured model to summarise the changed files. Throws when AI is
  *  unconfigured or the stream fails — callers fall back to the deterministic
  *  message. Tokens arrive on the shared `ai:token` event, so a concurrent AI
  *  panel stream would interleave; commit generation is short and user-initiated. */
-export async function generateCommitMessage(files: CommitFile[]): Promise<string> {
+export async function generateCommitMessage(files: CommitFile[], diffSummary = ''): Promise<string> {
   const { provider, model, baseUrl } = await getAiConfig()
   if (!provider || !model || !baseUrl) throw new Error('AI is not configured')
   if (provider !== CUSTOM_PROVIDER_ID && !useAiSettings.getState().savedProviders.includes(provider)) {
@@ -104,7 +83,7 @@ export async function generateCommitMessage(files: CommitFile[]): Promise<string
     await invoke('ask_ai', {
       messages: JSON.stringify([
         { role: 'system', content: COMMIT_SYSTEM_PROMPT },
-        { role: 'user', content: `Changed files:\n${files.map(file => `- ${file.status} ${file.path}`).join('\n') || '- (none)'}` },
+        { role: 'user', content: `Changed files:\n${files.map(file => `- ${file.status} ${file.path}`).join('\n') || '- (none)'}\n\nDiff statistics (prioritise the largest changes):\n${diffSummary || '- unavailable'}` },
       ]),
       provider,
       model,
@@ -118,10 +97,10 @@ export async function generateCommitMessage(files: CommitFile[]): Promise<string
 
 /** Commit message for a porcelain status: AI summary when available, else the
  *  deterministic file-list fallback. Never rejects. */
-export async function autoCommitMessage(status: string, fallbackName?: string): Promise<string> {
+export async function autoCommitMessage(status: string, fallbackName?: string, diffSummary = ''): Promise<string> {
   const files = parseCommitFiles(status)
   try {
-    const message = await withTimeout(generateCommitMessage(files), AI_MESSAGE_TIMEOUT_MS)
+    const message = await withTimeout(generateCommitMessage(files, diffSummary), AI_MESSAGE_TIMEOUT_MS)
     if (message) return message
   } catch { /* unconfigured, failed, or timed out — fall back below */ }
   return fallbackCommitMessage(files, fallbackName)
@@ -135,11 +114,6 @@ function basename(path: string): string {
   return path.split('/').pop() || path
 }
 
-function commonScope(files: CommitFile[]): string {
-  const dirs = new Set(files.map(file => (file.path.includes('/') ? file.path.split('/')[0] : '')))
-  const [scope] = [...dirs]
-  return dirs.size === 1 ? scope : ''
-}
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {

@@ -36,6 +36,9 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                 .await
                 .map_err(|e| e.to_string())?
         }
+        "git_diff_summary" => tokio::task::spawn_blocking(move || cmds::git_diff_summary(&st))
+            .await
+            .map_err(|e| e.to_string())?,
         "git_commit" => {
             let m = s("message");
             tokio::task::spawn_blocking(move || cmds::git_commit(&st, &m))

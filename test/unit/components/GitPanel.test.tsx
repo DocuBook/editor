@@ -18,9 +18,13 @@ const gitState = vi.hoisted(() => ({
   repoState: 'clean',
 }))
 
-const editorState = vi.hoisted(() => ({ openFile: vi.fn(async () => {}) }))
+const editorState = vi.hoisted(() => ({
+  activeTab: 'notes/active.md' as string | null,
+  tabs: [{ path: 'notes/active.md', name: 'active.md', dirty: false }],
+  openFile: vi.fn(async () => {}),
+}))
 const vaultTree = vi.hoisted(() => ({ loadTree: vi.fn(async () => {}) }))
-const invoke = vi.hoisted(() => vi.fn(async () => ''))
+const invoke = vi.hoisted(() => vi.fn(async (_command?: string, _args?: unknown) => ''))
 
 vi.mock('../../../frontend/lib/ipc', () => ({ invoke }))
 
@@ -33,11 +37,16 @@ vi.mock('../../../frontend/stores/editor', () => ({
   useEditorStore: (selector: (state: typeof editorState) => unknown) => selector(editorState),
 }))
 
+vi.mock('../../../frontend/utils/commitMessage', () => ({
+  autoCommitMessage: vi.fn(async () => 'docs(notes): update active.md'),
+}))
+
 vi.mock('../../../frontend/stores/vault', () => ({
   useVaultStore: { getState: () => vaultTree },
 }))
 
 import { pollGitStatus } from '../../../frontend/stores/gitStatus'
+import { autoCommitMessage } from '../../../frontend/utils/commitMessage'
 import GitPanel from '../../../frontend/components/panels/GitPanel'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -72,7 +81,7 @@ const stageButton = (path: string) => document.querySelector<HTMLButtonElement>(
 /** SyncBar buttons (Fetch/Rebase/Merge/Continue/Abort) — matched on the leading
  *  label, because an action may also carry a badge such as the incoming ↓n. */
 const syncButton = (label: string) =>
-  Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent?.trim().startsWith(label))
+  Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent?.trim().includes(label))
 
 const syncMenuButton = () => document.querySelector<HTMLButtonElement>('[aria-label="Git sync actions"]')
 const openSync = () => act(() => syncMenuButton()!.click())
@@ -94,6 +103,7 @@ const flush = () => act(async () => { await Promise.resolve() })
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
   Object.assign(gitState, { isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: '', ahead: 0, behind: 0, pushTarget: 'origin', hasCommits: true, remotes: ['origin'], repoState: 'clean' })
+  editorState.tabs[0].dirty = false
   invoke.mockClear()
 })
 
@@ -288,6 +298,71 @@ describe('GitPanel', () => {
     expect(document.body.textContent).toContain('no branch')
     expect(document.body.textContent).not.toContain('↑')
     expect(document.body.textContent).not.toContain('↓')
+  })
+
+  it('keeps commit and push controls in the Changes footer', () => {
+    gitState.status = '.M notes/active.md'
+    gitState.ahead = 1
+    renderPanel()
+
+    expect(document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')).not.toBeNull()
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="Generate commit message with AI"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="git-commit"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="git-push"]')).not.toBeNull()
+  })
+
+  it('commits a manually entered message with existing stage and commit commands', async () => {
+    gitState.status = '.M notes/active.md'
+    invoke.mockImplementation(async command => command === 'git_commit'
+      ? JSON.stringify({ success: true, commit: 'abcdef1234', message: 'Committed', error: '' })
+      : '')
+    renderPanel()
+
+    const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(input, 'docs: write manual message')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => document.querySelector<HTMLButtonElement>('[data-testid="git-commit"]')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_stage')
+    expect(invoke).toHaveBeenCalledWith('git_commit', { message: 'docs: write manual message' })
+    expect(pollGitStatus).toHaveBeenCalled()
+  })
+
+  it('fills the commit textarea through the Rust-backed AI message flow', async () => {
+    gitState.status = '.M notes/active.md'
+    invoke.mockResolvedValue(JSON.stringify({ status: gitState.status }))
+    renderPanel()
+
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Generate commit message with AI"]')!.click())
+    await flush()
+
+    expect(autoCommitMessage).toHaveBeenCalledWith(gitState.status, 'active.md', expect.any(String))
+    expect(document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!.value).toBe('docs(notes): update active.md')
+  })
+
+  it('pushes with existing push logic', async () => {
+    gitState.ahead = 1
+    invoke.mockResolvedValue(JSON.stringify({ success: true, message: 'Pushed', error: '' }))
+    renderPanel()
+
+    act(() => syncButton('Push')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_push_only')
+    expect(pollGitStatus).toHaveBeenCalled()
+  })
+
+  it('blocks commit while editor changes remain unsaved', () => {
+    gitState.status = '.M notes/active.md'
+    editorState.tabs[0].dirty = true
+    renderPanel()
+
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="git-commit"]')!.disabled).toBe(true)
+    expect(document.body.textContent).toContain('Unsaved editor changes')
   })
 })
 

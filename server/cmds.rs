@@ -60,6 +60,13 @@ pub(crate) fn search_vault(state: &AppState, query: &str) -> Result<String, Stri
     serde_json::to_string(&search::search_vault(&root, query)).map_err(|e| e.to_string())
 }
 
+pub(crate) fn git_diff_summary(state: &AppState) -> Result<String, String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) if g.is_repo() => Ok(g.diff_summary()?),
+        _ => Ok(String::new()),
+    }
+}
+
 pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),

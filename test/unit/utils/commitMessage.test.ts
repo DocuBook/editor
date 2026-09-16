@@ -61,17 +61,16 @@ describe('parseCommitFiles', () => {
 })
 
 describe('sanitizeCommitMessage', () => {
-  it('strips code fences and keeps the subject plus bullets', () => {
+  it('strips code fences and ignores body lines', () => {
     const raw = '```\nfeat(core): add thing\n\n- one\n- two\n```'
-    expect(sanitizeCommitMessage(raw)).toBe('feat(core): add thing\n\n- one\n- two')
+    expect(sanitizeCommitMessage(raw)).toBe('Auto commit : feat(core): add thing')
   })
 
-  it('drops prose that is not a bullet and clamps the subject to 100 chars', () => {
-    const raw = `feat: ${'x'.repeat(150)}\nHere is why:\n- kept\nnot a bullet`
+  it('drops body content and clamps the subject to 100 chars', () => {
+    const raw = `feat: ${'x'.repeat(150)}\nHere is why:\n- ignored\nnot a bullet`
     const output = sanitizeCommitMessage(raw)
-    const [subject, , bullet] = output.split('\n')
-    expect(subject.length).toBe(100)
-    expect(bullet).toBe('- kept')
+    expect(output.length).toBe(100)
+    expect(output).not.toContain('ignored')
     expect(output).not.toContain('not a bullet')
   })
 
@@ -81,21 +80,21 @@ describe('sanitizeCommitMessage', () => {
 })
 
 describe('fallbackCommitMessage', () => {
-  it('summarises several markdown files with a scoped subject and bullets', () => {
+  it('summarises several markdown files with a single subject', () => {
     const files = [
       { status: 'M', path: 'notes/a.md' },
       { status: 'M', path: 'notes/b.md' },
     ]
-    expect(fallbackCommitMessage(files)).toBe('docs(notes): update 2 files\n\n- notes/a.md\n- notes/b.md')
+    expect(fallbackCommitMessage(files)).toBe('Auto commit : update 2 files')
   })
 
   it('names a single file instead of the generic word "changes"', () => {
-    expect(fallbackCommitMessage([{ status: 'A', path: 'notes/new.md' }])).toBe('docs(notes): add new.md')
+    expect(fallbackCommitMessage([{ status: 'A', path: 'notes/new.md' }])).toBe('Auto commit : update new.md')
   })
 
   it('uses the active tab name for an empty change set', () => {
-    expect(fallbackCommitMessage([], 'active.md')).toBe('docs: update active.md')
-    expect(fallbackCommitMessage([])).toBe('chore: update vault')
+    expect(fallbackCommitMessage([], 'active.md')).toBe('Auto commit : update active.md')
+    expect(fallbackCommitMessage([])).toBe('Auto commit : update vault')
   })
 })
 
@@ -113,13 +112,13 @@ describe('generateCommitMessage', () => {
     })
 
     await expect(generateCommitMessage([{ status: 'M', path: 'a.md' }]))
-      .resolves.toBe('fix(editor): guard empty selection')
+      .resolves.toBe('Auto commit : fix(editor): guard empty selection')
   })
 })
 
 describe('autoCommitMessage', () => {
   it('falls back to the deterministic message when AI is unconfigured', async () => {
-    await expect(autoCommitMessage('.M notes/a.md', 'a.md')).resolves.toBe('docs(notes): update a.md')
+    await expect(autoCommitMessage('.M notes/a.md', 'a.md')).resolves.toBe('Auto commit : update a.md')
   })
 
   it('uses the AI message when the provider is configured', async () => {
@@ -129,6 +128,6 @@ describe('autoCommitMessage', () => {
       return undefined
     })
 
-    await expect(autoCommitMessage('.M notes/a.md')).resolves.toBe('feat(notes): add backlinks')
+    await expect(autoCommitMessage('.M notes/a.md')).resolves.toBe('Auto commit : feat(notes): add backlinks')
   })
 })
