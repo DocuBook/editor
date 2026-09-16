@@ -27,7 +27,7 @@ interface EditorState {
   blockEditor: any | null
   canUndo: boolean; canRedo: boolean
   _flushEditor: (() => void | Promise<void>) | null
-  /** True while the xl-ai extension is streaming — autosave must not persist a
+  /** True while the rust-ai extension is streaming — autosave must not persist a
    *  half-written document (guard 2). Set by WysiwygEditor on AI state change. */
   _aiWriting: boolean
   setAiWriting: (writing: boolean) => void

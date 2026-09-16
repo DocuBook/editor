@@ -1,30 +1,53 @@
 const AI_CURSOR_SELECTOR = '.bn-collaboration-cursor__base[data-active="true"]'
 
-/** Keep the small AI caret visible without measuring or scrolling an oversized
- * writing block. Measuring the whole block causes perpetual scroll correction
- * once its height exceeds the viewport. */
-export function followAiWritingCursor(block: HTMLElement, margin = 32): void {
-  const cursor = block.querySelector<HTMLElement>(AI_CURSOR_SELECTOR)
-  if (!cursor) return
+/** Writes below one pixel never survive the next paint: the browser rounds
+ *  `scrollTop`, the next frame re-measures the caret as still outside the
+ *  margin, and the correction loops. Under a fast stream that reads as
+ *  flicker, so ignore anything smaller. */
+const MIN_SCROLL_DELTA = 1
 
-  let scroller: HTMLElement | null = block.parentElement
+/** Nearest element that actually scrolls, else the viewport — the document
+ *  scrolls when the editor has no inner scroller. Starts at the caret so every
+ *  wrapper between the caret and the window is a candidate. */
+function resolveScroller(from: HTMLElement): HTMLElement {
+  let scroller: HTMLElement | null = from
   while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement
-  if (!scroller) {
-    cursor.scrollIntoView({ block: 'nearest' })
-    return
-  }
-
-  const cursorBox = cursor.getBoundingClientRect()
-  const scrollerBox = scroller.getBoundingClientRect()
-  if (cursorBox.bottom > scrollerBox.bottom - margin) {
-    scroller.scrollTop += cursorBox.bottom - (scrollerBox.bottom - margin)
-  } else if (cursorBox.top < scrollerBox.top + margin) {
-    scroller.scrollTop -= (scrollerBox.top + margin) - cursorBox.top
-  }
+  return scroller ?? document.documentElement
 }
 
-/** Resolve current block node on every frame because ProseMirror may replace it. */
-export function followAiWritingCursorInRoot(root: HTMLElement, blockId: string): void {
-  const block = root.querySelector<HTMLElement>(`[data-node-type="blockContainer"][data-id="${blockId}"]`)
-  if (block) followAiWritingCursor(block)
+/** Keep the small AI caret inside the visible edge of the scroller. Measuring
+ *  the whole writing block is avoided on purpose: once a block grows past the
+ *  viewport its bounds stay permanently out of view, which triggers scroll
+ *  correction on every streamed mutation.
+ *
+ *  Scrolls by the minimal delta, and only after the caret crosses `margin`.
+ *  Always instant — an animation per streamed frame is unreadable while AI
+ *  writes fast, and following the caret is not worth blocking the stream for. */
+export function followAiWritingCursor(container: HTMLElement, margin = 32): void {
+  const cursor = container.querySelector<HTMLElement>(AI_CURSOR_SELECTOR)
+  if (!cursor) return
+
+  const scroller = resolveScroller(cursor)
+  const cursorBox = cursor.getBoundingClientRect()
+  const scrollerBox = scroller.getBoundingClientRect()
+
+  const bottomEdge = scrollerBox.bottom - margin
+  const topEdge = scrollerBox.top + margin
+  const target = cursorBox.bottom > bottomEdge
+    ? scroller.scrollTop + (cursorBox.bottom - bottomEdge)
+    : cursorBox.top < topEdge
+      ? scroller.scrollTop - (topEdge - cursorBox.top)
+      : scroller.scrollTop
+
+  const delta = Math.round(target) - scroller.scrollTop
+  if (Math.abs(delta) < MIN_SCROLL_DELTA) return
+  scroller.scrollTop += delta
+}
+
+/** Resolve the caret from the editor root on every frame: ProseMirror replaces
+ *  block DOM nodes, and a streamed write can move the caret into a block that
+ *  is not the one the prompt was anchored to. Scoping the lookup to the anchor
+ *  block silently stops scrolling in exactly that case. */
+export function followAiWritingCursorInRoot(root: HTMLElement): void {
+  followAiWritingCursor(root)
 }

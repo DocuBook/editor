@@ -18,6 +18,7 @@
     "test:e2e:theme": "node test/theme-check.mjs",
     "test:e2e:ai": "node test/ai-debug.mjs",
     "test:e2e:ai-pre": "node test/ai-pre-flicker.mjs",
+    "test:e2e:ai-follow": "node test/ai-multiblock-follow.mjs",
     "test:e2e:overlay": "node test/overlay-surface.mjs",
     "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs",
     "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs"
@@ -28,7 +29,6 @@
     "@blocknote/mantine": "0.54.2",
     "@blocknote/math-block": "0.54.2",
     "@blocknote/react": "0.54.2",
-    "@blocknote/xl-ai": "0.54.2",
     "@mantine/core": "^9.6.1",
     "@mantine/hooks": "^9.4.2",
     "@tauri-apps/api": "^2.11.1",
@@ -80,7 +80,7 @@
     "vite": "^8.2.2",
     "vitest": "^4.1.11"
   },
-  "license": "GPL-3.0-only",
+  "license": "AGPL-3.0-only",
   "lint-staged": {
     "*.{ts,tsx}": "oxlint"
   }

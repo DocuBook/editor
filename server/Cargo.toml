@@ -6,6 +6,7 @@ path = "main.rs"
 name = "docubook-server"
 version = "0.1.0-rc.5"
 edition = "2021"
+license = "AGPL-3.0-only"
 
 # Web-only server: reuses src-tauri's pure modules via #[path] includes.
 # No tauri dependency — builds as a plain Linux binary (musl-friendly).

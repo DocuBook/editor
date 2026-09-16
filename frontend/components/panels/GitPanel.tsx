@@ -394,10 +394,9 @@ function GitActions() {
     try {
       let freshStatus = status
       try { freshStatus = JSON.parse(await invoke<string>('git_status')).status || status } catch { /* current poll is enough */ }
-      let diffSummary = ''
-      try { diffSummary = await invoke<string>('git_diff_summary') } catch { /* status still supports the fallback */ }
       const fallbackName = tabs.find(tab => tab.path === activeTab)?.name
-      setMessage(await autoCommitMessage(freshStatus, fallbackName, diffSummary))
+      // Lazy: a single-file change set is named without ever fetching the diff.
+      setMessage(await autoCommitMessage(freshStatus, fallbackName, () => invoke<string>('git_diff_summary')))
     } finally {
       setGenerating(false)
     }

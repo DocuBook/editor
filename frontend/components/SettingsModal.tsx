@@ -230,12 +230,14 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       }
       addSavedProvider(provider)
       setKeyInput('')
-      toast.success('API key saved')
-      // Persist measured tool-call support so the badge + transport use it
-      // (not the conservative unmeasured default).
+      /** Persist measured tool-call support so the badge + transport use it (not
+       *  the conservative unmeasured default). ONE toast: the probe outcome is
+       *  inline in the save confirmation, not a second toast stacking on top. */
       if (tools !== undefined) {
         useAiSettings.getState().setProbeTools(provider, probeModel, tools)
-        toast.success(tools === true ? 'Tool calls supported' : 'Text-only — tool calls rejected by this gateway')
+        toast.success(tools === true ? 'API key saved - tool call' : 'API key saved - text-only')
+      } else {
+        toast.success('API key saved')
       }
     } catch (e) {
       /** Key rejected — do NOT persist. test_connection throws on auth/network

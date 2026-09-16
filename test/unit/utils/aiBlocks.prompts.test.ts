@@ -12,7 +12,7 @@ describe("buildAiPrompt", () => {
     blocks: [{ id: "a$", block: "<p>x</p>" }],
   };
 
-  it("uses canonical xl-ai tool policy and keeps document state in context", () => {
+  it("uses canonical rust-ai tool policy and keeps document state in context", () => {
     const result = buildAiPrompt({
       mode: "tool",
       messages: [{ role: "user", parts: [{ type: "text", text: "Fix x" }] }],

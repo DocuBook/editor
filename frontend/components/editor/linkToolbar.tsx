@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, TextAlignButton, NestBlockButton, UnnestBlockButton, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
-import { getDefaultAIMenuItems, useAIDictionary } from '@blocknote/xl-ai'
+import { getDefaultAIMenuItems, getAIDictionary } from '../../utils/aiMenu'
 import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
 import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
@@ -196,7 +196,7 @@ export function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPo
 function AIToolbarButtonSafe() {
   const editor = useBlockNoteEditor<any, any, any>()
   const Components = useComponentsContext()!
-  const dict = useAIDictionary()
+  const dict = getAIDictionary()
   const formattingToolbar = useExtension(FormattingToolbarExtension)
   const { showSelection } = useExtension(ShowSelectionExtension)
   const setSelectionPromptOpen = useAiChat((state) => state.setSelectionPromptOpen)
@@ -281,7 +281,7 @@ const GROUPED_KEYS = [
   'unnestBlockButton',
 ] as string[]
 
-/** Formatting toolbar (bubble menu) with the xl-ai button — shows the AI text prompt when text is selected. */
+/** Formatting toolbar (bubble menu) with local AI button — shows text prompt when selected. */
 export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {}) => {
   const editor = useBlockNoteEditor<any, any, any>()
   const blockTypes = blockTypeSelectItems(editor.dictionary)

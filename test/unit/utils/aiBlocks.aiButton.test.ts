@@ -6,10 +6,10 @@ import {
   resolveAIBlockId,
 } from "../../../frontend/utils/aiBlocks";
 
-/** Regression: xl-ai's AIToolbarButton threw `Error("No selection")` when
+/** Regression: the formatting toolbar showed an AI action while
  *  `editor.getSelection()` was undefined (collapsed / node selection such as a
- *  selected image) even though the formatting toolbar was shown. The safe
- *  resolver must fall back to the cursor block instead of throwing. */
+ *  selected image), and the old resolver threw `Error("No selection")` instead of
+ *  falling back. The safe resolver must fall back to the cursor block. */
 describe("createSelectionAwareDocumentStateBuilder", () => {
   it("keeps selected blocks and only nearby context blocks", async () => {
     const blocks = Array.from({ length: 6 }, (_, index) => ({
@@ -35,7 +35,7 @@ describe("createSelectionAwareDocumentStateBuilder", () => {
     ]);
   });
 
-  it("delegates cursor requests to xl-ai's default builder", async () => {
+  it("delegates cursor requests to rust-ai's default builder", async () => {
     const fallback = vi.fn().mockResolvedValue({ selection: false });
     const builder = createSelectionAwareDocumentStateBuilder(fallback);
     const request = { editor: {}, selectedBlocks: undefined };
@@ -88,7 +88,7 @@ describe("resolveAIBlockId", () => {
 });
 
 /** Regression: submitting from the floating composer moves DOM focus into a
- *  <textarea> while xl-ai locks the editor. `getTextCursorPosition()` can then
+ *  <textarea> while rust-ai locks the editor. `getTextCursorPosition()` can then
  *  resolve to a stale/fallback block, so the document state sent to the model
  *  carried the wrong id and operations failed with "block ID not recognized".
  *  The anchored block (set at menu-open time) must win. */

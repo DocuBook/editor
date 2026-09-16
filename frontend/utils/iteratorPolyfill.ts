@@ -1,8 +1,5 @@
 // Polyfill Iterator Helpers (ES2024) for Safari < 18 — Iterator.prototype.filter.
-// @blocknote/xl-ai calls `map.values().filter(...)` in its tool-output handling,
-// which throws TypeError on Safari 15-17 (macOS 12-14) and older WKWebView.
-// Implemented as a runtime polyfill instead of a dist patch so future blocknote
-// versions that use iterator methods keep working without re-patching on upgrade.
+// Keep for other editor dependencies that may use iterator helpers in Safari 15-17.
 export function installIteratorFilterPolyfill() {
   // %IteratorPrototype% — the shared prototype of MapIterator/ArrayIterator/etc.
   // (also exposed as `Iterator.prototype` on Safari 18+/Chrome 122+, but Safari

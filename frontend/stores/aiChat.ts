@@ -6,7 +6,7 @@ import { hasTextSelection, openAIMenuAtAnchor } from '../utils/aiBlocks'
 interface AiChatState {
   /** True while text-selection prompts own the AI UI in the formatting toolbar. */
   selectionPromptOpen: boolean
-  /** True only while xl-ai prompt actions are shown above the composer. */
+  /** True while AI prompt actions are shown above composer. */
   expanded: boolean
   input: string
   focusRequest: number

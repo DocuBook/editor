@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { ListFilterPlus, ArrowUp, Check, RotateCcw, Loader2 } from 'lucide-react'
-import { AIExtension, getDefaultAIMenuItems } from '@blocknote/xl-ai'
+import type { AiMenuState } from '../../utils/aiExtension'
+import { getDefaultAIMenuItems } from '../../utils/aiMenu'
 import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
 import { useAiChat } from '../../stores/aiChat'
@@ -9,8 +10,6 @@ import { useAiThreads } from '../../stores/aiThreads'
 import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 
-/** Shape of the extension store slice we mirror from AIExtension.store. */
-type AiMenuState = { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any } | 'closed'
 
 export default function AiFloatingChat() {
   const editor = useEditorStore((s) => s.blockEditor)
@@ -24,9 +23,9 @@ export default function AiFloatingChat() {
   const rootRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  const ai = editor?.getExtension?.(AIExtension) ?? null
+  const ai = editor?.getExtension?.('ai') ?? null
 
-  /** Subscribe to AIExtension.store directly — it's a vanilla Store
+  /** Subscribe to local AI store directly — it's a vanilla Store
    *  (subscribe/state), so the chat works outside BlockNote's React context.
    *  Snapshot is `aiMenuState`, the single source of truth for the whole
    *  status machine (thinking / ai-writing / user-reviewing / error). */
@@ -121,8 +120,7 @@ export default function AiFloatingChat() {
 
   if (!ai) return null
 
-  /** Same default submit as xl-ai's AIMenu: selection is applied when the
-   *  editor has one, otherwise the prompt acts on the cursor block. */
+  /** Selection applies when editor has one; otherwise prompt acts on cursor block. */
   const submit = () => {
     const prompt = input.trim()
     if (!prompt || !aiConfigured) return
@@ -141,7 +139,7 @@ export default function AiFloatingChat() {
     setInput('')
   }
 
-  /** Mirror xl-ai's accept/reject into the persisted thread history. The
+  /** Mirror accept/reject into persisted thread history. The
    *  transport records the "ready for review" marker when a tool call arrives,
    *  so a finished review must rewrite that marker or the panel keeps claiming
    *  the change is still pending. Resolved by file+vault, the same identity the
@@ -167,10 +165,10 @@ export default function AiFloatingChat() {
     ai.rejectChanges()
   }
 
-  /** Composer stays visible in WYSIWYG. Empty action toggles xl-ai prompts;
-   *  entered text turns it into submit. Enter sends and Shift+Enter adds a line. */
+  /** Composer row of the chat bubble. Empty action toggles AI prompts;
+   *  entered text turns it into submit. Enter sends, Shift+Enter adds a line. */
   const promptInput = (
-    <div className="relative isolate z-20 flex w-full min-w-0 items-end gap-2 rounded-lg border border-border bg-surface p-2 shadow-popover">
+    <div className="flex w-full min-w-0 items-end gap-2 p-2">
       <textarea
         ref={inputRef}
         value={input}
@@ -180,7 +178,7 @@ export default function AiFloatingChat() {
         disabled={!promptEnabled}
         placeholder={aiConfigured ? 'Send message to AI writing...' : 'Configure API key in Settings (⌘,)'}
         title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'}
-        className="min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-0 py-1.5 text-xs leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60 max-h-30"
+        className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60"
       />
       {/* Selection mode: prompts live in the toolbar popover, so the toggle has
           nothing to open. Typed text still turns this into the send button. */}
@@ -193,9 +191,9 @@ export default function AiFloatingChat() {
           aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined}
           title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'}
           className={
-            'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' +
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' +
             (hasInput
-              ? 'bg-accent text-on-accent shadow-popover hover:bg-accent-hover'
+              ? 'bg-accent text-on-accent hover:bg-accent-hover'
               : 'bg-transparent text-foreground hover:bg-surface-active')
           }
         >
@@ -204,6 +202,53 @@ export default function AiFloatingChat() {
       )}
     </div>
   )
+
+  /** Status bar of the same bubble: one column, one border. Every non-idle
+   *  state renders here instead of as its own popover, so the panel keeps a
+   *  single stable shape while it moves between thinking, writing, review and
+   *  error. */
+  const statusBar = status === 'thinking' || status === 'ai-writing' ? (
+    <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2">
+      <Loader2 size={13} className="animate-spin text-accent" />
+      <span className="text-xs text-foreground-secondary">
+        {status === 'thinking' ? 'Thinking…' : 'Writing…'}
+      </span>
+      <button
+        onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }}
+        className="ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary hover:text-foreground"
+      >
+        Stop
+      </button>
+    </div>
+  ) : status === 'user-reviewing' ? (
+    <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2">
+      <span className="text-xs text-foreground-secondary">Review the changes</span>
+      <div className="ml-auto flex items-center gap-2">
+        <button onClick={revert} onMouseDown={(e) => e.preventDefault()} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">
+          Revert
+        </button>
+        <button onClick={accept} onMouseDown={(e) => e.preventDefault()} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover">
+          <Check size={11} />
+          Accept
+        </button>
+      </div>
+    </div>
+  ) : status === 'error' ? (
+    <div className="ai-chat-status border-b border-border-subtle px-3 py-2">
+      <div className="wrap-break-word text-[11px] text-danger">
+        {typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}
+      </div>
+      <div className="mt-2 flex justify-end gap-2">
+        <button onClick={() => { setExpanded(false); ai.rejectChanges() }} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">
+          Cancel
+        </button>
+        <button onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover">
+          <RotateCcw size={11} />
+          Retry
+        </button>
+      </div>
+    </div>
+  ) : null
 
   return (
     <div
@@ -217,7 +262,7 @@ export default function AiFloatingChat() {
               key={item.key}
               onClick={item.onItemClick}
               onMouseDown={(e) => e.preventDefault()}
-              className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer"
             >
               <span className="flex w-5 shrink-0 items-center justify-center text-accent">{item.icon}</span>
               {item.title}
@@ -226,49 +271,10 @@ export default function AiFloatingChat() {
         </div>
       )}
 
-      {(status === 'thinking' || status === 'ai-writing') && (
-        <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-surface px-3 py-3 shadow-popover">
-          <span className="flex items-center gap-2 text-xs text-foreground-secondary">
-            <Loader2 size={13} className="animate-spin text-accent" />
-            {status === 'thinking' ? 'Thinking…' : 'Writing…'}
-          </span>
-          <button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className="text-[11px] px-2 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
-            Stop
-          </button>
-        </div>
-      )}
-
-      {status === 'user-reviewing' && (
-        <div className="flex w-full items-center justify-end gap-2 rounded-xl border border-border bg-surface px-3 py-3 shadow-popover">
-          <span className="mr-auto text-xs text-foreground-secondary">Review the changes</span>
-          <button onClick={revert} onMouseDown={(e) => e.preventDefault()} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
-            Revert
-          </button>
-          <button onClick={accept} onMouseDown={(e) => e.preventDefault()} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-on-accent border-none hover:bg-accent-hover">
-            <Check size={11} />
-            Accept
-          </button>
-        </div>
-      )}
-
-      {status === 'error' && (
-        <div className="w-full rounded-xl border border-border bg-surface px-3 py-3 shadow-popover">
-          <div className="mb-2 wrap-break-word text-[11px] text-danger">
-            {typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}
-          </div>
-          <div className="flex justify-end gap-2">
-            <button onClick={() => { setExpanded(false); ai.rejectChanges() }} className="text-[11px] px-2.5 py-1 rounded cursor-pointer bg-surface-active border border-border-subtle text-foreground-secondary hover:text-foreground">
-              Cancel
-            </button>
-            <button onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded cursor-pointer bg-accent text-on-accent border-none hover:bg-accent-hover">
-              <RotateCcw size={11} />
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-
-      {promptInput}
+      <div className="ai-chat-surface flex w-full flex-col overflow-hidden rounded-xl border border-border transition-colors focus-within:border-accent">
+        {statusBar}
+        {promptInput}
+      </div>
     </div>
   )
 }

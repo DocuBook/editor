@@ -183,7 +183,7 @@ describe("buildDocumentContext", () => {
 });
 
 describe("buildAiPrompt document state", () => {
-  it("serializes blocks with suffixed ids from xl-ai metadata", () => {
+  it("serializes blocks with suffixed ids from rust-ai metadata", () => {
     const documentState = {
       selection: false,
       blocks: [{ id: "abc$", block: "<h2>T</h2>" }],

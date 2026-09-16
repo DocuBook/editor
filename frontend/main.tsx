@@ -35,10 +35,10 @@ installWebkitCssStyleSheet()
 installGlobalErrorHandlers()
 
 // NOTE: no Object.prototype hardening here. Tauri's freezePrototype broke
-// zod/xl-ai (they assign Object.prototype.toString during module eval), and
-// freezing __proto__ breaks rope-sequence (prosemirror dep used by xl-ai,
+// zod and related dependencies (they assign Object.prototype.toString during
+// module eval), and freezing __proto__ breaks rope-sequence (ProseMirror dep,
 // does `Child.__proto__ = Parent` inheritance) — so any Object.prototype
-// mutation kills the AI stack. Prototype-pollution protection belongs at
+// mutation kills the editor stack. Prototype-pollution protection belongs at
 // input boundaries (JSON.parse reviver), not on built-in prototypes.
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

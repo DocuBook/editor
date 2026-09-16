@@ -40,6 +40,7 @@ COPY src-tauri/git ./src-tauri/git
 COPY src-tauri/wiki ./src-tauri/wiki
 COPY src-tauri/search ./src-tauri/search
 COPY src-tauri/agent ./src-tauri/agent
+COPY src-tauri/rust-ai ./src-tauri/rust-ai
 COPY src-tauri/markdown.rs ./src-tauri/markdown.rs
 COPY server ./server
 RUN touch server/main.rs && cd server && cargo build --release --locked

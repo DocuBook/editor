@@ -1,7 +1,4 @@
-import {
-  aiDocumentFormats,
-  injectDocumentStateMessages,
-} from "@blocknote/xl-ai";
+import { injectDocumentStateMessages } from './aiPromptState';
 
 import { CURSOR_MARKER } from "./aiBlocks";
 
@@ -33,7 +30,7 @@ const COMMON_SYSTEM_POLICY = `You are DocuBook's document editing assistant. Fol
 
 const TOOL_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 
-${aiDocumentFormats.html.systemPrompt}
+You're manipulating a text document using HTML blocks. Follow applyDocumentOperations JSON schema. IDs include trailing $.
 Math blocks MUST use one HTML block per operation: <math display="block"><annotation encoding="application/x-tex">LATEX</annotation></math>. Inline math inside text uses <math display="inline"><annotation encoding="application/x-tex">LATEX</annotation></math>. Never emit Markdown delimiters (\\(...\\), \\[...\\], $...$, $$...$$) inside HTML tool arguments.`;
 
 const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}

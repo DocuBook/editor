@@ -1,9 +1,11 @@
 /**
  * Auto-generated commit messages for the Commit action.
  *
- * The message is summarised by the configured AI from changed-file and diff
- * statistics. The result uses the app's `Auto commit : subject` format. When
- * AI is unavailable, a deterministic fallback is used.
+ * A single-file change set is named deterministically — the fallback already
+ * carries the file name, so an AI round-trip would only add latency. Larger
+ * change sets are summarised by the configured AI from the changed files and a
+ * bounded diff excerpt. The result uses the app's `Auto commit : subject`
+ * format. When AI is unavailable, a deterministic fallback is used.
  */
 import { invoke, listen } from '../lib/ipc'
 import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
@@ -21,13 +23,16 @@ const SUBJECT_MAX = 100
  *  stalled provider never blocks Commit. */
 const AI_MESSAGE_TIMEOUT_MS = 20_000
 
+/** Change sets smaller than this skip the AI: the deterministic message already
+ *  names the single file involved, so a round-trip buys nothing. */
+const AI_SUMMARY_MIN_FILES = 2
+
 const COMMIT_SYSTEM_PROMPT = [
-  'You summarise a git diff for a commit message.',
-  'Reply with ONLY the requested text — no code fences, quotes, or explanation.',
-  'The first line MUST be `Auto commit : ` followed by a concise summary of the largest or most meaningful diff.',
+  'You write a git commit subject for a change set.',
+  'The first line MUST be `Auto commit : ` followed by a concise summary of what the change set does as a whole.',
+  'With several files, describe their shared intent instead of naming one file, and judge that intent from the diff rather than from the file names.',
   'The subject must be at most 100 characters including the prefix, specific, and plain language; do not use conventional commit types or scopes.',
-  'Return only one subject line; do not add a body, file list, or explanation.',
-  'Prefer the largest diff/stat impact when choosing the subject.',
+  'Reply with ONLY the subject — no code fences, quotes, body, file list, or explanation.',
 ].join(' ')
 
 /** Porcelain `XY path` lines → commit files. Staged entries (index !== '.')
@@ -67,23 +72,26 @@ export function sanitizeCommitMessage(raw: string): string {
   return subject
 }
 
-/** Ask the configured model to summarise the changed files. Throws when AI is
- *  unconfigured or the stream fails — callers fall back to the deterministic
- *  message. Tokens arrive on the shared `ai:token` event, so a concurrent AI
- *  panel stream would interleave; commit generation is short and user-initiated. */
-export async function generateCommitMessage(files: CommitFile[], diffSummary = ''): Promise<string> {
+/** Ask the configured model to summarise the changed files and their diff.
+ *  Throws when AI is unconfigured or the stream fails — callers fall back to the
+ *  deterministic message. `loadDiff` is only called once the model is known to
+ *  be configured, and a failing diff degrades the prompt instead of the result.
+ *  Tokens arrive on the shared `ai:token` event, so a concurrent AI panel stream
+ *  would interleave; commit generation is short and user-initiated. */
+export async function generateCommitMessage(files: CommitFile[], loadDiff?: () => Promise<string>): Promise<string> {
   const { provider, model, baseUrl } = await getAiConfig()
   if (!provider || !model || !baseUrl) throw new Error('AI is not configured')
   if (provider !== CUSTOM_PROVIDER_ID && !useAiSettings.getState().savedProviders.includes(provider)) {
     throw new Error('AI is not configured')
   }
+  const diff = loadDiff ? await loadDiff().catch(() => '') : ''
   const tokens: string[] = []
   const unlisten = await listen<string>('ai:token', event => { tokens.push(String(event.payload)) })
   try {
     await invoke('ask_ai', {
       messages: JSON.stringify([
         { role: 'system', content: COMMIT_SYSTEM_PROMPT },
-        { role: 'user', content: `Changed files:\n${files.map(file => `- ${file.status} ${file.path}`).join('\n') || '- (none)'}\n\nDiff statistics (prioritise the largest changes):\n${diffSummary || '- unavailable'}` },
+        { role: 'user', content: `Changed files:\n${files.map(file => `- ${file.status} ${file.path}`).join('\n') || '- (none)'}\n\nDiff excerpt (largest files first; judge intent from it):\n${diff || '- unavailable, infer the subject from the file names'}` },
       ]),
       provider,
       model,
@@ -95,12 +103,14 @@ export async function generateCommitMessage(files: CommitFile[], diffSummary = '
   return sanitizeCommitMessage(tokens.join(''))
 }
 
-/** Commit message for a porcelain status: AI summary when available, else the
- *  deterministic file-list fallback. Never rejects. */
-export async function autoCommitMessage(status: string, fallbackName?: string, diffSummary = ''): Promise<string> {
+/** Commit message for a porcelain status: the deterministic name for a single
+ *  file, an AI summary of the diff for a larger change set, and the fallback
+ *  whenever AI is unconfigured, fails, or times out. Never rejects. */
+export async function autoCommitMessage(status: string, fallbackName?: string, loadDiff?: () => Promise<string>): Promise<string> {
   const files = parseCommitFiles(status)
+  if (files.length < AI_SUMMARY_MIN_FILES) return fallbackCommitMessage(files, fallbackName)
   try {
-    const message = await withTimeout(generateCommitMessage(files, diffSummary), AI_MESSAGE_TIMEOUT_MS)
+    const message = await withTimeout(generateCommitMessage(files, loadDiff), AI_MESSAGE_TIMEOUT_MS)
     if (message) return message
   } catch { /* unconfigured, failed, or timed out — fall back below */ }
   return fallbackCommitMessage(files, fallbackName)

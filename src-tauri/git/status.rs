@@ -22,42 +22,51 @@ pub struct WorktreeStatus {
     pub state: String,
 }
 
+/// Caps for the diff excerpt handed to commit-message generation: enough content
+/// for the model to judge intent, bounded so a huge change set cannot blow the
+/// prompt or the IPC payload.
+const MAX_DIFF_FILES: usize = 10;
+const MAX_LINES_PER_FILE: usize = 30;
+const MAX_LINE_CHARS: usize = 200;
+const MAX_COLLECTED_CHARS: usize = 64 * 1024;
+const MAX_EXCERPT_CHARS: usize = 8 * 1024;
+
 impl Git {
-    /// Returns compact per-file diff statistics for commit-message generation.
-    /// The result is deliberately bounded to keep the AI prompt small.
+    /// Returns a bounded diff excerpt for commit-message generation: per-file
+    /// churn stats plus the leading changed lines of the largest files. Stats
+    /// alone cannot tell the model what a change set does, so the excerpt
+    /// carries real content; the caps keep the prompt small.
+    ///
+    /// The HEAD tree is the base, so the excerpt covers everything a commit
+    /// would capture — staged, unstaged, and untracked alike.
     pub fn diff_summary(&self) -> Result<String, String> {
         let repo = self.repository()?;
+        let head = repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_tree().ok());
         let mut options = DiffOptions::new();
-        options.include_untracked(true).recurse_untracked_dirs(true);
+        // Untracked deltas carry no content lines unless this flag is set, so
+        // without it a brand-new note would never reach the churn stats.
+        options
+            .include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .show_untracked_content(true);
         let diff = repo
-            .diff_index_to_workdir(None, Some(&mut options))
+            .diff_tree_to_workdir_with_index(head.as_ref(), Some(&mut options))
             .map_err(git_error)?;
-        let changes = RefCell::new(HashMap::<String, (usize, usize)>::new());
+        let scanned = RefCell::new(ScannedDiff::default());
         diff.print(
             DiffFormat::Patch,
             &mut |delta: DiffDelta<'_>, _hunk: Option<DiffHunk<'_>>, line: DiffLine<'_>| {
                 if let Some(path) = delta.new_file().path().or(delta.old_file().path()) {
-                    let mut values = changes.borrow_mut();
-                    let entry = values.entry(path.display().to_string()).or_insert((0, 0));
-                    if line.origin() == '+' {
-                        entry.0 += 1;
-                    }
-                    if line.origin() == '-' {
-                        entry.1 += 1;
-                    }
+                    scanned.borrow_mut().record(&path.display().to_string(), &line);
                 }
                 true
             },
         )
         .map_err(git_error)?;
-        let mut files: Vec<_> = changes.into_inner().into_iter().collect();
-        files.sort_by_key(|(_, (added, removed))| std::cmp::Reverse(added + removed));
-        Ok(files
-            .into_iter()
-            .take(10)
-            .map(|(path, (added, removed))| format!("{path} (+{added} -{removed})"))
-            .collect::<Vec<_>>()
-            .join("\n"))
+        Ok(scanned.into_inner().excerpt())
     }
 
     pub fn status_with_branch(&self) -> Result<WorktreeStatus, String> {
@@ -97,6 +106,75 @@ impl Git {
             state: state_name(repo.state()).to_string(),
         })
     }
+}
+
+/// Churn statistics plus a truncated copy of the changed lines, gathered in the
+/// single diff walk the caller already performs.
+#[derive(Default)]
+struct ScannedDiff {
+    churn: HashMap<String, (usize, usize)>,
+    excerpt: HashMap<String, Vec<String>>,
+    collected: usize,
+}
+
+impl ScannedDiff {
+    fn record(&mut self, path: &str, line: &DiffLine<'_>) {
+        let origin = line.origin();
+        let churn = self.churn.entry(path.to_string()).or_insert((0, 0));
+        match origin {
+            '+' => churn.0 += 1,
+            '-' => churn.1 += 1,
+            _ => return,
+        }
+        if self.collected >= MAX_COLLECTED_CHARS {
+            return;
+        }
+        let lines = self.excerpt.entry(path.to_string()).or_default();
+        if lines.len() >= MAX_LINES_PER_FILE {
+            return;
+        }
+        let content = String::from_utf8_lossy(line.content());
+        let content = content.trim_end_matches(['\n', '\r']);
+        if content.is_empty() {
+            return;
+        }
+        let rendered = format!("  {origin} {}", clamp_chars(content, MAX_LINE_CHARS));
+        self.collected += rendered.len();
+        lines.push(rendered);
+    }
+
+    /// Files ranked by churn, largest first, each with its excerpt; the total is
+    /// capped so the prompt stays predictable.
+    fn excerpt(&self) -> String {
+        let mut ranked: Vec<_> = self.churn.iter().collect();
+        ranked.sort_by_key(|(_, (added, removed))| std::cmp::Reverse(added + removed));
+        let mut sections = Vec::new();
+        let mut total = 0usize;
+        for (path, (added, removed)) in ranked.into_iter().take(MAX_DIFF_FILES) {
+            let mut section = format!("{path} (+{added} -{removed})");
+            for line in self.excerpt.get(path).map(Vec::as_slice).unwrap_or_default() {
+                if total + section.len() + line.len() + 1 > MAX_EXCERPT_CHARS {
+                    break;
+                }
+                section.push('\n');
+                section.push_str(line);
+            }
+            total += section.len() + 1;
+            sections.push(section);
+            if total >= MAX_EXCERPT_CHARS {
+                break;
+            }
+        }
+        sections.join("\n")
+    }
+}
+
+/// Truncate on a char boundary so lossy multi-byte content never panics.
+fn clamp_chars(value: &str, max: usize) -> String {
+    if value.chars().count() <= max {
+        return value.to_string();
+    }
+    value.chars().take(max).collect()
 }
 
 /** Stable machine-readable name for the repository state (`git status` style). */
@@ -207,6 +285,34 @@ mod tests {
         assert!(ws.status.contains("?? new.md"));
         assert!(ws.upstream.is_empty());
         assert_eq!((ws.ahead, ws.behind), (0, 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn diff_summary_carries_churn_and_changed_lines() {
+        let dir = temp_git_repo("diff-summary");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("").unwrap();
+        g.set_identity("T", "t@e.c").unwrap();
+        std::fs::write(dir.join("tracked.md"), "one\n").unwrap();
+        g.add_all().unwrap();
+        g.commit("first").unwrap();
+
+        // Unstaged edit, untracked note, and a staged-only file: the excerpt is
+        // based on HEAD, so a commit would capture all three.
+        std::fs::write(dir.join("tracked.md"), "two\n").unwrap();
+        std::fs::write(dir.join("fresh.md"), "new\n").unwrap();
+        std::fs::write(dir.join("staged.md"), "queued\n").unwrap();
+        g.stage_path("staged.md").unwrap();
+
+        let summary = g.diff_summary().unwrap();
+        assert!(summary.contains("tracked.md (+1 -1)"), "{summary}");
+        assert!(summary.contains("- one"), "{summary}");
+        assert!(summary.contains("+ two"), "{summary}");
+        assert!(summary.contains("fresh.md (+1 -0)"), "{summary}");
+        assert!(summary.contains("+ new"), "{summary}");
+        assert!(summary.contains("staged.md (+1 -0)"), "{summary}");
+        assert!(summary.contains("+ queued"), "{summary}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -340,7 +340,7 @@ describe('GitPanel', () => {
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="Generate commit message with AI"]')!.click())
     await flush()
 
-    expect(autoCommitMessage).toHaveBeenCalledWith(gitState.status, 'active.md', expect.any(String))
+    expect(autoCommitMessage).toHaveBeenCalledWith(gitState.status, 'active.md', expect.any(Function))
     expect(document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!.value).toBe('docs(notes): update active.md')
   })
 

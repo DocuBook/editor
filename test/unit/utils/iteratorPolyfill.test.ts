@@ -15,7 +15,7 @@ describe('installIteratorFilterPolyfill (Safari < 18 iterator helpers)', () => {
     const values = map.values() as unknown as {
       filter: (pred: (v: number) => boolean) => IterableIterator<number>
     }
-    // the exact pattern @blocknote/xl-ai uses
+    // the exact pattern the editor's dependency chain calls
     expect(Array.from(values.filter((v) => v > 1))).toEqual([2])
     // result stays iterable (for...of / spread contract) — fresh iterator
     const filtered = new Map([['a', 1], ['b', 2]]).values() as unknown as {

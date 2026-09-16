@@ -8,13 +8,6 @@ vi.mock('@blocknote/core', () => ({ BlockNoteEditor: { create: vi.fn(() => ({ __
 vi.mock('@blocknote/core/locales', () => ({ en: {} }))
 vi.mock('@blocknote/math-block', () => ({ locales: { en: {} } }))
 vi.mock('@blocknote/diagram-block', () => ({ locales: { en: {} } }))
-vi.mock('@blocknote/xl-ai/locales', () => ({ en: {} }))
-vi.mock('@blocknote/xl-ai', () => ({
-  AIExtension: vi.fn((options: any) => ({ options })),
-  aiDocumentFormats: {
-    html: { defaultDocumentStateBuilder: vi.fn(async () => ({ selection: false })) },
-  },
-}))
 vi.mock('../../../frontend/lib/ipc', () => ({
   fileUrl: vi.fn(async () => ''),
   isAbsoluteUrl: () => false,

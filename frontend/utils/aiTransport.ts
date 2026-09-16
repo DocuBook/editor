@@ -1,13 +1,13 @@
 /**
- * AI transport for the xl-ai extension — the ONLY window between xl-ai's Chat
+ * AI transport for the rust-ai extension — the ONLY window between the AI menu
  * and the Rust backend (ask_ai SSE stream). Responsibilities, in order:
  *
  *  1. Resolve provider/model/tool support (probe-driven, model-agnostic).
- *  2. Stream Rust SSE events → ai-sdk stream parts (batched text-delta).
+ *  2. Stream Rust SSE events → typed stream parts (batched text-delta).
  *  3. Route output: meaningful tool ops win (Path A), text-only falls back to
  *     a generated applyDocumentOperations input (Path B).
  *  4. Semantic gate: referenced block ids must exist in the document;
- *     model-echoed ids get the trailing `$` restored before xl-ai validation.
+ *     model-echoed ids get the trailing `$` restored before rust-ai validation.
  *
  *  Prompt policy and context assembly live in aiPrompt.ts; document operation
  *  helpers stay in aiBlocks.ts so this streaming sequence remains orchestration.
@@ -58,8 +58,8 @@ export interface AiTransportDeps {
   vaultPath?: string;
 }
 
-/** Create the xl-ai ChatTransport. `reconnectToStream` is unsupported (the Rust
- *  stream is one-shot; xl-ai never resumes after an abort). */
+/** Create the rust-ai ChatTransport. `reconnectToStream` is unsupported (the Rust
+ *  stream is one-shot; rust-ai never resumes after an abort). */
 export function createAiTransport(deps: AiTransportDeps) {
   return {
     sendMessages: async (args: any) => {
@@ -140,7 +140,7 @@ async function runSendMessages(
   const supportsTools = !isTextOnly(provider, model, st.probeTools);
   const toolDefs = (body as any)?.toolDefinitions as
     Record<string, { description: string; inputSchema: any }> | undefined;
-  /** Send xl-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
+  /** Send rust-ai's OWN tool definitions (applyDocumentOperations) so operations → suggestions work */
   const tools =
     supportsTools && toolDefs
       ? Object.entries(toolDefs).map(([name, def]) => ({
@@ -213,14 +213,14 @@ async function runSendMessages(
           });
         }
       });
-      /** Propagate xl-ai abort → Rust cancel (stops the in-flight reqwest stream). */
+      /** Propagate a rust-ai abort → Rust cancel (stops the in-flight reqwest stream). */
       abortSignal?.addEventListener?.("abort", () => {
         invoke("cancel_ai").catch(() => {});
       });
       try {
         const useTools = supportsTools && !!tools;
         /** Markdown is only used by the text-only fallback. Tool mode gets the
-         *  canonical (selection-aware) documentState from xl-ai metadata, so
+         *  canonical (selection-aware) documentState from rust-ai metadata, so
          *  avoid serializing the full document a second time. */
         const docContext = useTools ? "" : buildDocumentContext(editor);
         /** Resolve selection text as late as possible: submitting from the
@@ -238,7 +238,7 @@ async function runSendMessages(
           .find((message: any) => message?.role === "user")
           ?.metadata?.documentState;
         /** Compile stable policy separately from dynamic document/reference context.
-         *  Tool mode uses xl-ai's canonical documentState; text mode uses Markdown. */
+         *  Tool mode uses rust-ai's canonical documentState; text mode uses Markdown. */
         const basePrompt = {
           mode: useTools ? ("tool" as const) : ("text" as const),
           messages,
@@ -313,7 +313,7 @@ async function runSendMessages(
         }
         closed = true;
         /** Server cap (MAX_AI_BUFFER) hit: content is incomplete — never present
-         *  partial output as a valid response. Fail once so xl-ai shows retry/cancel;
+         *  partial output as a valid response. Fail once so rust-ai shows retry/cancel;
          *  retrying internally cannot help (the same cap applies). */
         if (streamTruncated) {
           console.error("[ai] response truncated at server cap", {
@@ -342,8 +342,8 @@ async function runSendMessages(
           flushDeltas();
         }
         if (!accepted) {
-          /** Signal the error to xl-ai so its AIMenu shows error state with retry/cancel
-           *  (built-in getDefaultAIMenuItemsForError renders retry + cancel buttons). */
+          /** Signal the error to rust-ai so the AI menu shows error state with retry/cancel
+           *  buttons. */
           const reason = lastReason || "unknown";
           console.error("[ai] AI output failed validation:", {
             provider,
@@ -357,17 +357,17 @@ async function runSendMessages(
           controller.error(new Error(reason));
         } else if (emitToolCalls.length > 0) {
           /** A model forced by tool_choice:"required" often calls with EMPTY
-           *  operations when it decides nothing needs changing. xl-ai hard-fails
-           *  on empty input ("No operations seen"), so filter those out and
-           *  close gracefully instead of surfacing an error. */
+           *  operations when it decides nothing needs changing. Empty input must not
+           *  become a document edit and must not surface as an error, so filter
+           *  those out and close gracefully. */
           if (meaningfulOps.length === 0) {
             console.info(
               "[ai] tool calls had no operations — treating as no change",
               { provider, model, toolCalls: emitToolCalls.length },
             );
-            /** Route through xl-ai's ERROR surface: it renders retry + cancel
-             *  (ai.retry() / ai.rejectChanges()), so the user can rephrase or
-             *  dismiss. The toast carries the clear message — xl-ai only shows a
+            /** Route through rust-ai's ERROR surface: it renders retry + cancel
+             *  buttons, so the user can rephrase or dismiss. The toast carries
+             *  the clear message — the menu only shows a
              *  generic "Error" label. The old force-close + toast fought each
              *  other (menu vanished while the toast claimed something happened). */
             toast.info(
@@ -376,7 +376,7 @@ async function runSendMessages(
             controller.error(new Error("AI made no document changes"));
           } else {
             for (const tc of meaningfulOps) {
-              /** Emit tool-input-available so xl-ai Chat creates a tool part → suggestions */
+              /** Emit tool-input-available so rust-ai creates a tool part → suggestions */
               controller.enqueue({
                 type: "tool-input-available",
                 toolCallId: tc.toolCallId,
@@ -396,7 +396,7 @@ async function runSendMessages(
           );
           controller.error(new Error("AI tool call required"));
         } else if (emitText && editor) {
-          /** Text-only: build applyDocumentOperations so xl-ai renders a suggestion (Option B) */
+          /** Text-only: build applyDocumentOperations so rust-ai renders a suggestion (Option B) */
           const input = await buildApplyDocumentInput(editor, emitText);
           const meaningfulInput = input
             ? filterMeaningfulOperations(editor, { input })?.input
@@ -406,7 +406,7 @@ async function runSendMessages(
            *  Retry once with Path B prompt (no tools, explicit markdown
            *  instruction) before surfacing an error. */
           if (meaningfulInput) {
-            /** Let xl-ai create the tool part → suggestion → accept/reject flow */
+            /** Let rust-ai create the tool part → suggestion → accept/reject flow */
             controller.enqueue({
               type: "tool-input-available",
               toolCallId: "gen-" + uuid(),
@@ -415,7 +415,7 @@ async function runSendMessages(
             });
             controller.enqueue({ type: "text-end", id });
           } else if (input) {
-            /** Parsed text mapped only to no-op operations. Fail so xl-ai does
+            /** Parsed text mapped only to no-op operations. Fail so rust-ai does
              *  not turn successful completion into user-reviewing. */
             toast.info(
               "AI made no document changes — retry with a different prompt or cancel",

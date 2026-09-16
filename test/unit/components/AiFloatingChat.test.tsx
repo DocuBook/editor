@@ -6,10 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Schema } from 'prosemirror-model'
 import { EditorState, TextSelection } from 'prosemirror-state'
 
-vi.mock('@blocknote/xl-ai', () => ({
-  AIExtension: 'ai',
+vi.mock('../../../frontend/utils/aiMenu', () => ({
   getDefaultAIMenuItems: () => [
-    { key: 'continue_writing', title: 'Continue writing', icon: null, onItemClick: vi.fn() },
+    { key: 'continue_writing', title: 'Continue Writing', icon: null, onItemClick: vi.fn() },
     { key: 'summarize', title: 'Summarize', icon: null, onItemClick: vi.fn() },
   ],
 }))
@@ -81,29 +80,29 @@ describe('AI floating composer', () => {
     expect(document.querySelector('[aria-label="Show AI prompts"]')).not.toBeNull()
 
     act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
-    expect(document.body.textContent).toContain('Continue writing')
+    expect(document.body.textContent).toContain('Continue Writing')
     expect(document.body.textContent).toContain('Summarize')
     const floating = document.querySelector('.editor-ai-floating')!
-    const promptAction = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue writing')!
+    const promptAction = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue Writing')!
     expect(floating.classList.contains('z-50')).toBe(true)
     expect(promptAction.classList.contains('ui-popover')).toBe(true)
     expect(promptAction.querySelector('span')?.classList.contains('text-accent')).toBe(true)
 
     act(() => promptAction.click())
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
 
     act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
     act(() => useAiChat.getState().focusInput('Tighten this paragraph'))
     expect(document.activeElement).toBe(textarea)
     expect(textarea.value).toBe('Tighten this paragraph')
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
 
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Tighten this paragraph')
       textarea.dispatchEvent(new Event('input', { bubbles: true }))
     })
 
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
     const send = document.querySelector('[aria-label="Send prompt"]') as HTMLButtonElement
     expect(send).not.toBeNull()
 
@@ -180,7 +179,7 @@ describe('AI floating composer', () => {
     expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Continue', useSelection: false })
   })
 
-  it('does not derive prompt visibility from xl-ai lifecycle state', () => {
+  it('does not derive prompt visibility from rust-ai lifecycle state', () => {
     const ai = makeAi()
     useEditorStore.setState({
       blockEditor: {
@@ -194,7 +193,7 @@ describe('AI floating composer', () => {
     act(() => ai.setMenuState({ blockId: 'b1', status: 'user-input' }))
 
     expect(useAiChat.getState().expanded).toBe(false)
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
   })
 
   /* Regression: the transport records "Document changes ready for review." when a
@@ -281,7 +280,7 @@ describe('AI floating composer', () => {
     act(() => button.click())
 
     expect(useAiChat.getState().expanded).toBe(false)
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
     expect(ai.openAIMenuAtBlock).not.toHaveBeenCalled()
   })
 
@@ -306,7 +305,7 @@ describe('AI floating composer', () => {
 
     expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
     expect(useAiChat.getState().expanded).toBe(false)
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
   })
 
   it('keeps the FAB prompt list out of selection mode', () => {
@@ -325,7 +324,7 @@ describe('AI floating composer', () => {
     act(() => root!.render(<AiFloatingChat />))
 
     expect(useAiChat.getState().expanded).toBe(false)
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
     expect(document.body.textContent).not.toContain('Summarize')
     expect(ai.openAIMenuAtBlock).not.toHaveBeenCalled()
     // The toggle is not a dead control in this mode: it is simply absent.
@@ -333,7 +332,7 @@ describe('AI floating composer', () => {
 
     // A stale `expanded` flag must not resurrect the selection prompt list.
     act(() => useAiChat.setState({ expanded: true }))
-    expect(document.body.textContent).not.toContain('Continue writing')
+    expect(document.body.textContent).not.toContain('Continue Writing')
 
     // Closing the toolbar popover hands the UI back to the cursor: the toggle
     // returns instead of staying permanently hidden. It reads as "Hide" here

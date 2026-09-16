@@ -98,13 +98,18 @@ describe('fallbackCommitMessage', () => {
   })
 })
 
+/** Provider settings that make `getAiConfig` resolve to a saved provider. */
+function configureAi() {
+  useAiSettings.setState({ provider: 'opencode-go', model: 'model-x', savedProviders: ['opencode-go'], baseUrls: {} })
+}
+
 describe('generateCommitMessage', () => {
   it('rejects when AI is not configured', async () => {
     await expect(generateCommitMessage([{ status: 'M', path: 'a.md' }])).rejects.toThrow('AI is not configured')
   })
 
   it('collects streamed tokens into a sanitized message', async () => {
-    useAiSettings.setState({ provider: 'opencode-go', model: 'model-x', savedProviders: ['opencode-go'], baseUrls: {} })
+    configureAi()
     ipc.handlers.set('ask_ai', () => {
       emit('ai:token', 'fix(editor): ')
       emit('ai:token', 'guard empty selection')
@@ -114,20 +119,74 @@ describe('generateCommitMessage', () => {
     await expect(generateCommitMessage([{ status: 'M', path: 'a.md' }]))
       .resolves.toBe('Auto commit : fix(editor): guard empty selection')
   })
-})
 
-describe('autoCommitMessage', () => {
-  it('falls back to the deterministic message when AI is unconfigured', async () => {
-    await expect(autoCommitMessage('.M notes/a.md', 'a.md')).resolves.toBe('Auto commit : update a.md')
-  })
-
-  it('uses the AI message when the provider is configured', async () => {
-    useAiSettings.setState({ provider: 'opencode-go', model: 'model-x', savedProviders: ['opencode-go'], baseUrls: {} })
-    ipc.handlers.set('ask_ai', () => {
-      emit('ai:token', 'feat(notes): add backlinks')
+  it('prompts the model with every changed file and the diff excerpt', async () => {
+    configureAi()
+    let prompt = ''
+    ipc.handlers.set('ask_ai', args => {
+      const messages = JSON.parse(String(args?.messages)) as { role: string; content: string }[]
+      prompt = messages[1].content
+      emit('ai:token', 'notes: add backlinks')
       return undefined
     })
 
-    await expect(autoCommitMessage('.M notes/a.md')).resolves.toBe('Auto commit : feat(notes): add backlinks')
+    await generateCommitMessage(
+      [{ status: 'M', path: 'notes/a.md' }, { status: 'A', path: 'notes/b.md' }],
+      async () => 'notes/a.md (+4 -1)\n  + hello',
+    )
+
+    expect(prompt).toContain('- M notes/a.md')
+    expect(prompt).toContain('- A notes/b.md')
+    expect(prompt).toContain('notes/a.md (+4 -1)')
+    expect(prompt).toContain('+ hello')
+  })
+
+  it('still answers when the diff loader fails', async () => {
+    configureAi()
+    ipc.handlers.set('ask_ai', () => {
+      emit('ai:token', 'notes: add backlinks')
+      return undefined
+    })
+
+    await expect(generateCommitMessage(
+      [{ status: 'M', path: 'a.md' }, { status: 'M', path: 'b.md' }],
+      async () => { throw new Error('diff unavailable') },
+    )).resolves.toBe('Auto commit : notes: add backlinks')
+  })
+})
+
+describe('autoCommitMessage', () => {
+  it('names a single file without asking the model or the diff', async () => {
+    let asked = false
+    ipc.handlers.set('ask_ai', () => { asked = true; return undefined })
+
+    await expect(autoCommitMessage('.M notes/a.md', 'a.md', async () => { asked = true; return '' }))
+      .resolves.toBe('Auto commit : update a.md')
+    expect(asked).toBe(false)
+  })
+
+  it('falls back for an empty change set', async () => {
+    await expect(autoCommitMessage('   ', 'active.md')).resolves.toBe('Auto commit : update active.md')
+  })
+
+  it('falls back to the deterministic message when AI is unconfigured', async () => {
+    await expect(autoCommitMessage('.M notes/a.md\n.M notes/b.md')).resolves.toBe('Auto commit : update 2 files')
+  })
+
+  it('uses the AI message when the provider is configured', async () => {
+    configureAi()
+    ipc.handlers.set('ask_ai', () => {
+      emit('ai:token', 'add backlinks across notes')
+      return undefined
+    })
+
+    await expect(autoCommitMessage('.M notes/a.md\n.M notes/b.md')).resolves.toBe('Auto commit : add backlinks across notes')
+  })
+
+  it('falls back when the AI stream returns nothing usable', async () => {
+    configureAi()
+    ipc.handlers.set('ask_ai', () => undefined)
+
+    await expect(autoCommitMessage('.M notes/a.md\n.M notes/b.md')).resolves.toBe('Auto commit : update 2 files')
   })
 })
