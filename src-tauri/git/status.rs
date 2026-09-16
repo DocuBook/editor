@@ -1,7 +1,12 @@
 //! Worktree status feeding the shared Git UI poller.
 
-use git2::{Repository, RepositoryState, Status, StatusOptions};
+use git2::{
+    DiffDelta, DiffFormat, DiffHunk, DiffLine, DiffOptions, Repository, RepositoryState, Status,
+    StatusOptions,
+};
 use serde::Serialize;
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use super::{git_error, Git};
 
@@ -18,6 +23,43 @@ pub struct WorktreeStatus {
 }
 
 impl Git {
+    /// Returns compact per-file diff statistics for commit-message generation.
+    /// The result is deliberately bounded to keep the AI prompt small.
+    pub fn diff_summary(&self) -> Result<String, String> {
+        let repo = self.repository()?;
+        let mut options = DiffOptions::new();
+        options.include_untracked(true).recurse_untracked_dirs(true);
+        let diff = repo
+            .diff_index_to_workdir(None, Some(&mut options))
+            .map_err(git_error)?;
+        let changes = RefCell::new(HashMap::<String, (usize, usize)>::new());
+        diff.print(
+            DiffFormat::Patch,
+            &mut |delta: DiffDelta<'_>, _hunk: Option<DiffHunk<'_>>, line: DiffLine<'_>| {
+                if let Some(path) = delta.new_file().path().or(delta.old_file().path()) {
+                    let mut values = changes.borrow_mut();
+                    let entry = values.entry(path.display().to_string()).or_insert((0, 0));
+                    if line.origin() == '+' {
+                        entry.0 += 1;
+                    }
+                    if line.origin() == '-' {
+                        entry.1 += 1;
+                    }
+                }
+                true
+            },
+        )
+        .map_err(git_error)?;
+        let mut files: Vec<_> = changes.into_inner().into_iter().collect();
+        files.sort_by_key(|(_, (added, removed))| std::cmp::Reverse(added + removed));
+        Ok(files
+            .into_iter()
+            .take(10)
+            .map(|(path, (added, removed))| format!("{path} (+{added} -{removed})"))
+            .collect::<Vec<_>>()
+            .join("\n"))
+    }
+
     pub fn status_with_branch(&self) -> Result<WorktreeStatus, String> {
         let repo = self.repository()?;
         let branch = head_name(&repo);

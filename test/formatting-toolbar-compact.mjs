@@ -279,7 +279,7 @@ try {
   ok('compact: a panel button can hold focus',
     await page.evaluate(() => !!document.activeElement?.closest('[data-testid="formatting-toolbar-more-panel"]')))
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(250)
+  await morePanel().waitFor({ state: 'detached', timeout: 3000 })
   ok('compact: Escape closes the panel', await morePanel().count() === 0)
   ok('compact: Escape returns focus to the trigger',
     await moreTrigger().evaluate(button => button === document.activeElement),

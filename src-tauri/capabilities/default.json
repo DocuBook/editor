@@ -25,6 +25,7 @@
     "allow-git-create-branch",
     "allow-git-clone",
     "allow-git-commit",
+    "allow-git-diff-summary",
     "allow-git-fetch",
     "allow-git-pull",
     "allow-git-init",

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, File, GitBranch, GitMerge, GitPullRequest, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, File, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest, PencilSparkles, RefreshCw, Upload } from 'lucide-react'
 import { invoke } from '../../lib/ipc'
 import { useGitStatus, pollGitStatus } from '../../stores/gitStatus'
 import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import SidebarPopover from '../SidebarPopover'
+import { autoCommitMessage } from '../../utils/commitMessage'
+import { toast } from 'sonner'
 
 interface GitEntry {
   x: string
@@ -276,7 +278,7 @@ function SyncBar() {
               title={activeRemote && targetBranch ? `Sync ${targetBranch} with ${activeRemote}` : 'Sync current branch'}
               className="flex items-center gap-1 rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {busy && activeAction === 'pull' ? 'Pulling…' : busy && activeAction === 'fetch' ? 'Fetching…' : busy && activeAction === 'rebase' ? 'Rebasing…' : busy && activeAction === 'merge' ? 'Merging…' : syncState === 'error' ? 'Sync failed' : syncState === 'done' ? `${activeAction} done` : 'Git sync'}
+              {busy && activeAction === 'pull' ? 'Pulling…' : busy && activeAction === 'fetch' ? 'Fetching…' : busy && activeAction === 'rebase' ? 'Rebasing…' : busy && activeAction === 'merge' ? 'Merging…' : syncState === 'error' ? 'Sync failed' : syncState === 'done' ? `${activeAction} done` : 'Actions'}
               <ChevronDown size={11} className={'transition-transform ' + (syncOpen ? 'rotate-180' : '')} />
             </button>
           </span>
@@ -325,7 +327,7 @@ function SyncBar() {
       </div>
 
       {merging && (
-        <div className="mt-1.5 text-[10px] text-warning">Merge in progress — resolve the conflicted files below, stage them, then use Commit in the Actions menu.</div>
+        <div className="mt-1.5 text-[10px] text-warning">Merge in progress — resolve the conflicted files below, stage them, then commit below.</div>
       )}
       {rebasing && (
         <div className="mt-1.5 text-[10px] text-warning">Rebase in progress — resolve the conflicted files below, stage them, then Continue.</div>
@@ -351,6 +353,146 @@ function SyncBar() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/** Commit and push live with repository changes. Manual text always wins; the
+ *  sparkle explicitly asks the configured Rust-backed AI flow to fill it. */
+function GitActions() {
+  const { isRepo, hasRemote, ahead, upstream, status, repoState = 'clean' } = useGitStatus()
+  const tabs = useEditorStore(state => state.tabs)
+  const activeTab = useEditorStore(state => state.activeTab)
+  const [message, setMessage] = useState('')
+  const [commitState, setCommitState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const [pushState, setPushState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const [generating, setGenerating] = useState(false)
+  const [commitNotice, setCommitNotice] = useState('')
+  const [pushNotice, setPushNotice] = useState('')
+
+  const hasUnsaved = tabs.some(tab => tab.dirty)
+  const merging = repoState === 'merge'
+  const committableState = repoState === 'clean' || merging
+  const hasChanges = status.trim().length > 0
+  const busy = commitState === 'busy' || pushState === 'busy'
+  const commitDisabled = !isRepo || hasUnsaved || !committableState || (!hasChanges && !merging) || !message.trim() || busy || generating
+  const pushDisabled = !isRepo || !hasRemote || (!!upstream && ahead <= 0) || busy
+
+  useEffect(() => {
+    if (commitState !== 'done' && pushState !== 'done') return
+    const timer = setTimeout(() => {
+      setCommitState(state => state === 'done' ? 'idle' : state)
+      setPushState(state => state === 'done' ? 'idle' : state)
+    }, 3000)
+    return () => clearTimeout(timer)
+  }, [commitState, pushState])
+
+  const generateMessage = async () => {
+    if (generating || !isRepo) return
+    setGenerating(true)
+    setCommitNotice('')
+    try {
+      let freshStatus = status
+      try { freshStatus = JSON.parse(await invoke<string>('git_status')).status || status } catch { /* current poll is enough */ }
+      let diffSummary = ''
+      try { diffSummary = await invoke<string>('git_diff_summary') } catch { /* status still supports the fallback */ }
+      const fallbackName = tabs.find(tab => tab.path === activeTab)?.name
+      setMessage(await autoCommitMessage(freshStatus, fallbackName, diffSummary))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const commit = async () => {
+    const commitMessage = message.trim()
+    if (commitDisabled || !commitMessage) return
+    setCommitState('busy')
+    setCommitNotice('')
+    try {
+      await invoke('git_stage')
+      const result = JSON.parse(await invoke<string>('git_commit', { message: commitMessage }))
+      if (result.error) { setCommitNotice(result.error); setCommitState('error'); return }
+      if (result.message === 'Nothing to commit') { setCommitState('idle'); toast.info('Nothing to commit'); return }
+      setMessage('')
+      setCommitNotice(result.commit ? `Committed ${result.commit.substring(0, 7)}` : 'Committed')
+      setCommitState('done')
+    } catch (error) {
+      setCommitNotice(String(error))
+      setCommitState('error')
+    } finally {
+      await pollGitStatus()
+    }
+  }
+
+  const push = async () => {
+    if (pushDisabled) return
+    setPushState('busy')
+    setPushNotice('')
+    try {
+      const result = JSON.parse(await invoke<string>('git_push_only'))
+      if (result.error) { setPushNotice(result.error); setPushState('error'); return }
+      if (result.message === 'Nothing to push') { setPushState('idle'); toast.info('Nothing to push'); return }
+      setPushNotice('Pushed ✓')
+      setPushState('done')
+    } catch (error) {
+      setPushNotice(String(error))
+      setPushState('error')
+    } finally {
+      await pollGitStatus()
+    }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-border-subtle p-2">
+      <div className="relative rounded-md border border-border bg-background focus-within:border-accent">
+        <textarea
+          value={message}
+          onChange={event => setMessage(event.target.value)}
+          placeholder="Enter commit message"
+          aria-label="Commit message"
+          rows={4}
+          className="block min-h-24 w-full resize-none bg-transparent px-2.5 pt-2 pb-10 text-[12px] leading-relaxed text-foreground outline-none placeholder:text-muted"
+        />
+        <div className="absolute inset-x-1.5 bottom-1.5 flex items-center justify-between gap-1">
+          <button
+            type="button"
+            onClick={() => void generateMessage()}
+            disabled={!isRepo || (!hasChanges && !merging) || generating || busy}
+            aria-label="Generate commit message with AI"
+            title="Generate commit message with AI"
+            className="flex size-7 items-center justify-center rounded border-none bg-transparent text-foreground-subtle cursor-pointer hover:bg-surface-active hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <PencilSparkles size={14} className={generating ? 'animate-pulse' : ''} />
+          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              data-testid="git-push"
+              onClick={() => void push()}
+              disabled={pushDisabled}
+              className="flex h-7 items-center gap-1 rounded border border-border-subtle bg-transparent px-2 text-[11px] text-foreground-secondary cursor-pointer hover:bg-surface-active hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Upload size={12} />
+              {pushState === 'busy' ? 'Pushing…' : pushState === 'done' ? 'Pushed' : pushState === 'error' ? 'Retry Push' : 'Push'}
+              {upstream && ahead > 0 && <span className="text-[10px] text-muted">↑{ahead}</span>}
+            </button>
+            <button
+              type="button"
+              data-testid="git-commit"
+              onClick={() => void commit()}
+              disabled={commitDisabled}
+              className="flex h-7 items-center gap-1 rounded border border-border-subtle bg-surface-hover px-2 text-[11px] text-foreground-secondary cursor-pointer hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <GitCommitHorizontal size={12} />
+              {commitState === 'busy' ? 'Committing…' : commitState === 'done' ? 'Committed' : 'Commit'}
+            </button>
+          </div>
+        </div>
+      </div>
+      {hasUnsaved && isRepo && <div className="mt-1.5 text-[10px] text-muted">Unsaved editor changes — wait for autosave or switch mode before committing.</div>}
+      {!hasChanges && merging && !hasUnsaved && <div className="mt-1.5 text-[10px] text-muted">Merge in progress — commit records the resolved working tree.</div>}
+      {commitNotice && <div className={'mt-1.5 wrap-break-word text-[10px] ' + (commitState === 'error' ? 'text-danger' : 'text-success')}>{commitNotice}</div>}
+      {pushNotice && <div className={'mt-1.5 wrap-break-word text-[10px] ' + (pushState === 'error' ? 'text-danger' : 'text-success')}>{pushNotice}</div>}
     </div>
   )
 }
@@ -431,6 +573,7 @@ export default function GitPanel() {
           </section>
         )}
       </div>
+      <GitActions />
     </section>
   )
 }
