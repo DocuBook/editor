@@ -248,9 +248,10 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   /** Follow AI caret, not whole writing block. A long pre can exceed
    *  the viewport, making block-level bounds permanently out of view and
    *  triggering scroll/layout work on every streamed mutation. One measure per
-   *  frame while writing: the character reveal moves the caret through
-   *  class-only decoration updates, which a MutationObserver watching
-   *  childList/characterData never reports. */
+   *  frame while writing — the caret is resolved from the editor root, because a
+   *  streamed write can move it out of the anchor block. The character reveal
+   *  moves the caret through class-only decoration updates, which a
+   *  MutationObserver watching childList/characterData never reports. */
   useEffect(() => {
     if (!isAiWriting || !aiMenu?.blockId) return
     const root = editor.domElement
@@ -258,7 +259,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     let raf = 0
     const tick = () => {
       raf = requestAnimationFrame(tick)
-      if (followRef.current) followAiWritingCursorInRoot(root, aiMenu.blockId)
+      if (followRef.current) followAiWritingCursorInRoot(root)
     }
     raf = requestAnimationFrame(tick)
     return () => { if (raf) cancelAnimationFrame(raf) }

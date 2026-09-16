@@ -3,13 +3,17 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
 import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
 
-const PORT = 4277
+const PORT = 4289
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
-const DATA = '/tmp/docubook-e2e-ai-pre'
+const DATA = '/tmp/docubook-e2e-ai-multiblock'
 const VAULT = `${DATA}/vaults/myva`
 const BASE = `http://localhost:${PORT}`
-const ADMIN = { email: 'ai-pre@test.dev', password: 'password1' }
+const ADMIN = { email: 'ai-multiblock@test.dev', password: 'password1' }
 const code = (label, lines) => `\`\`\`js\n${Array.from({ length: lines }, (_, i) => `const ${label}${i} = "${'x'.repeat(18)}"`).join('\n')}\n\`\`\``
+/** Three fences → the selection path turns the first into an `update` on the
+ *  anchor and the rest into one `add` after it, so the agent writes into blocks
+ *  the prompt was never anchored to. */
+const MULTI_BLOCK = [code('first', 30), code('second', 30), code('third', 30)].join('\n\n')
 const results = []
 const ok = (name, cond, extra = '') => {
   results.push([cond ? 'PASS' : 'FAIL', name, extra])
@@ -19,9 +23,9 @@ const ok = (name, cond, extra = '') => {
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
 mkdirSync(VAULT, { recursive: true })
-writeFileSync(`${VAULT}/notes.md`, code('before', 45))
+writeFileSync(`${VAULT}/notes.md`, code('before', 12))
 
-const server = startServer('ai-pre-flicker', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
+const server = startServer('ai-multiblock-follow', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
 let browser
 
 async function api(cmd, args = {}, cookie = '') {
@@ -43,14 +47,13 @@ try {
   const context = await browser.newContext({ viewport: { width: 900, height: 320 } })
   await context.addCookies([{ name: 'db_session', value: cookie.split('=').slice(1).join('='), url: BASE }])
   const page = await context.newPage()
-  attachLogging(page, 'ai-pre-flicker')
+  attachLogging(page, 'ai-multiblock-follow')
 
   await page.route('**/api/ask_ai', route => {
-    const output = code('after', 45)
     route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: ['event: ai:token', `data: ${JSON.stringify(output)}`, '', 'event: ai:tools_done', 'data: ""', '', 'event: ai:done', 'data: {"provider":"mock","truncated":false}', ''].join('\n'),
+      body: ['event: ai:token', `data: ${JSON.stringify(MULTI_BLOCK)}`, '', 'event: ai:tools_done', 'data: ""', '', 'event: ai:done', 'data: {"provider":"mock","truncated":false}', ''].join('\n'),
     })
   })
 
@@ -64,36 +67,24 @@ try {
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.getByText('notes', { exact: true }).click()
-  const pre = page.locator('.bn-block-content[data-content-type="codeBlock"] pre')
-  await pre.waitFor({ timeout: 10000 })
-  const initialHeight = await pre.evaluate(el => el.getBoundingClientRect().height)
-  ok('fixture: pre lebih tinggi dari viewport pendek', initialHeight > 320, `${Math.round(initialHeight)}px`)
+  await page.locator('.bn-block-content[data-content-type="codeBlock"] pre').waitFor({ timeout: 10000 })
 
   await page.evaluate(() => {
-    const initialPre = document.querySelector('.bn-block-content[data-content-type="codeBlock"] pre')
+    const anchor = document.querySelector('.bn-block-content[data-content-type="codeBlock"]')?.closest('[data-node-type="blockContainer"]')
+    const anchorId = anchor?.getAttribute('data-id') ?? null
     const originalRect = Element.prototype.getBoundingClientRect
-    const metrics = {
-      initialPre, preDetached: false, blockRectReads: 0, cursorRectReads: 0,
-      cursorFrames: 0, cursorOvershoot: 0, scrollerTag: null,
-    }
-    Object.defineProperty(window, '__aiPreMetrics', { value: metrics })
-    Element.prototype.getBoundingClientRect = function () {
-      if (this.matches?.('.bn-collaboration-cursor__base[data-active="true"]')) metrics.cursorRectReads++
-      if (this.matches?.('[data-node-type="blockContainer"]') && this.querySelector?.('pre')) metrics.blockRectReads++
-      return originalRect.call(this)
-    }
-    new MutationObserver(() => { if (metrics.initialPre && !metrics.initialPre.isConnected) metrics.preDetached = true })
-      .observe(document.querySelector('.bn-editor'), { childList: true, subtree: true })
+    const metrics = { anchorId, cursorFrames: 0, cursorOutsideAnchorFrames: 0, cursorOvershoot: 0, scrollerTag: null }
+    Object.defineProperty(window, '__aiFollowMetrics', { value: metrics })
 
-    // Probe: largest distance the writing caret travels past its scroller's
-    // bottom edge on any painted frame, and how many frames carried a caret.
-    // Reads go through `originalRect` so the probe stays out of the counters
-    // the assertions above depend on.
+    /** Same frame rate as the follower: how far the writing caret travels past
+     *  its scroller's bottom edge, and whether it ever left the anchor block. */
     const sample = () => {
       requestAnimationFrame(sample)
       const cursor = document.querySelector('.bn-collaboration-cursor__base[data-active="true"]')
       if (!cursor) return
       metrics.cursorFrames++
+      const block = cursor.closest('[data-node-type="blockContainer"]')
+      if (block?.getAttribute('data-id') !== anchorId) metrics.cursorOutsideAnchorFrames++
       let scroller = cursor
       while (scroller && scroller.scrollHeight <= scroller.clientHeight) scroller = scroller.parentElement
       scroller = scroller || document.documentElement
@@ -109,30 +100,24 @@ try {
   await page.keyboard.press('Control+Alt+L')
   const prompt = page.locator('textarea[placeholder="Send message to AI writing..."]')
   await prompt.waitFor()
-  await prompt.fill('rewrite this code')
+  await prompt.fill('expand the snippet into three blocks')
   await page.keyboard.press('Enter')
   await page.getByText('Accept', { exact: true }).waitFor({ timeout: 60000 })
 
   const metrics = await page.evaluate(() => {
-    const m = window.__aiPreMetrics
+    const m = window.__aiFollowMetrics
     return {
-      preDetached: m.preDetached,
-      samePre: m.initialPre === document.querySelector('.bn-block-content[data-content-type="codeBlock"] pre'),
-      blockRectReads: m.blockRectReads,
-      cursorRectReads: m.cursorRectReads,
+      blocks: document.querySelectorAll('.bn-block-content[data-content-type="codeBlock"]').length,
       cursorFrames: m.cursorFrames,
+      cursorOutsideAnchorFrames: m.cursorOutsideAnchorFrames,
       cursorOvershoot: Math.round(m.cursorOvershoot),
       scrollerTag: m.scrollerTag,
     }
   })
-  ok('pre tetap terpasang selama streaming', !metrics.preDetached && metrics.samePre, JSON.stringify(metrics))
-  ok(
-    'pengukuran blok panjang tidak mengikuti setiap token',
-    metrics.cursorRectReads > 0 && metrics.blockRectReads < metrics.cursorRectReads / 5,
-    JSON.stringify(metrics),
-  )
-  ok('cursor tulis tetap terlihat selama streaming', metrics.cursorFrames > 5 && metrics.cursorOvershoot <= 32, JSON.stringify(metrics))
-  await page.screenshot({ path: 'test/artifacts/ai-pre-flicker.png', fullPage: true })
+  ok('fixture: tulisan AI mendarat di beberapa block', metrics.blocks >= 3, JSON.stringify(metrics))
+  ok('fixture: caret sempat keluar dari block anchor selama reveal', metrics.cursorOutsideAnchorFrames > 5, JSON.stringify(metrics))
+  ok('caret tetap di dalam scroller walau menulis di block baru', metrics.cursorFrames > 5 && metrics.cursorOvershoot <= 32, JSON.stringify(metrics))
+  await page.screenshot({ path: 'test/artifacts/ai-multiblock-follow.png', fullPage: true })
 } catch (error) {
   results.push(['FAIL', 'setup/run', String(error).split('\n')[0]])
   process.exitCode = 1
@@ -141,4 +126,4 @@ try {
   server.bin.kill()
 }
 
-if (!summary('ai-pre-flicker', results, { serverLog: server.logPath })) process.exitCode = 1
+if (!summary('ai-multiblock-follow', results, { serverLog: server.logPath })) process.exitCode = 1
