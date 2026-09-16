@@ -64,7 +64,7 @@ const textarea = () => page.locator('textarea[placeholder="Send message to AI wr
 const showPrompts = () => page.locator('button[aria-label="Show AI prompts"]')
 const aiToolbarBtn = () => page.locator('button[aria-label="Edit with AI"]')
 /** Prompt chips exist in two shapes: the composer's own FAB list renders real
- *  <button>s, while xl-ai's toolbar suggestion menu renders <div role="option">.
+ *  <button>s, while rust-ai's toolbar suggestion menu renders <div role="option">.
  *  Match both, otherwise one of the two entry points silently stops being tested. */
 const chip = (name) => page.getByRole('button', { name }).or(page.getByRole('option', { name }))
 

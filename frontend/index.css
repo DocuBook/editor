@@ -126,6 +126,12 @@ body {
     color: var(--color-ai-cursor-text);
 }
 
+/* AI character-reveal: waiting text stays laid out and only its visibility
+   grows, so a tall block is written top-to-bottom without any reflow. */
+.ai-reveal-hidden {
+    visibility: hidden;
+}
+
 #root .bn-root {
     --bn-colors-editor-background: var(--color-surface);
 }
@@ -475,6 +481,49 @@ body .mobile-sidebar-drawer-body > aside {
 @media (min-width: 640px) {
     .editor-ai-floating {
         width: 50%;
+    }
+}
+
+/* AI chat surfaces are flat — no box-shadow anywhere in the panel. The chat
+   bubble (composer textarea) and the prompt/FAB list both sit on the app's base
+   background token, so they stay identical in light and dark and need no tonal
+   invention: the hairline border alone separates them from the document.
+   Deliberately NOT --color-surface-active (the pressed/hover token), which reads
+   as a disabled/negative state when used as a resting surface. Chips keep the
+   shared `ui-popover` class (and its radius/border) but drop its elevation. */
+.editor-ai-floating .ui-popover,
+.editor-ai-floating .ai-chat-surface {
+    background: var(--color-background);
+    box-shadow: none;
+}
+.editor-ai-floating .ui-popover:hover {
+    background: var(--color-surface-hover);
+}
+/* Keyboard focus cue without a Tailwind ring: `ring-*` is a box-shadow, so the
+   flat panel uses an inset outline instead. */
+.editor-ai-floating .ui-popover:focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
+}
+
+/* Status bar of the chat bubble: transform/opacity only, so switching between
+   thinking, writing, review and error never reflows the panel mid-animation. */
+@keyframes ai-status-in {
+    from {
+        opacity: 0;
+        transform: translateY(2px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+.editor-ai-floating .ai-chat-status {
+    animation: ai-status-in 140ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+    .editor-ai-floating .ai-chat-status {
+        animation: none;
     }
 }
 

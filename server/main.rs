@@ -9,6 +9,8 @@
 //! Docker: see ../Dockerfile (multi-stage, single binary, non-root).
 #[path = "../src-tauri/agent/mod.rs"]
 mod agent;
+#[path = "../src-tauri/rust-ai/mod.rs"]
+mod rust_ai;
 mod ai;
 mod auth;
 mod auth_routes;
@@ -45,7 +47,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tokio_stream::wrappers::ReceiverStream;
+
 use tower_http::request_id::{
     MakeRequestId, PropagateRequestIdLayer, RequestId, SetRequestIdLayer,
 };
@@ -106,17 +108,7 @@ struct AppState {
     data_dir: PathBuf,
 }
 
-/** Cap runaway AI responses (memory-exhaustion guard) — mirrors lib.rs. */
-const MAX_AI_BUFFER: usize = 8 * 1024 * 1024;
-const MAX_TOOL_ARGS_SIZE: usize = 2 * 1024 * 1024;
-const MAX_TOOL_CALLS_PER_REQUEST: usize = 64;
 const MAX_CONCURRENT_AI_REQUESTS: usize = 1;
-/** Total AI generation budget per attempt (seconds) — a pure backstop.
- *  Failure detection is the PI pattern: 30s first-chunk + 120s per-chunk stall
- *  timeout kill hung streams fast, and the user can always Abort (cancel_ai).
- *  A model that streams slowly but steadily (weak/thinking models) is allowed
- *  to finish; this cap only guards against a runaway generation. */
-const AI_MAX_SECONDS: u64 = 900;
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(

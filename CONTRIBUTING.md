@@ -81,7 +81,7 @@ editor/
 ## Workflow
 
 1. Fork the repo and create a branch: `git checkout -b fix/your-change`
-2. Make your change. Keep commits focused.
+2. Make your change. Keep commits focused, and sign off every commit (`git commit -s`) — see [Contribution licensing](#contribution-licensing).
 3. Run checks locally:
    - `npx tsc -b`
    - `npm test`
@@ -155,6 +155,17 @@ PR (conventional commit) → merge to master → CI audit → tag on master → 
 - Tag only on `master` (a tag on a branch survives squash-merge poorly: the tagged commit is not reachable from master).
 - Version bumps go together in the release commit — never bump in a feature PR.
 - Docker image: immutable version tags with the `v` prefix (`:v0.1.0-beta.2`); stable tags also move `:latest`, while prerelease tags do not.
+
+## Contribution licensing
+
+Every commit must carry a `Signed-off-by` line certifying the [Developer Certificate of Origin 1.1](https://developercertificate.org/) (`git commit -s`). You keep your copyright; the sign-off certifies you have the right to submit the work.
+
+By signing off, you also agree that:
+
+- Your contribution is licensed to the project and its users under **AGPL-3.0** (inbound = outbound).
+- You grant the maintainer a perpetual, worldwide, non-exclusive, royalty-free right to use, reproduce, modify, distribute, and **relicense** your contribution under any license, including commercial terms.
+
+The second point is what keeps the commercial licensing option available: it lets the maintainer offer a closed commercial license covering the whole codebase. If you cannot agree to it, open an issue before writing code — the change cannot be merged.
 
 ## Security
 

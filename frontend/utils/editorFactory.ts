@@ -3,7 +3,7 @@
  *
  * Design: one editor *instance* per open tab, held across tab switches.
  * `BlockNoteView` remounts the view (DOM attach/detach) but the instance —
- * and with it the ProseMirror document, undo history, and xl-ai stream
+ * and with it the ProseMirror document, undo history, and rust-ai stream
  * state — survives. Markdown is parsed ONCE per instance (first open);
  * switching tabs is O(1) cache lookup instead of O(doc) re-parse.
  *
@@ -17,8 +17,8 @@ import { BlockNoteEditor } from '@blocknote/core'
 import { en as baseDict } from '@blocknote/core/locales'
 import { locales as mathLocales } from '@blocknote/math-block'
 import { locales as diagramLocales } from '@blocknote/diagram-block'
-import { en as aiDict } from '@blocknote/xl-ai/locales'
-import { AIExtension, aiDocumentFormats } from '@blocknote/xl-ai'
+import { AIExtension } from './aiExtension'
+import { getAIDictionary } from './aiMenu'
 import { fileUrl, isAbsoluteUrl, isSafeImageUrl } from '../lib/ipc'
 import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { createAiTransport } from './aiTransport'
@@ -46,7 +46,7 @@ export function createBlockEditor(vaultPath: string, filePath: string): CachedEd
   let editor!: BlockNoteEditor<any, any, any>
   editor = BlockNoteEditor.create({
     schema: getSchema(),
-    dictionary: { ...baseDict, ai: aiDict, math: mathLocales.en, diagram: diagramLocales.en },
+    dictionary: { ...baseDict, ai: getAIDictionary(), math: mathLocales.en, diagram: diagramLocales.en },
 
     resolveFileUrl: async (url: string) => {
       if (!isSafeImageUrl(url)) return ''
@@ -55,8 +55,8 @@ export function createBlockEditor(vaultPath: string, filePath: string): CachedEd
     extensions: [
       AIExtension({
         transport: createAiTransport({ getEditor: () => editor, filePath, vaultPath }),
-        documentStateBuilder: createSelectionAwareDocumentStateBuilder(
-          aiDocumentFormats.html.defaultDocumentStateBuilder,
+        documentStateBuilder: createSelectionAwareDocumentStateBuilder(async (request: any) =>
+          (await import('./aiBlocks')).buildHtmlDocumentState(request.editor, !!request.selectedBlocks?.length),
         ),
         agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
       }),

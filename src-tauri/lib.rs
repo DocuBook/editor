@@ -12,6 +12,8 @@ mod search;
 mod agent;
 mod keychain;
 mod markdown;
+#[path = "rust-ai/mod.rs"]
+pub(crate) mod rust_ai;
 
 // Command layer — one module per responsibility. Files live in `lib/`;
 // the module is named `commands` because `lib` collides with the crate root
@@ -29,7 +31,7 @@ pub(crate) struct AppState {
     pub(crate) vault: Mutex<Option<vault::Vault>>,
     pub(crate) wiki: Mutex<Option<wiki::WikiIndex>>,
     pub(crate) git: Mutex<Option<git::Git>>,
-    pub(crate) ai_cancel: AtomicBool,
+    pub(crate) ai_cancel: std::sync::Arc<AtomicBool>,
     /** Set when the frontend confirmed it is safe to close (graceful shutdown). */
     pub(crate) closing: AtomicBool,
 }
@@ -45,7 +47,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: AtomicBool::new(false), closing: AtomicBool::new(false) })
+        .manage(AppState { vault: Mutex::new(None), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: std::sync::Arc::new(AtomicBool::new(false)), closing: AtomicBool::new(false) })
         .on_window_event(|window, event| {
             // Graceful shutdown: ask the frontend to flush & save, then confirm.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

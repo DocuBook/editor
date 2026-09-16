@@ -111,7 +111,7 @@ Other text formats can be viewed but only `.md` and `.mdx` use the WYSIWYG edito
 | -------- | ----------------------------------- |
 | Desktop  | Tauri v2, Rust                      |
 | Web API  | Axum, Rust                          |
-| Frontend | React 19, TypeScript 6, Zustand     |
+| Frontend | React 19, TypeScript 7, Zustand     |
 | Editor   | BlockNote 0.54, TipTap, ProseMirror |
 | UI       | Tailwind CSS v4                     |
 | Build    | Vite 8, Rolldown                    |
@@ -144,15 +144,27 @@ Whatever you choose, thank you for reading this far — and welcome to the neigh
 
 ## License
 
-[GPL-3.0](./LICENSE) — DocuBook Editor now integrates BlockNote XL package (`@blocknote/xl-ai`) which is licensed under GPL-3.0. The GPL ensures that modified versions of the app remain free and open — if you distribute the app, you must share your changes under the same license.
+[AGPL-3.0](./LICENSE) — DocuBook Editor is released under GNU Affero General Public License version 3. Source and network-use obligations follow `LICENSE`.
+
+Copyright (C) 2026 @gitfromwildan [email@wildan.dev](mailto:email@wildan.dev).
 
 ### Commercial Use
 
-**GPL-3.0 permits commercial use** — you may sell the app, host it as a service, or use it internally, as long as you comply with the copyleft obligations (offer source, keep it under GPL-3.0, preserve notices). No permission is required for standard commercial use.
+**AGPL-3.0 permits commercial use** — you may sell the app, host it as a service, or use it internally, as long as you comply with AGPL source and network-use obligations in `LICENSE`.
 
-The **optional cooperation clause** below is a separate, voluntary arrangement — it is NOT a GPL requirement and does not restrict what the license already permits:
+That network-use obligation is exactly why this project is AGPL-3.0 and not MIT: if you distribute or host a **modified** version, that version's source must stay AGPL-3.0. So commercial use has two honest paths:
+
+1. **Publish** — comply with `LICENSE`. If you modify DocuBook Editor and let users interact with it over a network, offer them the modified version's source under AGPL-3.0. No fee, no permission needed.
+2. **Cooperate** — keep your changes closed under a separate commercial arrangement with the author. This is where a **royalty can be agreed**.
+
+The royalty is not a GPL requirement and does not restrict what the license already permits — it is what the author asks for explicitly on the second path. It is reasonable for the same reason AGPL exists: the network case is where a product captures value from this code without contributing anything back. Two cases where it is expected rather than exceptional:
+
+- **Hosted or managed service** — offering DocuBook Editor as a paid SaaS, or as a managed instance for third parties.
+- **AI gateway or provider** — selling or metering model access through it, or running an AI gateway/provider product on top of it.
+
+Complying with `LICENSE` is sufficient on its own. Nothing in this README adds a condition to, or restricts, the rights AGPL-3.0 grants.
 
 > If you would like to work with the author directly — for example, running DocuBook Editor as a dedicated managed service or building an AI gateway/provider on top of it — reach out to arrange cooperation: [email@wildan.dev](mailto:email@wildan.dev)
 
 > [!NOTE]
-> **Personal and community use remains free forever.** Using DocuBook Editor for yourself, your studies, or your community — on your own devices or your own server — always stays free and open source.
+> **Personal and community use remains free forever.** Using DocuBook Editor for yourself, your studies, or your community — on your own devices or your own server — always stays free and open source. Where a commercial arrangement is chosen, a royalty can be agreed; it never touches personal or community use.

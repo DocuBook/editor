@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### License
+
+- Relicensed from GPL-3.0 to **AGPL-3.0** after removing the last GPL dependency. AGPL-3.0 extends source obligations to software offered over a network, so a **modified** hosted version must publish its source — or the operator can arrange a commercial license instead.
+
+### 🔄 Refactor
+
+- Replaced the proprietary `@blocknote/xl-ai` package with an in-house AI layer: a framework-neutral `rust-ai` module shared by the desktop agent and the web server (request assembly, SSE streaming, provider reachability, prompt policy, tool schema and error sanitization), plus a local ProseMirror extension for streaming document operations, the writing cursor, and accept/revert review.
+- Reimplemented the AI prompt menu, dictionary, and chat wiring in-repo (titles and placeholders now match the previous package's English strings).
+- Restored the character-reveal writing animation: freshly written blocks appear top-to-bottom while the document is already final (only `visibility` grows, so a tall block never reflows and undo history stays clean), and the AI caret — with its auto-scroll — rides the reveal frontier. Skipped entirely under `prefers-reduced-motion` or in a background tab.
+
 ## v0.1.0-rc.5 — 2026-09-01
 
 ### Release candidate — floating AI chat, reliable autosave, external media support, and editor stability

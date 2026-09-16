@@ -3,10 +3,10 @@
  *
  * Intercepts /api/ask_ai in the browser with a mock SSE stream (same wire
  * format as the real server: event: ai:token / ai:tools_done / ai:done), so
- * the FULL frontend chain runs: transport → buildApplyDocumentInput → xl-ai
+ * the FULL frontend chain runs: transport → buildApplyDocumentInput → rust-ai
  * suggestion. This isolates the frontend — no provider reachability needed.
  *
- * Key question it answers: does xl-ai reject our generated applyDocument
+ * Key question it answers: does rust-ai reject our generated applyDocument
  * Operations (→ "Error calling LLM" with NO [ai] log, stream "succeeded"
  * from our side) or does the transport itself fail (→ [ai] log)?
  *

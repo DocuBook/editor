@@ -50,7 +50,7 @@ describe('AI writing follow scroll', () => {
     expect(second.scroller.scrollTop).toBe(152)
   })
 
-  it('does nothing while xl-ai has no rendered cursor', () => {
+  it('does nothing while rust-ai has no rendered cursor', () => {
     const { block, scroller } = elements(null)
 
     followAiWritingCursor(block)

@@ -1,4 +1,4 @@
-import { AIExtension } from "@blocknote/xl-ai";
+
 import { TextSelection } from "prosemirror-state";
 import { mathDollarToMathML } from "./mathMarkdown";
 
@@ -93,11 +93,29 @@ export function restoreAISelection(editor: any): boolean {
 }
 
 /**
- * Keep selection requests small without changing xl-ai's document-state schema.
+ * Keep selection requests small without changing rust-ai's document-state schema.
  * The stock HTML builder includes every document block even when a selection is
  * active. Tool operations only need ids for selected blocks; nearby blocks are
  * included without ids as lightweight structural context.
  */
+export async function buildHtmlDocumentState(editor: any, useSelection = false): Promise<any> {
+  const flatten = (blocks: any[]): any[] => blocks.flatMap((block) => [block, ...(block?.children?.length ? flatten(block.children) : [])])
+  const documentBlocks = flatten(Array.isArray(editor?.document) ? editor.document : [])
+  if (useSelection) {
+    const selected = editor?.getSelectionCutBlocks?.(true)?.blocks || editor?.getSelection?.()?.blocks || []
+    return {
+      isEmptyDocument: documentBlocks.length === 0,
+      selection: true,
+      selectedBlocks: await Promise.all(selected.map(async (block: any) => ({ id: `${block.id}$`, block: await editor.blocksToHTMLLossy([block]) }))),
+      blocks: await Promise.all(documentBlocks.map(async (block: any) => ({ block: await editor.blocksToHTMLLossy([block]) }))),
+    }
+  }
+  const cursor = editor?.getTextCursorPosition?.()?.block?.id
+  const blocks = await Promise.all(documentBlocks.map(async (block: any) => ({ id: `${block.id}$`, block: await editor.blocksToHTMLLossy([block]) })))
+  const withCursor = blocks.flatMap((block: any) => block.id === `${cursor}$` ? [block, { cursor: true }] : [block])
+  return { selection: false, isEmptyDocument: documentBlocks.length === 0, blocks: withCursor }
+}
+
 export function createSelectionAwareDocumentStateBuilder(defaultBuilder: any) {
   return async (request: any) => {
     if (!request?.selectedBlocks?.length) return defaultBuilder(request);
@@ -187,7 +205,7 @@ export function blockIdExists(editor: any, id: string): boolean {
 /**
  * Resolve the block the formatting-toolbar AI button should open its menu at.
  *
- * xl-ai's own `AIToolbarButton` does `const s = editor.getSelection(); if (!s)
+ * The stock toolbar AI button does `const s = editor.getSelection(); if (!s)
  * throw new Error("No selection")` — but BlockNote's `getSelection()` returns
  * `undefined` for collapsed AND node selections (`"node" in tr.selection`, e.g.
  * a selected image), while the formatting toolbar is still shown. Clicking the
@@ -214,10 +232,10 @@ export function resolveAIBlockId(editor: any): string | undefined {
 }
 
 /**
- * Open the xl-ai menu at the resolved block and keep the editor's text cursor
+ * Open the rust-ai menu at the resolved block and keep the editor's text cursor
  * in sync with it.
  *
- * xl-ai re-reads the LIVE cursor when building the request
+ * rust-ai re-reads the LIVE cursor when building the request
  * (`buildAIRequest` → `getTextCursorPosition()` and `defaultDocumentStateBuilder`),
  * so if the cursor is stale when the menu opens, the document state sent to the
  * model carries the wrong block. Operations then reference ids the model never
@@ -255,7 +273,7 @@ export function openAIMenuAtAnchor(editor: any): string | undefined {
   const blockId = resolveAIBlockId(editor);
   let ai: any;
   try {
-    ai = editor?.getExtension?.(AIExtension);
+    ai = editor?.getExtension?.('ai');
   } catch {
     ai = undefined;
   }
@@ -281,7 +299,7 @@ export function openAIMenuAtAnchor(editor: any): string | undefined {
  * context, tolerating a host that has lost editor focus.
  *
  * Sending from the floating composer moves DOM focus into a `<textarea>`, and
- * xl-ai locks the editor (`isEditable = false`) while its menu is open. In that
+ * rust-ai locks the editor (`isEditable = false`) while its menu is open. In that
  * state `getTextCursorPosition()` can resolve to a stale/fallback block, so the
  * context would no longer match the block the user picked — operations then
  * reference an id the model never saw (`block ID not recognized`).
@@ -291,7 +309,7 @@ export function openAIMenuAtAnchor(editor: any): string | undefined {
  */
 export function resolveActiveBlockId(editor: any): string | undefined {
   try {
-    const menu = editor?.getExtension?.(AIExtension)?.store?.state?.aiMenuState;
+    const menu = editor?.getExtension?.('ai')?.store?.state?.aiMenuState;
     if (menu && menu !== "closed" && typeof menu.blockId === "string")
       return menu.blockId;
   } catch {
@@ -305,7 +323,7 @@ export function resolveActiveBlockId(editor: any): string | undefined {
  * Ensure every operation id/referenceId carries the trailing `$` that
  * BlockNote's applyDocumentOperations expects (idsSuffixed). The document
  * state in the AI prompt has suffixed ids, but some models (e.g. GLM) strip
- * the `$` when echoing them back — xl-ai then rejects with
+ * the `$` when echoing them back — rust-ai then rejects with
  * "referenceId must end with $". Fix at the transport boundary.
  *
  * The model's tool args are `{ "operations": [...] }` — there is NO `type`
@@ -644,7 +662,7 @@ export function latestUserText(messages: any[]): string {
 
 /**
  * Build an applyDocumentOperations input from the AI text output.
- * Follows xl-ai's operation schema (html format, idsSuffixed):
+ * Follows rust-ai's operation schema (html format, idsSuffixed):
  * - referenceId / id MUST end with `$`
  * - blocks MUST be HTML strings (not block objects)
  * - selection → update ops (preserving format); no selection → add op after cursor
@@ -701,11 +719,11 @@ export async function buildApplyDocumentInput(
      *  can be stale. Prefer the AI menu's anchored block (resolved at invoke time)
      *  when it disagrees with the live cursor. */
     const anchored = findBlock(editor, resolveActiveBlockId(editor) || "");
-    /** xl-ai deletes the empty cursor block before executing (deleteEmptyCursorBlock
-     *  in onStart, when the doc has other content) — anchoring on it fails
-     *  validation with "referenceId not found". Anchor on the previous block
-     *  instead when the cursor block is empty (exactly the block xl-ai removes).
-     *  Single-empty-block docs are safe: there xl-ai does NOT delete it. */
+    /** Anchor add-ops on the previous block when the cursor block is empty: the
+     *  empty cursor block would otherwise keep the new content below it, and a
+     *  referenced empty block can be gone before the operations execute
+     *  ("referenceId not found"). Single-empty-block documents keep the cursor
+     *  block as the anchor. */
     const useAnchored = !!anchored && anchored.id !== cursor?.block?.id;
     const refBlock = useAnchored
       ? anchored

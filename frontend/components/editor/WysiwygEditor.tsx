@@ -1,20 +1,20 @@
 /** WYSIWYG block editor powered by BlockNoteJS. Loads markdown, syncs changes back,
- *  and hosts the xl-ai extension (transport lives in utils/aiTransport).
+ *  and hosts local AI extension (transport lives in utils/aiTransport).
  *
  *  Keep-alive host: the `cached` editor INSTANCE is created once per file
  *  (utils/editorFactory) and survives tab switches — only the view
  *  (BlockNoteView) remounts. Markdown is parsed once; undo history persists.
  *  In-flight AI is settled and serialized before any view detaches. */
-import { useCallback, useEffect, useRef } from 'react'
-import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, useExtensionState, type FormattingToolbarProps } from '@blocknote/react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
-import '@blocknote/xl-ai/style.css'
+
 import { combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
 import { Selection, TextSelection } from 'prosemirror-state'
 import { getMathSlashMenuItems } from '@blocknote/math-block'
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
-import { AIExtension } from '@blocknote/xl-ai'
+
 import { useEditorStore } from '../../stores/editor'
 import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
@@ -187,10 +187,17 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     return () => el.removeEventListener('click', onClick)
   }, [editor])
 
-  /** Follow the AI writing position. xl-ai's built-in auto-scroll self-disables once content
+  /** Follow AI writing position. Local app scrolls current block while content
    *  outgrows the viewport (its scroll-event race kills `autoScroll` under streaming), so we
    *  scroll the writing block ourselves and stop only on real user input (wheel/touch/keys). */
-  const aiMenu: any = useExtensionState<any>(AIExtension, { editor, selector: (s: any) => s.aiMenuState })
+  const aiExt: any = editor?.getExtension?.('ai') ?? null
+  /** Subscribe to the AI store. 'thinking'
+   *  and 'error' transition with no content change, so reading the store during
+   *  render would leave `isAiWriting` stale and keep previews paused. */
+  const aiMenu: any = useSyncExternalStore(
+    useCallback((onChange: () => void) => (aiExt ? aiExt.store.subscribe(onChange) : () => {}), [aiExt]),
+    () => (aiExt ? aiExt.store.state.aiMenuState : 'closed'),
+  )
   const isAiWriting = !!aiMenu && aiMenu !== 'closed' && aiMenu.status === 'ai-writing'
   /** Pause the full-doc wikilink decoration scan while AI streams (it runs on
    *  every transaction = one O(document) regex scan per 50ms batch otherwise).
@@ -199,7 +206,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   useEffect(() => {
     setWikilinkStylerPaused(isAiWriting)
     setPreviewRenderingPaused(isAiWriting)
-    /** Autosave gate (store-level): never persist while xl-ai streams. Dirty is
+    /** Autosave gate (store-level): never persist while AI streams. Dirty is
      *  re-set when writing ends → a fresh autosave writes the full result. */
     useEditorStore.getState().setAiWriting(isAiWriting)
     if (!isAiWriting) (editor as any).prosemirrorView?.dispatch((editor as any).prosemirrorView.state.tr)
@@ -238,24 +245,23 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     }
   }, [isAiWriting])
 
-  /** Follow xl-ai's caret, not the whole writing block. A long pre can exceed
+  /** Follow AI caret, not whole writing block. A long pre can exceed
    *  the viewport, making block-level bounds permanently out of view and
-   *  triggering scroll/layout work on every streamed mutation. */
+   *  triggering scroll/layout work on every streamed mutation. One measure per
+   *  frame while writing: the character reveal moves the caret through
+   *  class-only decoration updates, which a MutationObserver watching
+   *  childList/characterData never reports. */
   useEffect(() => {
     if (!isAiWriting || !aiMenu?.blockId) return
     const root = editor.domElement
     if (!root) return
     let raf = 0
-    const scroll = () => {
-      if (!followRef.current || raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        followAiWritingCursorInRoot(root, aiMenu.blockId)
-      })
+    const tick = () => {
+      raf = requestAnimationFrame(tick)
+      if (followRef.current) followAiWritingCursorInRoot(root, aiMenu.blockId)
     }
-    const mo = new MutationObserver(scroll)
-    mo.observe(root, { childList: true, subtree: true, characterData: true })
-    return () => { mo.disconnect(); if (raf) cancelAnimationFrame(raf) }
+    raf = requestAnimationFrame(tick)
+    return () => { if (raf) cancelAnimationFrame(raf) }
   }, [isAiWriting, aiMenu?.blockId, editor])
   const { setBlockEditor, setFlushEditor } = useEditorStore()
   const onSyncRef = useRef(onSync)
@@ -272,7 +278,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   const markdownRef = useRef(markdown)
   markdownRef.current = markdown
   const dirtyRef = useRef(false)
-  /** TipTap emits `update` for UI-only option changes such as xl-ai toggling
+  /** TipTap emits `update` for UI-only option changes such as AI toggling
    * editable state when the FAB opens. ProseMirror documents are immutable, so
    * identity changes only when document content actually changes. */
   const documentRef = useRef(editor.prosemirrorState.doc)
@@ -328,7 +334,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
        *  stream would otherwise complete into a detached view). Abort is a
        *  no-op unless the AI is actually thinking/ai-writing. */
       try {
-        ;(editor as any).getExtension?.(AIExtension)?.abort?.('view detached')
+        ;(editor as any).getExtension?.('ai')?.abort?.('view detached')
       } catch {}
     }
   }, [editor, setBlockEditor])
@@ -338,7 +344,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     const sync = async () => {
       exitingRef.current = true
       try {
-      const ai = (editor as any).getExtension?.(AIExtension)
+      const ai = (editor as any).getExtension?.('ai')
       const isStreaming = () => {
         const state = ai?.store?.state?.aiMenuState
         return state !== 'closed' && (state?.status === 'thinking' || state?.status === 'ai-writing')
