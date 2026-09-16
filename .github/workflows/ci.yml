@@ -32,6 +32,8 @@ jobs:
         run: npx tsc -b
       - name: ACL guard (every Tauri command has an allow entry)
         run: node test/check-acl.mjs
+      - name: Docker path guard (shared src-tauri modules are copied)
+        run: node test/check-docker-paths.mjs
       - name: Frontend tests
         run: npm test
       - name: Check version consistency (manifests + locks + changelog section)
