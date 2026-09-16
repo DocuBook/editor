@@ -6,6 +6,10 @@
 
 - Relicensed from GPL-3.0 to **AGPL-3.0** after removing the last GPL dependency. AGPL-3.0 extends source obligations to software offered over a network, so a **modified** hosted version must publish its source — or the operator can arrange a commercial license instead.
 
+### 🐛 Bug Fixes
+
+- Auto commit messages: a multi-file change set is now summarised from the real diff — the prompt carries a bounded excerpt of the changed lines instead of diff statistics alone — while a single-file change set skips the AI round-trip and uses the deterministic file name.
+
 ### 🔄 Refactor
 
 - Replaced the proprietary `@blocknote/xl-ai` package with an in-house AI layer: a framework-neutral `rust-ai` module shared by the desktop agent and the web server (request assembly, SSE streaming, provider reachability, prompt policy, tool schema and error sanitization), plus a local ProseMirror extension for streaming document operations, the writing cursor, and accept/revert review.
