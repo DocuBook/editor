@@ -1,6 +1,8 @@
 # App command permissions — SEC-3: every Tauri command is scoped via the capabilities ACL.
-# Auto-generated from the generate_handler! list (canonical Tauri format).
-# If a command is added/removed, update this file and capabilities/default.json together.
+# Hand-maintained, derived from the generate_handler! list in lib.rs — the same
+# list also feeds capabilities/default.json and the server dispatch table.
+# `node test/check-acl.mjs` fails CI when this file, the capability file, or the
+# server dispatch drifts from it, so keep all four in the same change.
 
 [default]
 permissions = [
@@ -39,17 +41,20 @@ permissions = [
   "allow-git-status",
   "allow-health",
   "allow-list-api-keys",
+  "allow-list-models",
   "allow-list-trash",
   "allow-list-tree",
   "allow-markdown-preview",
   "allow-md-to-html",
   "allow-open-vault",
+  "allow-open-system-settings",
   "allow-read-file",
   "allow-read-file-binary",
   "allow-rename-file",
   "allow-restore-file",
   "allow-search-vault",
   "allow-set-api-key",
+  "allow-set-custom-endpoint",
   "allow-test-connection",
   "allow-wiki-backlinks",
   "allow-wiki-resolve",
