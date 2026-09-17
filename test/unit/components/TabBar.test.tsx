@@ -86,6 +86,9 @@ describe('responsive tabs', () => {
     const activeTab = document.querySelector<HTMLElement>('[data-tab-path]')!
     expect(label?.classList.contains('truncate')).toBe(true)
     expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
+    // Tab boundaries come from the strip (adjacent-sibling rule), so no tab ever
+    // carries a border of its own — that is what left a dangling edge before.
+    expect(document.querySelector('.tab-strip')).not.toBeNull()
     expect(activeTab.classList.contains('border-r')).toBe(false)
     expect(activeTab.className).not.toContain('shadow-[inset_0_-1px_0_var(--color-accent)]')
   })
@@ -99,7 +102,10 @@ describe('responsive tabs', () => {
       'notes/last.md',
     ])
     const activeTab = document.querySelector<HTMLElement>('[data-tab-path="notes/active-document-with-a-long-name.md"]')!
-    expect(activeTab.classList.contains('border-r')).toBe(true)
+    expect(document.querySelector('.tab-strip')).not.toBeNull()
+    // No right edge on the last tab: the strip draws boundaries between tabs only.
+    expect(document.querySelector<HTMLElement>('[data-tab-path="notes/last.md"]')!.classList.contains('border-r')).toBe(false)
+    expect(activeTab.classList.contains('border-r')).toBe(false)
     expect(activeTab.className).not.toContain('shadow-[inset_0_-1px_0_var(--color-accent)]')
     expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
     expect(document.querySelector('[aria-label="Editor actions"]')).toBeNull()

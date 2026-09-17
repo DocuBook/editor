@@ -60,7 +60,7 @@ async function api(cmd, args = {}, cookie = '') {
   return { status: res.status, text: await res.text() }
 }
 
-const textarea = () => page.locator('textarea[placeholder="Send message to AI writing..."]')
+const textarea = () => page.locator('textarea[aria-label="AI prompt"]')
 const showPrompts = () => page.locator('button[aria-label="Show AI prompts"]')
 const aiToolbarBtn = () => page.locator('button[aria-label="Edit with AI"]')
 /** Prompt chips exist in two shapes: the composer's own FAB list renders real

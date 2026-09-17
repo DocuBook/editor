@@ -129,7 +129,7 @@ try {
   // Opening/closing the prompt list only toggles editor editability. TipTap emits
   // an update for that UI-only change; it must not dirty and lossy-serialize the file.
   await page.getByRole('button', { name: 'Show AI prompts' }).click()
-  await page.getByPlaceholder('Send message to AI writing...').waitFor()
+  await page.locator('textarea[aria-label="AI prompt"]').waitFor()
   await page.keyboard.press('Escape')
   await page.waitForTimeout(2200)
   ok('prompt open/close preserves raw Markdown bytes', readFileSync(`${VAULT}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
@@ -140,7 +140,7 @@ try {
   // Open the AI menu (Ctrl+Alt+L) and submit — the menu input autofocuses
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
-  const promptBox = page.locator('textarea[placeholder="Send message to AI writing..."]')
+  const promptBox = page.locator('textarea[aria-label="AI prompt"]')
   await promptBox.waitFor()
   // Selection-aware prompts intentionally do not show “Write Anything”; chip
   // focus behavior has its own ai-chat-focus suite.
@@ -155,7 +155,7 @@ try {
   await page.getByText('Revert', { exact: true }).waitFor()
   // Review keeps the prompt input mounted (old AIMenu parity): the user can
   // type the next instruction while deciding accept/revert.
-  await page.getByPlaceholder('Send message to AI writing...').waitFor()
+  await page.locator('textarea[aria-label="AI prompt"]').waitFor()
   ok('Path B: text-only request renders review', askAiHits === 1)
 
   // Escape dismisses the AI review back to the idle composer (the FAB is gone;
@@ -190,7 +190,7 @@ try {
   // Revert closes the review and restores the editor; the composer stays mounted,
   // so the user can refocus it and send a follow-up prompt straight away.
   await page.getByText('Revert', { exact: true }).click()
-  await page.getByPlaceholder('Send message to AI writing...').click()
+  await page.locator('textarea[aria-label="AI prompt"]').click()
   await page.keyboard.type('leave unchanged')
   await page.keyboard.press('Enter')
   await page.locator('[data-sonner-toast]').filter({ hasText: /AI made no document changes/i }).waitFor()

@@ -90,10 +90,19 @@ function run(argv) {
 
 /** Rebuild the wiki index after a file mutation. The index is a snapshot taken
  *  at open_vault — without this, suggest/backlinks/resolve stay stale until a
- *  hard refresh (reopen) reads new files. Cheap enough per save on desktop. */
+ *  hard refresh (reopen) reads new files. Cheap enough per save on desktop.
+ *
+ *  The vault lock only covers the file list: the content scan reads every
+ *  markdown file, and holding the vault mutex across it would stall tree/read/
+ *  search on every save. */
 fn rescan_wiki(state: &State<'_, AppState>) {
+    let (root, files) = {
+        let vault = state.vault.lock().expect("lock");
+        let Some(v) = vault.as_ref() else { return };
+        (v.root().to_path_buf(), v.walk("", crate::vault::WalkKind::Markdown))
+    };
     if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
-        w.scan();
+        w.scan(&root, files);
     }
 }
 
@@ -106,7 +115,7 @@ fn valid_vault_name(name: &str) -> bool {
 pub fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
     let v = crate::vault::Vault::new(path)?;
     let name = v.name();
-    let mut w = crate::wiki::WikiIndex::new(v.root()); w.scan();
+    let mut w = crate::wiki::WikiIndex::new(); w.scan(v.root(), v.walk("", crate::vault::WalkKind::Markdown));
     eprintln!("[docubook] open_vault: {} (git repo: {})", path, std::path::Path::new(path).join(".git").exists());
     let g = crate::git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);
@@ -126,6 +135,20 @@ pub fn create_vault(parent: &str, name: &str, state: State<AppState>) -> Result<
 #[tauri::command]
 pub fn close_vault(state: State<AppState>) -> Result<(), String> {
     *state.vault.lock().expect("lock") = None; *state.wiki.lock().expect("lock") = None; *state.git.lock().expect("lock") = None; Ok(())
+}
+
+#[tauri::command]
+pub async fn resolve_mentions(request: crate::vault::mentions::ResolveRequest, state: State<'_, AppState>) -> Result<String, String> {
+    use crate::vault::mentions::{Bundle, resolve};
+    if request.mentions.is_empty() { return serde_json::to_string(&Bundle::default()).map_err(|e| e.to_string()); }
+    // Clone the shared handle, not the vault: the blocking task locks the open
+    // vault (Vault is Send but not Sync, so it cannot be borrowed across threads).
+    let vault = state.vault.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let guard = vault.lock().map_err(|_| "Vault lock poisoned".to_string())?;
+        let Some(v) = guard.as_ref() else { return serde_json::to_string(&Bundle::default()).map_err(|e| e.to_string()); };
+        serde_json::to_string(&resolve(v, request)).map_err(|e| e.to_string())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

@@ -86,10 +86,10 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
         </span>
       </span>
       )}
-      <div ref={tabStripRef} className={'flex-1 min-w-0 flex items-stretch h-full overflow-y-hidden scrollbar-none ' + (compact ? 'overflow-hidden' : 'overflow-x-auto')}>
+      <div ref={tabStripRef} className={'tab-strip flex-1 min-w-0 flex items-stretch h-full overflow-y-hidden scrollbar-none ' + (compact ? 'overflow-hidden' : 'overflow-x-auto')}>
         {tabs.length === 0 ? <span className="text-foreground-subtle italic self-center">No file open</span> : visibleTabs.map(tab => (
           <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
-            className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-6 pr-8 ' : 'whitespace-nowrap shrink-0 px-8 border-r border-border-subtle ') + (activeTab === tab.path ? 'tab-active bg-background text-foreground' : 'tab-inactive text-foreground-subtle')}>
+            className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-6 pr-8 ' : 'whitespace-nowrap shrink-0 px-8 ') + (activeTab === tab.path ? 'tab-active bg-background text-foreground' : 'tab-inactive text-foreground-subtle')}>
             {activeTab === tab.path && <span data-testid="active-tab-indicator" aria-hidden="true" className={'absolute size-1.5 rounded-full bg-accent ' + (compact ? 'left-2' : 'left-3')} />}
             <span title={compact ? tab.name : undefined} className={(compact ? 'min-w-0 truncate ' : '') + (tab.deleted ? 'line-through opacity-50' : '')}>{tab.name}</span>
             {activeTab === tab.path && (

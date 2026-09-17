@@ -1,0 +1,212 @@
+// @vitest-environment jsdom
+
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('../../../frontend/utils/aiMenu', () => ({
+  getDefaultAIMenuItems: () => [],
+}))
+
+const invokeMock = vi.fn()
+vi.mock('../../../frontend/lib/ipc', () => ({
+  invoke: (...args: any[]) => invokeMock(...args),
+}))
+
+import AiFloatingChat from '../../../frontend/components/editor/AiFloatingChat'
+import { useAiChat } from '../../../frontend/stores/aiChat'
+import { useAiSettings } from '../../../frontend/stores/aiSettings'
+import { useEditorStore } from '../../../frontend/stores/editor'
+
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+
+/** jsdom has no layout, so the dropdown's scroll-into-view is a no-op here. */
+Element.prototype.scrollIntoView = () => {}
+
+const files = (names: string[]) => names.map(name => ({ name, path: name, type: '0' }))
+const folder = (name: string) => ({ name, path: name, type: '1' })
+
+let root: Root | null
+let tree: Record<string, unknown>
+
+function makeAi() {
+  return {
+    store: { state: { aiMenuState: 'closed' }, subscribe: () => () => {} },
+    openAIMenuAtBlock: vi.fn(),
+    closeAIMenu: vi.fn(),
+    acceptChanges: vi.fn(),
+    rejectChanges: vi.fn(),
+    abort: vi.fn().mockResolvedValue(undefined),
+    retry: vi.fn().mockResolvedValue(undefined),
+    invokeAI: vi.fn(),
+  }
+}
+
+/** React listens for `input`; the native setter bypasses React's value tracker. */
+function typeInto(el: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+  setter.call(el, value)
+  el.setSelectionRange(value.length, value.length)
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+async function settle() {
+  await act(async () => {
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+}
+
+const options = () => Array.from(document.querySelectorAll('[role="option"]')).map(node => node.textContent ?? '')
+const textarea = () => document.querySelector('textarea')!
+
+function render() {
+  act(() => root!.render(<AiFloatingChat />))
+}
+
+function listTreeCalls() {
+  return invokeMock.mock.calls.filter(([cmd]) => cmd === 'list_tree').length
+}
+
+beforeEach(() => {
+  document.body.innerHTML = '<div id="root"></div>'
+  root = createRoot(document.getElementById('root')!)
+  tree = {
+    '': [folder('docs'), folder('assets'), ...files(['CHANGELOG.md'])],
+    docs: [folder('notes'), ...files(['guide.md', 'CHANGELOG-old.md'])],
+    'docs/notes': files(['guide.md']),
+    assets: [],
+  }
+  useAiChat.setState({ expanded: false, input: '', focusRequest: 0, selectionPromptOpen: false, mentionNotice: null })
+  useAiSettings.setState({ provider: 'openai', savedProviders: ['openai'] })
+  useEditorStore.setState({
+    blockEditor: {
+      getExtension: () => makeAi(),
+      getTextCursorPosition: () => ({ block: { id: 'b1' } }),
+      getSelection: () => undefined,
+    },
+  })
+  invokeMock.mockImplementation(async (cmd: string, args: any) => {
+    if (cmd !== 'list_tree') return '[]'
+    const entry = tree[args?.subpath ?? '']
+    if (entry === 'reject') throw new Error('permission denied')
+    return JSON.stringify(entry ?? [])
+  })
+})
+
+afterEach(() => {
+  if (root) act(() => root!.unmount())
+  root = null
+  useEditorStore.setState({ blockEditor: null })
+  vi.clearAllMocks()
+})
+
+describe('composer @mention picker', () => {
+  it('suggests a nested vault file from a partial name', async () => {
+    render()
+    act(() => typeInto(textarea(), '@old'))
+    await settle()
+
+    expect(options().some(label => label.includes('CHANGELOG-old.md'))).toBe(true)
+  })
+
+  it('offers folders so a folder mention stays recursive', async () => {
+    render()
+    act(() => typeInto(textarea(), '@doc'))
+    await settle()
+
+    const docs = Array.from(document.querySelectorAll('[role="option"]')).find(node => node.textContent?.includes('docs'))
+    expect(docs).toBeDefined()
+
+    act(() => (docs as HTMLButtonElement).click())
+    expect(textarea().value).toBe('@docs/ ')
+  })
+
+  it('names the folder for rows that share a basename', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    // Two `guide.md` files: the labels must differ, or the user cannot tell them apart.
+    const labels = options()
+    expect(labels).toHaveLength(2)
+    expect(labels[0]).not.toBe(labels[1])
+    expect(labels.some(label => label.includes('docs/notes'))).toBe(true)
+  })
+
+  it('inserts the full nested path for an ambiguous basename', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    const nested = Array.from(document.querySelectorAll('[role="option"]')).find(node => node.textContent?.includes('docs/notes'))
+    act(() => (nested as HTMLButtonElement).click())
+
+    expect(textarea().value).toBe('@docs/notes/guide.md ')
+  })
+
+  it('keeps suggestions when one folder cannot be listed', async () => {
+    tree.assets = 'reject'
+    render()
+    act(() => typeInto(textarea(), '@change'))
+    await settle()
+
+    expect(options().some(label => label.includes('CHANGELOG.md'))).toBe(true)
+    expect(document.body.textContent).toContain('1 folder could not be read')
+  })
+
+  it('walks the vault once per mention session, not per keystroke', async () => {
+    render()
+    act(() => typeInto(textarea(), '@c'))
+    await settle()
+    const afterFirst = listTreeCalls()
+    expect(afterFirst).toBeGreaterThan(0)
+
+    act(() => typeInto(textarea(), '@ch'))
+    act(() => typeInto(textarea(), '@cha'))
+    await settle()
+
+    expect(listTreeCalls()).toBe(afterFirst)
+  })
+
+  it('never opens the picker while typing an email address', async () => {
+    render()
+    act(() => typeInto(textarea(), 'me@mail.com'))
+    await settle()
+
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+  })
+
+  it('shows what the last request actually retrieved', () => {
+    render()
+    act(() => useAiChat.setState({ mentionNotice: '1 file in context · 1 skipped (CHANGELOG.md: not_found)' }))
+
+    expect(document.body.textContent).toContain('1 skipped (CHANGELOG.md: not_found)')
+  })
+
+  it('narrows the list as the query grows and reports an empty state', async () => {
+    render()
+    act(() => typeInto(textarea(), '@CHANGELOG'))
+    await settle()
+    // Substring match, case-insensitive: both changelogs qualify.
+    expect([...options()].sort()).toEqual(['CHANGELOG-old.md', 'CHANGELOG.md'])
+
+    act(() => typeInto(textarea(), '@CHANGELOG.md-nope'))
+    await settle()
+    expect(options()).toEqual([])
+    expect(document.body.textContent).toContain('No matching files or folders')
+  })
+
+  it('closes on Escape without clearing what the user typed', async () => {
+    render()
+    act(() => typeInto(textarea(), 'summarise @change'))
+    await settle()
+    expect(document.querySelector('[role="listbox"]')).not.toBeNull()
+
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+    expect(textarea().value).toBe('summarise @change')
+  })
+})

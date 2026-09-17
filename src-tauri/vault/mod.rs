@@ -4,6 +4,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
+pub mod mentions;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
     pub path: String,
@@ -15,6 +17,9 @@ pub struct FileInfo {
 pub(crate) fn is_ignored_entry(name: &str) -> bool {
     matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash")
 }
+
+#[derive(Clone, Copy)]
+pub enum WalkKind { Markdown, Renderable, All }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct TrashEntry {
@@ -35,9 +40,9 @@ struct TrashMetadata {
 pub struct Vault {
     root: PathBuf,
     /// Cache: dir → whether its subtree contains any renderable file.
-    /// Built once per vault, invalidated on mutations. Turns the O(n²) tree
-    /// walk into O(n) build + O(1) lookups.
-    renderable: RefCell<HashMap<PathBuf, bool>>,
+    /// Built lazily on the first lookup and dropped by mutations, so opening a
+    /// vault does not pay for a walk nobody (currently) reads.
+    renderable: RefCell<Option<HashMap<PathBuf, bool>>>,
 }
 
 impl Vault {
@@ -45,11 +50,10 @@ impl Vault {
     pub fn new(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         if !root.is_dir() { return Err(format!("Not a directory: {}", path)); }
-        let v = Self { root, renderable: RefCell::new(HashMap::new()) };
-        v.build_renderable_cache();
-        Ok(v)
+        Ok(Self { root, renderable: RefCell::new(None) })
     }
-/** Get the vault root path. */
+/** Get the vault root path. Used by both crates: file serving and the wiki
+     *  index reads. */
     pub fn root(&self) -> &Path { &self.root }
 /** Get the vault directory name. */
     pub fn name(&self) -> String {
@@ -97,46 +101,81 @@ impl Vault {
 
     /// True if the subtree at `dir` contains at least one renderable file
     /// (recursive, skipping hidden/system dirs). Drives folder visibility.
-    /// Uses the cached map — O(1) after build_renderable_cache().
+    /// Builds the map on first use — O(1) after that.
     #[allow(dead_code)]
     fn dir_has_renderable(&self, dir: &Path) -> bool {
-        *self.renderable.borrow().get(dir).unwrap_or(&false)
+        if self.renderable.borrow().is_none() {
+            let map = self.build_renderable_cache();
+            *self.renderable.borrow_mut() = Some(map);
+        }
+        self.renderable.borrow().as_ref().and_then(|m| m.get(dir).copied()).unwrap_or(false)
     }
 
-    /// Build the `dir → has_renderable` map bottom-up in one walk. Each dir
-    /// is renderable if it holds a renderable file directly or any subdir is.
-    fn build_renderable_cache(&self) {
+    /// Build the `dir → has_renderable` map bottom-up in one shared walk.
+    fn build_renderable_cache(&self) -> HashMap<PathBuf, bool> {
         let mut map: HashMap<PathBuf, bool> = HashMap::new();
-        let mut stack: Vec<PathBuf> = vec![self.root.clone()];
-        let mut post: Vec<PathBuf> = Vec::new();
-        while let Some(d) = stack.pop() {
-            post.push(d.clone());
-            if let Ok(read) = std::fs::read_dir(&d) {
-                for e in read.flatten() {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    if is_ignored_entry(&name) { continue; }
-                    if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                        stack.push(e.path());
-                    } else if Self::is_renderable(&name) {
-                        map.insert(d.clone(), true);
-                    }
+        for rel in self.walk("", WalkKind::Renderable) {
+            let mut dir = self.root.join(rel).parent().map(Path::to_path_buf);
+            while let Some(path) = dir {
+                if !path.starts_with(&self.root) { break; }
+                map.insert(path.clone(), true);
+                if path == self.root { break; }
+                dir = path.parent().map(Path::to_path_buf);
+            }
+        }
+        map
+    }
+
+    /// Drop the cache after filesystem mutations so the next lookup rebuilds it.
+    fn invalidate_renderable_cache(&self) {
+        *self.renderable.borrow_mut() = None;
+    }
+
+    /// Enumerate files recursively beneath a vault-relative directory.
+    /// Results are relative to the vault root and sorted lexically.
+    pub fn walk(&self, subpath: &str, kind: WalkKind) -> Vec<String> {
+        let Ok(base) = self.safe_path(subpath) else { return vec![] };
+        let mut paths = Vec::new();
+        let mut stack = vec![base];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let mut entries: Vec<_> = entries.flatten().collect();
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries.into_iter().rev() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if is_ignored_entry(&name) { continue; }
+                let path = entry.path();
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    stack.push(path);
+                } else if match kind {
+                    WalkKind::Markdown => crate::markdown::is_markdown_name(&name),
+                    WalkKind::Renderable => Self::is_renderable(&name),
+                    WalkKind::All => true,
+                } {
+                    if let Ok(rel) = path.strip_prefix(&self.root) { paths.push(rel.to_string_lossy().to_string()); }
                 }
             }
         }
-        // Bottom-up: a dir is renderable if itself or any child is.
-        while let Some(d) = post.pop() {
-            let has = map.get(&d).copied().unwrap_or(false);
-            if has {
-                if let Some(p) = d.parent() { map.entry(p.to_path_buf()).or_insert(true); }
-            }
-        }
-        *self.renderable.borrow_mut() = map;
+        paths.sort();
+        paths
     }
 
-    /// Drop the cache after filesystem mutations so the next tree() rebuilds.
-    fn invalidate_renderable_cache(&self) {
-        self.renderable.borrow_mut().clear();
-        self.build_renderable_cache();
+    /// Resolve an exact vault path, then an extension-less Markdown path.
+    pub fn resolve_directory(&self, token: &str) -> Option<String> {
+        let path = self.safe_path(token).ok()?;
+        path.is_dir().then(|| token.to_string())
+    }
+
+    pub fn resolve_target(&self, token: &str) -> Option<String> {
+        let exact = self.safe_path(token).ok()?;
+        if exact.is_file() { return Some(token.to_string()); }
+        if Path::new(token).extension().is_none() {
+            for ext in ["md", "mdx"] {
+                let candidate = format!("{token}.{ext}");
+                if self.safe_path(&candidate).ok()?.is_file() { return Some(candidate); }
+            }
+        }
+        None
     }
 
     pub fn tree(&self, subpath: &str) -> Vec<FileInfo> {
@@ -159,8 +198,9 @@ impl Vault {
         files.sort_by_key(|a| a.name.to_lowercase());
         [dirs, files].concat()
     }
-    #[allow(dead_code)] // used by the web server crate for bounded API reads
-    fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    /** Bounded byte read for an index-owned path. `pub(crate)` so the wiki index
+     *  can read `Vault::walk` output without holding the vault lock. */
+    pub(crate) fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
         let file = std::fs::File::open(path).map_err(|e| format!("Read: {}", e))?;
         let mut data = Vec::new();
         file.take(max_bytes.saturating_add(1))
@@ -175,36 +215,21 @@ impl Vault {
 /** Read file content as UTF-8 string for desktop IPC callers. */
     #[allow(dead_code)] // unused by the web server crate, retained for desktop IPC
     pub fn read_file(&self, path: &str) -> Result<String, String> {
-        // Reference-completing fallback: an extension-less path that names a
-        // markdown vault file opens it (e.g. links written as `roadmap` instead
-        // of `roadmap.md`) — never appends twice (only when no extension present).
-        let f = self.safe_path(path)?;
-        let data = match std::fs::read(&f) {
-            Ok(d) => d,
-            Err(_) if !path.contains('.') => {
-                let md = self.safe_path(&format!("{path}.md"));
-                let mdx = self.safe_path(&format!("{path}.mdx"));
-                std::fs::read(md.or(mdx)?).map_err(|e| format!("Read: {}", e))?
-            }
-            Err(e) => return Err(format!("Read: {}", e)),
-        };
+        let target = self.resolve_target(path).ok_or_else(|| format!("Read: not found: {path}"))?;
+        let data = std::fs::read(self.safe_path(&target)?).map_err(|e| format!("Read: {e}"))?;
         Ok(String::from_utf8_lossy(&data).to_string())
     }
 
 /** Read UTF-8 content with a bounded allocation for web/API callers. */
     #[allow(dead_code)] // used by the web server crate for bounded API reads
     pub fn read_file_limited(&self, path: &str, max_bytes: u64) -> Result<String, String> {
-        let f = self.safe_path(path)?;
-        let data = match Self::read_limited(&f, max_bytes) {
-            Ok(data) => data,
-            Err(_e) if !f.exists() && !path.contains('.') => {
-                let md = self.safe_path(&format!("{path}.md"))?;
-                let mdx = self.safe_path(&format!("{path}.mdx"))?;
-                Self::read_limited(&md, max_bytes)
-                    .or_else(|_| Self::read_limited(&mdx, max_bytes))?
-            }
-            Err(e) => return Err(e),
-        };
+        self.read_bounded(path, max_bytes)
+    }
+
+    /// Read UTF-8 text with a byte limit; extension-less paths complete to .md/.mdx.
+    pub fn read_bounded(&self, path: &str, max_bytes: u64) -> Result<String, String> {
+        let target = self.resolve_target(path).ok_or_else(|| format!("Read: not found: {path}"))?;
+        let data = Self::read_limited(&self.safe_path(&target)?, max_bytes)?;
         Ok(String::from_utf8_lossy(&data).to_string())
     }
 /** Read a binary file as base64 (images etc). Same path-traversal protection
@@ -371,14 +396,14 @@ mod tests {
 
     #[test]
     fn vault_name_from_directory() {
-        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(HashMap::new()) };
+        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None) };
         assert_eq!(v.name(), "my-vault");
     }
 
     #[test]
     fn vault_name_root() {
         // root's file_name is None on some platforms, empty on others
-        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(HashMap::new()) };
+        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None) };
         assert_eq!(v.name(), "");
     }
 

@@ -4,6 +4,8 @@ use std::path::Path;
 use regex::Regex;
 use serde::Serialize;
 
+use crate::vault::Vault;
+
 #[derive(Debug, Serialize)]
 pub struct Backlink { pub path: String, pub name: String, pub snippet: String }
 #[derive(Debug, Serialize)]
@@ -13,54 +15,46 @@ pub struct Suggestion { pub path: String, pub title: String }
 /// Concept: a note is referenced by its normalized name (`[[Note Name]]` →
 /// `note-name`); the index maps every file to its link targets AND every
 /// normalized name to the actual file, so links resolve to real paths.
+/// Holds no vault of its own: the caller passes the vault root and the file
+/// list, so no second `Vault` is ever constructed. Reads go straight through the
+/// root because every path here comes from `Vault::walk`, never from user input.
 pub struct WikiIndex {
-    root: std::path::PathBuf,
     /// rel path -> normalized link targets
     links: HashMap<String, Vec<String>>,
-    files: Vec<std::path::PathBuf>,
+    /// rel paths of every indexed markdown file, in scan order
+    files: Vec<String>,
     /// normalized name -> rel path (first file that claims the name)
     name_to_path: HashMap<String, String>,
 }
 
 impl WikiIndex {
 /** Create an empty wiki index. Call `scan()` to populate. */
-    pub fn new(root: &Path) -> Self {
-        Self { root: root.to_path_buf(), links: HashMap::new(), files: Vec::new(), name_to_path: HashMap::new() }
+    pub fn new() -> Self {
+        Self { links: HashMap::new(), files: Vec::new(), name_to_path: HashMap::new() }
     }
 /** Walk all markdown files (`.md`/`.mdx`, recursive, skipping hidden dirs) and
- *  build the wikilink graph + name→path resolution map. */
-    pub fn scan(&mut self) {
+ *  build the wikilink graph + name→path resolution map.
+ *
+ *  `files` is the caller's `Vault::walk` output (the single enumerator for the
+ *  whole app); reading through `root` keeps this rebuild off the vault lock, so
+ *  a large vault cannot stall every other vault command on each save. */
+    pub fn scan(&mut self, root: &Path, files: Vec<String>) {
         self.links.clear(); self.files.clear(); self.name_to_path.clear();
         let link_re = Regex::new(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]").unwrap();
-        let root = self.root.clone();
-        self.scan_dir(&root, &link_re);
-    }
-
-    fn scan_dir(&mut self, dir: &Path, link_re: &Regex) {
-        if let Ok(entries) = std::fs::read_dir(dir) {
-            for e in entries.flatten() {
-                let p = e.path();
-                let name = e.file_name().to_string_lossy().to_string();
-                if crate::vault::is_ignored_entry(&name) { continue; }
-                if p.is_dir() { self.scan_dir(&p, link_re); continue; }
-                let ext = p.extension().and_then(|e| e.to_str()).unwrap_or_default();
-                // markdown family — .md/.mdx (single source in markdown.rs)
-                if !crate::markdown::is_markdown_name(ext) { continue; }
-                let rel = self.rel(&p);
-                self.files.push(p.clone());
-                let stem = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                self.name_to_path.entry(normalize(&stem)).or_insert_with(|| rel.clone());
-                if let Ok(c) = std::fs::read_to_string(&p) {
-                    let targets: Vec<String> = link_re.captures_iter(&c).map(|m| normalize(&m[1])).collect();
-                    self.links.insert(rel, targets);
-                }
+        for rel in &files {
+            let stem = Path::new(rel).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            self.name_to_path.entry(normalize(&stem)).or_insert_with(|| rel.clone());
+            if let Some(c) = read_indexed(root, rel) {
+                let targets: Vec<String> = link_re.captures_iter(&c).map(|m| normalize(&m[1])).collect();
+                self.links.insert(rel.clone(), targets);
             }
         }
+        self.files = files;
     }
 /** Return files that link TO the given path, with a one-line snippet of the link context.
  *  A link counts when its normalized text matches the target file's name/path,
  *  OR the link text resolves to the target file. */
-    pub fn backlinks(&self, target: &str) -> Vec<Backlink> {
+    pub fn backlinks(&self, root: &Path, target: &str) -> Vec<Backlink> {
         let t = normalize(target);
         let t_name = Path::new(target).file_stem().map(|s| normalize(&s.to_string_lossy())).unwrap_or_default();
         self.links.iter().filter(|(_, v)| {
@@ -71,7 +65,7 @@ impl WikiIndex {
             let matched = v.iter().find(|lt| lt.as_str() == t.as_str() || lt.as_str() == t_name.as_str() || self.resolve(lt.as_str()).map(|p| normalize(&p)) == Some(t.clone()))
                 .cloned().unwrap_or_else(|| t.clone());
             let name = Path::new(k).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-            Backlink { path: k.clone(), name, snippet: self.snippet_for_link(k, &matched) }
+            Backlink { path: k.clone(), name, snippet: self.snippet_for_link(root, k, &matched) }
         }).collect()
     }
 /** Resolve a `[[target]]` name to the actual relative file path, if it exists. */
@@ -85,35 +79,41 @@ impl WikiIndex {
             .map(|(_, p)| p.clone())
     }
 /** Suggest files matching a query (fuzzy by filename stem). */
-    pub fn suggest(&self, query: &str) -> Vec<Suggestion> {
+    pub fn suggest(&self, root: &Path, query: &str) -> Vec<Suggestion> {
         let q = query.to_lowercase();
         let mut by_name: Vec<Suggestion> = Vec::new();
         let mut by_content: Vec<Suggestion> = Vec::new();
-        for f in &self.files {
-            let name = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+        for rel in &self.files {
+            let name = Path::new(rel).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
             if name.to_lowercase().contains(&q) {
-                by_name.push(Suggestion { path: self.rel(f), title: name });
-            } else if let Ok(c) = std::fs::read_to_string(f) {
+                by_name.push(Suggestion { path: rel.clone(), title: name });
+            } else if let Some(c) = read_indexed(root, rel) {
                 // Content match — lets you link a note by what's IN it, not just
                 // its filename. Reads are bounded: stops once 20 total found.
                 if c.to_lowercase().contains(&q) {
-                    by_content.push(Suggestion { path: self.rel(f), title: name });
+                    by_content.push(Suggestion { path: rel.clone(), title: name });
                 }
             }
             if by_name.len() + by_content.len() >= 20 { break; }
         }
         by_name.into_iter().chain(by_content).take(20).collect()
     }
-    fn rel(&self, path: &Path) -> String { path.strip_prefix(&self.root).map(|p| p.to_string_lossy().to_string()).unwrap_or_default() }
 /** Extract the first line containing a wikilink whose text normalizes to `lt`. */
-    fn snippet_for_link(&self, file: &str, lt: &str) -> String {
-        let Ok(c) = std::fs::read_to_string(self.root.join(file)) else { return String::new() };
+    fn snippet_for_link(&self, root: &Path, file: &str, lt: &str) -> String {
+        let Some(c) = read_indexed(root, file) else { return String::new() };
         let link_re = Regex::new(r"\[\[([^\]|]+)").unwrap();
         c.lines().find_map(|l| {
             let hit = link_re.captures_iter(l).any(|m| normalize(&m[1]) == lt);
             if hit { Some(l.trim().chars().take(140).collect()) } else { None }
         }).unwrap_or_default()
     }
+}
+
+/** Bounded text read for an index-owned vault path. Every path reaching here is
+ *  `Vault::walk` output, so no traversal check is needed. */
+fn read_indexed(root: &Path, rel: &str) -> Option<String> {
+    let data = Vault::read_limited(&root.join(rel), 4 * 1024 * 1024).ok()?;
+    Some(String::from_utf8_lossy(&data).to_string())
 }
 
 fn normalize(s: &str) -> String { s.trim().to_lowercase().replace(' ', "-").trim_matches('/').to_string() }
@@ -156,19 +156,20 @@ mod tests {
         std::fs::write(dir.join("beta-note.md"), "# Beta\n\nback to [[alpha]]").unwrap();
         std::fs::write(dir.join("gamma.md"), "gamma only").unwrap();
 
-        let mut w = WikiIndex::new(&dir);
-        w.scan();
+        let vault = Vault::new(dir.to_str().unwrap()).unwrap();
+        let mut w = WikiIndex::new();
+        w.scan(vault.root(), vault.walk("", crate::vault::WalkKind::Markdown));
         // link resolution: [[Beta Note]] → beta-note.md
         assert_eq!(w.resolve("Beta Note").as_deref(), Some("beta-note.md"));
         assert_eq!(w.resolve("alpha").as_deref(), Some("alpha.md"));
         // backlinks of alpha: beta-note.md links to it, with a snippet
-        let bl = w.backlinks("alpha.md");
+        let bl = w.backlinks(vault.root(), "alpha.md");
         assert_eq!(bl.len(), 1);
         assert_eq!(bl[0].path, "beta-note.md");
         assert!(bl[0].snippet.contains("back to [[alpha]]"));
         // suggest by stem — name matches first; content match ("Gamma" in
         // alpha.md) follows after
-        let gam = w.suggest("gam");
+        let gam = w.suggest(vault.root(), "gam");
         assert_eq!(gam[0].path, "gamma.md");
         assert!(gam.iter().any(|s| s.path == "alpha.md"), "content match must also be suggested");
         let _ = std::fs::remove_dir_all(&dir);
@@ -184,16 +185,17 @@ mod tests {
         std::fs::write(dir.join(".trash/old.md"), "# Old").unwrap();
         std::fs::write(dir.join("notes.md"), "# Notes").unwrap();
 
-        let mut w = WikiIndex::new(&dir);
-        w.scan();
+        let vault = Vault::new(dir.to_str().unwrap()).unwrap();
+        let mut w = WikiIndex::new();
+        w.scan(vault.root(), vault.walk("", crate::vault::WalkKind::Markdown));
         // recursive: nested note indexed; .trash excluded
         assert!(w.resolve("roadmap").as_deref() == Some("projects/roadmap.md"), "nested note must resolve");
         assert!(w.resolve("old").is_none(), ".trash must be excluded");
         // content search: query matches words INSIDE the note, not its filename
-        let hits = w.suggest("launch");
+        let hits = w.suggest(vault.root(), "launch");
         assert!(hits.iter().any(|s| s.path == "projects/roadmap.md"), "content match must be found");
         // filename match still wins the ordering (first)
-        let by_name = w.suggest("road");
+        let by_name = w.suggest(vault.root(), "road");
         assert_eq!(by_name[0].path, "projects/roadmap.md");
         let _ = std::fs::remove_dir_all(&dir);
     }

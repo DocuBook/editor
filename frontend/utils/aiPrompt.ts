@@ -1,4 +1,4 @@
-import { injectDocumentStateMessages } from './aiPromptState';
+import { injectDocumentStateMessages, injectMentionContextMessages } from './aiPromptState';
 
 import { CURSOR_MARKER } from "./aiBlocks";
 
@@ -13,6 +13,7 @@ export type BuildAiPromptInput = {
   mode: AiPromptMode;
   messages: any[];
   documentState?: any;
+  mentionContext?: any;
   documentMarkdown: string;
   selectedMarkdown: string;
   userText: string;
@@ -104,7 +105,7 @@ function withDocumentState(input: BuildAiPromptInput): any[] {
 }
 
 function toolMessages(input: BuildAiPromptInput): PromptMessage[] {
-  const injected = injectDocumentStateMessages(withDocumentState(input) as any);
+  const injected = injectMentionContextMessages(injectDocumentStateMessages(withDocumentState(input) as any), input.mentionContext);
   const latestIndex = latestUserIndex(injected);
   return (
     latestIndex >= 0
@@ -117,6 +118,11 @@ function textMessages(input: BuildAiPromptInput): PromptMessage[] {
   const messages = (input.messages || []).map(cleanMessage);
   const latestIndex = latestUserIndex(input.messages || []);
   const history = latestIndex >= 0 ? messages.slice(0, latestIndex) : messages;
+
+  const mentionMessage = input.mentionContext && (input.mentionContext.files?.length || input.mentionContext.skipped?.length)
+    ? cleanMessage({ role: 'assistant', content: injectMentionContextMessages([{ role: 'user', id: 'latest' }], input.mentionContext)[0]?.parts?.[0]?.text })
+    : null;
+  const contextMessages = mentionMessage ? [mentionMessage] : [];
   return [
     ...history,
     {
@@ -126,6 +132,7 @@ function textMessages(input: BuildAiPromptInput): PromptMessage[] {
         input.selectedMarkdown,
       ),
     },
+    ...contextMessages,
     { role: "user", content: input.userText },
   ];
 }

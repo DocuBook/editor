@@ -10,9 +10,13 @@ interface AiChatState {
   expanded: boolean
   input: string
   focusRequest: number
+  /** Retrieval outcome of the last prompt (e.g. "2 files in context · 1 skipped").
+   *  Set by the transport, rendered by the composer. */
+  mentionNotice: string | null
   setSelectionPromptOpen: (v: boolean) => void
   setExpanded: (v: boolean) => void
   setInput: (v: string) => void
+  setMentionNotice: (v: string | null) => void
   /** Keyboard shortcut / toolbar prompt consumed by the mounted composer. */
   focusInput: (input?: string) => void
   /** Composer action opens/closes prompt suggestions without touching active AI work. */
@@ -24,9 +28,11 @@ export const useAiChat = create<AiChatState>((set, get) => ({
   expanded: false,
   input: '',
   focusRequest: 0,
+  mentionNotice: null,
   setSelectionPromptOpen: (v) => set({ selectionPromptOpen: v }),
   setExpanded: (v) => set({ expanded: v }),
   setInput: (input) => set({ input }),
+  setMentionNotice: (mentionNotice) => set({ mentionNotice }),
   focusInput: (input) => set((state) => ({
     expanded: false,
     input: input === undefined ? state.input : input,

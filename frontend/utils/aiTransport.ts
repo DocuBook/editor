@@ -14,6 +14,7 @@
  */
 import { invoke, listen } from "../lib/ipc";
 import { toast } from "sonner";
+import { useAiChat } from "../stores/aiChat";
 import { useAiSettings } from "../stores/aiSettings";
 import { useAiThreads } from "../stores/aiThreads";
 
@@ -30,12 +31,31 @@ import {
   suffixOperationIds,
 } from "./aiBlocks";
 import { buildAiPrompt } from "./aiPrompt";
+import { parseMentions } from "./aiMentions";
 import { isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
  *  document writes while the AI types (smooth instead of janky streaming). */
 const AI_DELTA_BATCH_MS = 50;
+
+/** Human summary of what retrieval actually delivered. A mention that was
+ *  skipped (typo, non-markdown, budget) must be visible: otherwise "the AI
+ *  ignored my file" and "the file never reached the request" look identical.
+ *  Paths only — never file content. */
+function mentionNotice(context: any): string | null {
+  if (!context) return null;
+  const files = context.files?.length ?? 0;
+  const truncated = context.totals?.truncated ?? 0;
+  const skipped: any[] = context.skipped ?? [];
+  const parts = [`${files} file${files === 1 ? "" : "s"} in context`];
+  if (truncated) parts.push(`${truncated} truncated`);
+  if (skipped.length) {
+    const shown = skipped.slice(0, 2).map((item) => `${item.path}: ${item.reason}`).join(", ");
+    parts.push(`${skipped.length} skipped (${shown}${skipped.length > 2 ? ", …" : ""})`);
+  }
+  return parts.join(" · ");
+}
 
 function safeAiTransportError(error: unknown) {
   return String(error).includes("AI response too large")
@@ -231,6 +251,26 @@ async function runSendMessages(
           ? editor.blocksToMarkdownLossy(sel.blocks)
           : "";
         const userText = latestUserText(messages);
+        const parsedMentions = parseMentions(userText);
+        const mentionResult = parsedMentions.hasMentions
+          ? await invoke<any>("resolve_mentions", { request: { mentions: parsedMentions.mentions.map(({ token, kind }) => ({ token, kind })), excludePath: deps.filePath } })
+          : undefined;
+        /** The Tauri command may hand back the bundle as a serialized string; a
+         *  malformed payload must not abort the turn. Mentions are optional
+         *  context, so a decode failure degrades to "no context" and the notice
+         *  line stays empty rather than the request failing for an unrelated
+         *  parse error. */
+        const mentionContext = (() => {
+          if (typeof mentionResult !== 'string') return mentionResult;
+          try {
+            return JSON.parse(mentionResult);
+          } catch {
+            console.debug("[ai] mention payload was not valid JSON; sending without vault context");
+            return undefined;
+          }
+        })();
+        /** Publish the retrieval outcome for the composer's context line. */
+        useAiChat.getState().setMentionNotice(mentionNotice(mentionContext));
         const taskRules = buildTaskFormattingRules(userText);
         bufferText = useTools;
         const documentState = [...messages]
@@ -243,6 +283,7 @@ async function runSendMessages(
           mode: useTools ? ("tool" as const) : ("text" as const),
           messages,
           documentState,
+          mentionContext,
           documentMarkdown: docContext,
           selectedMarkdown: selText,
           userText,
@@ -268,6 +309,7 @@ async function runSendMessages(
             console.debug("[ai] prompt metrics", {
               mode: useTools ? "tool" : "text",
               documentStateBytes: JSON.stringify(documentState ?? {}).length,
+              mentionContextChars: JSON.stringify(mentionContext ?? {}).length,
               documentMarkdownChars: docContext.length,
               selectedMarkdownChars: selText.length,
               promptChars: msgs.reduce((total, message) => total + String(message.content ?? "").length, 0),
@@ -442,7 +484,10 @@ async function runSendMessages(
       } catch (error) {
         if (abortSignal?.aborted) return;
         const message = safeAiTransportError(error);
-        console.error("[ai] transport failed");
+        /** Log the cause: the generic toast is intentional (no vault/provider
+         *  detail leaks to the user), but swallowing the error made field
+         *  reports like "[ai] transport failed" impossible to diagnose. */
+        console.error("[ai] transport failed", error);
         toast.error(message);
         try {
           controller.error(new Error(message));

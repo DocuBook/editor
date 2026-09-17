@@ -98,7 +98,7 @@ try {
   await page.locator('.bn-editor').click()
   await page.keyboard.press('Meta+a')
   await page.keyboard.press('Control+Alt+L')
-  const prompt = page.locator('textarea[placeholder="Send message to AI writing..."]')
+  const prompt = page.locator('textarea[aria-label="AI prompt"]')
   await prompt.waitFor()
   await prompt.fill('expand the snippet into three blocks')
   await page.keyboard.press('Enter')
