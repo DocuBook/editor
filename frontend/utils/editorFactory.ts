@@ -21,6 +21,7 @@ import { AIExtension } from './aiExtension'
 import { getAIDictionary } from './aiMenu'
 import { fileUrl, isAbsoluteUrl, isSafeImageUrl } from '../lib/ipc'
 import { getSchema, wikilinkStyler } from '../components/editor/setup'
+import { syntaxHighlighting } from './codeHighlighting'
 import { createAiTransport } from './aiTransport'
 import { createSelectionAwareDocumentStateBuilder } from './aiBlocks'
 
@@ -61,6 +62,7 @@ export function createBlockEditor(vaultPath: string, filePath: string): CachedEd
         agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
       }),
       wikilinkStyler,
+      syntaxHighlighting,
     ],
   })
   return { editor, loaded: false, loadedMarkdown: null }

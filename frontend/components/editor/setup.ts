@@ -1,4 +1,4 @@
-import { createElement, useRef, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useRef, useSyncExternalStore } from 'react'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
 import { createCodeBlockConfig, parsePreCode, parsePreCodeContent } from '@blocknote/core/blocks'
 import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
@@ -20,6 +20,7 @@ import { createDiagramBlockConfig, DiagramBlockPreviewWithPopup, parseDiagramCod
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
+import { parseCodeBlockInfo, withCodeBlockTitle } from '../../utils/codeBlockInfo'
 
 let _previewRenderingPaused = false
 const _previewRenderingListeners = new Set<() => void>()
@@ -40,7 +41,7 @@ const usePreviewRenderingPaused = () => useSyncExternalStore(
 /* oxlint-disable react/refs -- deliberate render-time ref caching freezes preview
  * components during AI writing; moving these reads/writes into effects
  * reintroduces the preview flicker this wrapper exists to prevent. */
-function StableSourcePreview({ paused, props, language, Preview, fallback }: { paused: boolean; props: any; language: string; Preview: any; fallback: 'block' | 'inline' }) {
+function StableSourcePreview({ paused, props, language, codeInfo, Preview, fallback }: { paused: boolean; props: any; language: string; codeInfo: string; Preview: any; fallback: 'block' | 'inline' }) {
   const stableProps = useRef<any | null>(null)
   const stableElement = useRef<any | null>(null)
   const latestContentRef = useRef(props.contentRef)
@@ -66,8 +67,8 @@ function StableSourcePreview({ paused, props, language, Preview, fallback }: { p
   if (paused && !stableElement.current) {
     if (!stableProps.current) {
       const code = createElement('code', {
-        className: `language-${language}`,
-        'data-language': language,
+        className: language ? `language-${language}` : undefined,
+        'data-language': codeInfo || undefined,
         ref: stableContentRef.current,
       })
       stableElement.current = fallback === 'inline' ? code : createElement('pre', null, code)
@@ -86,10 +87,10 @@ function StableSourcePreview({ paused, props, language, Preview, fallback }: { p
 /* oxlint-enable react/refs */
 
 
-function createStablePreview(Preview: any, language: string | ((props: any) => string), fallback: 'block' | 'inline') {
+function createStablePreview(Preview: any, language: string | ((props: any) => string), fallback: 'block' | 'inline', codeInfo?: (props: any) => string) {
   return function StableWrapper(props: any) {
     const lang = typeof language === 'function' ? language(props) : language
-    return createElement(StableSourcePreview, { paused: usePreviewRenderingPaused(), props, language: lang, Preview, fallback })
+    return createElement(StableSourcePreview, { paused: usePreviewRenderingPaused(), props, language: lang, codeInfo: codeInfo ? codeInfo(props) : lang, Preview, fallback })
   }
 }
 
@@ -122,17 +123,69 @@ const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
   toExternalHTML: (props) => createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef })),
 })
 
-/** Code block source view: pre > code, same shape as vanilla renderer. */
-function CodeBlockSource(props: any) {
-  const language = props.block?.props?.language ?? 'text'
-  return createElement('pre', null, createElement('code', {
-    className: `language-${language}`,
-    'data-language': language,
-    ref: props.contentRef,
-  }))
+/** Keys and clicks inside the header belong to the field, not the document:
+ *  ProseMirror's keymap sits on an ancestor of this node view, so without
+ *  stopping propagation here the code block's own Tab/Enter/Delete commands
+ *  fire while the user types a title (inserting spaces or splitting the block
+ *  into the code). Bound once per node — the callback identity changes every
+ *  render, so re-binding is guarded by a data flag rather than a ref. */
+const keepEventsLocal = (node: HTMLElement | null) => {
+  if (!node || node.dataset.boundEvents === '1') return
+  node.dataset.boundEvents = '1'
+  for (const type of ['keydown', 'keyup', 'mousedown', 'click'] as const) {
+    node.addEventListener(type, (event) => event.stopPropagation())
+  }
 }
 
-const StableCodeBlockPreview = createStablePreview(CodeBlockSource, (p: any) => p.block?.props?.language ?? 'text', 'block')
+/** The block header: the fence language Shiki highlights as, plus the optional
+ *  `title="…"` from the fence info string. Chrome, not content — both live in
+ *  the block's `language` prop, so renaming a block never touches its code and
+ *  the fence round-trips as typed. */
+function CodeBlockHeader({ editor, block, info, language, title }: any) {
+  return createElement('div', { className: 'code-block-header', contentEditable: false, ref: keepEventsLocal }, [
+    createElement('span', { key: 'language', className: 'code-block-language' }, language || 'text'),
+    createElement('input', {
+      key: 'title',
+      className: 'code-block-title',
+      placeholder: 'Add title…',
+      value: title,
+      spellCheck: false,
+      'aria-label': 'Code block title',
+      onChange: (event: any) => editor.updateBlock(block.id, {
+        props: { language: withCodeBlockTitle(info, event.target.value) },
+      }),
+    }),
+  ])
+}
+
+/** Code block source view: pre > code, same shape as vanilla renderer, with the
+ *  block header on top. */
+function CodeBlockSource(props: any) {
+  const info: string = props.block?.props?.language ?? ''
+  const { language, title } = parseCodeBlockInfo(info)
+  return createElement(Fragment, null,
+    createElement(CodeBlockHeader, {
+      key: 'header',
+      editor: props.editor,
+      block: props.block,
+      info,
+      language,
+      title,
+    }),
+    createElement('pre', { key: 'code' }, createElement('code', {
+      className: language ? `language-${language}` : undefined,
+      'data-language': info || undefined,
+      ref: props.contentRef,
+    })),
+  )
+}
+
+const StableCodeBlockPreview = createStablePreview(
+  CodeBlockSource,
+  (p: any) => parseCodeBlockInfo(p.block?.props?.language ?? '').language,
+  'block',
+  (p: any) => p.block?.props?.language ?? '',
+)
 
 const codeBlockShortcuts = createExtension({
   key: 'codeBlockKeyboardShortcuts',
@@ -204,15 +257,19 @@ const codeBlockShortcuts = createExtension({
  *  the default vanilla spec, but with the AI-writing freeze applied (see
  *  StableCodeBlockPreview). */
 const codeBlockSpec = createReactBlockSpec(createCodeBlockConfig, {
-  meta: { code: true, defining: true, isolating: false, highlight: (block: any) => block.props.language },
+  meta: { code: true, defining: true, isolating: false, highlight: (block: any) => parseCodeBlockInfo(block.props.language).language },
   parse: parsePreCode,
   parseContent: (opts: any) => parsePreCodeContent(opts, 'codeBlock'),
   render: StableCodeBlockPreview,
-  toExternalHTML: (props) => createElement('pre', null, createElement('code', {
-    className: `language-${props.block.props.language}`,
-    'data-language': props.block.props.language,
-    ref: props.contentRef,
-  })),
+  toExternalHTML: (props) => {
+    const info: string = props.block.props.language ?? ''
+    const { language } = parseCodeBlockInfo(info)
+    return createElement('pre', null, createElement('code', {
+      className: language ? `language-${language}` : undefined,
+      'data-language': info || undefined,
+      ref: props.contentRef,
+    }))
+  },
 }, [codeBlockShortcuts])
 
 /** Base BlockNote schema with heading levels 1-5. */
