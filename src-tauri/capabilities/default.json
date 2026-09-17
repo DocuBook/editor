@@ -52,6 +52,7 @@
     "allow-read-file",
     "allow-read-file-binary",
     "allow-rename-file",
+    "allow-resolve-mentions",
     "allow-restore-file",
     "allow-search-vault",
     "allow-set-api-key",

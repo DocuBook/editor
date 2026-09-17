@@ -51,6 +51,7 @@ permissions = [
   "allow-read-file",
   "allow-read-file-binary",
   "allow-rename-file",
+  "allow-resolve-mentions",
   "allow-restore-file",
   "allow-search-vault",
   "allow-set-api-key",
@@ -492,6 +493,16 @@ commands.allow = ["rename_file"]
 identifier = "deny-rename-file"
 description = "Denies the rename_file command."
 commands.deny = ["rename_file"]
+
+[[permission]]
+identifier = "allow-resolve-mentions"
+description = "Enables resolving @-mentions to vault files as AI context."
+commands.allow = ["resolve_mentions"]
+
+[[permission]]
+identifier = "deny-resolve-mentions"
+description = "Denies resolving @-mentions to vault files."
+commands.deny = ["resolve_mentions"]
 
 [[permission]]
 identifier = "allow-restore-file"

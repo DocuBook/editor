@@ -123,6 +123,17 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         "close_vault" => sync(state, cmd, args),
         "list_tree" => sb(state, cmd, args).await,
+        "resolve_mentions" => {
+            let request = serde_json::from_value(args.get("request").cloned().unwrap_or(args)).map_err(|e| format!("Invalid mention request: {e}"))?;
+            // Clone the shared handle, not the vault (Vault is Send but not Sync),
+            // so the blocking task reuses the open vault instead of rebuilding it.
+            let vault = st.vault.clone();
+            tokio::task::spawn_blocking(move || {
+                let guard = vault.lock().map_err(|_| "Vault lock poisoned".to_string())?;
+                let Some(v) = guard.as_ref() else { return Ok(serde_json::to_string(&vault::mentions::Bundle::default()).map_err(|e| e.to_string())?); };
+                serde_json::to_string(&vault::mentions::resolve(v, request)).map_err(|e| e.to_string())
+            }).await.map_err(|e| e.to_string())?
+        }
         "read_file" => sync(state, cmd, args),
         "write_file" => sync(state, cmd, args),
         "create_file" => sync(state, cmd, args),
@@ -316,14 +327,23 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 _ => Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","upstream":"","status":"","ahead":0,"behind":0,"pushTarget":"","hasCommits":false,"remotes":[],"state":"clean"}"#.to_string()),
             }
         }
-        "wiki_backlinks" => match state.wiki.lock().expect("lock").as_ref() {
-            Some(w) => serde_json::to_string(&w.backlinks(&s("path"))).map_err(|e| e.to_string()),
-            None => Ok("[]".to_string()),
-        },
-        "wiki_suggest" => match state.wiki.lock().expect("lock").as_ref() {
-            Some(w) => serde_json::to_string(&w.suggest(&s("query"))).map_err(|e| e.to_string()),
-            None => Ok("[]".to_string()),
-        },
+        "wiki_backlinks" => {
+            // Vault lock before wiki lock — the order every nested path uses.
+            let vault = state.vault.lock().expect("lock");
+            let Some(v) = vault.as_ref() else { return Ok("[]".to_string()) };
+            match state.wiki.lock().expect("lock").as_ref() {
+                Some(w) => serde_json::to_string(&w.backlinks(v, &s("path"))).map_err(|e| e.to_string()),
+                None => Ok("[]".to_string()),
+            }
+        }
+        "wiki_suggest" => {
+            let vault = state.vault.lock().expect("lock");
+            let Some(v) = vault.as_ref() else { return Ok("[]".to_string()) };
+            match state.wiki.lock().expect("lock").as_ref() {
+                Some(w) => serde_json::to_string(&w.suggest(v, &s("query"))).map_err(|e| e.to_string()),
+                None => Ok("[]".to_string()),
+            }
+        }
         "wiki_resolve" => match state.wiki.lock().expect("lock").as_ref() {
             Some(w) => Ok(w.resolve(&s("title")).unwrap_or_default()),
             None => Ok(String::new()),
