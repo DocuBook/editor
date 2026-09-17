@@ -9,15 +9,11 @@ pub struct AiRequest {
     pub messages: Value,
     pub tools: Option<Value>,
     pub document_state: Option<Value>,
-    pub mention_context: Option<Value>,
 }
 
 impl AiRequest {
     pub fn body(&self) -> Value {
         let mut messages = self.messages.clone();
-        if let Some(mention_context) = &self.mention_context {
-            if let Some(messages) = messages.as_array_mut() { prompt::attach_mention_context(messages, mention_context.clone()); }
-        }
         if let Some(document_state) = &self.document_state {
             if let Some(messages) = messages.as_array_mut() {
                 prompt::attach_document_state(messages, document_state.clone());
@@ -58,7 +54,7 @@ impl AiRequest {
         messages: &str,
         tools: Option<&str>,
     ) -> Result<Self, String> {
-        let mut messages: Value =
+        let messages: Value =
             serde_json::from_str(messages).map_err(|_| "Invalid messages".to_string())?;
         // Older desktop/web adapters ignored malformed or non-array tools and
         // continued with text-only streaming. Keep that compatibility here.
@@ -71,16 +67,6 @@ impl AiRequest {
                     .cloned()
             })
         });
-        let mention_context = messages.as_array().and_then(|items| {
-            items.iter().rev().find_map(|message| {
-                (message.get("role").and_then(Value::as_str) == Some("user"))
-                    .then(|| message.get("metadata")?.get(prompt::MENTION_CONTEXT_FIELD))
-                    .flatten().cloned()
-            })
-        });
-        if let (Some(context), Some(items)) = (mention_context.as_ref(), messages.as_array_mut()) {
-            prompt::attach_mention_context(items, context.clone());
-        }
         Ok(Self {
             model: model.into(),
             api_key: api_key.into(),
@@ -88,7 +74,6 @@ impl AiRequest {
             messages,
             tools,
             document_state,
-            mention_context,
         })
     }
 }

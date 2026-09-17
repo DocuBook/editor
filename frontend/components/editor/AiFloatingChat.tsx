@@ -23,6 +23,13 @@ const MENTION_LIST_CONCURRENCY = 6
 /** Stable option ids for aria-activedescendant (vault paths are not valid ids). */
 const optionId = (position: number) => `mention-option-${position}`
 
+/** Folder part of a vault path (`docs/notes` for `docs/notes/guide.md`), empty
+ *  at the vault root. */
+const parentOf = (path: string) => {
+  const cut = path.lastIndexOf('/')
+  return cut === -1 ? '' : path.slice(0, cut)
+}
+
 /** Recursive vault listing for the mention picker.
  *
  *  A folder that cannot be listed (deleted/renamed mid-walk, permissions) only
@@ -169,13 +176,23 @@ export default function AiFloatingChat() {
   const currentIndex = index && index.vault === (vaultPath ?? '') ? index : null
   const indexLoading = pickerOpen && !currentIndex
 
-  const visibleEntries = useMemo(() => {
+  /** Same basename in two folders renders as two identical rows, so those rows
+   *  name their folder. Counting runs over the whole match set rather than the
+   *  visible slice, so a truncated list cannot silently hide a duplicate. The
+   *  inserted token is the full path either way. */
+  const { visibleEntries, ambiguousNames } = useMemo(() => {
     const query = String(picker?.query ?? '').toLowerCase()
     const all = currentIndex?.entries ?? []
     const matched = query
       ? all.filter((entry) => entry.name.toLowerCase().includes(query) || entry.path.toLowerCase().includes(query))
       : all
-    return matched.slice(0, MENTION_LIST_LIMIT)
+    const counts = new Map<string, number>()
+    for (const entry of matched) {
+      const name = entry.name.toLowerCase()
+      counts.set(name, (counts.get(name) ?? 0) + 1)
+    }
+    const ambiguous = new Set([...counts].filter(([, count]) => count > 1).map(([name]) => name))
+    return { visibleEntries: matched.slice(0, MENTION_LIST_LIMIT), ambiguousNames: ambiguous }
   }, [currentIndex, picker?.query])
 
   const activeIndex = Math.min(activeOption, Math.max(visibleEntries.length - 1, 0))
@@ -252,7 +269,7 @@ export default function AiFloatingChat() {
     <>
       {mentions.length > 0 && <div className="flex flex-wrap gap-1 px-3 pt-2">{mentions.map((mention) => <span key={`${mention.start}:${mention.end}`} className="flex items-center gap-1 rounded-full bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary"><FileText size={11} />{mention.token}<button aria-label={`Remove @${mention.token}`} className="p-1" onClick={() => removeMention(mention)}><X size={11} /></button></span>)}</div>}
       {mentionNotice && <div className="px-3 pt-1 text-[10px] text-muted">{mentionNotice}</div>}
-      {picker && <div role="listbox" aria-label="Mention files and folders" aria-activedescendant={activeEntry ? optionId(activeIndex) : undefined} className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => <button key={entry.path} ref={entry === activeEntry ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={entry === activeEntry} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-xs hover:bg-surface-active">{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{entry.type === '1' && <span className="ml-auto text-muted">recursive</span>}</button>) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
+      {picker && <div role="listbox" aria-label="Mention files and folders" aria-activedescendant={activeEntry ? optionId(activeIndex) : undefined} className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => <button key={entry.path} ref={entry === activeEntry ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={entry === activeEntry} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className="flex min-h-10 w-full items-center gap-2 rounded px-3 text-left text-xs hover:bg-surface-active">{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className="truncate text-[10px] text-muted">{parentOf(entry.path)}</span>}{entry.type === '1' && <span className="ml-auto text-muted">recursive</span>}</button>) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
       <div className="flex w-full min-w-0 items-end gap-2 p-2">
         <textarea ref={inputRef} value={input} onChange={(event) => onInputChange(event.target.value, event.target.selectionStart)} onKeyDown={(event) => {
           if (picker && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); setActiveOption((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + visibleEntries.length) % Math.max(visibleEntries.length, 1)); return }

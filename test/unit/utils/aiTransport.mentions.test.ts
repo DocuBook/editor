@@ -94,4 +94,34 @@ describe('transport mention retrieval', () => {
     expect(messages[injected + 1].role).toBe('user')
     expect(useAiChat.getState().mentionNotice).toBe('1 file in context')
   })
+
+  it('degrades to no context when the mention payload is not valid JSON', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+      urls.push(String(url))
+      if (String(url).includes('resolve_mentions')) {
+        return new Response(JSON.stringify({ result: 'not-json' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(sseStream([
+        'event: ai:token\n',
+        'data: "ok"\n\n',
+        'event: ai:done\n',
+        'data: {"provider":"test","truncated":false}\n\n',
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    const transport = createAiTransport({ getEditor: () => null, filePath: 'notes/current.md' })
+    const reader = (await transport.sendMessages({ messages: [{ role: 'user', content: 'summarise @docs/a.md' }], body: {} })).getReader()
+    for (;;) {
+      try {
+        const result = await reader.read()
+        if (result.done) break
+      } catch {
+        break
+      }
+    }
+
+    // A bad payload is optional context, not a failed turn.
+    expect(urls.some(url => url.includes('ask_ai'))).toBe(true)
+    expect(useAiChat.getState().mentionNotice).toBeNull()
+  })
 })

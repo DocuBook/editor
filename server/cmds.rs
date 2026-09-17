@@ -5,7 +5,7 @@ pub(crate) fn open_vault(state: &AppState, path: &str) -> Result<String, String>
     let v = vault::Vault::new(path)?;
     let name = v.name();
     let mut w = wiki::WikiIndex::new();
-    w.scan(&v);
+    w.scan(v.root(), v.walk("", vault::WalkKind::Markdown));
     tracing::info!(
         event = "vault_opened",
         git_repository = std::path::Path::new(path).join(".git").exists()
@@ -28,13 +28,19 @@ fn valid_vault_name(name: &str) -> bool {
 /** Rebuild the wiki index after a file mutation — same staleness fix as the
  *  desktop command layer (lib/vault.rs). The index is a snapshot taken at
  *  open_vault; without this, suggest/backlinks/resolve stay stale until the
- *  vault is reopened. Vault is locked before the wiki, matching every other
- *  nested vault/wiki path, so the two locks cannot deadlock. */
+ *  vault is reopened.
+ *
+ *  The vault lock only covers the file list: the content scan reads every
+ *  markdown file, so holding the vault mutex across it would stall every other
+ *  vault command. */
 pub(crate) fn rescan_wiki(state: &AppState) {
-    let vault = state.vault.lock().expect("lock");
-    let Some(v) = vault.as_ref() else { return };
+    let (root, files) = {
+        let vault = state.vault.lock().expect("lock");
+        let Some(v) = vault.as_ref() else { return };
+        (v.root().to_path_buf(), v.walk("", vault::WalkKind::Markdown))
+    };
     if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
-        w.scan(v);
+        w.scan(&root, files);
     }
 }
 

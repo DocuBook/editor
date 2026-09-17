@@ -74,7 +74,8 @@ beforeEach(() => {
   root = createRoot(document.getElementById('root')!)
   tree = {
     '': [folder('docs'), folder('assets'), ...files(['CHANGELOG.md'])],
-    docs: files(['guide.md', 'CHANGELOG-old.md']),
+    docs: [folder('notes'), ...files(['guide.md', 'CHANGELOG-old.md'])],
+    'docs/notes': files(['guide.md']),
     assets: [],
   }
   useAiChat.setState({ expanded: false, input: '', focusRequest: 0, selectionPromptOpen: false, mentionNotice: null })
@@ -120,6 +121,29 @@ describe('composer @mention picker', () => {
 
     act(() => (docs as HTMLButtonElement).click())
     expect(textarea().value).toBe('@docs/ ')
+  })
+
+  it('names the folder for rows that share a basename', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    // Two `guide.md` files: the labels must differ, or the user cannot tell them apart.
+    const labels = options()
+    expect(labels).toHaveLength(2)
+    expect(labels[0]).not.toBe(labels[1])
+    expect(labels.some(label => label.includes('docs/notes'))).toBe(true)
+  })
+
+  it('inserts the full nested path for an ambiguous basename', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    const nested = Array.from(document.querySelectorAll('[role="option"]')).find(node => node.textContent?.includes('docs/notes'))
+    act(() => (nested as HTMLButtonElement).click())
+
+    expect(textarea().value).toBe('@docs/notes/guide.md ')
   })
 
   it('keeps suggestions when one folder cannot be listed', async () => {

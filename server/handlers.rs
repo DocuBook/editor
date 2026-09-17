@@ -328,19 +328,24 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
         }
         "wiki_backlinks" => {
-            // Vault lock before wiki lock — the order every nested path uses.
-            let vault = state.vault.lock().expect("lock");
-            let Some(v) = vault.as_ref() else { return Ok("[]".to_string()) };
+            // Only the root is copied out under the vault lock: backlink snippets
+            // read markdown files, so the wiki lock alone must cover that work.
+            let root = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.root().to_path_buf(),
+                None => return Ok("[]".to_string()),
+            };
             match state.wiki.lock().expect("lock").as_ref() {
-                Some(w) => serde_json::to_string(&w.backlinks(v, &s("path"))).map_err(|e| e.to_string()),
+                Some(w) => serde_json::to_string(&w.backlinks(&root, &s("path"))).map_err(|e| e.to_string()),
                 None => Ok("[]".to_string()),
             }
         }
         "wiki_suggest" => {
-            let vault = state.vault.lock().expect("lock");
-            let Some(v) = vault.as_ref() else { return Ok("[]".to_string()) };
+            let root = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.root().to_path_buf(),
+                None => return Ok("[]".to_string()),
+            };
             match state.wiki.lock().expect("lock").as_ref() {
-                Some(w) => serde_json::to_string(&w.suggest(v, &s("query"))).map_err(|e| e.to_string()),
+                Some(w) => serde_json::to_string(&w.suggest(&root, &s("query"))).map_err(|e| e.to_string()),
                 None => Ok("[]".to_string()),
             }
         }

@@ -52,8 +52,8 @@ impl Vault {
         if !root.is_dir() { return Err(format!("Not a directory: {}", path)); }
         Ok(Self { root, renderable: RefCell::new(None) })
     }
-/** Get the vault root path. */
-    #[allow(dead_code)] // used by the web server crate (file serving)
+/** Get the vault root path. Used by both crates: file serving and the wiki
+     *  index reads. */
     pub fn root(&self) -> &Path { &self.root }
 /** Get the vault directory name. */
     pub fn name(&self) -> String {
@@ -198,8 +198,9 @@ impl Vault {
         files.sort_by_key(|a| a.name.to_lowercase());
         [dirs, files].concat()
     }
-    #[allow(dead_code)] // used by the web server crate for bounded API reads
-    fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
+    /** Bounded byte read for an index-owned path. `pub(crate)` so the wiki index
+     *  can read `Vault::walk` output without holding the vault lock. */
+    pub(crate) fn read_limited(path: &Path, max_bytes: u64) -> Result<Vec<u8>, String> {
         let file = std::fs::File::open(path).map_err(|e| format!("Read: {}", e))?;
         let mut data = Vec::new();
         file.take(max_bytes.saturating_add(1))

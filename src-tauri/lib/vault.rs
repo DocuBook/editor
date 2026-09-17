@@ -91,13 +91,18 @@ function run(argv) {
 /** Rebuild the wiki index after a file mutation. The index is a snapshot taken
  *  at open_vault — without this, suggest/backlinks/resolve stay stale until a
  *  hard refresh (reopen) reads new files. Cheap enough per save on desktop.
- *  Locks the vault before the wiki: every nested vault/wiki path uses this
- *  order (see `wiki_suggest`), so the two locks can never deadlock. */
+ *
+ *  The vault lock only covers the file list: the content scan reads every
+ *  markdown file, and holding the vault mutex across it would stall tree/read/
+ *  search on every save. */
 fn rescan_wiki(state: &State<'_, AppState>) {
-    let vault = state.vault.lock().expect("lock");
-    let Some(v) = vault.as_ref() else { return };
+    let (root, files) = {
+        let vault = state.vault.lock().expect("lock");
+        let Some(v) = vault.as_ref() else { return };
+        (v.root().to_path_buf(), v.walk("", crate::vault::WalkKind::Markdown))
+    };
     if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
-        w.scan(v);
+        w.scan(&root, files);
     }
 }
 
@@ -110,7 +115,7 @@ fn valid_vault_name(name: &str) -> bool {
 pub fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
     let v = crate::vault::Vault::new(path)?;
     let name = v.name();
-    let mut w = crate::wiki::WikiIndex::new(); w.scan(&v);
+    let mut w = crate::wiki::WikiIndex::new(); w.scan(v.root(), v.walk("", crate::vault::WalkKind::Markdown));
     eprintln!("[docubook] open_vault: {} (git repo: {})", path, std::path::Path::new(path).join(".git").exists());
     let g = crate::git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);

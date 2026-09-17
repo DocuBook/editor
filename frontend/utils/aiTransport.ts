@@ -255,7 +255,20 @@ async function runSendMessages(
         const mentionResult = parsedMentions.hasMentions
           ? await invoke<any>("resolve_mentions", { request: { mentions: parsedMentions.mentions.map(({ token, kind }) => ({ token, kind })), excludePath: deps.filePath } })
           : undefined;
-        const mentionContext = typeof mentionResult === 'string' ? JSON.parse(mentionResult) : mentionResult;
+        /** The Tauri command may hand back the bundle as a serialized string; a
+         *  malformed payload must not abort the turn. Mentions are optional
+         *  context, so a decode failure degrades to "no context" and the notice
+         *  line stays empty rather than the request failing for an unrelated
+         *  parse error. */
+        const mentionContext = (() => {
+          if (typeof mentionResult !== 'string') return mentionResult;
+          try {
+            return JSON.parse(mentionResult);
+          } catch {
+            console.debug("[ai] mention payload was not valid JSON; sending without vault context");
+            return undefined;
+          }
+        })();
         /** Publish the retrieval outcome for the composer's context line. */
         useAiChat.getState().setMentionNotice(mentionNotice(mentionContext));
         const taskRules = buildTaskFormattingRules(userText);

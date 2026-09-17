@@ -1,10 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::path::{Component, Path};
 
 pub const MENTION_MAX_FILES: usize = 32;
 pub const MENTION_MAX_FILE_CHARS: usize = 24_000;
 pub const MENTION_MAX_TOTAL_CHARS: usize = 120_000;
 pub const MENTION_MAX_DEPTH: usize = 8;
+/** Cap on reported skip reasons. A folder mention walks every file, so an asset
+ *  folder can otherwise return thousands of entries the UI never shows. */
+pub const MENTION_MAX_SKIPPED: usize = 64;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -27,6 +31,16 @@ pub struct Totals { pub files: usize, pub chars: usize, pub truncated: usize }
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct Bundle { pub files: Vec<ResolvedFile>, pub skipped: Vec<Skipped>, pub totals: Totals }
 
+/// Depth counted from the vault root, ignoring `.`/`..` components.
+fn depth_of(path: &str) -> usize {
+    Path::new(path).components().filter(|part| matches!(part, Component::Normal(_))).count()
+}
+
+/// Record a skip reason, bounded by `MENTION_MAX_SKIPPED`.
+fn skip(bundle: &mut Bundle, path: String, reason: SkipReason) {
+    if bundle.skipped.len() < MENTION_MAX_SKIPPED { bundle.skipped.push(Skipped { path, reason }); }
+}
+
 pub fn resolve(vault: &super::Vault, request: ResolveRequest) -> Bundle {
     use super::WalkKind;
     let mut bundle = Bundle::default();
@@ -39,22 +53,25 @@ pub fn resolve(vault: &super::Vault, request: ResolveRequest) -> Bundle {
     let mut paths: Vec<(String, String)> = Vec::new();
     for mention in request.mentions {
         if mention.token.starts_with('/') || mention.token.split('/').any(|part| part == "..") {
-            bundle.skipped.push(Skipped { path: mention.token, reason: SkipReason::TraversalRejected }); continue;
+            skip(&mut bundle, mention.token, SkipReason::TraversalRejected); continue;
         }
         match mention.kind {
             MentionKind::File => match vault.resolve_target(&mention.token) {
-                Some(path) if !crate::markdown::is_markdown_name(&path) => bundle.skipped.push(Skipped { path, reason: SkipReason::Unsupported }),
+                Some(path) if !crate::markdown::is_markdown_name(&path) => skip(&mut bundle, path, SkipReason::Unsupported),
                 Some(path) => paths.push((path, "mention".into())),
-                None => bundle.skipped.push(Skipped { path: mention.token, reason: SkipReason::NotFound }),
+                None => skip(&mut bundle, mention.token, SkipReason::NotFound),
             },
             MentionKind::Folder => {
                 let prefix = mention.token.trim_end_matches('/').to_string();
-                if vault.resolve_directory(&prefix).is_none() { bundle.skipped.push(Skipped { path: mention.token, reason: SkipReason::NotFound }); continue; }
+                if vault.resolve_directory(&prefix).is_none() { skip(&mut bundle, mention.token, SkipReason::NotFound); continue; }
+                let prefix_depth = depth_of(&prefix);
                 for path in vault.walk(&prefix, WalkKind::All) {
-                    let filename = std::path::Path::new(&path).file_name().and_then(|s| s.to_str()).unwrap_or_default();
-                    if !crate::markdown::is_markdown_name(filename) { bundle.skipped.push(Skipped { path, reason: SkipReason::Unsupported }); continue; }
-                    let depth = path.strip_prefix(&(prefix.clone() + "/")).map(|tail| tail.matches('/').count() + 1).unwrap_or(1);
-                    if depth > max_depth { bundle.skipped.push(Skipped { path, reason: SkipReason::DepthExceeded }); }
+                    let filename = Path::new(&path).file_name().and_then(|s| s.to_str()).unwrap_or_default();
+                    if !crate::markdown::is_markdown_name(filename) { skip(&mut bundle, path, SkipReason::Unsupported); continue; }
+                    // Measured below the mentioned folder, so a degenerate prefix
+                    // like `.` still counts every level instead of collapsing to 1.
+                    let depth = depth_of(&path).saturating_sub(prefix_depth);
+                    if depth > max_depth { skip(&mut bundle, path, SkipReason::DepthExceeded); }
                     else { paths.push((path, "folder".into())); }
                 }
             }
@@ -64,10 +81,10 @@ pub fn resolve(vault: &super::Vault, request: ResolveRequest) -> Bundle {
     let mut seen = HashSet::new();
     let exclude = request.exclude_path.as_deref().unwrap_or("");
     for (path, via) in paths {
-        if path == exclude || !seen.insert(path.clone()) { bundle.skipped.push(Skipped { path, reason: SkipReason::Duplicate }); continue; }
-        if bundle.files.len() >= max_files || bundle.totals.chars >= max_total_chars { bundle.skipped.push(Skipped { path, reason: SkipReason::Budget }); continue; }
+        if path == exclude || !seen.insert(path.clone()) { skip(&mut bundle, path, SkipReason::Duplicate); continue; }
+        if bundle.files.len() >= max_files || bundle.totals.chars >= max_total_chars { skip(&mut bundle, path, SkipReason::Budget); continue; }
         let read_limit = max_file_chars.max(max_total_chars).saturating_mul(4).saturating_add(256) as u64;
-        let content = match vault.read_bounded(&path, read_limit) { Ok(content) => content, Err(_) => { bundle.skipped.push(Skipped { path, reason: SkipReason::Budget }); continue; } };
+        let content = match vault.read_bounded(&path, read_limit) { Ok(content) => content, Err(_) => { skip(&mut bundle, path, SkipReason::Budget); continue; } };
         let chars: Vec<char> = content.chars().collect();
         let allowed = max_file_chars.min(max_total_chars.saturating_sub(bundle.totals.chars));
         let truncated = chars.len() > allowed;
@@ -115,6 +132,17 @@ mod tests {
         assert!(bundle.skipped.iter().any(|s| matches!(s.reason, SkipReason::TraversalRejected)));
         assert!(bundle.skipped.iter().any(|s| matches!(s.reason, SkipReason::Unsupported)));
         assert!(bundle.files.iter().all(|f| !f.content.contains("secret")));
+    }
+    #[test] fn root_folder_prefix_still_enforces_depth() {
+        let (_root, vault) = vault();
+        let bundle = resolve(&vault, request(vec![folder(".")], Some(Options { max_depth: Some(1), ..Default::default() })));
+        assert!(bundle.skipped.iter().any(|s| matches!(s.reason, SkipReason::DepthExceeded)), "depth must count from the vault root for a '.' prefix");
+    }
+    #[test] fn caps_skipped_entries() {
+        let (root, vault) = vault();
+        for i in 0..(MENTION_MAX_SKIPPED + 20) { std::fs::write(root.join("docs").join(format!("img{i}.png")), "x").unwrap(); }
+        let bundle = resolve(&vault, request(vec![folder("docs")], None));
+        assert!(bundle.skipped.len() <= MENTION_MAX_SKIPPED, "skipped must stay bounded");
     }
     #[test] fn truncates_and_enforces_file_and_depth_budgets() {
         let (_root, vault) = vault();
