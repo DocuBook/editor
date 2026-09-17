@@ -126,7 +126,7 @@ Operational logs are written to stdout/stderr and can be filtered with `RUST_LOG
 
 DocuBook Editor isn't built from nothing — it stands on the shoulders of a few thoughtful open-source projects. Every note you open, every keystroke in the WYSIWYG canvas, flows through them:
 
-- **[BlockNote](https://www.blocknotejs.org/)** — the block editor that powers the writing experience. The `/`-menu, math blocks, diagrams, and the AI writing layer all live here. The editor you type into _is_ BlockNote.
+- **[BlockNote](https://www.blocknotejs.org/)** — the block editor that powers the writing experience. The `/`-menu, math blocks, diagrams, and the block schema all live here. The editor you type into _is_ BlockNote.
 - **[TipTap](https://tiptap.dev/)** — the headless editor framework underneath. It handles the plumbing — extensions, keyboard shortcuts, undo/redo, editor lifecycle — so BlockNote and you can focus on ideas instead of boilerplate.
 - **[ProseMirror](https://prosemirror.net/)** — the engine at the foundation. It's the document model and collaborative-editing core that both TipTap and BlockNote are built on, and the reason your undo history and document state behave so predictably.
 
