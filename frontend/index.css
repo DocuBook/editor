@@ -118,7 +118,7 @@ body {
 .ProseMirror {
     outline: none;
     caret-color: var(--color-accent);
-    padding-top: 16px;
+
     user-select: text;
 }
 
@@ -132,25 +132,16 @@ body {
     visibility: hidden;
 }
 
+/* No card chrome anywhere: the document sits directly on the pane background,
+   with no border or radius of its own. */
 #root .bn-root {
-    --bn-colors-editor-background: var(--color-surface);
-}
-#root .bn-editor {
-    background: var(--color-surface);
-    border: 1px solid var(--color-border);
-    border-radius: 8px;
+    --bn-colors-editor-background: var(--color-background);
 }
 
-/* Phone editors use the full canvas, matching mobile writing apps: no nested
-   card chrome and no BlockNote desktop gutter competing with screen width. */
+/* Phones additionally drop BlockNote's desktop gutter so the writing column
+   can use the full screen width. */
 @media (max-width: 639px) {
-    #root .bn-root {
-        --bn-colors-editor-background: var(--color-background);
-    }
     #root .bn-editor {
-        background: transparent;
-        border: 0;
-        border-radius: 0;
         padding-inline: 0;
     }
 }
@@ -537,6 +528,12 @@ body .mobile-sidebar-drawer-body > aside {
         width: min(calc(100% - 6rem), 1280px);
         margin-inline: auto;
     }
+}
+
+/* Tab boundaries live on the strip, not on every tab: a divider only between
+   neighbouring tabs, so there is no dangling border after the last one. */
+.tab-strip > .tab-item + .tab-item {
+    border-left: 1px solid var(--color-border-subtle);
 }
 
 /* Tab hover effects */
