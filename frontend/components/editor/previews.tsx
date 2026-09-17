@@ -73,7 +73,7 @@ export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange
     <textarea ref={ref} value={content} onChange={e => { onCursorOffset(e.currentTarget.selectionStart); onChange(e.target.value) }}
       onSelect={e => onCursorOffset(e.currentTarget.selectionStart)}
       placeholder="Start writing in Markdown…"
-      className="w-full bg-transparent text-sm text-foreground font-mono leading-relaxed outline-none resize-none placeholder:text-muted pt-4"
+      className="editor-raw-markdown w-full bg-transparent text-sm text-foreground font-mono leading-relaxed outline-none resize-none placeholder:text-muted"
       spellCheck={false} />
   )
 }

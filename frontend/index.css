@@ -138,11 +138,21 @@ body {
     --bn-colors-editor-background: var(--color-background);
 }
 
-/* Phones additionally drop BlockNote's desktop gutter so the writing column
-   can use the full screen width. */
+/* Writing-column gutter — single source for both editor modes. BlockNote
+   reserves 54px inline for the plus/drag side menu it shows on hover; the raw
+   markdown textarea carries the same gutter, otherwise the text column jumps
+   54px sideways when Editor/Code is toggled. Phones drop it so the column uses
+   the full screen width. */
+#root .editor-content {
+    --editor-gutter: 54px;
+}
+#root .bn-editor,
+#root .editor-raw-markdown {
+    padding-inline: var(--editor-gutter, 54px);
+}
 @media (max-width: 639px) {
-    #root .bn-editor {
-        padding-inline: 0;
+    #root .editor-content {
+        --editor-gutter: 0px;
     }
 }
 
