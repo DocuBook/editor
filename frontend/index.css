@@ -445,6 +445,16 @@ body .mobile-sidebar-drawer-body > aside {
 }
 
 .ProseMirror .bn-block-content[data-content-type=codeBlock] {
+    /* BlockNote ships `.bn-block-content { display: flex }` as a ROW. The vanilla
+       code block never notices: its only in-flow child is the `pre` and the
+       language select is absolutely positioned. Our header is a normal in-flow
+       child, so without an explicit column it lands beside the code instead of
+       above it. */
+    flex-direction: column;
+    /* `.bn-block-content` ships `padding: 3px 0`, which showed nothing while the
+       block and its `pre` shared a background. With a tinted header it becomes a
+       3px band of block background above it, reading as stray margin. */
+    padding: 0;
     color: var(--color-foreground);
     background-color: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -452,6 +462,58 @@ body .mobile-sidebar-drawer-body > aside {
 }
 .ProseMirror .bn-block-content[data-content-type=codeBlock] code {
     white-space: pre;
+}
+/* The generic `.ProseMirror pre` box (its own border, margin and radius) would
+   nest a second rounded frame inside the block and leave a band of block
+   background between it and the header's background. Inside a code block the
+   block itself is the frame. */
+.ProseMirror .bn-block-content[data-content-type=codeBlock] > pre {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    background: none;
+}
+/* Shiki tokens (SyntaxHighlightingExtension). BlockNote already points every
+   token at `--shiki-dark`; a light theme flips it to the light variant. Only
+   the token COLOUR is used — its `--shiki-*-bg` is left alone so the block
+   surface above shows through. */
+[data-theme="light"] .shiki {
+    color: var(--shiki-light);
+}
+/* Code block header: the fence language plus the optional `title="…"` from the
+   info string. Chrome, not content — it sits outside the editable code and only
+   writes back to the block's language prop. */
+.ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    /* The block is a rounded 1px-bordered frame, so the header's background has
+       to be rounded to the frame's INNER radius or its square top corners poke
+       through the block's corners. */
+    border-radius: calc(8px - 1px) calc(8px - 1px) 0 0;
+    background: var(--color-surface-hover);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.72em;
+    line-height: 1.6;
+}
+.ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-language {
+    color: var(--color-foreground-subtle);
+    text-transform: lowercase;
+}
+.ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-title {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    border: none;
+    outline: none;
+    padding: 0;
+    font: inherit;
+    color: var(--color-foreground-secondary);
+}
+.ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-title::placeholder {
+    color: var(--color-foreground-subtle);
+    opacity: 0.6;
 }
 .ProseMirror pre code {
     background: none;

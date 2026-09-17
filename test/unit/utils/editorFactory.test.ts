@@ -14,6 +14,8 @@ vi.mock('../../../frontend/lib/ipc', () => ({
   isSafeImageUrl: () => true,
 }))
 vi.mock('../../../frontend/components/editor/setup', () => ({ getSchema: () => ({}), wikilinkStyler: {} }))
+// Shiki is irrelevant to the wiring under test, and its grammar maps are heavy.
+vi.mock('../../../frontend/utils/codeHighlighting', () => ({ syntaxHighlighting: {} }))
 vi.mock('../../../frontend/utils/aiTransport', () => ({
   createAiTransport: vi.fn((deps: any) => {
     captured.transports.push(deps)
