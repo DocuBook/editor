@@ -22,7 +22,8 @@
     "test:e2e:ai-follow": "node test/ai-multiblock-follow.mjs",
     "test:e2e:overlay": "node test/overlay-surface.mjs",
     "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs",
-    "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs"
+    "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs",
+    "test:e2e:raw-md": "node test/raw-markdown-highlight.mjs"
   },
   "dependencies": {
     "@blocknote/core": "0.54.2",
@@ -56,6 +57,9 @@
     "@tiptap/starter-kit": "^3.31.3",
     "lucide-react": "^1.27.0",
     "mdast-util-from-markdown": "2.0.2",
+    "micromark": "4.0.2",
+    "micromark-extension-frontmatter": "2.0.0",
+    "micromark-extension-gfm": "3.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-icons": "5.7.0",

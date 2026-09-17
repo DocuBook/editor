@@ -51,3 +51,56 @@ describe('MarkdownEditor cursor synchronization', () => {
     expect(onCursorOffset).toHaveBeenLastCalledWith(offset)
   })
 })
+
+/* Tokenising is a whole-document parse, so a long note must not pay for it inside
+   the keystroke that changed it. Short notes are unaffected: they stay coloured
+   in the same render. */
+describe('MarkdownEditor colouring budget', () => {
+  const LONG = '# Long\n\n' + 'plain text line\n'.repeat(400)
+
+  const page = () => ({
+    pre: document.querySelector('[data-testid="raw-markdown-highlight"]') as HTMLElement,
+    textarea: document.querySelector('textarea') as HTMLTextAreaElement,
+  })
+  const render = (content: string) => act(() => root!.render(
+    <MarkdownEditor content={content} onCursorOffset={() => {}} onChange={() => {}} />,
+  ))
+
+  it('colours a short note during the render that changed it', () => {
+    render('# H\n\n**bold**\n')
+    const { pre, textarea } = page()
+    expect(pre.querySelector('.md-heading')).not.toBeNull()
+    expect(pre.querySelector('.md-strong')).not.toBeNull()
+    expect(pre.classList.contains('invisible')).toBe(false)
+    expect(textarea.className).toContain('text-transparent')
+  })
+
+  it('debounces a long note, revealing the textarea until the colour lands', async () => {
+    vi.useFakeTimers()
+    try {
+      render(LONG)
+      const { pre, textarea } = page()
+      /* Nothing truthful to paint yet, so the textarea shows its own text and the
+         layer stays hidden rather than showing stale colour. */
+      expect(pre.querySelector('.md-heading')).toBeNull()
+      expect(pre.classList.contains('invisible')).toBe(true)
+      expect(textarea.className).toContain('text-foreground')
+
+      await act(async () => { vi.advanceTimersByTime(200) })
+      expect(pre.querySelector('.md-heading')).not.toBeNull()
+      expect(pre.classList.contains('invisible')).toBe(false)
+
+      /* The keystroke that edits it is not what tokenises it: the layer reveals
+         and the parse waits for the pause. */
+      render(LONG + '\nand **bold**\n')
+      expect(pre.classList.contains('invisible')).toBe(true)
+      expect(textarea.className).toContain('text-foreground')
+
+      await act(async () => { vi.advanceTimersByTime(200) })
+      expect(pre.classList.contains('invisible')).toBe(false)
+      expect(pre.querySelector('.md-strong')).not.toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
