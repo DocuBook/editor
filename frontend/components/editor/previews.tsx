@@ -1,7 +1,8 @@
 /** Non-editor file previews — binary (image → inline) and plain text. */
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef, memo } from 'react'
 import { EyeOff } from 'lucide-react'
 import { fileUrl } from '../../lib/ipc'
+import { highlightMarkdown, markdownTokenClass, type MarkdownToken } from '../../utils/markdownHighlight'
 
 /** ── Non-text preview fallback ── */
 
@@ -42,7 +43,63 @@ export function PlainTextViewer({ content, fileName }: { content: string; fileNa
   )
 }
 
-/** Raw markdown textarea editor (code mode). */
+/** Colour-only token paint. Nothing here may change weight, style, size or
+ *  spacing — only colour and decoration, which do not move glyphs.
+ *
+ *  Memoised on `tokens`: while a debounced edit is still uncoloured the token
+ *  array keeps its identity, so a keystroke does not re-render the span tree
+ *  for the whole note. */
+const MarkdownTokens = memo(function MarkdownTokens({ tokens }: { tokens: MarkdownToken[] }) {
+  return (
+    <>
+      {tokens.map((token, index) => {
+        const className = markdownTokenClass(token.kind)
+        if (token.children) {
+          return className
+            ? <span key={index} className={className}><MarkdownTokens tokens={token.children} /></span>
+            : <MarkdownTokens key={index} tokens={token.children} />
+        }
+        return className ? <span key={index} className={className}>{token.text}</span> : token.text
+      })}
+    </>
+  )
+})
+
+/** No tokens yet — a stable identity, so the memo above is not defeated. */
+const NO_TOKENS: MarkdownToken[] = []
+
+/** Tokenising is a whole-document micromark parse: linear in the note, and far
+ *  from free on a long one (GFM costs several times plain CommonMark). It must
+ *  not sit in the keystroke's render path, or the glyph the user just typed
+ *  waits on the parser. Short notes tokenise during render — cheap, and the
+ *  overlay never trails the text. Long notes are debounced; `pending` reports
+ *  that the painted tokens belong to older text, which is unrenderable colour,
+ *  not something to show. */
+const LIVE_PARSE_LIMIT = 4000
+const COLOUR_DELAY_MS = 90
+
+function useMarkdownTokens(source: string) {
+  const [painted, setPainted] = useState<{ source: string; tokens: MarkdownToken[] } | null>(null)
+  const live = source.length <= LIVE_PARSE_LIMIT
+  const liveTokens = useMemo(() => (live ? highlightMarkdown(source) : null), [live, source])
+  useEffect(() => {
+    if (live || painted?.source === source) return
+    const timer = setTimeout(() => setPainted({ source, tokens: highlightMarkdown(source) }), COLOUR_DELAY_MS)
+    return () => clearTimeout(timer)
+  }, [live, source, painted?.source])
+  if (liveTokens) return { tokens: liveTokens, pending: false }
+  return { tokens: painted?.tokens ?? NO_TOKENS, pending: painted?.source !== source }
+}
+
+/** Raw markdown textarea editor (code mode).
+ *
+ *  Highlighting is a <pre> painted behind the textarea, so every native
+ *  editing behaviour (caret, selection, IME, undo, spellcheck) stays the
+ *  browser's. The textarea keeps its own text transparent and shows only the
+ *  caret; the exceptions are moments when the layer has nothing truthful to
+ *  show — during IME composition the preedit is not in `content` yet, and while
+ *  `pending` the tokens describe older text — and the textarea reveals its own
+ *  text for the duration instead. */
 export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange }: {
   content: string
   cursorOffset?: number
@@ -51,6 +108,9 @@ export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange
 }) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const initialCursorOffset = useRef(cursorOffset)
+  const [composing, setComposing] = useState(false)
+  const { tokens, pending } = useMarkdownTokens(content)
+  const revealed = composing || pending
   // Auto-resize before restoring scroll so the outer container has its final height.
   useEffect(() => {
     const el = ref.current
@@ -66,14 +126,24 @@ export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange
     if (scroller) {
       const lineHeight = parseFloat(getComputedStyle(el).lineHeight) || 20
       const line = el.value.slice(0, offset).split('\n').length - 1
-      scroller.scrollTop = Math.max(0, el.offsetTop + line * lineHeight - scroller.clientHeight / 3)
+      // Measured from rects, not offsetTop: the highlight stack is a positioned
+      // ancestor, so the textarea's offsetParent is no longer the scroller.
+      const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
+      scroller.scrollTop = Math.max(0, top + line * lineHeight - scroller.clientHeight / 3)
     }
   }, [initialCursorOffset])
   return (
-    <textarea ref={ref} value={content} onChange={e => { onCursorOffset(e.currentTarget.selectionStart); onChange(e.target.value) }}
-      onSelect={e => onCursorOffset(e.currentTarget.selectionStart)}
-      placeholder="Start writing in Markdown…"
-      className="editor-raw-markdown w-full bg-transparent text-sm text-foreground font-mono leading-relaxed outline-none resize-none placeholder:text-muted"
-      spellCheck={false} />
+    <div className="editor-raw-stack relative">
+      <pre aria-hidden="true" data-testid="raw-markdown-highlight"
+        className={'editor-raw-highlight pointer-events-none absolute inset-0 overflow-hidden' + (pending ? ' invisible' : '')}>
+        <MarkdownTokens tokens={tokens} />
+      </pre>
+      <textarea ref={ref} value={content} onChange={e => { onCursorOffset(e.currentTarget.selectionStart); onChange(e.target.value) }}
+        onSelect={e => onCursorOffset(e.currentTarget.selectionStart)}
+        onCompositionStart={() => setComposing(true)} onCompositionEnd={() => setComposing(false)}
+        placeholder="Start writing in Markdown…"
+        className={'editor-raw-markdown relative block w-full bg-transparent outline-none resize-none placeholder:text-muted ' + (revealed ? 'text-foreground' : 'text-transparent')}
+        spellCheck={false} />
+    </div>
   )
 }

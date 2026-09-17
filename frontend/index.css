@@ -15,6 +15,15 @@
     --color-foreground-quaternary: #d4d4d8;
     --color-foreground-heading: #f4f4f5;
     --color-muted: #52525b;
+    /* Raw markdown syntax palette. Separate from the UI tokens so the raw
+       editor's colours can be tuned without moving chrome, and so every theme
+       declares the same set of syntax roles. */
+    --color-syntax-punctuation: #71717a;
+    --color-syntax-voiced: #f4f4f5;
+    --color-syntax-code: #2dd4bf;
+    --color-syntax-math: #fbbf24;
+    --color-syntax-wikilink: #c084fc;
+    --color-syntax-task: #22c55e;
     --color-accent: #3b82f6;
     --color-accent-hover: #1d4ed8;
     --color-accent-subtle: rgb(59 130 246 / 10%);
@@ -54,6 +63,12 @@
     --color-foreground-quaternary: #3f3f46;
     --color-foreground-heading: #09090b;
     --color-muted: #a1a1aa;
+    --color-syntax-punctuation: #52525b;
+    --color-syntax-voiced: #09090b;
+    --color-syntax-code: #0f766e;
+    --color-syntax-math: #b45309;
+    --color-syntax-wikilink: #7c3aed;
+    --color-syntax-task: #047857;
     --color-accent: #2563eb;
     --color-accent-hover: #1d4ed8;
     --color-accent-subtle: rgb(37 99 235 / 10%);
@@ -149,6 +164,83 @@ body {
 #root .bn-editor,
 #root .editor-raw-markdown {
     padding-inline: var(--editor-gutter, 54px);
+}
+
+/* Raw markdown: the <pre> paints the glyphs, the transparent <textarea> on top
+   carries only the caret, selection and input. Typography lives here once, for
+   both layers, and not as utilities: the form preflight sets `font: inherit` on
+   the textarea, so it picks up the shell's sans stack and the layered
+   `font-mono`/`leading-relaxed` utilities do not win. Any metric the two layers
+   do not share walks the caret off the glyph the user is editing. Token
+   colours below must never change weight, style, size or spacing for the same
+   reason — colour and decoration only. */
+#root .editor-raw-highlight,
+#root .editor-raw-markdown {
+    margin: 0;
+    padding-block: 0;
+    font-family: var(--font-mono);
+    font-size: 0.875rem;
+    line-height: 1.625;
+    letter-spacing: normal;
+    tab-size: 4;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+#root .editor-raw-highlight {
+    padding-inline: var(--editor-gutter, 54px);
+    color: var(--color-foreground);
+    pointer-events: none;
+    overflow: hidden;
+}
+#root .editor-raw-markdown {
+    caret-color: var(--color-foreground);
+}
+#root .editor-raw-markdown::selection {
+    background: var(--color-surface-active);
+}
+#root .md-marker,
+#root .md-list-marker,
+#root .md-table-pipe,
+#root .md-table-separator,
+#root .md-escape,
+#root .md-html,
+#root .md-hr {
+    color: var(--color-syntax-punctuation);
+}
+/* Heading, bold, italic and frontmatter keys all carry the reading voice of the
+   text, so they share one bright role and are told apart by their markers. */
+#root .md-heading,
+#root .md-strong,
+#root .md-emphasis,
+#root .md-frontmatter-key {
+    color: var(--color-syntax-voiced);
+}
+#root .md-quote,
+#root .md-code-lang,
+#root .md-frontmatter-value {
+    color: var(--color-foreground-secondary);
+}
+#root .md-task-marker {
+    color: var(--color-syntax-task);
+}
+#root .md-code,
+#root .md-code-span,
+#root .md-code-fence {
+    color: var(--color-syntax-code);
+}
+#root .md-link,
+#root .md-link-url {
+    color: var(--color-accent);
+}
+#root .md-wikilink {
+    color: var(--color-syntax-wikilink);
+}
+#root .md-math {
+    color: var(--color-syntax-math);
+}
+#root .md-strike {
+    color: var(--color-syntax-punctuation);
+    text-decoration: line-through;
 }
 
 /* The editable root contains its blocks' vertical margins. Without a BFC the
