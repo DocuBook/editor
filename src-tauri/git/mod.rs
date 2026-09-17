@@ -6,8 +6,12 @@
 
 pub mod branches;
 pub mod commit;
+pub mod fetch;
 pub mod identity;
+pub mod merge;
+pub mod pull;
 pub mod push;
+pub mod rebase;
 pub mod remote;
 pub mod repo;
 pub mod staging;
