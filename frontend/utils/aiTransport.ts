@@ -16,7 +16,6 @@ import { invoke, listen } from "../lib/ipc";
 import { toast } from "sonner";
 import { useAiChat } from "../stores/aiChat";
 import { useAiSettings } from "../stores/aiSettings";
-import { useAiThreads } from "../stores/aiThreads";
 
 import {
   buildApplyDocumentInput,
@@ -74,70 +73,15 @@ export interface AiTransportDeps {
   getEditor: () => any | null;
   /** Vault-relative file bound to this keep-alive editor instance. */
   filePath?: string
-  /** Absolute vault identity used to isolate persisted thread history. */
-  vaultPath?: string;
 }
 
 /** Create the rust-ai ChatTransport. `reconnectToStream` is unsupported (the Rust
  *  stream is one-shot; rust-ai never resumes after an abort). */
 export function createAiTransport(deps: AiTransportDeps) {
   return {
-    sendMessages: async (args: any) => {
-      const stream = await runSendMessages(args, deps);
-      return recordThreadHistory(stream, args, deps.filePath ?? "", deps.vaultPath ?? "");
-    },
+    sendMessages: async (args: any) => runSendMessages(args, deps),
     reconnectToStream: async () => null,
   };
-}
-
-/** Pass-through stream middleware. History is updated from transport parts, so
- *  a file/menu tab switch cannot lose an in-flight response from a keep-alive editor. */
-function recordThreadHistory(source: ReadableStream<any>, args: any, filePath: string, vaultPath: string): ReadableStream<any> {
-  const exchange = useAiThreads.getState().beginExchange(latestUserText(args?.messages || []), filePath, vaultPath);
-  if (!exchange) return source;
-
-  const reader = source.getReader();
-  const { threadId, assistantId } = exchange;
-  let content = "";
-  let toolRecorded = false;
-  let settled = false;
-  const update = () => useAiThreads.getState().setMessageContent(threadId, assistantId, content);
-  const finish = (status: "done" | "error") => {
-    if (settled) return;
-    settled = true;
-    useAiThreads.getState().finishMessage(threadId, assistantId, status, content);
-  };
-
-  return new ReadableStream({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          finish("done");
-          controller.close();
-          return;
-        }
-        const parts = Array.isArray(value) ? value : [value];
-        for (const part of parts) {
-          if (part?.type === "text-delta" && typeof part.delta === "string") {
-            content += part.delta;
-          } else if (part?.type === "tool-input-available" && !toolRecorded) {
-            toolRecorded = true;
-            content += `${content ? "\n\n" : ""}Document changes ready for review.`;
-          }
-        }
-        update();
-        controller.enqueue(value);
-      } catch (error) {
-        finish("error");
-        controller.error(error);
-      }
-    },
-    cancel(reason) {
-      finish("done");
-      return reader.cancel(reason);
-    },
-  });
 }
 
 async function runSendMessages(

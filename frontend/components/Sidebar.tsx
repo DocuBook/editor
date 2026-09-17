@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
-import { useAiThreads } from '../stores/aiThreads'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
 import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
@@ -10,7 +9,6 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
 import SidebarFooter from './SidebarFooter'
 import SidebarPopover from './SidebarPopover'
-import AiChatPanel from './panels/AiChatPanel'
 import GitPanel from './panels/GitPanel'
 import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
@@ -271,7 +269,6 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                       await useEditorStore.getState().flushEditor()
                       await invoke('rename_file', { from: renaming.path, to: newPath })
                       await useEditorStore.getState().renameTab(renaming.path, newPath)
-                      useAiThreads.getState().renamePath(renaming.path, newPath)
                       /* Keep the create-here target in sync: create_file re-creates missing
                        * parent dirs, so a stale currentFolder would silently recreate the
                        * old folder (A -> Z then new file lands in A/). */
@@ -313,7 +310,6 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
             ))}
           </div>
       )}
-      {isOpen && activePanel === 'ai' && <AiChatPanel />}
       {isOpen && activePanel === 'git' && <GitPanel />}
       {(isOpen || isTauri) && activePanel === 'trash' && (
         <TrashPanel

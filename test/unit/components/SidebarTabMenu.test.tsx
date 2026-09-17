@@ -29,20 +29,19 @@ afterEach(() => {
 })
 
 describe('SidebarTabMenu', () => {
-  it('renders four tabs in order', () => {
+  it('renders three tabs in order', () => {
     renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 0, isNative: true })
 
-    expect(tabs()).toHaveLength(4)
-    expect(tabs().map(tab => tab.getAttribute('aria-label'))).toEqual(['Vault', 'AI Chat', 'Changes', 'Trash'])
+    expect(tabs()).toHaveLength(3)
+    expect(tabs().map(tab => tab.getAttribute('aria-label'))).toEqual(['Folders', 'Changes', 'Trash'])
     expect(tabById('sidebar-panel-vault')).not.toBeNull()
-    expect(tabById('sidebar-panel-ai')).not.toBeNull()
     expect(tabById('sidebar-panel-git')).not.toBeNull()
     expect(tabById('trash-toggle')).not.toBeNull()
   })
 
   it('shows the title text only on the active tab', () => {
-    const labels: Record<SidebarPanelId, string> = { vault: 'Vault', ai: 'AI Chat', git: 'Changes', trash: 'Trash' }
-    for (const active of ['vault', 'ai', 'git', 'trash'] as SidebarPanelId[]) {
+    const labels: Record<SidebarPanelId, string> = { vault: 'Folders', git: 'Changes', trash: 'Trash' }
+    for (const active of ['vault', 'git', 'trash'] as SidebarPanelId[]) {
       if (root) act(() => root!.unmount())
       renderMenu({ active, onChange: vi.fn(), trashCount: 5, isNative: true })
 
@@ -69,7 +68,7 @@ describe('SidebarTabMenu', () => {
     renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 3, isNative: false })
     expect(tabById('trash-toggle').disabled).toBe(false)
 
-    for (const id of ['sidebar-panel-vault', 'sidebar-panel-ai', 'sidebar-panel-git']) {
+    for (const id of ['sidebar-panel-vault', 'sidebar-panel-git']) {
       expect(tabById(id).disabled).toBe(false)
     }
   })
@@ -84,9 +83,6 @@ describe('SidebarTabMenu', () => {
     const onChange = vi.fn()
     renderMenu({ active: 'vault', onChange, trashCount: 2, isNative: true })
 
-    act(() => tabById('sidebar-panel-ai').click())
-    expect(onChange).toHaveBeenLastCalledWith('ai')
-
     act(() => tabById('sidebar-panel-git').click())
     expect(onChange).toHaveBeenLastCalledWith('git')
 
@@ -95,7 +91,7 @@ describe('SidebarTabMenu', () => {
 
     act(() => tabById('sidebar-panel-vault').click())
     expect(onChange).toHaveBeenLastCalledWith('vault')
-    expect(onChange).toHaveBeenCalledTimes(4)
+    expect(onChange).toHaveBeenCalledTimes(3)
   })
 
   it('ignores clicks on disabled web trash', () => {

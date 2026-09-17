@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAiTransport } from '../../../frontend/utils/aiTransport'
 import { useAiChat } from '../../../frontend/stores/aiChat'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
-import { useAiThreads } from '../../../frontend/stores/aiThreads'
 
 /** Mention retrieval is a dedicated API: it must fire ONLY when the prompt
  *  actually contains a mention, and its payload must reach the model as framed
@@ -63,7 +62,6 @@ async function send(content: string) {
 }
 
 beforeEach(() => {
-  useAiThreads.setState({ threads: [], activeThreadId: null })
   useAiSettings.setState({ provider: 'test', model: 'test-model', probeTools: {} })
   useAiChat.setState({ mentionNotice: null })
 })

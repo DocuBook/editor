@@ -6,7 +6,6 @@ import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
 import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
-import { useAiThreads } from '../../stores/aiThreads'
 import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
@@ -72,7 +71,6 @@ async function listVaultEntries(): Promise<{ entries: TreeEntry[]; unreadable: n
 
 export default function AiFloatingChat() {
   const editor = useEditorStore((s) => s.blockEditor)
-  const activeTab = useEditorStore((s) => s.activeTab)
   const vaultPath = useVaultStore((s) => s.vaultPath)
   const { selectionPromptOpen, expanded, input, focusRequest, mentionNotice, setExpanded, setInput, setSelectionPromptOpen, setMentionNotice } = useAiChat()
   const provider = useAiSettings((s) => s.provider)
@@ -256,14 +254,8 @@ export default function AiFloatingChat() {
     setInput('')
   }
 
-  const settleThreadStatus = (status: string) => {
-    const path = activeTab ?? ''
-    if (!path) return
-    const thread = useAiThreads.getState().threads.find((item) => item.filePath === path && (item.vaultPath ?? '') === (vaultPath ?? ''))
-    if (thread) useAiThreads.getState().updateLatestAssistantStatus(thread.id, status)
-  }
-  const accept = () => { setExpanded(false); settleThreadStatus('Document accepted by editor.'); ai.acceptChanges() }
-  const revert = () => { setExpanded(false); settleThreadStatus('Document reverted by editor.'); ai.rejectChanges() }
+  const accept = () => { setExpanded(false); ai.acceptChanges() }
+  const revert = () => { setExpanded(false); ai.rejectChanges() }
 
   const promptInput = (
     <>

@@ -54,7 +54,7 @@ export function createBlockEditor(vaultPath: string, filePath: string): CachedEd
     },
     extensions: [
       AIExtension({
-        transport: createAiTransport({ getEditor: () => editor, filePath, vaultPath }),
+        transport: createAiTransport({ getEditor: () => editor, filePath }),
         documentStateBuilder: createSelectionAwareDocumentStateBuilder(async (request: any) =>
           (await import('./aiBlocks')).buildHtmlDocumentState(request.editor, !!request.selectedBlocks?.length),
         ),

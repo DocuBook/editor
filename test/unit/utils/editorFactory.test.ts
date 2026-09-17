@@ -36,8 +36,8 @@ describe('createBlockEditor AI transport wiring', () => {
   })
 
   /** The AI transport closes over the keep-alive editor instance; it must also
-   *  know WHICH document it is bound to, or thread history lands in the wrong
-   *  chat. The factory is the single place that passes that path. */
+   *  know WHICH document it is bound to, so mention retrieval excludes the
+   *  current file. The factory is the single place that passes that path. */
   it('passes the vault-relative file path and the live editor to createAiTransport', () => {
     const cached = createBlockEditor('/vault', 'notes/a.md')
 

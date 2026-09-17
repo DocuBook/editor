@@ -1,6 +1,6 @@
-import { BotMessageSquare, HardDrive, GitMerge, Trash } from 'lucide-react'
+import { FolderOpen, GitMerge, Trash } from 'lucide-react'
 
-export type SidebarPanelId = 'vault' | 'ai' | 'git' | 'trash'
+export type SidebarPanelId = 'vault' | 'git' | 'trash'
 
 interface SidebarTabMenuProps {
   active: SidebarPanelId
@@ -13,8 +13,7 @@ interface SidebarTabMenuProps {
 }
 
 const ITEMS = [
-  { id: 'vault' as const, label: 'Vault', Icon: HardDrive },
-  { id: 'ai' as const, label: 'AI Chat', Icon: BotMessageSquare },
+  { id: 'vault' as const, label: 'Folders', Icon: FolderOpen },
   { id: 'git' as const, label: 'Changes', Icon: GitMerge },
   { id: 'trash' as const, label: 'Trash', Icon: Trash },
 ]
