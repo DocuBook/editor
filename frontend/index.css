@@ -150,6 +150,16 @@ body {
 #root .editor-raw-markdown {
     padding-inline: var(--editor-gutter, 54px);
 }
+
+/* The editable root contains its blocks' vertical margins. Without a BFC the
+   first block's top margin collapses out of the editor, so the blank space
+   above the first heading belongs to the scroll container instead: clicks there
+   never reach the editor, and the editable box stops covering the top of the
+   column. flow-root keeps the margin inside without changing the visual gap
+   (the collapsed margin already rendered outside the box). */
+#root .bn-editor {
+    display: flow-root;
+}
 @media (max-width: 639px) {
     #root .editor-content {
         --editor-gutter: 0px;
