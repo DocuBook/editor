@@ -71,12 +71,13 @@ A bind mount must point at a dedicated directory — never a shared parent such 
 
 ##### Coolify
 
-| Type                      | Name           | Source Path           | Destination Path |
-| ------------------------- | -------------- | --------------------- | ---------------- |
-| Volume Mount (recommended) | `docubook-data` | leave empty           | `/data`          |
-| Directory Mount           | —              | `/data/docubook-app`  | `/data`          |
+| Type                       | Name           | Source Path          | Destination Path |
+| -------------------------- | -------------- | -------------------- | ---------------- |
+| Volume Mount (recommended) | `docubook-data` | leave empty          | `/data`          |
+| Directory Mount            | —              | `/data/docubook-app` | `/data`          |
 
-Coolify prefixes volume names with the resource id, so `docubook-data` is created as `jtuxy7892urbxqshjtzh7t5x-docubook-data` under `/var/lib/docker/volumes/`. A Volume Mount **with** a Source Path and a Directory Mount are both bind mounts, so their source must be a dedicated directory: Coolify keeps its own state in `/data/coolify`, and binding `/data` hands that state to the container. File Mount is for single files only — never for `/data`.
+Coolify prefixes volume names with the resource id, so `docubook-data` becomes `<resource-id>-docubook-data` under `/var/lib/docker/volumes/`. A Volume Mount **with** a Source Path and a Directory Mount are both bind mounts, so their source must be a dedicated directory: Coolify keeps its own state in `/data/coolify`, and binding `/data` hands that state to the container. File Mount is for single files only — never for `/data`.
+
 
 ### Desktop — macOS
 
