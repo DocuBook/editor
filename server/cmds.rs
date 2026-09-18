@@ -4,8 +4,10 @@ use super::*;
 pub(crate) fn open_vault(state: &AppState, path: &str) -> Result<String, String> {
     let v = vault::Vault::new(path)?;
     let name = v.name();
+    // The markdown list is shared, not copied, and the wiki index defers link
+    // extraction: opening a large vault pays for enumeration only.
     let mut w = wiki::WikiIndex::new();
-    w.scan(v.root(), v.walk("", vault::WalkKind::Markdown));
+    w.scan(v.markdown_files());
     tracing::info!(
         event = "vault_opened",
         git_repository = std::path::Path::new(path).join(".git").exists()
@@ -30,17 +32,17 @@ fn valid_vault_name(name: &str) -> bool {
  *  open_vault; without this, suggest/backlinks/resolve stay stale until the
  *  vault is reopened.
  *
- *  The vault lock only covers the file list: the content scan reads every
- *  markdown file, so holding the vault mutex across it would stall every other
+ *  The vault lock only covers the file list, and the list itself is cached on
+ *  the vault: holding the vault mutex across a re-walk would stall every other
  *  vault command. */
 pub(crate) fn rescan_wiki(state: &AppState) {
-    let (root, files) = {
+    let files = {
         let vault = state.vault.lock().expect("lock");
         let Some(v) = vault.as_ref() else { return };
-        (v.root().to_path_buf(), v.walk("", vault::WalkKind::Markdown))
+        v.markdown_files()
     };
     if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
-        w.scan(&root, files);
+        w.scan(files);
     }
 }
 

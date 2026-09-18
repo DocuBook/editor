@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 pub mod mentions;
@@ -43,6 +44,10 @@ pub struct Vault {
     /// Built lazily on the first lookup and dropped by mutations, so opening a
     /// vault does not pay for a walk nobody (currently) reads.
     renderable: RefCell<Option<HashMap<PathBuf, bool>>>,
+    /// Cache: every markdown file, in walk order. Search runs it on each
+    /// keystroke and the wiki index scans it at open, so re-walking per call is
+    /// the difference between a few ms and a few hundred on a large vault.
+    markdown: RefCell<Option<Arc<Vec<String>>>>,
 }
 
 impl Vault {
@@ -50,7 +55,7 @@ impl Vault {
     pub fn new(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         if !root.is_dir() { return Err(format!("Not a directory: {}", path)); }
-        Ok(Self { root, renderable: RefCell::new(None) })
+        Ok(Self { root, renderable: RefCell::new(None), markdown: RefCell::new(None) })
     }
 /** Get the vault root path. Used by both crates: file serving and the wiki
      *  index reads. */
@@ -126,9 +131,10 @@ impl Vault {
         map
     }
 
-    /// Drop the cache after filesystem mutations so the next lookup rebuilds it.
-    fn invalidate_renderable_cache(&self) {
+    /// Drop the caches after filesystem mutations so the next lookup rebuilds.
+    fn invalidate_caches(&self) {
         *self.renderable.borrow_mut() = None;
+        *self.markdown.borrow_mut() = None;
     }
 
     /// Enumerate files recursively beneath a vault-relative directory.
@@ -158,6 +164,16 @@ impl Vault {
         }
         paths.sort();
         paths
+    }
+
+    /** Cached markdown file list (same order as `walk("", Markdown)`). Shared
+     *  through `Arc` so callers — search per keystroke, the wiki index at open —
+     *  never copy it or re-walk the vault. */
+    pub(crate) fn markdown_files(&self) -> Arc<Vec<String>> {
+        if let Some(cached) = self.markdown.borrow().as_ref() { return cached.clone(); }
+        let files = Arc::new(self.walk("", WalkKind::Markdown));
+        *self.markdown.borrow_mut() = Some(files.clone());
+        files
     }
 
     /// Resolve an exact vault path, then an extension-less Markdown path.
@@ -246,7 +262,7 @@ impl Vault {
         let f = self.safe_path(path)?;
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         std::fs::write(&f, content).map_err(|e| e.to_string())?;
-        self.invalidate_renderable_cache();
+        self.invalidate_caches();
         Ok(())
     }
 /** Create an empty file, creating parent directories if needed. */
@@ -254,14 +270,14 @@ impl Vault {
         let f = self.safe_path(path)?;
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         if !f.exists() { std::fs::write(&f, "").map_err(|e| e.to_string())?; }
-        self.invalidate_renderable_cache();
+        self.invalidate_caches();
         Ok(path.to_string())
     }
 
 /** Create an empty directory (and parents). */
     pub fn create_directory(&self, path: &str) -> Result<(), String> {
         std::fs::create_dir_all(self.safe_path(path)?).map_err(|e| format!("Create dir: {}", e))?;
-        self.invalidate_renderable_cache();
+        self.invalidate_caches();
         Ok(())
     }
 
@@ -297,6 +313,7 @@ impl Vault {
         {
             trash::delete(&f).map_err(|e| format!("Trash: {}", e))?;
         }
+        self.invalidate_caches();
         Ok(())
     }
 
@@ -357,7 +374,7 @@ impl Vault {
         if let Some(parent) = dst.parent() { std::fs::create_dir_all(parent).map_err(|e| format!("Restore: {e}"))?; }
         std::fs::rename(&src, &dst).map_err(|e| format!("Restore: {}", e))?;
         let _ = std::fs::remove_file(metadata_path);
-        self.invalidate_renderable_cache();
+        self.invalidate_caches();
         Ok(())
     }
 
@@ -375,7 +392,7 @@ impl Vault {
     pub fn delete_trash_item(&self, trash_name: &str) -> Result<(), String> {
         Self::remove_trash_path(&self.trash_path(trash_name)?)?;
         let _ = std::fs::remove_file(self.trash_metadata_path(trash_name)?);
-        self.invalidate_renderable_cache();
+        self.invalidate_caches();
         Ok(())
     }
 
@@ -385,7 +402,7 @@ impl Vault {
         let dst = self.safe_path(to)?;
         if let Some(p) = dst.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         std::fs::rename(&src, &dst).map_err(|e| format!("Rename: {}", e))?;
-        self.invalidate_renderable_cache();
+        self.invalidate_caches();
         Ok(())
     }
 }
@@ -396,14 +413,14 @@ mod tests {
 
     #[test]
     fn vault_name_from_directory() {
-        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None) };
+        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None), markdown: RefCell::new(None) };
         assert_eq!(v.name(), "my-vault");
     }
 
     #[test]
     fn vault_name_root() {
         // root's file_name is None on some platforms, empty on others
-        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None) };
+        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None), markdown: RefCell::new(None) };
         assert_eq!(v.name(), "");
     }
 
@@ -505,6 +522,28 @@ mod tests {
         assert_eq!(tree.len(), 2, "empty/ harus muncul setelah ada .md");
         let names: Vec<&str> = tree.iter().map(|f| f.name.as_str()).collect();
         assert!(names.contains(&"empty"), "tree: {:?}", names);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn markdown_list_cache_invalidates_after_mutation() {
+        let dir = std::env::temp_dir().join("vault-test-markdown-cache");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "").unwrap();
+        std::fs::write(dir.join("b.mdx"), "").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(*v.markdown_files(), vec!["a.md".to_string(), "b.mdx".to_string()]);
+
+        // Create + rename must drop the cached list: search reads it on every
+        // keystroke and the wiki index scans it after each save, so a stale list
+        // would keep offering paths that no longer exist.
+        v.create_file("c.md").unwrap();
+        assert_eq!(v.markdown_files().len(), 3);
+        v.rename_file("c.md", "notes/d.md").unwrap();
+        assert!(v.markdown_files().iter().any(|p| p == "notes/d.md"), "{:?}", v.markdown_files());
+        assert!(!v.markdown_files().iter().any(|p| p == "c.md"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -96,13 +96,13 @@ function run(argv) {
  *  markdown file, and holding the vault mutex across it would stall tree/read/
  *  search on every save. */
 fn rescan_wiki(state: &State<'_, AppState>) {
-    let (root, files) = {
+    let files = {
         let vault = state.vault.lock().expect("lock");
         let Some(v) = vault.as_ref() else { return };
-        (v.root().to_path_buf(), v.walk("", crate::vault::WalkKind::Markdown))
+        v.markdown_files()
     };
     if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
-        w.scan(&root, files);
+        w.scan(files);
     }
 }
 
@@ -115,7 +115,10 @@ fn valid_vault_name(name: &str) -> bool {
 pub fn open_vault(path: &str, state: State<AppState>) -> Result<String, String> {
     let v = crate::vault::Vault::new(path)?;
     let name = v.name();
-    let mut w = crate::wiki::WikiIndex::new(); w.scan(v.root(), v.walk("", crate::vault::WalkKind::Markdown));
+    // Markdown list is shared, not copied: the index takes the same cached
+    // `Arc` the search command will use. Link extraction is deferred (see
+    // `WikiIndex`), so open pays for enumeration only, not for reading every note.
+    let mut w = crate::wiki::WikiIndex::new(); w.scan(v.markdown_files());
     eprintln!("[docubook] open_vault: {} (git repo: {})", path, std::path::Path::new(path).join(".git").exists());
     let g = crate::git::Git::open(path);
     *state.vault.lock().expect("lock") = Some(v);
