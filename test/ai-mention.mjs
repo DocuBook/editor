@@ -141,8 +141,19 @@ try {
   const idle = await bgOf(1)
   ok('the row Enter would commit is painted, not merely hoverable', armed !== idle && armed !== 'rgba(0, 0, 0, 0)', `${armed} vs ${idle}`)
 
+  // --- assistive tech is told which row is armed ---------------------------
+  // `aria-activedescendant` belongs on the composer: it is the element holding
+  // DOM focus, so the same attribute on the listbox announces nothing.
+  const controls = await prompt.getAttribute('aria-controls')
+  const listboxId = await page.locator('[role="listbox"]').getAttribute('id')
+  ok('the focused composer points at the open listbox', (await prompt.getAttribute('aria-expanded')) === 'true' && controls !== null && controls === listboxId, `controls=${controls} listbox=${listboxId}`)
+  const namedBefore = await prompt.getAttribute('aria-activedescendant')
+  ok('the composer names the armed row', namedBefore !== null && (await page.locator('#' + namedBefore).getAttribute('aria-selected')) === 'true', String(namedBefore))
+
   await page.keyboard.press('ArrowDown')
   ok('ArrowDown moves the highlight to the next row', (await bgOf(1)) === armed && (await bgOf(0)) === idle, 'highlight stayed put')
+  const namedAfter = await prompt.getAttribute('aria-activedescendant')
+  ok('the composer renames the row after ArrowDown', namedAfter !== null && namedAfter !== namedBefore && (await page.locator('#' + namedAfter).getAttribute('aria-selected')) === 'true', `${namedBefore} -> ${namedAfter}`)
 
   await page.keyboard.press('Enter')
   const moved = await prompt.inputValue()

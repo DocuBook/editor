@@ -22,6 +22,9 @@ const MENTION_LIST_CONCURRENCY = 6
 /** Stable option ids for aria-activedescendant (vault paths are not valid ids). */
 const optionId = (position: number) => `mention-option-${position}`
 
+/** `aria-controls` target for the composer while the picker is open. */
+const MENTION_LISTBOX_ID = 'mention-listbox'
+
 /** Folder part of a vault path (`docs/notes` for `docs/notes/guide.md`), empty
  *  at the vault root. */
 const parentOf = (path: string) => {
@@ -274,7 +277,7 @@ export default function AiFloatingChat() {
     <>
       {mentions.length > 0 && <div className="flex flex-wrap gap-1 px-3 pt-2">{mentions.map((mention) => <span key={`${mention.start}:${mention.end}`} className="flex items-center gap-1 rounded-full bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary"><FileText size={11} />{mention.token}<button aria-label={`Remove @${mention.token}`} className="p-1" onClick={() => removeMention(mention)}><X size={11} /></button></span>)}</div>}
       {mentionNotice && <div className="px-3 pt-1 text-[10px] text-muted">{mentionNotice}</div>}
-      {picker && <div role="listbox" aria-label="Mention files and folders" aria-activedescendant={activeEntry ? optionId(activeIndex) : undefined} className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => {
+      {picker && <div id={MENTION_LISTBOX_ID} role="listbox" aria-label="Mention files and folders" className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => {
           const selected = entry === activeEntry
           return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={mentionRowClass(selected)}>{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}{entry.type === '1' && <span className={'ml-auto ' + mentionMetaClass(selected)}>recursive</span>}</button>
         }) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
@@ -285,7 +288,7 @@ export default function AiFloatingChat() {
           if (picker && event.key === 'Tab' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
           if (event.key === 'Backspace' && !input && mentions.length) { event.preventDefault(); removeMention(mentions[mentions.length - 1]); return }
           if (event.key === 'Enter' && !event.shiftKey && hasInput && promptEnabled) { event.preventDefault(); submit() }
-        }} rows={1} aria-label="AI prompt" disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
+        }} rows={1} role="combobox" aria-label="AI prompt" aria-expanded={pickerOpen} aria-controls={pickerOpen ? MENTION_LISTBOX_ID : undefined} aria-autocomplete="list" aria-activedescendant={pickerOpen && activeEntry ? optionId(activeIndex) : undefined} disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
         {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <ListFilterPlus size={16} />}</button>}
       </div>
     </>

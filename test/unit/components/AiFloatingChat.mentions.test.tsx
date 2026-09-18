@@ -208,6 +208,39 @@ describe('composer @mention picker', () => {
     expect(textarea().value).toBe('@docs/notes/guide.md ')
   })
 
+  it('names the armed row from the composer, the element that keeps focus', async () => {
+    render()
+    const composer = textarea()
+
+    // Closed: nothing to control and nothing armed.
+    expect(composer.getAttribute('role')).toBe('combobox')
+    expect(composer.getAttribute('aria-expanded')).toBe('false')
+    expect(composer.getAttribute('aria-controls')).toBeNull()
+
+    act(() => typeInto(composer, '@guide'))
+    await settle()
+
+    // Focus never leaves the composer, so `aria-activedescendant` has to sit on
+    // the composer. On the listbox it names a row of an element the user cannot
+    // focus, and screen readers announce nothing as the highlight moves.
+    const listbox = document.querySelector('[role="listbox"]')!
+    expect(composer.getAttribute('aria-expanded')).toBe('true')
+    expect(composer.getAttribute('aria-controls')).toBe(listbox.id)
+    expect(composer.getAttribute('aria-autocomplete')).toBe('list')
+    expect(listbox.getAttribute('aria-activedescendant')).toBeNull()
+
+    const armedId = () => composer.getAttribute('aria-activedescendant')
+    expect(armedId()).toBe(listbox.querySelector('[aria-selected="true"]')!.id)
+
+    act(() => composer.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    expect(armedId()).toBe(Array.from(listbox.querySelectorAll('[role="option"]'))[1].id)
+
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(composer.getAttribute('aria-expanded')).toBe('false')
+    expect(composer.getAttribute('aria-controls')).toBeNull()
+    expect(armedId()).toBeNull()
+  })
+
   it('keeps suggestions when one folder cannot be listed', async () => {
     tree.assets = 'reject'
     render()
