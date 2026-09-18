@@ -318,7 +318,11 @@ const extensionFactory = ({ editor, options }: any) => {
     },
     async retry() {
       if (store.state.aiMenuState === 'closed' || store.state.aiMenuState.status !== 'error' || !session) throw new Error('retry() is only valid when a previous response failed')
-      return this.invokeAI({ ...session.options, userPrompt: 'An error occurred in the previous request. Please retry to accomplish the last user prompt.' })
+      /** Resend the ORIGINAL prompt. The transport sends only the latest user
+       *  message (no conversation history), so replacing the prompt with an
+       *  error notice left rust-ai with no task — the model then answered
+       *  "no last prompt content… cannot retry" instead of redoing the work. */
+      return this.invokeAI(session.options)
     },
     setAIResponseStatus: setStatus,
     async invokeAI(invokeOptions: InvokeOptions) {
