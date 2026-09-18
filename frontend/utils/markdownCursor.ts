@@ -1,6 +1,6 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
+import { gfmTableFromMarkdown } from 'mdast-util-gfm-table'
 import { gfm } from 'micromark-extension-gfm'
-import { parse, postprocess, preprocess } from 'micromark'
 
 interface CursorBlock {
   id: string
@@ -39,11 +39,6 @@ interface SourceBlock {
   end: number
   characters: SourceCharacter[]
   children: SourceBlock[]
-}
-
-interface Span {
-  start: number
-  end: number
 }
 
 interface MappedBlock {
@@ -105,7 +100,6 @@ export function blockText(block: CursorBlock): string {
 
 const nodeStart = (node: MarkdownNode) => node.position?.start.offset ?? 0
 const nodeEnd = (node: MarkdownNode) => node.position?.end.offset ?? nodeStart(node)
-const hasPosition = (node: MarkdownNode) => node.position?.start.offset !== undefined
 
 /** Source positions for each UTF-16 code unit in an AST text value. */
 function valueCharacters(markdown: string, node: MarkdownNode, value: string): SourceCharacter[] {
@@ -170,107 +164,39 @@ function listItemParts(markdown: string, own: MarkdownNode): { first: SourceChar
 }
 
 /** Child blocks of a container that BlockNote models as nested blocks: a list
- *  item's extra paragraphs and its sublists, in source order. */
-function childBlocks(markdown: string, node: MarkdownNode, spans: Span[]): SourceBlock[] {
+ *  item's continuation paragraph and its sublists, in source order. */
+function childBlocks(markdown: string, node: MarkdownNode): SourceBlock[] {
   if (node.type !== 'listItem') return []
   const children = node.children ?? []
   const ownIndex = children.findIndex(child => child.type !== 'list')
   const own = ownIndex < 0 ? undefined : children[ownIndex]
   const rest = ownIndex < 0 ? children : children.slice(ownIndex + 1)
   const blocks = rest.flatMap(child => child.type === 'list'
-    ? sourceBlocks(markdown, child.children ?? [], spans)
-    : [sourceBlock(markdown, child, spans)])
+    ? sourceBlocks(markdown, child.children ?? [])
+    : [sourceBlock(markdown, child)])
   const continuation = own ? listItemParts(markdown, own).continuation : undefined
   return continuation ? [continuation, ...blocks] : blocks
 }
 
-function sourceBlock(markdown: string, node: MarkdownNode, spans: Span[]): SourceBlock {
+function sourceBlock(markdown: string, node: MarkdownNode): SourceBlock {
   return {
     start: nodeStart(node),
     end: nodeEnd(node),
     characters: textCharacters(markdown, node),
-    children: childBlocks(markdown, node, spans),
+    children: childBlocks(markdown, node),
   }
-}
-
-/** A table span as one source block; `members` are the nodes that landed inside it. */
-function spanBlock(markdown: string, span: Span, members: MarkdownNode[]): SourceBlock {
-  return { start: span.start, end: span.end, characters: members.flatMap(member => textCharacters(markdown, member)), children: [] }
 }
 
 /** Lists are AST containers; BlockNote blocks correspond to their list items.
- *  A GFM table is the reverse: micromark emits one table token while
- *  `mdast-util-from-markdown` (without the mdast GFM extension) hands back the
- *  cell content as several adjacent nodes, so the whole span collapses into one
- *  source block to stay index-aligned with the single BlockNote table block.
- *
- *  Every span yields a block even when no node starts inside it: a table whose
- *  cells are all empty produces no mdast node at all, and skipping it would
- *  shift every later block/source pair by one. */
-function sourceBlocks(markdown: string, nodes: MarkdownNode[], spans: Span[]): SourceBlock[] {
-  const blocks: SourceBlock[] = []
-  let index = 0
-  let spanIndex = 0
-  while (index < nodes.length || spanIndex < spans.length) {
-    const span = spans[spanIndex]
-    const node = nodes[index]
-    if (!node) {
-      if (span) blocks.push(spanBlock(markdown, span, []))
-      spanIndex++
-      continue
-    }
-    const start = hasPosition(node) ? nodeStart(node) : undefined
-    /* The span ends before this node: it held no nodes of its own. Emit it first
-       so source order, and therefore index alignment, survives. */
-    if (span && start !== undefined && start >= span.end) {
-      blocks.push(spanBlock(markdown, span, []))
-      spanIndex++
-      continue
-    }
-    if (node.type === 'list') {
-      blocks.push(...sourceBlocks(markdown, node.children ?? [], spans))
-      index++
-      continue
-    }
-    if (!span || start === undefined || start < span.start) {
-      blocks.push(sourceBlock(markdown, node, spans))
-      index++
-      continue
-    }
-    const group: MarkdownNode[] = []
-    while (index < nodes.length && hasPosition(nodes[index]) && nodeStart(nodes[index]) >= span.start && nodeStart(nodes[index]) < span.end) {
-      group.push(nodes[index])
-      index++
-    }
-    blocks.push(spanBlock(markdown, span, group))
-    spanIndex++
-  }
-  return blocks
-}
-
-/** Top-level GFM table spans, straight from micromark's token stream. A GFM
- *  table row is delimited by pipes, so Markdown without a single `|` cannot
- *  contain one — and this tokenizer pass costs about as much as the mdast parse
- *  it accompanies, so skipping it keeps a table-free note on one pass. */
-function tableSpans(markdown: string): Span[] {
-  if (!markdown.includes('|')) return []
-  const parser = parse({ extensions: [gfm()] })
-  const events = postprocess(parser.document().write(preprocess()(markdown, undefined, true))) as unknown as ['enter' | 'exit', MicromarkToken][]
-  const spans: Span[] = []
-  let depth = 0
-  for (const [kind, token] of events) {
-    if (kind === 'enter' && depth === 0 && token.type === 'table') {
-      spans.push({ start: token.start?.offset ?? 0, end: token.end?.offset ?? 0 })
-    }
-    depth += kind === 'enter' ? 1 : -1
-  }
-  return spans
-}
-
-interface MicromarkToken {
-  type: string
-  start?: { offset?: number } | null
-  end?: { offset?: number } | null
+ *  A GFM table is the reverse: one BlockNote block holds every cell while the
+ *  tokenizer emits cell text in document order, which is exactly what the
+ *  generic walk below concatenates — so `mdast-util-gfm-table` turns a table
+ *  into a single source block with no span special case, and the parse stays on
+ *  one pass. */
+function sourceBlocks(markdown: string, nodes: MarkdownNode[]): SourceBlock[] {
+  return nodes.flatMap(node => node.type === 'list'
+    ? sourceBlocks(markdown, node.children ?? [])
+    : [sourceBlock(markdown, node)])
 }
 
 function emptySource(offset: number): SourceBlock {
@@ -302,8 +228,8 @@ let sourceCache: { markdown: string; sources: SourceBlock[] } | null = null
 
 function sourceBlocksFor(markdown: string): SourceBlock[] {
   if (sourceCache?.markdown === markdown) return sourceCache.sources
-  const root = fromMarkdown(markdown, { extensions: [gfm()] }) as MarkdownNode
-  const sources = sourceBlocks(markdown, root.children ?? [], tableSpans(markdown))
+  const root = fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmTableFromMarkdown()] }) as MarkdownNode
+  const sources = sourceBlocks(markdown, root.children ?? [])
   sourceCache = { markdown, sources }
   return sources
 }
