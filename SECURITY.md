@@ -44,5 +44,5 @@ The Rust backend (`src-tauri`) is the trust boundary; the webview is treated as 
 
 | Version | Supported |
 |---------|-----------|
-| v0.1.0-alpha.5 and later | ✅ |
-| Earlier alphas | ❌ |
+| v0.1.0-next and later | ✅ |
+| Earlier pre-releases | ❌ |

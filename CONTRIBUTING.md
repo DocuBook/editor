@@ -151,10 +151,10 @@ PR (conventional commit) → merge to master → CI audit → tag on master → 
 
 **Rules:**
 
-- **Tags are immutable** — never force-move a released tag. A fix after release means a new version (bump the pre-release number, e.g. `beta.3`), then the full flow again.
+- **Tags are immutable** — never force-move a released tag. A fix after release means a new version (bump the pre-release number, e.g. `next.1`), then the full flow again.
 - Tag only on `master` (a tag on a branch survives squash-merge poorly: the tagged commit is not reachable from master).
 - Version bumps go together in the release commit — never bump in a feature PR.
-- Docker image: immutable version tags with the `v` prefix (`:v0.1.0-beta.2`); stable tags also move `:latest`, while prerelease tags do not.
+- Docker image: immutable version tags with the `v` prefix (`:v0.1.0-next`); stable tags also move `:latest`, while prerelease tags do not.
 
 ## Contribution licensing
 
