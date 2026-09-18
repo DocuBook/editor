@@ -16,7 +16,8 @@ import {
   parseInlineMathMLContent,
   parseInlineMathMLElement,
 } from '@blocknote/math-block'
-import { createDiagramBlockConfig, DiagramBlockPreviewWithPopup, parseDiagramCodeContent, parseDiagramCodeElement } from '@blocknote/diagram-block'
+import { createDiagramBlockConfig, parseDiagramCodeContent, parseDiagramCodeElement } from '@blocknote/diagram-block'
+import { CachedDiagramPreviewWithPopup } from './CachedDiagramPreview'
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
@@ -94,7 +95,7 @@ function createStablePreview(Preview: any, language: string | ((props: any) => s
   }
 }
 
-const StableDiagramPreview = createStablePreview(DiagramBlockPreviewWithPopup, 'mermaid', 'block')
+const StableDiagramPreview = createStablePreview(CachedDiagramPreviewWithPopup, 'mermaid', 'block')
 const StableMathBlockPreview = createStablePreview(MathBlockPreviewWithPopup, 'latex', 'block')
 const StableMathInlinePreview = createStablePreview(MathInlinePreviewWithPopup, 'latex', 'inline')
 

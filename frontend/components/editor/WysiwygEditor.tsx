@@ -23,16 +23,16 @@ import { isTauri } from '../../lib/ipc'
 import { findActiveSuggestionItem, isEnterBeforeInput } from '../../utils/slashMenuFallback'
 import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
-import { createQueuedMermaidRender } from '../../utils/mermaidRenderCache'
+import { installRenderCaches } from '../../utils/renderCacheInstall'
 import { followAiWritingCursorInRoot } from '../../utils/aiFollowScroll'
 import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../utils/markdownCursor'
 import { serializeMarkdown } from '../../utils/markdownSerialization'
 import { setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
-// Mermaid is a singleton; patching it here also covers @blocknote/diagram-block.
-import mermaid from 'mermaid'
-;(mermaid as any).render = createQueuedMermaidRender(mermaid.render)
+// Memoization for the global renderers (Mermaid, KaTeX) must be installed before
+// any block renders — see `installRenderCaches`.
+installRenderCaches()
 
 export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, onSync, filePath, isDesktop }: {
   cached: CachedEditor

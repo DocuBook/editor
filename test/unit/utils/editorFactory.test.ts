@@ -88,4 +88,16 @@ describe('KeepAliveCache', () => {
     cache.get('a')
     expect(create).toHaveBeenCalledTimes(2) // re-created after clear
   })
+
+  /** peek() backs the flash-free tab switch: the host asks "is this file already
+   *  open?" during render, which must never construct an editor as a side effect. */
+  it('peek() reads without creating and returns null for a miss', () => {
+    const create = vi.fn((key: string) => ({ key }))
+    const cache = new KeepAliveCache(create)
+
+    expect(cache.peek('missing')).toBeNull()
+    const entry = cache.get('a')
+    expect(cache.peek('a')).toBe(entry)
+    expect(create).toHaveBeenCalledOnce()
+  })
 })

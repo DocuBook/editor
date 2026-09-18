@@ -24,6 +24,7 @@ import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { syntaxHighlighting } from './codeHighlighting'
 import { createAiTransport } from './aiTransport'
 import { createSelectionAwareDocumentStateBuilder } from './aiBlocks'
+import { getEditorCache, peekEditorCache } from './editorCache'
 
 export interface CachedEditor {
   editor: BlockNoteEditor<any, any, any>
@@ -65,5 +66,23 @@ export function createBlockEditor(vaultPath: string, filePath: string): CachedEd
       syntaxHighlighting,
     ],
   })
-  return { editor, loaded: false, loadedMarkdown: null }
+  return { editor, loaded: false, loadedMarkdown: null };
+}
+
+/** The single chokepoint for the shared editor cache.
+ *
+ *  Every way a document can be opened — sidebar tree, search modal, wikilink,
+ *  backlinks, git panel, or a plain tab switch — ends at the active tab and is
+ *  rendered by WysiwygEditorHost, which resolves its instance here. One
+ *  instance per (vault, path), so returning to a tab is a Map lookup instead of
+ *  a markdown re-parse, whatever the entry point was. */
+export function getCachedEditor(vaultPath: string, filePath: string): CachedEditor {
+  return getEditorCache<CachedEditor>(vaultPath, path => createBlockEditor(vaultPath, path)).get(filePath);
+}
+
+/** Same cache, read-only: returns an already-created instance or null. Lets a
+ *  component render the cached editor on the FIRST paint instead of showing a
+ *  loading placeholder while an effect resolves what is already in memory. */
+export function peekCachedEditor(vaultPath: string, filePath: string): CachedEditor | null {
+  return peekEditorCache<CachedEditor>(vaultPath, filePath);
 }
