@@ -179,6 +179,35 @@ describe('composer @mention picker', () => {
     expect(textarea().value).toBe('@docs/guide.md ')
   })
 
+  it('marks the row Enter would pick, so the commit is never blind', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    const rows = () => Array.from(document.querySelectorAll('[role="option"]')) as HTMLButtonElement[]
+    expect(rows()).toHaveLength(2)
+
+    // The armed row takes the accent; the hover tint stays off it, or hovering
+    // would paint over the highlight and hide where Enter points.
+    expect(rows()[0].className).toContain('bg-accent')
+    expect(rows()[0].className).toContain('text-on-accent')
+    expect(rows()[0].className).not.toContain('hover:bg-surface-active')
+    expect(rows()[1].className).not.toContain('bg-accent')
+    expect(rows()[1].className).toContain('hover:bg-surface-active')
+    // The muted path label is tuned for the dropdown surface, so it flips too.
+    expect(rows()[0].querySelector('span')!.className).toContain('text-on-accent')
+
+    act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+
+    expect(rows()[0].className).not.toContain('bg-accent')
+    expect(rows()[1].className).toContain('bg-accent')
+    expect(rows()[0].querySelector('span')!.className).toContain('text-muted')
+
+    // Enter commits the row carrying the highlight, not the first row.
+    act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(textarea().value).toBe('@docs/notes/guide.md ')
+  })
+
   it('keeps suggestions when one folder cannot be listed', async () => {
     tree.assets = 'reject'
     render()

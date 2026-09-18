@@ -130,6 +130,27 @@ try {
   await page.keyboard.press('Meta+a')
   await page.keyboard.type('summarise @change', { delay: 25 })
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
+
+  // --- the armed row is visible, and ArrowDown moves the highlight ----------
+  // Regression: rows carried only a hover tint, so ArrowDown changed the
+  // selection with no visual change and Enter committed a blind pick.
+  await page.mouse.move(0, 0) // keep a stray hover off the rows
+  const rows = page.locator('[role="listbox"] [role="option"]')
+  const bgOf = (i) => rows.nth(i).evaluate((el) => getComputedStyle(el).backgroundColor)
+  const armed = await bgOf(0)
+  const idle = await bgOf(1)
+  ok('the row Enter would commit is painted, not merely hoverable', armed !== idle && armed !== 'rgba(0, 0, 0, 0)', `${armed} vs ${idle}`)
+
+  await page.keyboard.press('ArrowDown')
+  ok('ArrowDown moves the highlight to the next row', (await bgOf(1)) === armed && (await bgOf(0)) === idle, 'highlight stayed put')
+
+  await page.keyboard.press('Enter')
+  const moved = await prompt.inputValue()
+  ok('Enter commits the highlighted row, not the first row', moved === 'summarise @docs/CHANGELOG-old.md ', JSON.stringify(moved))
+
+  await page.keyboard.press('Meta+a')
+  await page.keyboard.type('summarise @change', { delay: 25 })
+  await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
   await page.keyboard.press('Enter')
   const inserted = await prompt.inputValue()
   ok('Enter inserts the full vault path, not the partial query', inserted === 'summarise @CHANGELOG.md ', JSON.stringify(inserted))
