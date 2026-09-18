@@ -116,6 +116,20 @@ try {
   await page.keyboard.press('Meta+a')
   await page.keyboard.type('summarise @change', { delay: 25 })
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
+
+  // --- a pointer pick completes (touch devices have no Tab) -----------------
+  // Regression: the dropdown renders above `.editor-ai-floating`, so an
+  // `overflow-x: hidden` on that box clipped it and every row became
+  // unclickable — only Tab/Enter worked. Assert the row is the hit target.
+  const option = page.locator('[role="listbox"] [role="option"]').first()
+  await option.click()
+  const picked = await prompt.inputValue()
+  ok('clicking a suggestion completes the mention without Tab/Enter', picked === 'summarise @CHANGELOG.md ', JSON.stringify(picked))
+  ok('the picker closes after a pointer pick', (await page.locator('[role="listbox"]').count()) === 0)
+
+  await page.keyboard.press('Meta+a')
+  await page.keyboard.type('summarise @change', { delay: 25 })
+  await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
   await page.keyboard.press('Enter')
   const inserted = await prompt.inputValue()
   ok('Enter inserts the full vault path, not the partial query', inserted === 'summarise @CHANGELOG.md ', JSON.stringify(inserted))

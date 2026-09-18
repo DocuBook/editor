@@ -637,11 +637,18 @@ body .mobile-sidebar-drawer-body > aside {
 
 /* Tailwind v4 emits range media queries for responsive utilities; Safari 15
    ignores that syntax. Keep the floating composer responsive with the legacy
-   min-width form supported by the app's oldest WKWebView. */
+   min-width form supported by the app's oldest WKWebView.
+
+   Deliberately NO `overflow-x: hidden` here: the @mention dropdown is positioned
+   `bottom-full`, i.e. it renders ABOVE this box. `overflow-x: hidden` against a
+   `visible` overflow-y computes to `hidden auto`, which clipped the dropdown and
+   made every suggestion row unclickable (pointer hit-testing fell through to
+   `.editor-content`) — the mention could then only be accepted with the keyboard
+   (Tab/Enter). Horizontal overflow is guarded on the quick-prompt list, the only
+   child that can exceed the width, not on the box that hosts the dropdown. */
 .editor-ai-floating {
     width: calc(100% - 2rem);
     max-width: 100%;
-    overflow-x: hidden;
 }
 @media (min-width: 640px) {
     .editor-ai-floating {

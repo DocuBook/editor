@@ -146,6 +146,39 @@ describe('composer @mention picker', () => {
     expect(textarea().value).toBe('@docs/notes/guide.md ')
   })
 
+  it('completes the mention on a pointer pick, without Tab or Enter', async () => {
+    render()
+    act(() => typeInto(textarea(), 'summarise @change'))
+    await settle()
+
+    const row = Array.from(document.querySelectorAll('[role="option"]')).find(node => node.textContent?.includes('CHANGELOG.md')) as HTMLButtonElement
+    expect(row).toBeDefined()
+    // Real press shape: mousedown (composer keeps focus) then click.
+    act(() => {
+      row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+      row.click()
+    })
+
+    expect(textarea().value).toBe('summarise @CHANGELOG.md ')
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+  })
+
+  it('inserts the row that was picked, not the one the keyboard highlighted', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    // Arrow-down moves the highlight to the second row; the pick still has to
+    // insert the row the pointer landed on.
+    act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    const rows = Array.from(document.querySelectorAll('[role="option"]')) as HTMLButtonElement[]
+    expect(rows).toHaveLength(2)
+    expect(rows[1].getAttribute('aria-selected')).toBe('true')
+
+    act(() => rows[0].click())
+    expect(textarea().value).toBe('@docs/guide.md ')
+  })
+
   it('keeps suggestions when one folder cannot be listed', async () => {
     tree.assets = 'reject'
     render()

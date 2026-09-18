@@ -84,6 +84,13 @@ describe('AI floating composer', () => {
     expect(floating.classList.contains('z-50')).toBe(true)
     expect(promptAction.classList.contains('ui-popover')).toBe(true)
     expect(promptAction.querySelector('span')?.classList.contains('text-accent')).toBe(true)
+    // The horizontal-overflow guard belongs to the quick-prompt rail, NOT to
+    // `.editor-ai-floating`: the @mention dropdown renders above that box
+    // (`bottom-full`), so clipping there made every suggestion unclickable and
+    // left Tab/Enter as the only way to accept a mention (no Tab on touch).
+    const promptRail = floating.firstElementChild!
+    expect(promptRail.classList.contains('overflow-x-hidden')).toBe(true)
+    expect(floating.classList.contains('overflow-x-hidden')).toBe(false)
 
     act(() => promptAction.click())
     expect(document.body.textContent).not.toContain('Continue Writing')
