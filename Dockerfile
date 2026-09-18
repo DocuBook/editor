@@ -57,10 +57,14 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 # Runtime config (DB_*) is passed via compose/run/panel — only static
 # defaults live here; the full variable list is in .env.example.
 ENV DATA_DIR=/data WWW_DIR=/app/www PORT=8080
-# /data must exist with docubook ownership BEFORE first start: named volumes
-# inherit the mount-point ownership, so without this the volume is root-owned
-# and config.json/keys.json writes fail (EACCES, os error 13). The entrypoint
-# re-chowns at every start as a safety net for pre-created empty volumes.
+# /data ownership contract. The server writes config.json/keys.json/sessions.json
+# and vaults/ as uid 1000 (docubook). An empty named volume is seeded from this
+# image directory, so the Docker-default volume needs no repair. A bind mount
+# keeps the host directory's ownership instead, so it must be a DEDICATED
+# directory owned by 1000:1000 — never a shared parent such as /data or $HOME,
+# which would also hand DocuBook (and the entrypoint's chown) the host's own
+# files. The entrypoint scopes any repair to the mount type and fails fast if
+# the mount is not writable as uid 1000.
 RUN mkdir -p /data && chown -R docubook:docubook /data
 VOLUME /data
 EXPOSE 8080

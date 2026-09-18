@@ -2,10 +2,19 @@
 services:
   docubook:
     build: .
-    image: docubook/editor
+    # Unpinned: resolves to ghcr.io/docubook/editor:latest, the same reference
+    # CI publishes, so `compose pull` and `docker run ghcr.io/docubook/editor`
+    # agree. `compose build` still tags the local build with this name.
+    # Pin a release yourself by editing the tag (e.g. ghcr.io/docubook/editor:0.1.0).
+    image: ghcr.io/docubook/editor
     ports:
       - "8080:8080"
     volumes:
+      # Named volume: portable across every Docker host, seeded with the image's
+      # /data ownership (uid 1000) on first use. This is the recommended setup.
+      # To bind a host directory instead, pre-create a DEDICATED directory owned
+      # by 1000:1000 and bind that — never a shared parent (/data, $HOME,
+      # /var/www, ...); the entrypoint must not chown host files it doesn't own.
       - docubook:/data   # vaults + api keys + config.json (all 0600)
     environment:
       # ── Server (boot-time) ──
@@ -31,4 +40,7 @@ services:
     restart: unless-stopped
 
 volumes:
+  # Fixed physical name, so the volume survives renames of the checkout
+  # directory (Compose would otherwise use `<project>_docubook`).
   docubook:
+    name: docubook

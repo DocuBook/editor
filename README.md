@@ -51,9 +51,32 @@ services:
 
 volumes:
   docubook:
+    name: docubook
 ```
 
 The image supports `linux/amd64` and `linux/arm64` and includes a health check at `/api/health`.
+
+#### Storage
+
+All state lives under `/data` (`vaults/`, `config.json`, `keys.json`, `sessions.json`), so the mount destination is always `/data` — the same path as `DATA_DIR`. Change one and you must change the other.
+
+| Setup            | Name       | Source         | Destination |
+| ---------------- | ---------- | -------------- | ----------- |
+| `docker run`     | `docubook` | Docker-managed | `/data`     |
+| Compose          | `docubook` | Docker-managed | `/data`     |
+
+With no mount at all, Docker creates an anonymous volume from the image. Those are not reused after `docker rm`, so the vaults look lost on the next recreate; the entrypoint warns when it detects one. Mount a named volume instead, as shown above.
+
+A bind mount must point at a dedicated directory — never a shared parent such as `/data`, `/`, `$HOME`, `/var/www`, or another application's directory. The entrypoint fixes ownership of the mount root only, and never rewrites host files below it. Starting as root (the default) is enough; no manual `chown` needed.
+
+##### Coolify
+
+| Type                      | Name           | Source Path           | Destination Path |
+| ------------------------- | -------------- | --------------------- | ---------------- |
+| Volume Mount (recommended) | `docubook-data` | leave empty           | `/data`          |
+| Directory Mount           | —              | `/data/docubook-app`  | `/data`          |
+
+Coolify prefixes volume names with the resource id, so `docubook-data` is created as `jtuxy7892urbxqshjtzh7t5x-docubook-data` under `/var/lib/docker/volumes/`. A Volume Mount **with** a Source Path and a Directory Mount are both bind mounts, so their source must be a dedicated directory: Coolify keeps its own state in `/data/coolify`, and binding `/data` hands that state to the container. File Mount is for single files only — never for `/data`.
 
 ### Desktop — macOS
 
