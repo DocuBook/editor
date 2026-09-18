@@ -1,4 +1,6 @@
 import { fromMarkdown } from 'mdast-util-from-markdown'
+import { gfm } from 'micromark-extension-gfm'
+import { parse, postprocess, preprocess } from 'micromark'
 
 interface CursorBlock {
   id: string
@@ -26,11 +28,22 @@ interface SourceCharacter {
   offset: number
 }
 
+/** A visible character paired with its source offset, or `null` when the
+ *  WYSIWYG inserted a character the Markdown has no glyph for — a quote's
+ *  paragraph break, for example. The raw caret counts those characters too, so
+ *  keeping them as null slots stops the two sides drifting apart. */
+type AlignedCharacter = SourceCharacter | null
+
 interface SourceBlock {
   start: number
   end: number
   characters: SourceCharacter[]
   children: SourceBlock[]
+}
+
+interface Span {
+  start: number
+  end: number
 }
 
 interface MappedBlock {
@@ -44,11 +57,11 @@ export interface MarkdownCursorPosition {
   textOffset: number
 }
 
-/** Visible text used to align a BlockNote cursor with Markdown AST text nodes. */
-function blockText(block: CursorBlock): string {
-  if (typeof block.content === 'string') return block.content
-  if (!Array.isArray(block.content)) return ''
-  return block.content.map(item => {
+/** Inline text of a BlockNote content value, Markdown syntax excluded. */
+function inlineText(content: unknown): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map(item => {
     if (typeof item === 'string') return item
     if (!item || typeof item !== 'object') return ''
     const value = item as { type?: string; text?: string; content?: unknown[] }
@@ -60,8 +73,39 @@ function blockText(block: CursorBlock): string {
   }).join('')
 }
 
+interface TableContent {
+  type: 'tableContent'
+  rows: { cells: unknown[] }[]
+}
+
+function isTableContent(content: unknown): content is TableContent {
+  return !!content && typeof content === 'object' && !Array.isArray(content) && (content as { type?: string }).type === 'tableContent'
+}
+
+/** A table cell is either inline content or a `{ content }` wrapper. */
+function cellContent(cell: unknown): unknown {
+  return cell && typeof cell === 'object' && 'content' in cell ? (cell as { content: unknown }).content : cell
+}
+
+/** Visible text used to align a BlockNote cursor with Markdown AST text nodes.
+ *
+ *  A table is ONE BlockNote block holding every cell, while the tokenizer emits
+ *  cell text in document order, so cells concatenate row by row. Pipes,
+ *  delimiters and the header rule are syntax: they carry no visible character
+ *  and must not enter the alignment. */
+export function blockText(block: CursorBlock): string {
+  const content = block.content
+  if (isTableContent(content)) {
+    return (content.rows ?? [])
+      .map(row => (row.cells ?? []).map(cell => inlineText(cellContent(cell))).join(''))
+      .join('')
+  }
+  return inlineText(content)
+}
+
 const nodeStart = (node: MarkdownNode) => node.position?.start.offset ?? 0
 const nodeEnd = (node: MarkdownNode) => node.position?.end.offset ?? nodeStart(node)
+const hasPosition = (node: MarkdownNode) => node.position?.start.offset !== undefined
 
 /** Source positions for each UTF-16 code unit in an AST text value. */
 function valueCharacters(markdown: string, node: MarkdownNode, value: string): SourceCharacter[] {
@@ -83,25 +127,150 @@ function textCharacters(markdown: string, node: MarkdownNode): SourceCharacter[]
   }
   if (node.type === 'image') return valueCharacters(markdown, node, node.alt ?? '')
   if (node.type === 'break') return [{ value: '\n', offset: Math.max(nodeStart(node), nodeEnd(node) - 1) }]
+  /* A list item owns only its first line; the continuation is a BlockNote child
+     block of its own and must not leak into the item's own alignment. */
+  if (node.type === 'listItem') {
+    const own = listItemContent(node)
+    return own ? listItemParts(markdown, own).first : []
+  }
   return (node.children ?? []).flatMap(child => child.type === 'list' ? [] : textCharacters(markdown, child))
 }
 
-function sourceBlock(markdown: string, node: MarkdownNode): SourceBlock {
+/** A list item's own block: its first paragraph-like child, before any sublist. */
+function listItemContent(node: MarkdownNode): MarkdownNode | undefined {
+  return (node.children ?? []).find(child => child.type !== 'list')
+}
+
+/** A list item's own Markdown block may hold soft or hard line breaks that
+ *  BlockNote splits into the item's own inline content plus a nested paragraph
+ *  holding the continuation lines. The item's alignment must stop at the first
+ *  break and the rest becomes a child source block, or every caret in the item
+ *  maps into the continuation (and the continuation maps to offset 0).
+ *
+ *  The split is found from the source newline, not from an AST text value:
+ *  CommonMark drops the soft break when inline markup follows (`- a\n  **b**`).
+ *
+ *  Not modelled, because BlockNote's parser does not nest them either: a
+ *  continuation line indented less than the item's content (`- a\nb`), a sublist
+ *  at the same indent (`- a\n  b\n  - c`), and a task continuation
+ *  (`- [ ] a\n  b`). BlockNote hoists those to top-level blocks; mirroring that
+ *  would mean re-implementing its line grouping, and its serializer flattens a
+ *  nested paragraph to an unindented top-level one on the way back out. */
+function listItemParts(markdown: string, own: MarkdownNode): { first: SourceCharacter[]; continuation?: SourceBlock } {
+  const characters = textCharacters(markdown, own)
+  const newline = markdown.indexOf('\n', nodeStart(own))
+  if (newline < 0 || newline >= nodeEnd(own)) return { first: characters }
+  const first = characters.filter(character => character.offset < newline)
+  const rest = characters.filter(character => character.offset > newline)
+  if (!rest.length) return { first }
+  return {
+    first,
+    continuation: { start: rest[0].offset, end: rest[rest.length - 1].offset + 1, characters: rest, children: [] },
+  }
+}
+
+/** Child blocks of a container that BlockNote models as nested blocks: a list
+ *  item's extra paragraphs and its sublists, in source order. */
+function childBlocks(markdown: string, node: MarkdownNode, spans: Span[]): SourceBlock[] {
+  if (node.type !== 'listItem') return []
+  const children = node.children ?? []
+  const ownIndex = children.findIndex(child => child.type !== 'list')
+  const own = ownIndex < 0 ? undefined : children[ownIndex]
+  const rest = ownIndex < 0 ? children : children.slice(ownIndex + 1)
+  const blocks = rest.flatMap(child => child.type === 'list'
+    ? sourceBlocks(markdown, child.children ?? [], spans)
+    : [sourceBlock(markdown, child, spans)])
+  const continuation = own ? listItemParts(markdown, own).continuation : undefined
+  return continuation ? [continuation, ...blocks] : blocks
+}
+
+function sourceBlock(markdown: string, node: MarkdownNode, spans: Span[]): SourceBlock {
   return {
     start: nodeStart(node),
     end: nodeEnd(node),
     characters: textCharacters(markdown, node),
-    children: node.type === 'listItem'
-      ? (node.children ?? []).flatMap(child => child.type === 'list' ? sourceBlocks(markdown, child.children ?? []) : [])
-      : [],
+    children: childBlocks(markdown, node, spans),
   }
 }
 
-/** Lists are AST containers; BlockNote blocks correspond to their list items. */
-function sourceBlocks(markdown: string, nodes: MarkdownNode[]): SourceBlock[] {
-  return nodes.flatMap(node => node.type === 'list'
-    ? sourceBlocks(markdown, node.children ?? [])
-    : [sourceBlock(markdown, node)])
+/** A table span as one source block; `members` are the nodes that landed inside it. */
+function spanBlock(markdown: string, span: Span, members: MarkdownNode[]): SourceBlock {
+  return { start: span.start, end: span.end, characters: members.flatMap(member => textCharacters(markdown, member)), children: [] }
+}
+
+/** Lists are AST containers; BlockNote blocks correspond to their list items.
+ *  A GFM table is the reverse: micromark emits one table token while
+ *  `mdast-util-from-markdown` (without the mdast GFM extension) hands back the
+ *  cell content as several adjacent nodes, so the whole span collapses into one
+ *  source block to stay index-aligned with the single BlockNote table block.
+ *
+ *  Every span yields a block even when no node starts inside it: a table whose
+ *  cells are all empty produces no mdast node at all, and skipping it would
+ *  shift every later block/source pair by one. */
+function sourceBlocks(markdown: string, nodes: MarkdownNode[], spans: Span[]): SourceBlock[] {
+  const blocks: SourceBlock[] = []
+  let index = 0
+  let spanIndex = 0
+  while (index < nodes.length || spanIndex < spans.length) {
+    const span = spans[spanIndex]
+    const node = nodes[index]
+    if (!node) {
+      if (span) blocks.push(spanBlock(markdown, span, []))
+      spanIndex++
+      continue
+    }
+    const start = hasPosition(node) ? nodeStart(node) : undefined
+    /* The span ends before this node: it held no nodes of its own. Emit it first
+       so source order, and therefore index alignment, survives. */
+    if (span && start !== undefined && start >= span.end) {
+      blocks.push(spanBlock(markdown, span, []))
+      spanIndex++
+      continue
+    }
+    if (node.type === 'list') {
+      blocks.push(...sourceBlocks(markdown, node.children ?? [], spans))
+      index++
+      continue
+    }
+    if (!span || start === undefined || start < span.start) {
+      blocks.push(sourceBlock(markdown, node, spans))
+      index++
+      continue
+    }
+    const group: MarkdownNode[] = []
+    while (index < nodes.length && hasPosition(nodes[index]) && nodeStart(nodes[index]) >= span.start && nodeStart(nodes[index]) < span.end) {
+      group.push(nodes[index])
+      index++
+    }
+    blocks.push(spanBlock(markdown, span, group))
+    spanIndex++
+  }
+  return blocks
+}
+
+/** Top-level GFM table spans, straight from micromark's token stream. A GFM
+ *  table row is delimited by pipes, so Markdown without a single `|` cannot
+ *  contain one — and this tokenizer pass costs about as much as the mdast parse
+ *  it accompanies, so skipping it keeps a table-free note on one pass. */
+function tableSpans(markdown: string): Span[] {
+  if (!markdown.includes('|')) return []
+  const parser = parse({ extensions: [gfm()] })
+  const events = postprocess(parser.document().write(preprocess()(markdown, undefined, true))) as unknown as ['enter' | 'exit', MicromarkToken][]
+  const spans: Span[] = []
+  let depth = 0
+  for (const [kind, token] of events) {
+    if (kind === 'enter' && depth === 0 && token.type === 'table') {
+      spans.push({ start: token.start?.offset ?? 0, end: token.end?.offset ?? 0 })
+    }
+    depth += kind === 'enter' ? 1 : -1
+  }
+  return spans
+}
+
+interface MicromarkToken {
+  type: string
+  start?: { offset?: number } | null
+  end?: { offset?: number } | null
 }
 
 function emptySource(offset: number): SourceBlock {
@@ -120,8 +289,23 @@ function mapBlocks(blocks: CursorBlock[], sources: SourceBlock[], fallbackOffset
 }
 
 function mappedDocument(editor: CursorEditor, markdown: string): MappedBlock[] {
-  const root = fromMarkdown(markdown) as MarkdownNode
-  return mapBlocks(editor.document, sourceBlocks(markdown, root.children ?? []))
+  return mapBlocks(editor.document, sourceBlocksFor(markdown))
+}
+
+/** Source blocks for a Markdown string. The parse is the expensive half of a
+ *  mapping and depends only on the Markdown — never on the editor document — so
+ *  one entry is cached: a single mode switch maps its caret against the same
+ *  string that the dirty serialize already parsed, and a batch of carets costs
+ *  one parse instead of one each. This is also why the cache cannot go stale
+ *  against an edited document: `mapBlocks` re-runs on every call. */
+let sourceCache: { markdown: string; sources: SourceBlock[] } | null = null
+
+function sourceBlocksFor(markdown: string): SourceBlock[] {
+  if (sourceCache?.markdown === markdown) return sourceCache.sources
+  const root = fromMarkdown(markdown, { extensions: [gfm()] }) as MarkdownNode
+  const sources = sourceBlocks(markdown, root.children ?? [], tableSpans(markdown))
+  sourceCache = { markdown, sources }
+  return sources
 }
 
 function findMappedBlock(blocks: MappedBlock[], id: string): MappedBlock | undefined {
@@ -133,36 +317,90 @@ function findMappedBlock(blocks: MappedBlock[], id: string): MappedBlock | undef
   return undefined
 }
 
-/** Align AST text with BlockNote inline content without counting Markdown syntax. */
-function alignedCharacters(mapped: MappedBlock): SourceCharacter[] {
-  const visible = blockText(mapped.block)
-  if (!visible) return mapped.source.characters
-  const aligned: SourceCharacter[] = []
+/** Placeholder for a WYSIWYG-only break glyph: a paragraph/hard break, and the
+ *  single space BlockNote keeps after it. Neither can match a source character,
+ *  so keeping them as slots the greedy match skips stops a break from stealing a
+ *  real source character and dragging the rest of the block off by one. */
+const BREAK = '\u0000'
+const BREAK_SPACE = '\u0001'
+
+/** Visible text with break glyphs replaced by non-matching placeholders. The
+ *  length is preserved, so caret offsets stay usable. */
+function alignmentText(text: string): string {
+  let out = ''
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] !== '\n') {
+      out += text[index]
+      continue
+    }
+    out += BREAK
+    if (text[index + 1] === ' ') {
+      out += BREAK_SPACE
+      index++
+    }
+  }
+  return out
+}
+
+/** Align AST text with BlockNote inline content. Characters the Markdown side
+ *  has no glyph for become null slots instead of consuming a source character,
+ *  so a quote's paragraph break or a hard break never drags the rest of the
+ *  block off by one. */
+function alignedCharacters(mapped: MappedBlock): AlignedCharacter[] {
+  const text = blockText(mapped.block)
+  if (!text) return mapped.source.characters
+  const visible = alignmentText(text)
+  const aligned: AlignedCharacter[] = []
   let searchFrom = 0
   for (let index = 0; index < visible.length; index++) {
-    let found = mapped.source.characters.findIndex((character, sourceIndex) => sourceIndex >= searchFrom && character.value === visible[index])
-    if (found < 0) found = Math.min(searchFrom, mapped.source.characters.length - 1)
-    if (found < 0) break
+    const found = mapped.source.characters.findIndex((character, sourceIndex) => sourceIndex >= searchFrom && character.value === visible[index])
+    if (found < 0) {
+      aligned.push(null)
+      continue
+    }
     aligned.push(mapped.source.characters[found])
     searchFrom = found + 1
   }
   return aligned
 }
 
+/** Offset of the first source character at or after `index`. */
+function offsetAt(characters: AlignedCharacter[], index: number): number | undefined {
+  for (let cursor = Math.max(0, index); cursor < characters.length; cursor++) {
+    const character = characters[cursor]
+    if (character) return character.offset
+  }
+  return undefined
+}
+
 function contentStart(mapped: MappedBlock): number {
-  return alignedCharacters(mapped)[0]?.offset ?? mapped.source.start
+  return offsetAt(alignedCharacters(mapped), 0) ?? mapped.source.start
 }
 
 function sourceOffsetForTextOffset(mapped: MappedBlock, textOffset: number): number {
   const characters = alignedCharacters(mapped)
   if (!characters.length) return mapped.source.start
-  if (textOffset <= 0) return characters[0].offset
-  if (textOffset >= characters.length) return Math.min(mapped.source.end, characters[characters.length - 1].offset + 1)
-  return characters[textOffset].offset
+  if (textOffset <= 0) return offsetAt(characters, 0) ?? mapped.source.start
+  if (textOffset >= characters.length) {
+    const last = characters[characters.length - 1]
+    /* Normal end of text: one past the last visible character. A trailing break
+       artifact has no source glyph, so the raw caret belongs after the block's
+       break syntax — the end of its source range. */
+    if (last) return Math.min(mapped.source.end, last.offset + 1)
+    return mapped.source.end
+  }
+  /* `offsetAt` finds nothing when the caret sits in trailing break artifacts;
+     the raw caret then belongs at the end of the block, not at its start. */
+  return offsetAt(characters, textOffset) ?? mapped.source.end
 }
 
 function textOffsetForSourceOffset(mapped: MappedBlock, sourceOffset: number): number {
-  return alignedCharacters(mapped).filter(character => character.offset < sourceOffset).length
+  const characters = alignedCharacters(mapped)
+  for (let index = 0; index < characters.length; index++) {
+    const character = characters[index]
+    if (character && character.offset >= sourceOffset) return index
+  }
+  return characters.length
 }
 
 function blockAtOffset(blocks: MappedBlock[], offset: number): MappedBlock | undefined {

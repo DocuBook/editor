@@ -288,16 +288,44 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   const initialLoadRef = useRef(true)
 
   /** Keep only the local caret. Remote collaboration transactions must not
-   * overwrite this snapshot or move another author's selection. */
+   *  overwrite this snapshot or move another author's selection.
+   *
+   *  The offset spans the WHOLE block, not just the textblock under the caret:
+   *  a table is one block with a paragraph per cell, and the raw editor sees
+   *  their text concatenated, so a cell-local offset would land the raw caret
+   *  back in the first cell. */
   useEffect(() => {
     const captureLocalCursor = () => {
       try {
         const selection = editor.prosemirrorState.selection
         if (!selection.empty) return
-        cursorSnapshotRef.current = {
-          blockId: editor.getTextCursorPosition().block.id,
-          textOffset: selection.$head.parent.textBetween(0, selection.$head.parentOffset, '\n', '\n').length,
-        }
+        const state = editor.prosemirrorState
+        const $head = selection.$head
+        let depth = $head.depth
+        while (depth > 0 && $head.node(depth).type.name !== 'blockContainer') depth--
+        if (depth <= 0) return
+        const block = $head.node(depth)
+        const blockPos = $head.before(depth)
+        /* Walk the block's own textblocks in document order — one per cell for a
+           table — and accumulate their sizes, exactly as the restore effect
+           below does. A fixed positional offset would encode how deep the
+           content wrapper sits, which is a schema detail, not a fact. */
+        let textOffset: number | undefined
+        let counted = 0
+        state.doc.nodesBetween(blockPos + 1, blockPos + block.nodeSize - 1, (node, pos) => {
+          if (textOffset !== undefined || !node.isTextblock) return true
+          const start = pos + 1
+          /* Position arithmetic counts a hard break as one character, same as the
+             `\n` leaf text the raw editor expects. */
+          if ($head.pos <= start + node.content.size) {
+            textOffset = counted + Math.max(0, $head.pos - start)
+            return false
+          }
+          counted += node.content.size
+          return true
+        })
+        if (textOffset === undefined) return
+        cursorSnapshotRef.current = { blockId: block.attrs.id, textOffset }
       } catch {}
     }
     const unsubscribe = editor.onSelectionChange(captureLocalCursor, false)
@@ -428,17 +456,38 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     const frame = requestAnimationFrame(() => {
       try {
         const view = editor.prosemirrorView
-        let cursorPos: number | undefined
-        view.state.doc.descendants((node, pos) => {
-          if (cursorPos !== undefined || node.type.name !== 'blockContainer' || node.attrs.id !== position.block.id) return true
-          node.forEach((child, offset) => {
-            if (cursorPos === undefined && child.type.spec.group === 'blockContent') {
-              const maxOffset = Math.max(0, child.content.size)
-              cursorPos = pos + offset + 2 + Math.min(position.textOffset, maxOffset)
-            }
-          })
-          return false
+        const doc = view.state.doc
+        let blockPos = -1
+        let blockSize = 0
+        doc.descendants((node, pos) => {
+          if (blockPos >= 0) return false
+          if (node.type.name === 'blockContainer' && node.attrs.id === position.block.id) {
+            blockPos = pos
+            blockSize = node.nodeSize
+            return false
+          }
+          return true
         })
+        /** Walk the block's own textblocks in document order — one for a
+         *  paragraph or quote, one per cell for a table — so a whole-block
+         *  offset lands the caret inside the right cell instead of the first. */
+        let cursorPos: number | undefined
+        let fallback: number | undefined
+        if (blockPos >= 0) {
+          let remaining = position.textOffset
+          doc.nodesBetween(blockPos + 1, blockPos + blockSize - 1, (node, pos) => {
+            if (cursorPos !== undefined || !node.isTextblock) return true
+            const size = node.content.size
+            fallback = pos + 1 + size
+            if (remaining <= size) {
+              cursorPos = pos + 1 + remaining
+              return false
+            }
+            remaining -= size
+            return true
+          })
+        }
+        if (cursorPos === undefined) cursorPos = fallback
         if (cursorPos === undefined) {
           editor.setTextCursorPosition(position.block.id, 'start')
         } else {
