@@ -1,7 +1,7 @@
 use std::path::Path;
 use serde::Serialize;
 
-use crate::vault::{Vault, WalkKind};
+use crate::vault::Vault;
 
 #[derive(Debug, Serialize)]
 pub struct SearchResult { pub path: String, pub name: String }
@@ -13,10 +13,12 @@ pub struct SearchResult { pub path: String, pub name: String }
 pub fn search_vault(vault: &Vault, query: &str) -> Vec<SearchResult> {
     let q = query.trim().to_lowercase();
     if q.is_empty() { return vec![]; }
-    let mut scored: Vec<(i32, SearchResult)> = vault.walk("", WalkKind::Markdown).into_iter().filter_map(|rel| {
+    // Cached list: this runs on every keystroke, so a recursive walk per query
+    // would cost hundreds of ms on a large vault.
+    let mut scored: Vec<(i32, SearchResult)> = vault.markdown_files().iter().filter_map(|rel| {
         let name = Path::new(&rel).file_name()?.to_string_lossy().to_string();
         let rank = fuzzy_score(crate::markdown::strip_markdown_ext(&name), &q);
-        (rank > 0).then_some((rank, SearchResult { path: rel, name }))
+        (rank > 0).then_some((rank, SearchResult { path: rel.clone(), name }))
     }).collect();
     scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
     scored.into_iter().take(30).map(|(_, r)| r).collect()
