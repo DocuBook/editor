@@ -12,6 +12,9 @@
 #
 # Case 3 is the regression guard for the incident where a bind of a shared host
 # parent (holding a co-located platform's data) was recursively chowned.
+# Case 3 creates a foreign-owned directory, so it needs root; CI runs the
+# suite with sudo to keep that regression guard active. A non-root caller
+# still gets the other four cases.
 set -eu
 
 image="$1"
@@ -25,7 +28,10 @@ cleanup() {
   docker rm --force "$name" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
   for dir in $bind_dirs; do
-    rm -rf "$dir"
+    # The container chowns a bind mount root to uid 1000. A non-root caller
+    # cannot delete that from a sticky /tmp, and a failing command inside an
+    # EXIT trap would turn a passing run into a non-zero exit.
+    rm -rf "$dir" 2>/dev/null || true
   done
   return 0
 }

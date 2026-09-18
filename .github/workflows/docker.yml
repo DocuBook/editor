@@ -111,7 +111,7 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
       - name: Smoke test image
         if: github.event_name != 'push'
-        run: sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}:check-${{ matrix.slug }}" "${{ matrix.platform }}"
+        run: sudo sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}:check-${{ matrix.slug }}" "${{ matrix.platform }}"
 
       - name: Build and push platform image
         id: build
@@ -127,7 +127,7 @@ jobs:
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max
       - name: Smoke test published image
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        run: sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" "${{ matrix.platform }}"
+        run: sudo sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" "${{ matrix.platform }}"
       - name: Export digest
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: |
