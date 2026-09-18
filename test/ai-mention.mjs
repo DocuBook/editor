@@ -127,6 +127,16 @@ try {
   ok('clicking a suggestion completes the mention without Tab/Enter', picked === 'summarise @CHANGELOG.md ', JSON.stringify(picked))
   ok('the picker closes after a pointer pick', (await page.locator('[role="listbox"]').count()) === 0)
 
+  // --- the picked tag is painted as a token, not as more prompt prose --------
+  // Asserted against the composer's own text colour instead of a palette value,
+  // so a theme swap cannot silently make the tag blend back into the prompt.
+  const styleOf = (loc) => loc.evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, fg: getComputedStyle(el).color }))
+  const tag = page.locator('button[aria-label="Remove @CHANGELOG.md"]').locator('xpath=..')
+  const tagStyle = await styleOf(tag)
+  const promptStyle = await styleOf(prompt)
+  ok('the mention tag carries a tinted background', tagStyle.bg !== 'rgba(0, 0, 0, 0)' && tagStyle.bg !== 'transparent', tagStyle.bg)
+  ok('the mention tag does not share the prompt text colour', tagStyle.fg !== promptStyle.fg, `${tagStyle.fg} vs ${promptStyle.fg}`)
+
   await page.keyboard.press('Meta+a')
   await page.keyboard.type('summarise @change', { delay: 25 })
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })

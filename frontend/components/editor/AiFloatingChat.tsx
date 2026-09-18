@@ -275,7 +275,7 @@ export default function AiFloatingChat() {
 
   const promptInput = (
     <>
-      {mentions.length > 0 && <div className="flex flex-wrap gap-1 px-3 pt-2">{mentions.map((mention) => <span key={`${mention.start}:${mention.end}`} className="flex items-center gap-1 rounded-full bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary"><FileText size={11} />{mention.token}<button aria-label={`Remove @${mention.token}`} className="p-1" onClick={() => removeMention(mention)}><X size={11} /></button></span>)}</div>}
+      {mentions.length > 0 && <div className="flex flex-wrap gap-1 px-3 pt-2">{mentions.map((mention) => <span key={`${mention.start}:${mention.end}`} className="flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-1 text-[11px] text-accent"><FileText size={11} />{mention.token}<button aria-label={`Remove @${mention.token}`} className="p-1 cursor-pointer hover:text-foreground" onClick={() => removeMention(mention)}><X size={11} /></button></span>)}</div>}
       {mentionNotice && <div className="px-3 pt-1 text-[10px] text-muted">{mentionNotice}</div>}
       {picker && <div id={MENTION_LISTBOX_ID} role="listbox" aria-label="Mention files and folders" className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => {
           const selected = entry === activeEntry

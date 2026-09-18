@@ -241,6 +241,24 @@ describe('composer @mention picker', () => {
     expect(armedId()).toBeNull()
   })
 
+  it('paints the mention tag apart from the prompt text', async () => {
+    render()
+    act(() => typeInto(textarea(), 'summarise @change'))
+    await settle()
+
+    // The tag should read as a token, not as more prompt prose.
+    const remove = document.querySelector('button[aria-label="Remove @change"]')!
+    expect(remove).not.toBeNull()
+    const tag = remove.parentElement!
+    expect(tag.className).toContain('bg-accent-subtle')
+    expect(tag.className).toContain('text-accent')
+    expect(textarea().className).toContain('text-foreground')
+
+    // The remove affordance still works from the tag.
+    act(() => (remove as HTMLButtonElement).click())
+    expect(textarea().value).toBe('summarise')
+  })
+
   it('keeps suggestions when one folder cannot be listed', async () => {
     tree.assets = 'reject'
     render()
