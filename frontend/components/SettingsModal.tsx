@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
 import { X, Eye, EyeOff, Check, Loader, ChevronsUpDown, Search } from 'lucide-react'
@@ -147,6 +148,13 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const modelSearchRef = useRef<HTMLInputElement>(null)
   const providerListRef = useRef<HTMLDivElement>(null)
   const modelListRef = useRef<HTMLDivElement>(null)
+  /** The dropdowns are rendered into document.body (see the createPortal calls
+   *  below): .ui-dialog applies backdrop-filter, which makes it the containing
+   *  block for position:fixed descendants, so dropdown coordinates taken from
+   *  getBoundingClientRect would be offset by the dialog's own position. These
+   *  refs keep the outside-click handlers aware of the portaled menus. */
+  const providerDropdownRef = useRef<HTMLDivElement>(null)
+  const modelDropdownRef = useRef<HTMLDivElement>(null)
 
   const selectedProvider: ProviderInfo | null = provider
     ? provider === CUSTOM_PROVIDER_ID ? CUSTOM_PROVIDER : providers.find(p => p.id === provider) || null
@@ -186,13 +194,13 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [modelHighlightIdx, showModelDropdown])
 
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (providerRef.current && !providerRef.current.contains(e.target as Node)) { setShowProviderDropdown(false); setProviderDropdownPos(null) } }
+    const h = (e: MouseEvent) => { const t = e.target as Node; if (providerRef.current && !providerRef.current.contains(t) && !providerDropdownRef.current?.contains(t)) { setShowProviderDropdown(false); setProviderDropdownPos(null) } }
     window.addEventListener('mousedown', h)
     return () => window.removeEventListener('mousedown', h)
   }, [])
 
   useEffect(() => {
-    const h = (e: MouseEvent) => { if (modelRef.current && !modelRef.current.contains(e.target as Node)) { setShowModelDropdown(false); setModelDropdownPos(null) } }
+    const h = (e: MouseEvent) => { const t = e.target as Node; if (modelRef.current && !modelRef.current.contains(t) && !modelDropdownRef.current?.contains(t)) { setShowModelDropdown(false); setModelDropdownPos(null) } }
     window.addEventListener('mousedown', h)
     return () => window.removeEventListener('mousedown', h)
   }, [])
@@ -303,8 +311,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               </span>
               <ChevronsUpDown size={14} className="text-muted shrink-0" />
             </div>
-            {showProviderDropdown && providerDropdownPos && (
-              <div style={providerDropdownPos} className="ui-popover max-h-[280px] z-[200] overflow-clip">
+            {showProviderDropdown && providerDropdownPos && createPortal(
+              <div ref={providerDropdownRef} style={providerDropdownPos} className="ui-popover max-h-[280px] z-[200] overflow-clip">
                 <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                   <Search size={14} className="text-muted shrink-0" />
                   <input ref={searchRef} type="text" value={providerSearch} onChange={e => { setProviderSearch(e.target.value); setProviderHighlightIdx(0) }}
@@ -326,7 +334,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>,
+              document.body,
             )}
           </div>
 
@@ -368,8 +377,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   })() : <span className="text-muted">— Select a model —</span>}
                   <ChevronsUpDown size={14} className="text-muted shrink-0 ml-auto" />
                 </div>
-                {showModelDropdown && modelDropdownPos && (
-                  <div style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-clip">
+                {showModelDropdown && modelDropdownPos && createPortal(
+                  <div ref={modelDropdownRef} style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-clip">
                     <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                       <Search size={14} className="text-muted shrink-0" />
                       <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}
@@ -393,7 +402,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                         ))
                       })()}
                     </div>
-                  </div>
+                  </div>,
+                  document.body,
                 )}
               </div>
                   )}
