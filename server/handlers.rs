@@ -130,7 +130,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
             let vault = st.vault.clone();
             tokio::task::spawn_blocking(move || {
                 let guard = vault.lock().map_err(|_| "Vault lock poisoned".to_string())?;
-                let Some(v) = guard.as_ref() else { return Ok(serde_json::to_string(&vault::mentions::Bundle::default()).map_err(|e| e.to_string())?); };
+                let Some(v) = guard.as_ref() else { return serde_json::to_string(&vault::mentions::Bundle::default()).map_err(|e| e.to_string()); };
                 serde_json::to_string(&vault::mentions::resolve(v, request)).map_err(|e| e.to_string())
             }).await.map_err(|e| e.to_string())?
         }
