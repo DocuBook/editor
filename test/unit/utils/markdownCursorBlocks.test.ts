@@ -80,6 +80,11 @@ function walk(blocks: AnyBlock[], visit: (block: AnyBlock) => void) {
   }
 }
 
+/** Every caret position in a block, including the one past its last character. */
+function caretPositions(length: number): number[] {
+  return Array.from({ length: length + 1 }, (_, index) => index)
+}
+
 describe('markdown cursor mapping across real BlockNote block shapes', () => {
   const editor = BlockNoteEditor.create({ schema: getSchema() })
 
@@ -89,13 +94,15 @@ describe('markdown cursor mapping across real BlockNote block shapes', () => {
 
     walk(parsed, (block) => {
       const text = blockText(block)
-      for (let textOffset = 0; textOffset <= text.length; textOffset++) {
+      for (const textOffset of caretPositions(text.length)) {
         const offset = markdownOffsetForCursor(document, markdown, block.id, textOffset)
         const back = cursorPositionAtMarkdownOffset(document, markdown, offset)
         expect(back?.block.id, `${block.type} t=${textOffset} text=${JSON.stringify(text)}`).toBe(block.id)
         // A break artifact (the char right after `\n`, or the `\n` itself) has no
         // source glyph; every other caret must land back on the exact position.
-        const artifact = textOffset > 0 && (text[textOffset - 1] === '\n' || text[textOffset] === '\n')
+        const before = textOffset > 0 ? text[textOffset - 1] : ''
+        const at = text[textOffset] ?? ''
+        const artifact = before === '\n' || at === '\n'
         if (!artifact) {
           expect(back?.textOffset, `${block.type} t=${textOffset} text=${JSON.stringify(text)} offset=${offset}`).toBe(textOffset)
         } else {
