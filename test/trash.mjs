@@ -182,7 +182,11 @@ try {
   await dialog.waitFor({ timeout: 5000 })
   await dialog.getByRole('button', { name: 'Delete' }).click()
   await deleteResponse
-  ok('delete: confirmed item is gone from the panel', await trashPanel.getByRole('checkbox', { name: 'Select doomed.md' }).count() === 0)
+  // The row leaves when the parent's `loadTrash` state update lands — after the
+  // network response, not with it. Sampling `count()` straight away races that
+  // render and fails on slower CI chromium, so wait for the row to detach.
+  await deleteCheckbox.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
+  ok('delete: confirmed item is gone from the panel', await deleteCheckbox.count() === 0)
 
   // 6. A permission failure must offer the System Settings pane, not a dead toast.
   //    The web server has no macOS privacy gate, so stub the command to fail the

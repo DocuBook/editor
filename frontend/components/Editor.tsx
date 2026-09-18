@@ -9,6 +9,7 @@ import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
 import { clearEditorCache } from '../utils/editorCache'
+import { clearDiagramSVG } from '../utils/mermaidRenderCache'
 import { useAiChat } from '../stores/aiChat'
 
 const WysiwygEditorHost = lazy(() => import('./editor/WysiwygEditorHost'))
@@ -22,7 +23,11 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   const [onboardingDone, setOnboardingDone] = useState(() => isOnboardingDone())
   const cursorOffsets = useRef(new Map<string, number>())
 
-  useEffect(() => { clearEditorCache(); cursorOffsets.current.clear() }, [vaultPath])
+  useEffect(() => {
+    clearEditorCache()
+    clearDiagramSVG()
+    cursorOffsets.current.clear()
+  }, [vaultPath])
 
   // Re-check when vault first opens
   /* oxlint-disable react/set-state-in-effect -- syncs the guide to vault-open state */

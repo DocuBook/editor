@@ -19,3 +19,12 @@ export function clearEditorCache() {
   cache = null
   cacheVaultPath = null
 }
+
+/** Cache hit for a vault+path WITHOUT creating anything — a pure read, so a
+ *  component may call it while rendering to decide between "show cached editor"
+ *  and "create one". Returns null when the vault scope differs from the cached
+ *  one (the caller's create path then resets the scope). */
+export function peekEditorCache<T>(vaultPath: string, path: string): T | null {
+  if (!cache || cacheVaultPath !== vaultPath) return null
+  return cache.peek(path) as T | null
+}
