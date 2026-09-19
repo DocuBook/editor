@@ -23,7 +23,7 @@ FROM scratch AS web-content
 COPY --from=web /app/dist /
 
 # ---- server (Rust, musl) ----
-FROM rust:1.94-alpine AS server
+FROM rust:1.97-alpine AS server
 # cmake/clang for native TLS crates; git keeps configured credential helpers available
 RUN apk add --no-cache musl-dev build-base cmake clang git perl
 WORKDIR /src
