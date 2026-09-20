@@ -149,6 +149,47 @@ describe('vault store lifecycle', () => {
     expect(useEditorStore.getState().tabs).toHaveLength(1)
   })
 
+  it('resumes the last vault without closing and restores its tabs', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'open_vault') return JSON.stringify({ name: 'notes' })
+      if (cmd === 'list_tree') return '[]'
+      if (cmd === 'read_file') return '# Restored'
+      return undefined
+    })
+    useVaultStore.setState({ vaultPath: '/tmp/notes', recent: [{ path: '/tmp/notes', name: 'notes', parent: '/tmp' }] })
+    useEditorStore.setState({
+      tabs: [{ path: 'note.md', name: 'note.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+      activeTab: 'note.md',
+    })
+
+    await useVaultStore.getState().resumeVault()
+
+    expect(useEditorStore.getState().tabs).toHaveLength(1)
+    expect(useEditorStore.getState().tabs[0]).toMatchObject({ path: 'note.md', content: '# Restored' })
+    expect(useEditorStore.getState().activeTab).toBe('note.md')
+    expect(mockInvoke).toHaveBeenCalledWith('read_file', { path: 'note.md' })
+  })
+
+  it('closes existing tabs when explicitly opening another vault', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === 'open_vault') return JSON.stringify({ name: 'new' })
+      if (cmd === 'list_tree') return '[]'
+      return undefined
+    })
+    useEditorStore.setState({
+      tabs: [{ path: 'old.md', name: 'old.md', content: '', frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+      activeTab: 'old.md',
+    })
+
+    await useVaultStore.getState().openRecent('/tmp/new')
+
+    expect(useEditorStore.getState().tabs).toHaveLength(0)
+    expect(useEditorStore.getState().activeTab).toBeNull()
+    expect(mockInvoke).not.toHaveBeenCalledWith('read_file', expect.anything())
+  })
+
   it('ignores a stale tree response after vault identity changes', async () => {
     const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
     let resolveTree!: (value: string) => void

@@ -16,7 +16,7 @@ interface VaultState {
   name: string; isOpen: boolean; vaultPath: string; recent: RecentVault[]
   tree: FileInfo[]; visibleItems: FileInfo[]; expanded: Record<string, boolean>; childrenCache: Record<string, FileInfo[]>; loading: boolean
   openingPath: string | null; openingAt: number
-  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; cloneVault: (url: string, parent: string) => Promise<void>; closeVault: () => Promise<void>; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
+  openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; cloneVault: (url: string, parent: string) => Promise<void>; closeVault: () => Promise<void>; resumeVault: () => Promise<void>; openRecent: (path: string, preserveTabs?: boolean) => Promise<void>
   loadTree: (subpath?: string) => Promise<void>
   toggleFolder: (item: FileInfo) => Promise<void>; flattenTree: (items: FileInfo[], depth: number) => FileInfo[]
 }
@@ -42,12 +42,14 @@ export const useVaultStore = create<VaultState>()(
         transitioning = false
         set({ loading: false })
       }
-      const prepareTransition = async (id: number) => {
+      const prepareTransition = async (id: number, preserveTabs = false) => {
         if (transitionId !== id) return false
         try {
           await useEditorStore.getState().persistAllDirty()
           if (get().isOpen) await invoke('close_vault')
-          useEditorStore.getState().closeAllTabs()
+          // Explicit vault changes close tabs by design. Startup resume keeps the
+          // persisted tab identities so they can be re-read after the vault opens.
+          if (!preserveTabs) useEditorStore.getState().closeAllTabs()
           treeRequestId++
           set({ ...emptyTreeState(), loading: true })
           return true
@@ -140,11 +142,11 @@ export const useVaultStore = create<VaultState>()(
         finishTransition(id)
       },
       /** Open a vault by path (no auto-resume at startup — user picks from welcome screen). */
-      openRecent: async (path: string) => {
+      openRecent: async (path: string, preserveTabs = false) => {
         const id = beginTransition()
         if (id === null) return
         try {
-          if (!await prepareTransition(id)) return
+          if (!await prepareTransition(id, preserveTabs)) return
           // Point the welcome screen at the vault being opened so its overlay can
           // name it, and stamp the start so the overlay measures delay from the
           // click rather than from its own mount. Every exit below clears it —
@@ -158,6 +160,7 @@ export const useVaultStore = create<VaultState>()(
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
+          if (preserveTabs) await useEditorStore.getState().restoreSessionTabs()
         } catch {
           // Vault can't be reopened (deleted/moved) — drop from recent + clear last vault so welcome shows next time
           set({ vaultPath: '', recent: get().recent.filter(r => r.path !== path), openingPath: null })
@@ -169,7 +172,7 @@ export const useVaultStore = create<VaultState>()(
       resumeVault: async () => {
         const { vaultPath } = get()
         if (!vaultPath) return
-        await get().openRecent(vaultPath)
+        await get().openRecent(vaultPath, true)
       },
       /** Load root tree (or subtree) from Rust backend. Re-fetches expanded folders. */
       loadTree: async (subpath = '') => {

@@ -161,6 +161,32 @@ describe('editor store tab persistence', () => {
     } finally { vi.useRealTimers() }
   })
 
+  it('keeps a restored tab when reading it fails for a non-missing-file reason', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('permission denied'))
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+      activeTab: 'a.md',
+    })
+
+    await useEditorStore.getState().restoreSessionTabs()
+
+    expect(useEditorStore.getState().tabs).toHaveLength(1)
+    expect(useEditorStore.getState().activeTab).toBe('a.md')
+  })
+
+  it('closes a restored tab when its file is missing', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('No such file or directory'))
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+      activeTab: 'a.md',
+    })
+
+    await useEditorStore.getState().restoreSessionTabs()
+
+    expect(useEditorStore.getState().tabs).toHaveLength(0)
+    expect(useEditorStore.getState().activeTab).toBeNull()
+  })
+
   it('does not rewrite a file whose content matches the disk baseline (guard 1)', async () => {
     useEditorStore.setState({
       tabs: [{ path: 'a.md', name: 'a.md', content: 'same', frontmatter: '', editedContent: 'same', dirty: true, deleted: false }],

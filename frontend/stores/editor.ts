@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { undoDepth, redoDepth } from '@tiptap/pm/history'
@@ -57,6 +58,8 @@ interface EditorState {
    *  untouched (their in-memory edits stay); files missing on the new branch
    *  are marked deleted. */
   reloadAllTabs: () => Promise<void>
+  /** Rehydrate the persisted tab identities from disk after the vault resumes. */
+  restoreSessionTabs: () => Promise<void>
   setEditMode: (mode: EditMode) => void
   toggleEditMode: () => Promise<void>
 }
@@ -66,7 +69,9 @@ interface EditorState {
 const AUTOSAVE_DELAY_MS = 2000
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-export const useEditorStore = create<EditorState>((set, get) => {
+export const useEditorStore = create<EditorState>()(
+  persist(
+    (set, get) => {
   /** Disk content for a tab carrying WYSIWYG/code edits (frontmatter kept raw). */
   const tabDiskContent = (tab: Tab) => tab.frontmatter + tab.editedContent!.replace(/^\n+/, '').replace(/\n+$/, '')
 
@@ -218,6 +223,28 @@ export const useEditorStore = create<EditorState>((set, get) => {
   },
   setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => (t.path === path || t.path.startsWith(path + '/')) ? { ...t, deleted } : t) }) },
 
+  /** Re-read persisted tab identities after the vault has resumed. */
+  restoreSessionTabs: async () => {
+    for (const tab of [...get().tabs]) {
+      if (isBinaryPath(tab.path)) continue
+      try {
+        const raw = await invoke<string>('read_file', { path: tab.path })
+        get().setContent(tab.path, raw)
+      } catch (error) {
+        const notFound = /no such file|not found|os error 2/i.test(String(error))
+        if (notFound) {
+          // A file removed while the app was closed should not reappear as a blank tab.
+          await get().closeTab(tab.path)
+        } else {
+          // Keep the session identity for transient permission/IPC/backend errors;
+          // a failed restore must not permanently erase the user's tab.
+          logger.error('restored_tab_read_failed', { error, fileName: tab.name })
+          toast.error(`Failed to restore "${tab.name}"`)
+        }
+      }
+    }
+  },
+
   /** After a branch switch: flush, then re-read every non-dirty text tab. */
   reloadAllTabs: async () => {
     await get().flushEditor()
@@ -270,5 +297,15 @@ export const useEditorStore = create<EditorState>((set, get) => {
       })
     }
   },
-  }
-})
+      }
+    },
+    {
+      name: 'docubook:editor-session',
+      partialize: (state) => ({
+        tabs: state.tabs.map(({ path, name }) => ({ path, name })),
+        activeTab: state.activeTab,
+        editMode: state.editMode,
+      }),
+    },
+  ),
+)
