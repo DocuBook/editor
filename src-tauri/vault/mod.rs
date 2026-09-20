@@ -367,8 +367,7 @@ impl Vault {
             }
             // No baseline: only proceed while the target still does not exist.
             None => {
-                if existed.is_some() {
-                    let target = existed.expect("existed checked above");
+                if let Some(target) = existed {
                     let bytes = std::fs::read(self.safe_path(&target)?)
                         .map_err(|e| format!("Read: {e}"))?;
                     return Ok(WriteOutcome::Conflict {
