@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import { invoke, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
 import { useEditorStore } from './editor'
+import { useSyncStore } from './sync'
 import { logger } from '../utils/logger'
 
 /** File or directory info from the vault tree. */
@@ -89,6 +90,7 @@ export const useVaultStore = create<VaultState>()(
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
+          void useSyncStore.getState().drain()
         } catch (e) { console.error(e); toast.error('Failed to open vault'); finishTransition(id) }
       },
       /** Create a new vault folder inside parent dir and open it. */
@@ -107,6 +109,7 @@ export const useVaultStore = create<VaultState>()(
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
+          void useSyncStore.getState().drain()
         } catch (e) { console.error(e); toast.error('Failed to create vault'); finishTransition(id) }
       },
       /** Clone a remote git repository into parent dir and open it as vault. */
@@ -160,6 +163,8 @@ export const useVaultStore = create<VaultState>()(
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
+          // Offline writes could not be flushed while the vault was closed.
+          void useSyncStore.getState().drain()
           if (preserveTabs) await useEditorStore.getState().restoreSessionTabs()
         } catch {
           // Vault can't be reopened (deleted/moved) — drop from recent + clear last vault so welcome shows next time

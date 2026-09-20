@@ -50,6 +50,7 @@ permissions = [
   "allow-open-vault",
   "allow-open-system-settings",
   "allow-read-file",
+  "allow-file-version",
   "allow-read-file-binary",
   "allow-rename-file",
   "allow-resolve-mentions",
@@ -64,7 +65,8 @@ permissions = [
   "allow-wiki-backlinks",
   "allow-wiki-resolve",
   "allow-wiki-suggest",
-  "allow-write-file"
+  "allow-write-file",
+  "allow-write-file-checked"
 ]
 
 
@@ -489,6 +491,16 @@ description = "Denies the read_file command."
 commands.deny = ["read_file"]
 
 [[permission]]
+identifier = "allow-file-version"
+description = "Enables the file_version command."
+commands.allow = ["file_version"]
+
+[[permission]]
+identifier = "deny-file-version"
+description = "Denies the file_version command."
+commands.deny = ["file_version"]
+
+[[permission]]
 identifier = "allow-read-file-binary"
 description = "Enables the read_file_binary command (base64 binary previews)."
 commands.allow = ["read_file_binary"]
@@ -637,6 +649,16 @@ commands.allow = ["write_file"]
 identifier = "deny-write-file"
 description = "Denies the write_file command."
 commands.deny = ["write_file"]
+
+[[permission]]
+identifier = "allow-write-file-checked"
+description = "Enables the write_file_checked command."
+commands.allow = ["write_file_checked"]
+
+[[permission]]
+identifier = "deny-write-file-checked"
+description = "Denies the write_file_checked command."
+commands.deny = ["write_file_checked"]
 
 [[permission]]
 identifier = "allow-custom-ai-config"

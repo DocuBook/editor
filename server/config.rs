@@ -381,8 +381,8 @@ mod tests {
         c.set_probe("anthropic", "claude-haiku-5", false).unwrap();
 
         let reloaded = Config::load(&dir);
-        assert_eq!(reloaded.ai.probes["anthropic"]["claude-sonnet-5"], true);
-        assert_eq!(reloaded.ai.probes["anthropic"]["claude-haiku-5"], false);
+        assert!(reloaded.ai.probes["anthropic"]["claude-sonnet-5"]);
+        assert!(!reloaded.ai.probes["anthropic"]["claude-haiku-5"]);
 
         // Merging: a later probe must not drop the other models, and writing the
         // selection must not drop the probes either.
@@ -421,7 +421,7 @@ mod tests {
         .unwrap();
         let c = Config::load(&dir);
         assert_eq!(c.ai.provider, "anthropic");
-        assert_eq!(c.ai.probes["a"]["ok"], true);
+        assert!(c.ai.probes["a"]["ok"]);
         assert_eq!(c.ai.probes["a"].len(), 1, "non-bool entry dropped");
         assert!(!c.ai.probes.contains_key("b"), "non-object provider dropped");
         let _ = std::fs::remove_file(dir.join("config.json"));

@@ -185,7 +185,10 @@ fn build_router(state: AppState, www_dir: PathBuf) -> Router {
         .route("/api/login", post(auth_routes::login))
         .route("/api/logout", post(auth_routes::logout))
         .route("/api/setup_admin", post(auth_routes::setup_admin))
-        .route("/api/{cmd}", post(handlers::api))
+        .route(
+                    "/api/{cmd}",
+                    post(handlers::api).layer(axum::extract::DefaultBodyLimit::max((httpm::MAX_FILE_BYTES + 1024 * 1024) as usize)),
+                )
         .layer(PropagateRequestIdLayer::new(REQUEST_ID_HEADER.clone()))
         .layer(
             TraceLayer::new_for_http()

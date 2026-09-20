@@ -169,6 +169,14 @@ pub fn read_file(path: &str, state: State<AppState>) -> Result<String, String> {
     }
 }
 
+/// Content version (`None` when absent) for optimistic-concurrency edits.
+#[tauri::command]
+pub fn file_version(path: &str, state: State<AppState>) -> Result<Option<String>, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.version_of(path), None => Err("No vault".to_string())
+    }
+}
+
 #[tauri::command]
 pub fn read_file_binary(path: &str, state: State<AppState>) -> Result<String, String> {
     match state.vault.lock().expect("lock").as_ref() {
@@ -183,6 +191,25 @@ pub fn write_file(path: &str, content: &str, state: State<AppState>) -> Result<(
     };
     if r.is_ok() { rescan_wiki(&state); }
     r
+}
+
+/// Guarded write used by the editor: rejects the write instead of clobbering a
+/// file that changed since the caller read it. `baseVersion` is the token from
+/// `file_version`/`read_file`; `null` means "expected to be new". Returns a JSON
+/// `WriteOutcome` so the caller can branch on `status`.
+#[tauri::command]
+pub fn write_file_checked(
+    path: &str,
+    content: &str,
+    base_version: Option<String>,
+    state: State<AppState>,
+) -> Result<String, String> {
+    let outcome = match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.write_file_checked(path, content, base_version.as_deref()),
+        None => Err("No vault".to_string()),
+    }?;
+    if matches!(outcome, crate::vault::WriteOutcome::Written { .. }) { rescan_wiki(&state); }
+    serde_json::to_string(&outcome).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

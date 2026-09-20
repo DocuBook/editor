@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 pub mod mentions;
@@ -17,6 +17,47 @@ pub struct FileInfo {
 
 pub(crate) fn is_ignored_entry(name: &str) -> bool {
     matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash")
+}
+
+/// Content version of a file: the FNV-1a 64-bit hash of its exact bytes.
+///
+/// This is the optimistic-concurrency token for edits. A writer sends the hash
+/// it was based on; the vault refuses the write if the file on disk no longer
+/// matches. It is deliberately NOT a security primitive — collisions only mean
+/// a missed conflict, never a corrupt write, and it must be identical for equal
+/// content so the frontend can compare hashes across reloads.
+///
+/// Dependency-free on purpose: this crate already ships `sha2`-free and adding
+/// a hashing crate for change detection is not worth the compile time.
+pub fn content_version(content: &[u8]) -> String {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = OFFSET;
+    for byte in content {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(PRIME);
+    }
+    format!("{hash:016x}")
+}
+
+/// Result of an optimistic write attempt.
+///
+/// `Written` means the guard matched (or was not requested) and disk now holds
+/// the new content. `Conflict` means someone else changed the file since the
+/// caller read it: the write was *rejected*, and the caller gets both sides so
+/// it can present a choice instead of silently clobbering a teammate's edit.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictReason {
+    VersionMismatch,
+    TargetExists,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum WriteOutcome {
+    Written { version: String },
+    Conflict { disk: String, version: String, reason: ConflictReason },
 }
 
 #[derive(Clone, Copy)]
@@ -48,6 +89,7 @@ pub struct Vault {
     /// keystroke and the wiki index scans it at open, so re-walking per call is
     /// the difference between a few ms and a few hundred on a large vault.
     markdown: RefCell<Option<Arc<Vec<String>>>>,
+    checked_write_lock: Mutex<()>,
 }
 
 impl Vault {
@@ -55,7 +97,7 @@ impl Vault {
     pub fn new(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         if !root.is_dir() { return Err(format!("Not a directory: {}", path)); }
-        Ok(Self { root, renderable: RefCell::new(None), markdown: RefCell::new(None) })
+        Ok(Self { root, renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()) })
     }
 /** Get the vault root path. Used by both crates: file serving and the wiki
      *  index reads. */
@@ -265,6 +307,80 @@ impl Vault {
         self.invalidate_caches();
         Ok(())
     }
+
+/// Content version of a file on disk, or `None` when it does not exist.
+    /// Callers hold this token between read and write so an edit can be rejected
+    /// rather than silently overwriting an external change.
+    pub fn version_of(&self, path: &str) -> Result<Option<String>, String> {
+        let target = match self.resolve_target(path) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        let f = self.safe_path(&target)?;
+        match std::fs::read(&f) {
+            Ok(bytes) => Ok(Some(content_version(&bytes))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Read: {e}")),
+        }
+    }
+
+/// Write only if the file still matches `base_version` (optimistic concurrency).
+    ///
+    /// `base_version` semantics:
+    /// - `None` — caller believes the file does not exist yet; the write fails with
+    ///   a conflict if something appeared in the meantime.
+    /// - `Some(token)` — the write fails if disk content hashes to anything else.
+    ///
+    /// The window between the check and the write is not atomic across processes;
+    /// this is a best-effort guard against the *common* case (external editor, git
+    /// checkout, another device) rather than a lock. Callers that need hard
+    /// serialization should hold a vault-level lock instead.
+    pub fn write_file_checked(
+        &self,
+        path: &str,
+        content: &str,
+        base_version: Option<&str>,
+    ) -> Result<WriteOutcome, String> {
+        let _write_guard = self.checked_write_lock.lock().map_err(|_| "Write lock poisoned".to_string())?;
+        let existed = self.resolve_target(path);
+        match base_version {
+            Some(expected) => {
+                let actual = match existed {
+                    Some(target) => {
+                        let bytes = std::fs::read(self.safe_path(&target)?)
+                            .map_err(|e| format!("Read: {e}"))?;
+                        Some((content_version(&bytes), String::from_utf8_lossy(&bytes).to_string()))
+                    }
+                    None => None,
+                };
+                match actual {
+                    Some((version, _disk)) if version == expected => {}
+                    Some((version, disk)) => {
+                        return Ok(WriteOutcome::Conflict { disk, version, reason: ConflictReason::VersionMismatch });
+                    }
+                    // The caller based its edit on a file that has since vanished;
+                    // recreating it silently would resurrect a deleted note.
+                    None => {
+                        return Ok(WriteOutcome::Conflict { disk: String::new(), version: String::new(), reason: ConflictReason::VersionMismatch });
+                    }
+                }
+            }
+            // No baseline: only proceed while the target still does not exist.
+            None => {
+                if let Some(target) = existed {
+                    let bytes = std::fs::read(self.safe_path(&target)?)
+                        .map_err(|e| format!("Read: {e}"))?;
+                    return Ok(WriteOutcome::Conflict {
+                        disk: String::from_utf8_lossy(&bytes).to_string(),
+                        version: content_version(&bytes),
+                        reason: ConflictReason::TargetExists,
+                    });
+                }
+            }
+        }
+        self.write_file(path, content)?;
+        Ok(WriteOutcome::Written { version: content_version(content.as_bytes()) })
+    }
 /** Create an empty file, creating parent directories if needed. */
     pub fn create_file(&self, path: &str) -> Result<String, String> {
         let f = self.safe_path(path)?;
@@ -413,14 +529,14 @@ mod tests {
 
     #[test]
     fn vault_name_from_directory() {
-        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None), markdown: RefCell::new(None) };
+        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()) };
         assert_eq!(v.name(), "my-vault");
     }
 
     #[test]
     fn vault_name_root() {
         // root's file_name is None on some platforms, empty on others
-        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None), markdown: RefCell::new(None) };
+        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()) };
         assert_eq!(v.name(), "");
     }
 
@@ -674,5 +790,123 @@ mod tests {
         let result = Vault::new("/tmp/nonexistent-12345");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Not a directory"));
+    }
+
+    #[test]
+    fn content_version_is_stable_and_content_sensitive() {
+        // Equal content must hash equal across calls, or every save would look
+        // like a conflict; any byte change must hash differently.
+        assert_eq!(content_version(b"hello"), content_version(b"hello"));
+        assert_ne!(content_version(b"hello"), content_version(b"hello "));
+        assert_ne!(content_version(b""), content_version(b"a"));
+        // Different lengths sharing a prefix must not collide trivially.
+        assert_ne!(content_version(b"ab"), content_version(b"abc"));
+    }
+
+    #[test]
+    fn checked_write_accepts_matching_baseline_and_rejects_stale_one() {
+        let dir = std::env::temp_dir().join(format!("vault-test-checked-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("note.md"), "v1").unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+
+        let base = v.version_of("note.md").unwrap().expect("file exists");
+
+        // A write based on the current version succeeds and advances the version.
+        let ok = v.write_file_checked("note.md", "v2", Some(&base)).unwrap();
+        let new_version = match ok {
+            WriteOutcome::Written { version } => version,
+            other => panic!("expected Written, got {other:?}"),
+        };
+        assert_ne!(new_version, base);
+        assert_eq!(v.read_file("note.md").unwrap(), "v2");
+
+        // A write still holding the OLD token must be rejected and must leave
+        // the disk untouched — this is what protects a concurrent editor.
+        let stale = v.write_file_checked("note.md", "clobber", Some(&base)).unwrap();
+        match stale {
+            WriteOutcome::Conflict { disk, version, .. } => {
+                assert_eq!(disk, "v2");
+                assert_eq!(version, new_version);
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+        assert_eq!(v.read_file("note.md").unwrap(), "v2");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checked_write_without_baseline_refuses_to_clobber_existing_file() {
+        let dir = std::env::temp_dir().join(format!("vault-test-nobase-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("taken.md"), "existing").unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+
+        // No baseline means "I believe this file is new" — an existing file is a conflict.
+        let conflict = v.write_file_checked("taken.md", "mine", None).unwrap();
+        assert!(matches!(conflict, WriteOutcome::Conflict { .. }));
+        assert_eq!(v.read_file("taken.md").unwrap(), "existing");
+
+        // Same call for a genuinely new path writes normally.
+        let ok = v.write_file_checked("fresh.md", "mine", None).unwrap();
+        assert!(matches!(ok, WriteOutcome::Written { .. }));
+        assert_eq!(v.read_file("fresh.md").unwrap(), "mine");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn checked_write_conflicts_when_baselined_file_was_deleted() {
+        let dir = std::env::temp_dir().join(format!("vault-test-deleted-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("gone.md"), "v1").unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        let base = v.version_of("gone.md").unwrap().unwrap();
+
+        std::fs::remove_file(dir.join("gone.md")).unwrap();
+
+        // Losing the file underneath an open editor must surface as a conflict
+        // rather than silently recreating a note someone deleted.
+        let conflict = v.write_file_checked("gone.md", "v2", Some(&base)).unwrap();
+        assert!(matches!(conflict, WriteOutcome::Conflict { .. }));
+        assert!(!dir.join("gone.md").exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn version_of_missing_file_is_none() {
+        let dir = std::env::temp_dir().join(format!("vault-test-ver-none-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert!(v.version_of("nope.md").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Cross-runtime parity: the frontend re-implements this hash in TypeScript
+    /// (`contentVersion` in `frontend/stores/sync.ts`) so the offline queue can
+    /// answer "does disk already hold this?" without a round trip. The two
+    /// implementations MUST agree, or every checked write would be rejected as
+    /// stale and the editor would report a conflict on every save.
+    ///
+    /// These expected values were produced by the TypeScript implementation and
+    /// are pinned here so any drift on EITHER side fails this test.
+    #[test]
+    fn cross_runtime_hash_parity() {
+        assert_eq!(content_version(b""), "cbf29ce484222325");
+        assert_eq!(content_version(b"a"), "af63dc4c8601ec8c");
+        assert_eq!(content_version(b"hello"), "a430d84680aabd0b");
+        assert_eq!(content_version(b"hello world"), "779a65e7023cd2e7");
+        // Multi-byte UTF-8 must hash over bytes, not code points: JS encodes to
+        // UTF-8 before hashing, so both sides see the same byte sequence.
+        assert_eq!(
+            content_version("# Title\n\nbody with émoji 🎉".as_bytes()),
+            "92709619a2fcf94b"
+        );
     }
 }

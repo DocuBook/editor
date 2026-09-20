@@ -11,6 +11,9 @@ import { Toaster, toast } from 'sonner'
 import { useGitPolling } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
 import { useVaultStore } from './stores/vault'
+import { useSyncStore, installSyncListeners } from './stores/sync'
+import ConflictDialog from './components/ConflictDialog'
+import SyncStatusBadge from './components/editor/SyncStatusBadge'
 import { listen, invoke } from './lib/ipc'
 import { useAuth, useAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
@@ -86,6 +89,28 @@ export default function App() {
   useGitPolling()
   useAuthGuard()
 
+  const conflicts = useSyncStore(s => s.conflicts)
+  /** Paths the user dismissed with "Decide later". The conflict stays in the
+   *  store (nothing is lost) but stops re-opening the dialog unprompted; the
+   *  status badge keeps showing it so it cannot be forgotten. */
+  const [dismissedConflicts, setDismissedConflicts] = useState<Record<string, true>>({})
+  const conflictIdentity = (conflict: typeof conflicts[number]) => conflict.id
+  const activeConflict = conflicts.find(c => !dismissedConflicts[conflictIdentity(c)])
+  const resolveConflict = useCallback(async (choice: 'mine' | 'theirs' | 'both') => {
+    const path = useSyncStore.getState().conflicts.find(c => !dismissedConflicts[conflictIdentity(c)])?.path
+    if (!path) return
+    const editor = useEditorStore.getState()
+    if (choice === 'mine') await editor.applyConflictMine(path)
+    else if (choice === 'theirs') await editor.applyConflictTheirs(path)
+    else await editor.applyConflictKeepBoth(path)
+  }, [dismissedConflicts])
+
+  /** Offline queue: drain when connectivity returns or auth/vault becomes ready. */
+  useEffect(() => installSyncListeners(() => useAuth.getState().status === 'ready' && useVaultStore.getState().isOpen), [])
+  useEffect(() => {
+    if (status === 'ready' && isVaultOpen) void useSyncStore.getState().drain()
+  }, [status, isVaultOpen])
+
   /** Graceful shutdown: on window close, flush + save all dirty tabs, then confirm. */
   useEffect(() => {
     let unsub: (() => void) | undefined
@@ -152,6 +177,7 @@ export default function App() {
           <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
         )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
+          <SyncStatusBadge />
           <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
         </main>
       </div>
@@ -193,6 +219,14 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+      {activeConflict && (
+        <ConflictDialog
+          key={activeConflict.path}
+          conflict={activeConflict}
+          onResolve={resolveConflict}
+          onClose={() => setDismissedConflicts(prev => ({ ...prev, [conflictIdentity(activeConflict)]: true }))}
+        />
       )}
       <Toaster position="bottom-right" theme={colorScheme} richColors offset={{ bottom: 80, right: 16 }} mobileOffset={{ bottom: 96 }} />
     </div>
