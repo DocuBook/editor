@@ -13,6 +13,10 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+const MAX_PROBE_PROVIDERS: usize = 32;
+const MAX_PROBE_MODELS_PER_PROVIDER: usize = 128;
+const MAX_PROBE_ID_LEN: usize = 256;
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
@@ -22,10 +26,25 @@ pub struct Admin {
     pub password_hash: String,
 }
 
+/** Which provider/model the AI panel uses — selection only, never credentials.
+ *  Lives here rather than in keys.json so it survives `clear site data` and a
+ *  browser/device switch, and is readable without DB_KEYS_PASSPHRASE. */
+#[derive(Clone, Default)]
+pub struct AiSelection {
+    pub provider: String,
+    pub model: String,
+    /** Measured tool-call support per provider → model → supports tools, from the
+     *  test_connection probe. Non-secret and expensive to re-measure (one extra
+     *  round-trip per model), so it is persisted here rather than in localStorage:
+     *  a new browser would otherwise run text-only until each model re-probed. */
+    pub probes: std::collections::BTreeMap<String, std::collections::BTreeMap<String, bool>>,
+}
+
 #[derive(Clone)]
 pub struct Config {
     pub admin: Option<Admin>,
     pub session_ttl_hours: u64,
+    pub ai: AiSelection,
     pub setup_token: Option<String>,
     path: PathBuf,
 }
@@ -71,12 +90,17 @@ impl Config {
             password_hash: a.get("password_hash").and_then(|e| e.as_str()).unwrap_or("").to_string(),
         });
         let session_ttl_hours = v.get("session_ttl_hours").and_then(|x| x.as_u64()).unwrap_or(168);
+        let ai = v.get("ai").map(|a| AiSelection {
+            provider: a.get("provider").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            model: a.get("model").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+            probes: parse_probes(a.get("probes")),
+        }).unwrap_or_default();
         // Env-only, never persisted: optional setup guard for public deployments.
         let setup_token = std::env::var("DB_SETUP_TOKEN").ok().filter(|s| !s.is_empty());
         if setup_token.is_none() {
             tracing::warn!(event = "setup_token_missing");
         }
-        Self { admin, session_ttl_hours, setup_token, path: path.to_path_buf() }
+        Self { admin, session_ttl_hours, ai, setup_token, path: path.to_path_buf() }
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -87,6 +111,11 @@ impl Config {
                 "created_at": chrono_now(),
             })),
             "session_ttl_hours": self.session_ttl_hours,
+            "ai": {
+                "provider": self.ai.provider,
+                "model": self.ai.model,
+                "probes": self.ai.probes,
+            },
         });
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
@@ -95,6 +124,42 @@ impl Config {
             .map_err(|e| format!("Cannot write {}: {} — check the /data volume ownership", self.path.display(), e))?;
         #[cfg(unix)]
         let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
+        Ok(())
+    }
+
+    /** Record which provider/model the UI selected. `model` may be empty while a
+     *  longer key is being entered; the provider is always saved so the selection
+     *  survives a browser/device change. */
+    pub fn set_ai(&mut self, provider: &str, model: &str) -> Result<(), String> {
+        self.ai.provider = provider.to_string();
+        self.ai.model = model.to_string();
+        self.save()
+    }
+
+    /** Record a measured probe outcome (provider → model → supports tools). Merged
+     *  into the existing map so a probe for one model never drops the others. */
+    pub fn set_probe(&mut self, provider: &str, model: &str, tools: bool) -> Result<(), String> {
+        self.merge_probe(provider, model, tools)?;
+        self.save()
+    }
+
+    /** Mutation without the write, so a bulk probe sync is one file write instead
+     *  of one per model. Callers own the `save()` call. */
+    pub fn merge_probe(&mut self, provider: &str, model: &str, tools: bool) -> Result<(), String> {
+        if provider.is_empty() || model.is_empty() {
+            return Err("Provider and model are required for a probe result".into());
+        }
+        if provider.len() > MAX_PROBE_ID_LEN || model.len() > MAX_PROBE_ID_LEN {
+            return Err(format!("Provider and model IDs must be at most {MAX_PROBE_ID_LEN} bytes"));
+        }
+        if !self.ai.probes.contains_key(provider) && self.ai.probes.len() >= MAX_PROBE_PROVIDERS {
+            return Err(format!("At most {MAX_PROBE_PROVIDERS} probe providers are supported"));
+        }
+        let models = self.ai.probes.entry(provider.to_string()).or_default();
+        if !models.contains_key(model) && models.len() >= MAX_PROBE_MODELS_PER_PROVIDER {
+            return Err(format!("At most {MAX_PROBE_MODELS_PER_PROVIDER} models per provider are supported"));
+        }
+        models.insert(model.to_string(), tools);
         Ok(())
     }
 
@@ -170,6 +235,28 @@ impl Config {
     }
 }
 
+/** Decode the persisted probe map, ignoring anything malformed: a hand-edited or
+ *  older config.json must never fail to load over a non-essential cache. */
+fn parse_probes(
+    value: Option<&serde_json::Value>,
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, bool>> {
+    let mut out = std::collections::BTreeMap::new();
+    let Some(obj) = value.and_then(|v| v.as_object()) else {
+        return out;
+    };
+    for (provider, models) in obj {
+        let Some(models) = models.as_object() else { continue };
+        let entries: std::collections::BTreeMap<String, bool> = models
+            .iter()
+            .filter_map(|(model, tools)| tools.as_bool().map(|t| (model.clone(), t)))
+            .collect();
+        if !entries.is_empty() {
+            out.insert(provider.clone(), entries);
+        }
+    }
+    out
+}
+
 /** Timestamp without pulling chrono — RFC3339-ish for the config file. */
 fn chrono_now() -> String {
     let s = std::process::Command::new("date").arg("-u").arg("+%Y-%m-%dT%H:%M:%SZ").output();
@@ -241,6 +328,7 @@ mod tests {
         let mut no_tok = Config {
             admin: None,
             session_ttl_hours: 24,
+            ai: AiSelection::default(),
             setup_token: None,
             path: dir.join("c1.json"),
         };
@@ -253,6 +341,7 @@ mod tests {
         let mut tok = Config {
             admin: None,
             session_ttl_hours: 24,
+            ai: AiSelection::default(),
             setup_token: Some("tok-secret-1".into()),
             path: dir.join("c2.json"),
         };
@@ -263,6 +352,90 @@ mod tests {
         assert!(tok.admin.is_some());
         let _ = std::fs::remove_file(dir.join("c1.json"));
         let _ = std::fs::remove_file(dir.join("c2.json"));
+    }
+
+    #[test]
+    fn ai_selection_persists_across_reload() {
+        // The point of storing this server-side: a new browser or device must be
+        // able to read back the provider/model that localStorage lost.
+        let dir = tmp();
+        let mut c = Config::load(&dir);
+        assert_eq!(c.ai.provider, "", "fresh config starts unselected");
+        c.set_ai("anthropic", "claude-sonnet-5").unwrap();
+
+        let reloaded = Config::load(&dir);
+        assert_eq!(reloaded.ai.provider, "anthropic");
+        assert_eq!(reloaded.ai.model, "claude-sonnet-5");
+        let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn ai_probes_persist_across_reload_and_merge() {
+        // Re-probing costs a network round-trip per model, so a fresh browser must
+        // read the results back instead of re-measuring (and running text-only
+        // until each probe lands).
+        let dir = tmp();
+        let mut c = Config::load(&dir);
+        assert!(c.ai.probes.is_empty(), "fresh config starts unprobed");
+        c.set_probe("anthropic", "claude-sonnet-5", true).unwrap();
+        c.set_probe("anthropic", "claude-haiku-5", false).unwrap();
+
+        let reloaded = Config::load(&dir);
+        assert_eq!(reloaded.ai.probes["anthropic"]["claude-sonnet-5"], true);
+        assert_eq!(reloaded.ai.probes["anthropic"]["claude-haiku-5"], false);
+
+        // Merging: a later probe must not drop the other models, and writing the
+        // selection must not drop the probes either.
+        let mut c2 = Config::load(&dir);
+        c2.set_probe("anthropic", "claude-opus-5", true).unwrap();
+        c2.set_ai("openai-compatible", "local-1").unwrap();
+        let c3 = Config::load(&dir);
+        assert_eq!(c3.ai.probes["anthropic"].len(), 3, "probes must merge, not replace");
+        assert_eq!(c3.ai.provider, "openai-compatible");
+        let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn probe_limits_reject_unbounded_entries() {
+        let dir = tmp();
+        let mut c = Config::load(&dir);
+        assert!(c.merge_probe(&"p".repeat(MAX_PROBE_ID_LEN + 1), "m", true).is_err());
+        assert!(c.merge_probe("p", &"m".repeat(MAX_PROBE_ID_LEN + 1), true).is_err());
+
+        for i in 0..MAX_PROBE_MODELS_PER_PROVIDER {
+            c.merge_probe("p", &format!("m-{i}"), true).unwrap();
+        }
+        assert!(c.merge_probe("p", "one-too-many", true).is_err());
+        let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn malformed_probes_do_not_break_config_load() {
+        // A cache must never take the config down with it: non-bool values and
+        // non-object providers are dropped rather than failing the parse.
+        let dir = tmp();
+        std::fs::write(
+            dir.join("config.json"),
+            r#"{"ai":{"provider":"anthropic","model":"m","probes":{"a":{"ok":true,"bad":"yes"},"b":7}}}"#,
+        )
+        .unwrap();
+        let c = Config::load(&dir);
+        assert_eq!(c.ai.provider, "anthropic");
+        assert_eq!(c.ai.probes["a"]["ok"], true);
+        assert_eq!(c.ai.probes["a"].len(), 1, "non-bool entry dropped");
+        assert!(!c.ai.probes.contains_key("b"), "non-object provider dropped");
+        let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn missing_ai_block_does_not_break_existing_config() {
+        // A config.json written before this field existed must still load.
+        let dir = tmp();
+        std::fs::write(dir.join("config.json"), r#"{"session_ttl_hours":48}"#).unwrap();
+        let c = Config::load(&dir);
+        assert_eq!(c.session_ttl_hours, 48);
+        assert_eq!(c.ai.provider, "");
+        let _ = std::fs::remove_file(dir.join("config.json"));
     }
 
     #[test]

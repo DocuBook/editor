@@ -6,6 +6,20 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 
+const MAX_PROBE_PROVIDERS: usize = 32;
+const MAX_PROBE_MODELS_PER_PROVIDER: usize = 128;
+const MAX_PROBE_ID_LEN: usize = 256;
+
+fn validate_probe_id(provider: &str, model: &str) -> Result<(), String> {
+    if provider.is_empty() || model.is_empty() {
+        return Err("Provider and model are required for a probe result".into());
+    }
+    if provider.len() > MAX_PROBE_ID_LEN || model.len() > MAX_PROBE_ID_LEN {
+        return Err(format!("Provider and model IDs must be at most {MAX_PROBE_ID_LEN} bytes"));
+    }
+    Ok(())
+}
+
 fn pin_custom_endpoint(
     builder: reqwest::ClientBuilder,
     provider: &str,
@@ -30,8 +44,193 @@ pub async fn list_api_keys(providers: Vec<String>) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn set_api_key(provider: &str, key: &str) -> Result<(), String> {
-    crate::keychain::set_key(provider, key)
+pub fn set_api_key(
+    app: tauri::AppHandle,
+    provider: &str,
+    key: &str,
+    model: Option<String>,
+) -> Result<(), String> {
+    let previous_key = crate::keychain::get_key(provider).ok();
+    let previous_selection = load_selection(&app);
+    crate::keychain::set_key(provider, key)?;
+    if let Err(error) = save_selection(&app, provider, model.as_deref().unwrap_or("")) {
+        restore_key(provider, previous_key.as_deref());
+        restore_selection(&app, &previous_selection);
+        return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
+    }
+    Ok(())
+}
+
+/** Persist the non-secret AI selection so it survives a webview storage wipe.
+ *  The webview's localStorage is cleared with the app's site data, which would
+ *  otherwise force the user to re-enter provider + model even though the API key
+ *  is still in the keychain. Failure is non-fatal: the settings still work for
+ *  this session, only the cross-wipe restore is lost. */
+fn save_selection(app: &tauri::AppHandle, provider: &str, model: &str) -> Result<(), String> {
+    let mut s = load_selection(app);
+    s.provider = provider.to_string();
+    s.model = model.to_string();
+    write_selection(app, &s)
+}
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct AiSelection {
+    provider: String,
+    model: String,
+    /** Measured tool-call support per provider → model → supports tools, from the
+     *  test_connection probe. Non-secret and expensive to re-measure (an extra
+     *  round-trip per model), so it lives here rather than in webview localStorage:
+     *  a wiped webview would otherwise run text-only until every model re-probed. */
+    #[serde(default)]
+    probes: std::collections::BTreeMap<String, std::collections::BTreeMap<String, bool>>,
+}
+
+fn selection_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .app_config_dir()
+        .map_err(|e| format!("No config directory available: {e}"))?;
+    Ok(dir.join("ai-settings.json"))
+}
+
+fn load_selection(app: &tauri::AppHandle) -> AiSelection {
+    selection_path(app)
+        .ok()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn restore_selection(app: &tauri::AppHandle, selection: &AiSelection) {
+    let _ = save_selection(app, &selection.provider, &selection.model);
+}
+
+/** Record a measured probe outcome (provider → model → supports tools). Merged
+ *  into the existing map so probing one model never drops the others. */
+fn save_probe(
+    app: &tauri::AppHandle,
+    provider: &str,
+    model: &str,
+    tools: bool,
+) -> Result<(), String> {
+    validate_probe_id(provider, model)?;
+    let mut s = load_selection(app);
+    s.probes
+        .entry(provider.to_string())
+        .or_default()
+        .insert(model.to_string(), tools);
+    write_selection(app, &s)
+}
+
+fn write_selection(app: &tauri::AppHandle, s: &AiSelection) -> Result<(), String> {
+    let path = selection_path(app)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(s).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Cannot write {}: {e}", path.display()))
+}
+
+fn restore_key(provider: &str, key: Option<&str>) {
+    match key {
+        Some(key) => { let _ = crate::keychain::set_key(provider, key); }
+        None => { let _ = crate::keychain::delete_key(provider); }
+    }
+}
+
+#[tauri::command]
+pub fn set_ai_settings(
+    app: tauri::AppHandle,
+    provider: &str,
+    model: &str,
+) -> Result<String, String> {
+    save_selection(&app, provider, model).map(|_| "null".into())
+}
+
+/** Batch probe sync (provider → model → supports tools). Merged, never
+ *  destructive, so a browser that measured several models can push them all at
+ *  once — and a partial payload cannot wipe results it does not mention. */
+#[tauri::command]
+pub fn set_probes(app: tauri::AppHandle, probes: serde_json::Value) -> Result<String, String> {
+    let Some(by_provider) = probes.as_object() else {
+        return Err("probes must be an object".into());
+    };
+    if by_provider.len() > MAX_PROBE_PROVIDERS {
+        return Err(format!("At most {MAX_PROBE_PROVIDERS} probe providers are supported"));
+    }
+    let mut selection = load_selection(&app);
+    let mut accepted = 0usize;
+    for (provider, models) in by_provider {
+        let Some(models) = models.as_object() else { continue };
+        if models.len() > MAX_PROBE_MODELS_PER_PROVIDER {
+            return Err(format!("At most {MAX_PROBE_MODELS_PER_PROVIDER} models per provider are supported"));
+        }
+        for (model, tools) in models {
+            let Some(tools) = tools.as_bool() else { continue };
+            validate_probe_id(provider, model)?;
+            if !selection.probes.contains_key(provider)
+                && selection.probes.len() >= MAX_PROBE_PROVIDERS
+            {
+                return Err(format!("At most {MAX_PROBE_PROVIDERS} probe providers are supported"));
+            }
+            let models = selection.probes.entry(provider.clone()).or_default();
+            if !models.contains_key(model) && models.len() >= MAX_PROBE_MODELS_PER_PROVIDER {
+                return Err(format!("At most {MAX_PROBE_MODELS_PER_PROVIDER} models per provider are supported"));
+            }
+            models.insert(model.clone(), tools);
+            accepted += 1;
+        }
+    }
+    if accepted > 0 {
+        write_selection(&app, &selection)?;
+    }
+    Ok(serde_json::json!({ "accepted": accepted }).to_string())
+}
+
+/** Record one probe result — the incremental path used by the auto-probe and by
+ *  API-key save, which measure a single model at a time. */
+#[tauri::command]
+pub fn set_probe(
+    app: tauri::AppHandle,
+    provider: &str,
+    model: &str,
+    tools: bool,
+) -> Result<String, String> {
+    save_probe(&app, provider, model, tools).map(|_| "null".into())
+}
+
+/** Non-secret AI selection + which catalog providers hold a key. The webview
+ *  re-reads this on every load, because its localStorage cannot be trusted to
+ *  survive a browser/device change. */
+#[tauri::command]
+pub async fn ai_settings(app: tauri::AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let s = load_selection(&app);
+        let providers: Vec<String> = crate::agent::PROVIDER_IDS.iter().map(|p| p.to_string()).collect();
+        let mut saved = crate::keychain::list_keys(&providers)?;
+        let custom = crate::keychain::active_provider();
+        if let Some(id) = &custom {
+            if !saved.contains(id) {
+                saved.push(id.clone());
+            }
+        }
+        // The bound endpoint URL lives in the keychain with the key, not in the
+        // selection file, so a fresh webview can still reach the endpoint.
+        let base_url = custom.as_deref().and_then(|p| crate::keychain::get_base_url(p).ok());
+        Ok(serde_json::json!({
+            "provider": s.provider,
+            "model": s.model,
+            "savedProviders": saved,
+            "baseUrl": base_url,
+            // Measured tool-call support, so a wiped webview does not run
+            // text-only until every model is re-probed.
+            "probes": s.probes,
+        })
+        .to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Runtime model discovery. API keys stay in the keychain, never in webview state.
@@ -55,12 +254,38 @@ pub async fn list_models(provider: String, base_url: String) -> Result<String, S
     serde_json::to_string(&models).map_err(|e| e.to_string())
 }
 
-/// Save custom endpoint and bind its key to that endpoint server-side.
+/** Save custom endpoint and bind its key to that endpoint server-side. */
 #[tauri::command]
-pub fn set_custom_endpoint(provider: &str, base_url: &str, key: &str) -> Result<(), String> {
+pub fn set_custom_endpoint(
+    app: tauri::AppHandle,
+    provider: &str,
+    base_url: &str,
+    key: &str,
+    model: Option<String>,
+) -> Result<(), String> {
     crate::agent::validate_custom_base_url(base_url, true)?;
+    let previous_key = crate::keychain::get_key(provider).ok();
+    let previous_base_url = crate::keychain::get_base_url(provider).ok();
+    let previous_selection = load_selection(&app);
     crate::keychain::set_base_url(provider, base_url)?;
-    crate::keychain::set_key(provider, key)
+    if let Err(error) = crate::keychain::set_key(provider, key) {
+        restore_base_url(provider, previous_base_url.as_deref());
+        return Err(error);
+    }
+    if let Err(error) = save_selection(&app, provider, model.as_deref().unwrap_or("")) {
+        restore_key(provider, previous_key.as_deref());
+        restore_base_url(provider, previous_base_url.as_deref());
+        restore_selection(&app, &previous_selection);
+        return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
+    }
+    Ok(())
+}
+
+fn restore_base_url(provider: &str, url: Option<&str>) {
+    match url {
+        Some(url) => { let _ = crate::keychain::set_base_url(provider, url); }
+        None => { let _ = crate::keychain::delete_base_url(provider); }
+    }
 }
 
 #[tauri::command]

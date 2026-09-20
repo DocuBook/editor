@@ -213,8 +213,10 @@ pub fn delete_key(data_dir: &Path, provider: &str) -> Result<(), String> {
 
 /** Map key binding a custom base URL to a provider's key (openai-compatible
  *  custom endpoints). Separate key keeps get_key/list_keys semantics unchanged. */
+const BASE_URL_SUFFIX: &str = ":base_url";
+
 fn base_url_key(provider: &str) -> String {
-    format!("{}:base_url", provider)
+    format!("{provider}{BASE_URL_SUFFIX}")
 }
 
 pub fn set_base_url(data_dir: &Path, provider: &str, url: &str) -> Result<(), String> {
@@ -244,6 +246,31 @@ pub fn list_keys(data_dir: &Path, providers: &[String]) -> Vec<String> {
         .filter(|p| map.contains_key(*p))
         .cloned()
         .collect()
+}
+
+/**
+ * Every configured provider, regardless of catalog membership.
+ *
+ * `list_keys` can only confirm providers the caller already knows about, but the
+ * server must answer "what is configured?" without trusting a client list — a
+ * custom endpoint, or a key saved before the catalog changed, still counts.
+ * The `:base_url` companion entries are stripped; only credentials are reported.
+ */
+pub fn configured_providers(data_dir: &Path) -> Vec<String> {
+    let map = load(data_dir);
+    map.keys()
+        .filter(|k| !k.contains(BASE_URL_SUFFIX))
+        .cloned()
+        .collect()
+}
+
+/** The provider whose custom endpoint is bound, if any (openai-compatible). */
+pub fn active_provider(data_dir: &Path) -> Option<String> {
+    let map = load(data_dir);
+    map.keys()
+        .find(|k| k.ends_with(BASE_URL_SUFFIX))
+        .map(|k| k.trim_end_matches(BASE_URL_SUFFIX).to_string())
+        .filter(|p| map.contains_key(p))
 }
 
 #[cfg(test)]

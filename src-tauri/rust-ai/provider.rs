@@ -33,6 +33,11 @@ pub const ALLOWED_API_HOSTS: &[&str] = &[
 /// Synthetic provider ID for user-configured OpenAI-compatible endpoints.
 pub const CUSTOM_PROVIDER_ID: &str = "openai-compatible";
 
+/// Catalog provider IDs, in the same order as the frontend provider list.
+/// Kept here because the web server must decide which providers have a key
+/// without trusting a client-supplied list.
+pub const PROVIDER_IDS: [&str; 4] = ["opencode-go", "anthropic", "google", "deepseek"];
+
 fn is_loopback(host: &str) -> bool {
     host == "localhost"
         || host

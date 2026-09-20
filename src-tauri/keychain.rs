@@ -57,8 +57,10 @@ pub fn delete_key(provider: &str) -> Result<(), String> {
 /** Account suffix binding a custom base URL to a provider's key
  *  (openai-compatible custom endpoints). Kept as a separate entry so
  *  get_key/list_keys semantics are unchanged. */
+const BASE_URL_SUFFIX: &str = ":base_url";
+
 fn base_url_account(provider: &str) -> String {
-    format!("{}:base_url", provider)
+    format!("{provider}{BASE_URL_SUFFIX}")
 }
 
 /** Store the base URL bound to a provider's API key. */
@@ -147,6 +149,14 @@ pub fn list_keys(providers: &[String]) -> Result<Vec<String>, String> {
         });
     }
     Ok(found)
+}
+
+/** The provider whose custom base URL is bound, if any (openai-compatible).
+ *  Separate from `list_keys` because the binding is proven by the `:base_url`
+ *  entry, not by a known provider id. */
+pub fn active_provider() -> Option<String> {
+    let provider = crate::agent::CUSTOM_PROVIDER_ID;
+    get_base_url(provider).ok().filter(|u| !u.is_empty()).map(|_| provider.to_string())
 }
 
 #[cfg(test)]

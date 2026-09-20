@@ -159,6 +159,10 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "wiki_suggest" => sync(state, cmd, args),
         "wiki_resolve" => sync(state, cmd, args),
         "custom_ai_config" => sync(state, cmd, args),
+        "ai_settings" => sync(state, cmd, args),
+        "set_ai_settings" => sync(state, cmd, args),
+        "set_probe" => sync(state, cmd, args),
+        "set_probes" => sync(state, cmd, args),
         "md_to_html" => sync(state, cmd, args),
         "cancel_ai" => sync(state, cmd, args),
         "set_api_key" => sync(state, cmd, args),
@@ -195,6 +199,26 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
 }
 
 /** Run a cheap sync command body on the current thread. */
+fn restore_key(data_dir: &std::path::Path, provider: &str, key: Option<&str>) {
+    match key {
+        Some(key) => { let _ = keys::set_key(data_dir, provider, key); }
+        None => { let _ = keys::delete_key(data_dir, provider); }
+    }
+}
+
+fn restore_base_url(data_dir: &std::path::Path, provider: &str, url: Option<&str>) {
+    match url {
+        Some(url) => { let _ = keys::set_base_url(data_dir, provider, url); }
+        None => { let _ = keys::delete_base_url(data_dir, provider); }
+    }
+}
+
+fn restore_ai(state: &AppState, selection: &config::AiSelection) {
+    let mut cfg = state.auth.config.lock().expect("lock");
+    cfg.ai = selection.clone();
+    let _ = cfg.save();
+}
+
 pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, String> {
     let s = |k: &str| {
         args.get(k)
@@ -376,16 +400,43 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "set_api_key" => {
-            keys::set_key(&state.data_dir, &s("provider"), &s("key")).map(|_| "null".into())
+            let provider = s("provider");
+            let key = s("key");
+            let previous_key = keys::get_key(&state.data_dir, &provider).ok();
+            let previous_ai = state.auth.config.lock().expect("lock").ai.clone();
+            keys::set_key(&state.data_dir, &provider, &key)?;
+            let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("");
+            if let Err(error) = state.auth.config.lock().expect("lock").set_ai(&provider, model) {
+                restore_key(&state.data_dir, &provider, previous_key.as_deref());
+                restore_ai(state, &previous_ai);
+                return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
+            }
+            Ok("null".into())
         }
         "set_custom_endpoint" => {
             if probe::custom_env_base_url().is_some() {
                 return Err("Custom endpoint is controlled by DB_OPENAI_COMPAT_BASE_URL — remove the env var to edit in the UI".into());
             }
+            let provider = s("provider");
             let url = s("baseUrl");
+            let key = s("key");
             agent::validate_custom_base_url(&url, false)?;
-            keys::set_base_url(&state.data_dir, &s("provider"), &url)?;
-            keys::set_key(&state.data_dir, &s("provider"), &s("key")).map(|_| "null".into())
+            let previous_key = keys::get_key(&state.data_dir, &provider).ok();
+            let previous_url = keys::get_base_url(&state.data_dir, &provider).ok();
+            let previous_ai = state.auth.config.lock().expect("lock").ai.clone();
+            keys::set_base_url(&state.data_dir, &provider, &url)?;
+            if let Err(error) = keys::set_key(&state.data_dir, &provider, &key) {
+                restore_base_url(&state.data_dir, &provider, previous_url.as_deref());
+                return Err(error);
+            }
+            let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("");
+            if let Err(error) = state.auth.config.lock().expect("lock").set_ai(&provider, model) {
+                restore_key(&state.data_dir, &provider, previous_key.as_deref());
+                restore_base_url(&state.data_dir, &provider, previous_url.as_deref());
+                restore_ai(state, &previous_ai);
+                return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
+            }
+            Ok("null".into())
         }
         "delete_api_key" => {
             let _ = keys::delete_base_url(&state.data_dir, &s("provider")); // best-effort — entry may not exist
@@ -405,6 +456,101 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 serde_json::to_string(&keys::list_keys(&state.data_dir, &providers))
                     .map_err(|e| e.to_string())?,
             )
+        }
+        // Non-secret AI selection + which configured providers have a key. The
+        // browser cannot recover these from localStorage after a device or
+        // origin change, so it re-reads them from here on every load.
+        "ai_settings" => {
+            let cfg = state.auth.config.lock().expect("lock");
+            // Server-authoritative: the client list is never trusted here, so a
+            // custom endpoint or a key saved before the catalog changed still
+            // shows up after a browser/device switch.
+            let mut saved = keys::configured_providers(&state.data_dir);
+            saved.retain(|p| !agent::PROVIDER_IDS.iter().all(|id| id != p));
+            let custom = keys::active_provider(&state.data_dir);
+            if let Some(id) = &custom {
+                if !saved.contains(id) {
+                    saved.push(id.clone());
+                }
+            }
+            // The bound endpoint URL lives with the key, not in config.json.
+            let base_url = custom
+                .as_ref()
+                .and_then(|p| keys::get_base_url(&state.data_dir, p).ok())
+                .or_else(|| probe::custom_env_config().map(|(url, _, _)| url));
+            Ok(json!({
+                "provider": cfg.ai.provider,
+                "model": cfg.ai.model,
+                "savedProviders": saved,
+                "baseUrl": base_url,
+                // Measured tool-call support, so a new browser does not run
+                // text-only until every model is re-probed.
+                "probes": cfg.ai.probes,
+            })
+            .to_string())
+        }
+        "set_ai_settings" => {
+            let provider = s("provider");
+            let model = s("model");
+            let mut cfg = state.auth.config.lock().expect("lock");
+            // Optional probe result batched into the same write as the selection:
+            // one file write instead of two, so a failure cannot leave the probe
+            // stored while the selection it belongs to was not.
+            let probe = args
+                .get("probes")
+                .and_then(|p| p.get(&provider))
+                .and_then(|m| m.get(&model))
+                .and_then(|t| t.as_bool());
+            cfg.set_ai(&provider, &model)?;
+            match probe {
+                Some(tools) => cfg.set_probe(&provider, &model, tools),
+                None => Ok(()),
+            }
+            .map(|_| "null".into())
+        }
+        "set_probes" => {
+            // Wholesale probe sync (e.g. a browser that measured several models
+            // while offline). Merged per provider+model, never destructive.
+            let probes = args.get("probes").cloned().unwrap_or(serde_json::Value::Null);
+            let Some(by_provider) = probes.as_object() else {
+                return Err("probes must be an object".into());
+            };
+            let mut cfg = state.auth.config.lock().expect("lock");
+            // Validate and mutate a clone first: a rejected oversized/malformed
+            // bulk payload must not leave partial probe state in the live config.
+            let mut next = cfg.clone();
+            let mut accepted = 0usize;
+            for (provider, models) in by_provider {
+                let Some(models) = models.as_object() else { continue };
+                for (model, tools) in models {
+                    let Some(tools) = tools.as_bool() else { continue };
+                    next.merge_probe(provider, model, tools)?;
+                    accepted += 1;
+                }
+            }
+            if accepted > 0 {
+                next.save()?;
+                *cfg = next;
+            }
+            Ok(json!({ "accepted": accepted }).to_string())
+        }
+        "set_probe" => {
+            // Single measurement (auto-probe / API-key save). Does NOT touch the
+            // selection: the probe is keyed by provider+model and arriving here
+            // does not mean the user switched to that model.
+            let provider = s("provider");
+            let model = s("model");
+            let tools = args.get("tools").and_then(|t| t.as_bool());
+            let Some(tools) = tools else {
+                return Err("tools must be a boolean".into());
+            };
+            state
+                .auth
+                .config
+                .lock()
+                .expect("lock")
+                .set_probe(&provider, &model, tools)
+                .map(|_| "null".into())
         }
         "web_vaults" => cmds::web_vaults(state),
         "web_vault_root" => Ok(state.data_dir.join("vaults").to_string_lossy().to_string()),
