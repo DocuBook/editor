@@ -559,8 +559,22 @@ body .mobile-sidebar-drawer-body > aside {
     height: 0;
     pointer-events: none;
 }
+/* Tooltips. Only the sidebar's create button uses this now.
 
-/* Zed-style tooltips for bottom bar */
+   The tab bar no longer uses `.tip` at all: its undo/redo/mode buttons carry
+   `title` instead. The old `.tip-bar` variant rendered BELOW its wrapper
+   (`top: calc(100% + 6px)`), escaped the 48px tab bar, and added ~73px of
+   phantom page scroll — which pushed the absolute AI rail below the fold, so
+   the floating chat only appeared after a manual scroll. Page-level scroll is
+   now contained by `overflow-hidden` on the shell in App.tsx, so that escape
+   cannot reach the document even if a below-anchored tip returns.
+
+   Deliberately NO `contain` here. It was added while `.tip-bar` existed to stop
+   that overflow, and measured as a no-op once the tab bar tips were removed
+   (identical scrollHeight and tip geometry with and without it). It is not
+   harmless dead weight either: `contain: paint` would clip this tip, and
+   `contain: layout` would make any future `position: fixed` descendant resolve
+   against this wrapper instead of the viewport. */
 .tip-wrap {
   position: relative;
   display: inline-flex;
@@ -599,10 +613,8 @@ body .mobile-sidebar-drawer-body > aside {
   opacity: 1;
 }
 
-/* Right-anchored tooltip variants. The drawer action uses the default
-   upward tooltip; toolbar actions open below the bar. */
-.tip-left,
-.tip-bar .tip {
+/* Right-anchored tooltip variant (the sidebar's create button). */
+.tip-left {
   left: auto;
   right: 0;
 }
@@ -610,15 +622,7 @@ body .mobile-sidebar-drawer-body > aside {
   left: auto;
   right: 10px;
 }
-.tip-bar .tip {
-  top: calc(100% + 6px);
-}
-.tip-bar .tip::after {
-  top: -4px;
-  bottom: auto;
-  right: 8px;
-  left: auto;
-}
+
 .tip-wrap:has([data-plus-popup]) .tip {
   opacity: 0;
   pointer-events: none;

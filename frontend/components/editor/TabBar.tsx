@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { X, ChevronLeft, ChevronRight, Command, ArrowBigUp, PanelLeft, ChevronDown, Search } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, PanelLeft, ChevronDown, Search } from 'lucide-react'
 import { BsMarkdown } from 'react-icons/bs'
 import { TbBlocks } from 'react-icons/tb'
 import { useEditorStore } from '../../stores/editor'
@@ -76,14 +76,8 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       </span>
       {showInlineEditing && (
       <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background">
-        <span className="tip-wrap tip-bar">
-          <button onClick={() => undo()} disabled={!canUndo} className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
-          <span className="tip">Undo <kbd><Command size={11} />Z</kbd></span>
-        </span>
-        <span className="tip-wrap tip-bar border-l border-border-subtle">
-          <button onClick={() => redo()} disabled={!canRedo} className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronRight size={16} /></button>
-          <span className="tip">Redo <kbd><Command size={11} /><ArrowBigUp size={11} />Z</kbd></span>
-        </span>
+        <button onClick={() => undo()} disabled={!canUndo} title="Undo" aria-label="Undo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
+        <button onClick={() => redo()} disabled={!canRedo} title="Redo" aria-label="Redo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 border-l border-border-subtle flex items-center justify-center"><ChevronRight size={16} /></button>
       </span>
       )}
       <div ref={tabStripRef} className={'tab-strip flex-1 min-w-0 flex items-stretch h-full overflow-y-hidden scrollbar-none ' + (compact ? 'overflow-hidden' : 'overflow-x-auto')}>
@@ -100,16 +94,13 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       </div>
 
       {showInlineEditing && (
-      <span className="tip-wrap tip-bar shrink-0">
-        <span className="inline-flex items-center rounded-md border border-border-subtle bg-background overflow-hidden">
-          <button onClick={() => { if (editMode !== 'code') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Markdown mode"
-          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
-          ><BsMarkdown size={15} /></button>
-          <button onClick={() => { if (editMode !== 'editor') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Editor (WYSIWYG) mode"
-          className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 border-l border-border-subtle disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'editor' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
-          ><TbBlocks size={15} /></button>
-        </span>
-        <span className="tip">{tabs.length === 0 ? 'Open a file first' : toggleable ? 'Switch mode to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'} <kbd><Command size={11} /><ArrowBigUp size={11} />E</kbd></span>
+      <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background overflow-hidden">
+        <button onClick={() => { if (editMode !== 'code') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Markdown mode" title="Markdown mode"
+        className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
+        ><BsMarkdown size={15} /></button>
+        <button onClick={() => { if (editMode !== 'editor') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Editor (WYSIWYG) mode" title="Editor (WYSIWYG) mode"
+        className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 border-l border-border-subtle disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'editor' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
+        ><TbBlocks size={15} /></button>
       </span>
       )}
 
