@@ -15,6 +15,7 @@ export interface RecentVault { path: string; name: string; parent: string }
 interface VaultState {
   name: string; isOpen: boolean; vaultPath: string; recent: RecentVault[]
   tree: FileInfo[]; visibleItems: FileInfo[]; expanded: Record<string, boolean>; childrenCache: Record<string, FileInfo[]>; loading: boolean
+  openingPath: string | null; openingAt: number
   openVault: () => Promise<void>; createVault: (parent: string, name: string) => Promise<void>; cloneVault: (url: string, parent: string) => Promise<void>; closeVault: () => Promise<void>; resumeVault: () => Promise<void>; openRecent: (path: string) => Promise<void>
   loadTree: (subpath?: string) => Promise<void>
   toggleFolder: (item: FileInfo) => Promise<void>; flattenTree: (items: FileInfo[], depth: number) => FileInfo[]
@@ -28,7 +29,7 @@ export const useVaultStore = create<VaultState>()(
       let transitionId = 0
       let treeRequestId = 0
       const folderRequestIds: Record<string, number> = {}
-      const emptyTreeState = () => ({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
+      const emptyTreeState = () => ({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {}, openingPath: null, openingAt: 0 })
       const beginTransition = () => {
         if (transitioning || get().loading) return null
         transitioning = true
@@ -66,7 +67,7 @@ export const useVaultStore = create<VaultState>()(
       }
       return {
         name: '', isOpen: false, vaultPath: '', recent: [],
-        tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false,
+        tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false, openingPath: null, openingAt: 0,
 
       /** Open a directory picker and load the selected folder as vault. */
       openVault: async () => {
@@ -79,7 +80,7 @@ export const useVaultStore = create<VaultState>()(
           const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
           if (transitionId !== id) return
-          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
+          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {}, openingPath: null })
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
@@ -129,16 +130,20 @@ export const useVaultStore = create<VaultState>()(
         if (id === null) return
         try {
           if (!await prepareTransition(id)) return
+          // Point the welcome screen at the vault being opened so its overlay can
+          // name it, and stamp the start so the overlay measures delay from the
+          // click rather than from its own mount. Cleared on every exit path below.
+          set({ openingPath: path, openingAt: performance.now() })
           const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
           if (transitionId !== id) return
-          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
+          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {}, openingPath: null })
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
         } catch {
           // Vault can't be reopened (deleted/moved) — drop from recent + clear last vault so welcome shows next time
-          set({ vaultPath: '', recent: get().recent.filter(r => r.path !== path) })
+          set({ vaultPath: '', recent: get().recent.filter(r => r.path !== path), openingPath: null })
           toast.error('Vault not found — removed from recent')
           finishTransition(id)
         }

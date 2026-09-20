@@ -1,11 +1,12 @@
 /** Welcome screen shown when no vault is open — launchpad (Open Folder / Create Vault / Recent). */
 import { useState } from 'react'
-import { Folder, GitBranch, Command } from 'lucide-react'
+import { Folder, GitBranch, Command, Loader } from 'lucide-react'
 import { useVaultStore } from '../../stores/vault'
 import { openDir } from '../../lib/ipc'
+import { VaultOpenOverlay } from './VaultOpenOverlay'
 
 export function WelcomeScreen() {
-  const { recent, openRecent, openVault, createVault, cloneVault, loading } = useVaultStore()
+  const { recent, openRecent, openVault, createVault, cloneVault, loading, openingPath, openingAt } = useVaultStore()
   const [step, setStep] = useState<'idle' | 'name' | 'clone'>('idle')
   const [parent, setParent] = useState('')
   const [name, setName] = useState('My Vault')
@@ -30,6 +31,19 @@ export function WelcomeScreen() {
   const btn = 'w-full flex items-center gap-2 rounded-md px-4 py-2.5 text-sm disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition-colors'
   const btnPrimary = btn + ' justify-center bg-surface-active text-foreground border-none hover:bg-surface-hover'
   const btnSecondary = btn + ' justify-center bg-transparent text-foreground-secondary border border-border hover:bg-surface-active'
+
+  /* A recent-vault open is in flight. The welcome screen is otherwise only
+   * correct at rest: while a vault opens, `isOpen` is still false, so Editor
+   * keeps rendering this launchpad and the click looks like a no-op on a large
+   * vault. Show the overlay instead of an inert screen, and keep it up until the
+   * vault tree is ready. */
+  if (openingPath) {
+    const rec = recent.find(r => r.path === openingPath)
+    return <div className="flex-1 flex items-center justify-center p-8">
+      <VaultOpenOverlay name={rec?.name || openingPath.split('/').filter(Boolean).pop()} startedAt={openingAt} />
+    </div>
+  }
+
   return (
     <div className="flex-1 flex items-center justify-center p-8">
       <div className="w-full max-w-[384px] text-center">
@@ -77,7 +91,7 @@ export function WelcomeScreen() {
               className="w-full bg-background border border-border rounded-md px-3 py-2 text-sm text-foreground outline-none" />
             <div className="flex items-center gap-2 mt-2">
               <button disabled={loading || !repoUrl.trim()} onClick={clone} className={btnPrimary + ' !w-auto px-4'}>
-                {loading ? 'Cloning…' : 'Clone'}
+                {loading ? <><Loader size={13} className="animate-spin" /> Cloning…</> : 'Clone'}
               </button>
               <button onClick={() => { setStep('idle'); setCloneErr('') }} className="text-xs text-muted hover:text-foreground-secondary cursor-pointer bg-transparent border-none">Cancel</button>
             </div>

@@ -16,7 +16,10 @@ import { invoke } from '../../../frontend/lib/ipc'
 describe('vault store lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    useVaultStore.setState({ tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false })
+    useVaultStore.setState({
+      name: '', isOpen: false, vaultPath: '', recent: [],
+      tree: [], visibleItems: [], expanded: {}, childrenCache: {}, loading: false, openingPath: null, openingAt: 0,
+    })
   })
 
   it('persists dirty tabs and clears editor state when closing a vault', async () => {
@@ -174,5 +177,47 @@ describe('vault store lifecycle', () => {
     const vis = useVaultStore.getState().visibleItems.map(i => i.path)
     expect(vis).toContain('docs')
     expect(vis).toContain('docs/a.md')
+  })
+
+  /** Regression: a recent-vault open left `isOpen` false until the backend
+   *  answered, so Editor kept rendering the welcome screen and a slow (large)
+   *  vault open looked like a dead click. `openingPath` must be set for the whole
+   *  in-flight window, then cleared on both success and failure. */
+  it('flags an in-flight open while the backend is still resolving it', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    let resolveOpen!: (value: string) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'open_vault') return new Promise(resolve => { resolveOpen = resolve })
+      return Promise.resolve('[]')
+    })
+    const started = useVaultStore.getState().openRecent('/tmp/big')
+    // `openRecent` awaits prepareTransition first, so let those microtasks drain
+    // before observing the in-flight window.
+    await vi.waitFor(() => expect(useVaultStore.getState().openingPath).toBe('/tmp/big'))
+
+    // Backend has not answered yet: the overlay must already be showing.
+    expect(useVaultStore.getState().openingAt).toBeGreaterThan(0)
+    expect(useVaultStore.getState().isOpen).toBe(false)
+
+    resolveOpen(JSON.stringify({ name: 'big' }))
+    await started
+
+    expect(useVaultStore.getState()).toMatchObject({ openingPath: null, isOpen: true, name: 'big' })
+  })
+
+  it('clears the in-flight open flag when the vault cannot be found', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === 'open_vault' ? Promise.reject(new Error('not found')) : Promise.resolve(undefined))
+    useVaultStore.setState({
+      name: '', isOpen: false, vaultPath: '', recent: [{ path: '/tmp/gone', name: 'gone', parent: '/tmp' }],
+    })
+
+    await useVaultStore.getState().openRecent('/tmp/gone')
+
+    // Flag cleared so the welcome screen comes back instead of spinning forever,
+    // and the dead vault is dropped from the recent list.
+    expect(useVaultStore.getState().openingPath).toBeNull()
+    expect(useVaultStore.getState().recent).toEqual([])
   })
 })
