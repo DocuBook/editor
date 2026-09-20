@@ -213,6 +213,12 @@ fn restore_base_url(data_dir: &std::path::Path, provider: &str, url: Option<&str
     }
 }
 
+/** Roll the AI selection back after a failed multi-step save.
+ *
+ *  Takes the same `config` lock the callers hold while deciding to roll back, so
+ *  every caller MUST drop its guard first (`{ ... }` around the failing `set_ai`
+ *  call). `std::sync::Mutex` is not reentrant: locking it while already holding
+ *  it blocks the thread on itself forever. */
 fn restore_ai(state: &AppState, selection: &config::AiSelection) {
     let mut cfg = state.auth.config.lock().expect("lock");
     cfg.ai = selection.clone();
@@ -403,10 +409,17 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             let provider = s("provider");
             let key = s("key");
             let previous_key = keys::get_key(&state.data_dir, &provider).ok();
-            let previous_ai = state.auth.config.lock().expect("lock").ai.clone();
+            // Scoped so the guard is released before any later lock: both this and
+            // `restore_ai` take the same non-reentrant `config` mutex. Snapshot first,
+            // then set — never with both guards alive.
+            let previous_ai = { state.auth.config.lock().expect("lock").ai.clone() };
             keys::set_key(&state.data_dir, &provider, &key)?;
             let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("");
-            if let Err(error) = state.auth.config.lock().expect("lock").set_ai(&provider, model) {
+            // `let` binding, not `if let`: a guard created in an `if let` scrutinee
+            // lives until the end of the whole statement, which would keep the lock
+            // held while the error arm calls `restore_ai`.
+            let saved = state.auth.config.lock().expect("lock").set_ai(&provider, model);
+            if let Err(error) = saved {
                 restore_key(&state.data_dir, &provider, previous_key.as_deref());
                 restore_ai(state, &previous_ai);
                 return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
@@ -423,14 +436,17 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             agent::validate_custom_base_url(&url, false)?;
             let previous_key = keys::get_key(&state.data_dir, &provider).ok();
             let previous_url = keys::get_base_url(&state.data_dir, &provider).ok();
-            let previous_ai = state.auth.config.lock().expect("lock").ai.clone();
+            // See `set_api_key` for why this snapshot is scoped and why the write
+            // below is a `let` binding rather than an `if let` scrutinee.
+            let previous_ai = { state.auth.config.lock().expect("lock").ai.clone() };
             keys::set_base_url(&state.data_dir, &provider, &url)?;
             if let Err(error) = keys::set_key(&state.data_dir, &provider, &key) {
                 restore_base_url(&state.data_dir, &provider, previous_url.as_deref());
                 return Err(error);
             }
             let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("");
-            if let Err(error) = state.auth.config.lock().expect("lock").set_ai(&provider, model) {
+            let saved = state.auth.config.lock().expect("lock").set_ai(&provider, model);
+            if let Err(error) = saved {
                 restore_key(&state.data_dir, &provider, previous_key.as_deref());
                 restore_base_url(&state.data_dir, &provider, previous_url.as_deref());
                 restore_ai(state, &previous_ai);

@@ -6,7 +6,7 @@ const { storage: localStorage, values: storage } = createMemoryStorage();
 vi.stubGlobal("localStorage", localStorage);
 vi.stubGlobal("window", { localStorage });
 
-const { useAiSettings, hydrateAiSettings } = await import("../../../frontend/stores/aiSettings");
+const { useAiSettings, hydrateAiSettings, setSavedProviders } = await import("../../../frontend/stores/aiSettings");
 
 // The store talks to the backend through the ipc bridge; hydration is the only
 // path under test here, so the bridge is mocked per test.
@@ -66,8 +66,31 @@ describe("aiSettings store", () => {
     await hydrateAiSettings();
 
     expect(useAiSettings.getState().provider).toBe("deepseek");
-    // savedProviders is authoritative from the server, unlike the selection.
-    expect(useAiSettings.getState().savedProviders).toEqual(["anthropic"]);
+    // Union, not replace: the server's view is merged in without dropping what
+    // this browser already had (see the empty-keys.json regression below).
+    expect(useAiSettings.getState().savedProviders).toContain("anthropic");
+  });
+
+  it("hydrateAiSettings keeps a locally-saved provider the backend does not know", async () => {
+    // Regression: a browser seeded with a saved provider but an empty keys.json
+    // used to have `savedProviders` replaced by the server's empty list, which
+    // flipped aiConfigured false and disabled the AI composer permanently.
+    useAiSettings.setState({ provider: "openai-compatible", savedProviders: ["openai-compatible"] });
+    invoke.mockResolvedValue(
+      JSON.stringify({ provider: "", model: "", savedProviders: [] })
+    );
+    await hydrateAiSettings();
+
+    expect(useAiSettings.getState().savedProviders).toEqual(["openai-compatible"]);
+  });
+
+  it("setSavedProviders merges instead of dropping local entries", () => {
+    useAiSettings.setState({ savedProviders: ["openai-compatible"] });
+    setSavedProviders(["anthropic"]);
+    expect(useAiSettings.getState().savedProviders).toEqual(["openai-compatible", "anthropic"]);
+    // Idempotent: re-hydrating with a known provider must not duplicate it.
+    setSavedProviders(["anthropic"]);
+    expect(useAiSettings.getState().savedProviders).toEqual(["openai-compatible", "anthropic"]);
   });
 
   it("hydrateAiSettings restores a custom endpoint base URL from the backend", async () => {

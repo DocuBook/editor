@@ -103,8 +103,12 @@ export const useAiSettings = create<AiSettingsState>()(
 /**
  * Restore provider/model from the backend after a localStorage miss.
  *
- * `savedProviders` is always re-derived from the backend (localStorage can only
- * ever be a subset of it). `provider`/`model` are only adopted when local state
+ * `savedProviders` grows by union: the backend is authoritative for what IT
+ * knows (keychain / keys.json), but it cannot see a provider this browser
+ * configured through a path the server does not track, and an empty `keys.json`
+ * is not evidence that a provider was never configured. Replacing outright used
+ * to disable the composer for a provider that was legitimately saved here.
+ * `provider`/`model` are only adopted when local state
  * is empty, so a user who deliberately switched provider in this browser is not
  * yanked back to the server value on every reload.
  */
@@ -181,9 +185,17 @@ function isProbeMap(value: unknown): value is Record<string, Record<string, bool
   )
 }
 
-/** Replace (not merge) the configured-provider set from an authoritative source. */
+/** Fold the providers the backend knows about into the local set.
+ *
+ *  Union, not replace: the two sources see different things. The server answers
+ *  from keychain / keys.json (plus the bound custom endpoint), so a key saved in
+ *  another browser shows up here; but the local set also carries providers this
+ *  browser configured that the server has no record of. Replacement is not
+ *  recoverable — dropping a provider flips `aiConfigured` false and disables the
+ *  composer (`AiFloatingChat`), which looks like "AI broke" rather than a sync
+ *  detail. Unconfiguring is an explicit user action (`removeSavedProvider`). */
 export function setSavedProviders(ids: string[]): void {
-  useAiSettings.setState({ savedProviders: [...new Set(ids)] })
+  useAiSettings.setState((s) => ({ savedProviders: [...new Set([...s.savedProviders, ...ids])] }))
 }
 
 /** Mirror the current selection to the backend so it survives a storage wipe or
