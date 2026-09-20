@@ -8,7 +8,7 @@
   <a href="https://github.com/DocuBook/editor/blob/master/LICENSE"><img alt="license" src="https://shieldcn.dev/github/DocuBook/editor/license.svg?split=true" /></a>
 </p>
 
-> Pocket notes sync all devices. Start phone, continue desktop. Switch devices anytime, no loss. Realtime collaboration enabled. WYSIWYG rich text editor included. Slash command `/` like Notion.
+> Pocket notes sync across all devices. Start on phone, continue on desktop — switch anytime. Built-in real-time collaboration. WYSIWYG rich editing `/` slash command for quick block insertion.
 
 ## Install
 
