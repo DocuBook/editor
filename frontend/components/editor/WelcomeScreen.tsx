@@ -5,6 +5,14 @@ import { useVaultStore } from '../../stores/vault'
 import { openDir } from '../../lib/ipc'
 import { VaultOpenOverlay } from './VaultOpenOverlay'
 
+/** Best-effort display name for the in-flight open: last path segment, or the
+ *  repo name when the target is a clone URL. Falls back to undefined so the
+ *  overlay keeps its generic "a vault" copy. */
+function openLabel(target: string): string | undefined {
+  const cleaned = target.replace(/[?#].*$/, '').replace(/\.git$/, '').replace(/\/+$/, '')
+  return cleaned.split(/[/\\]/).filter(Boolean).pop() || undefined
+}
+
 export function WelcomeScreen() {
   const { recent, openRecent, openVault, createVault, cloneVault, loading, openingPath, openingAt } = useVaultStore()
   const [step, setStep] = useState<'idle' | 'name' | 'clone'>('idle')
@@ -32,15 +40,18 @@ export function WelcomeScreen() {
   const btnPrimary = btn + ' justify-center bg-surface-active text-foreground border-none hover:bg-surface-hover'
   const btnSecondary = btn + ' justify-center bg-transparent text-foreground-secondary border border-border hover:bg-surface-active'
 
-  /* A recent-vault open is in flight. The welcome screen is otherwise only
-   * correct at rest: while a vault opens, `isOpen` is still false, so Editor
-   * keeps rendering this launchpad and the click looks like a no-op on a large
-   * vault. Show the overlay instead of an inert screen, and keep it up until the
-   * vault tree is ready. */
+  /* An open is in flight. The welcome screen is otherwise only correct at rest:
+   * while a vault opens, `isOpen` is still false, so Editor keeps rendering this
+   * launchpad and the click looks like a no-op on a large vault. Show the overlay
+   * instead of an inert screen.
+   *
+   * The overlay covers the backend open round-trip only — the store clears it as
+   * soon as the vault is open, while the sidebar tree may still be loading behind
+   * it. That is deliberate: the editor is already usable at that point. */
   if (openingPath) {
     const rec = recent.find(r => r.path === openingPath)
     return <div className="flex-1 flex items-center justify-center p-8">
-      <VaultOpenOverlay name={rec?.name || openingPath.split('/').filter(Boolean).pop()} startedAt={openingAt} />
+      <VaultOpenOverlay name={rec?.name || openLabel(openingPath)} startedAt={openingAt} />
     </div>
   }
 

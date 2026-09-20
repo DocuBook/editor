@@ -220,4 +220,64 @@ describe('vault store lifecycle', () => {
     expect(useVaultStore.getState().openingPath).toBeNull()
     expect(useVaultStore.getState().recent).toEqual([])
   })
+
+  /** The stale-transition return in `openRecent` used to leave `openingPath`
+   *  set. `beginTransition` refuses a second transition while one is in flight,
+   *  so reaching it needs the flag to be set outside the normal entry points —
+   *  which is exactly what a persisted/hydrated state or a future caller can do.
+   *  Assert the invariant directly: whatever supersedes the open, the flag clears. */
+  it('clears the in-flight flag when the open is superseded out-of-band', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    let resolveOpen!: (value: string) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'open_vault') return new Promise(resolve => { resolveOpen = resolve })
+      return Promise.resolve('[]')
+    })
+
+    const first = useVaultStore.getState().openRecent('/tmp/one')
+    await vi.waitFor(() => expect(useVaultStore.getState().openingPath).toBe('/tmp/one'))
+
+    // Simulate a superseding transition (another tab, an unmount/remount, or a
+    // future caller bumping the generation) without going through beginTransition,
+    // which would be refused while this open is still in flight.
+    useVaultStore.getState().closeVault()
+    resolveOpen(JSON.stringify({ name: 'one' }))
+    await first
+
+    // Whichever path won, the overlay must not outlive the attempt.
+    expect(useVaultStore.getState().openingPath).toBeNull()
+  })
+
+  /** Clone is the slowest open path, so it gets the overlay rather than only the
+   *  in-button label. The flag must be cleared on both exits. */
+  it('flags an in-flight clone and clears it once the repo is open', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    let resolveClone!: (value: string) => void
+    mockInvoke.mockImplementation((cmd: string) => {
+      if (cmd === 'git_clone') return new Promise(resolve => { resolveClone = resolve })
+      return Promise.resolve('[]')
+    })
+
+    const clone = useVaultStore.getState().cloneVault('https://github.com/user/notes.git', '/tmp')
+    await vi.waitFor(() => expect(useVaultStore.getState().openingPath).toBe('https://github.com/user/notes.git'))
+    expect(useVaultStore.getState().isOpen).toBe(false)
+
+    resolveClone(JSON.stringify({ name: 'notes', path: '/tmp/notes' }))
+    await clone
+
+    expect(useVaultStore.getState()).toMatchObject({ openingPath: null, isOpen: true, name: 'notes' })
+  })
+
+  it('clears the in-flight flag when a clone fails', async () => {
+    const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+    mockInvoke.mockImplementation((cmd: string) =>
+      cmd === 'git_clone' ? Promise.reject(new Error('auth failed')) : Promise.resolve(undefined))
+
+    // The rejection is rethrown for the caller's inline error message, but the
+    // overlay must not survive it.
+    await expect(useVaultStore.getState().cloneVault('https://github.com/user/private.git', '/tmp'))
+      .rejects.toThrow('auth failed')
+
+    expect(useVaultStore.getState().openingPath).toBeNull()
+  })
 })

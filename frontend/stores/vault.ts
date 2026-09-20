@@ -80,7 +80,10 @@ export const useVaultStore = create<VaultState>()(
           const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
           if (transitionId !== id) return
-          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {}, openingPath: null })
+          // No overlay on this path: the native folder picker already held the
+          // screen, so there is nothing to dismiss — and clearing `openingPath`
+          // here would wrongly wipe a flag an interleaved `openRecent` owns.
+          set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
@@ -92,6 +95,8 @@ export const useVaultStore = create<VaultState>()(
         if (id === null) return
         try {
           if (!await prepareTransition(id)) return
+          // `create_vault` is a mkdir — fast enough that the overlay would only
+          // flash, so this path deliberately stays on the inline button state.
           const res = await invoke<string>('create_vault', { parent, name })
           const d = JSON.parse(res)
           const path = parent.replace(/\/+$/, '') + '/' + name
@@ -108,14 +113,24 @@ export const useVaultStore = create<VaultState>()(
         if (id === null) return
         try {
           if (!await prepareTransition(id)) return
+          // Cloning is the slowest open here (network + checkout), so it gets the
+          // overlay too — not just the in-button label. Display name is the repo
+          // name derived from the URL; `git_clone` reports the real one on success.
+          set({ openingPath: url, openingAt: performance.now() })
           const res = await invoke<string>('git_clone', { url, parent })
           const d = JSON.parse(res)
-          if (transitionId !== id) return
-          set({ name: d.name, vaultPath: d.path, isOpen: true, expanded: {} })
+          if (transitionId !== id) { set({ openingPath: null }); return }
+          set({ name: d.name, vaultPath: d.path, isOpen: true, expanded: {}, openingPath: null })
           pushRecent(d.path)
           await get().loadTree()
           finishTransition(id)
-        } catch (e) { finishTransition(id); throw e }
+        } catch (e) {
+          // Always clear: the caller surfaces the error, but the overlay must not
+          // outlive the attempt.
+          set({ openingPath: null })
+          finishTransition(id)
+          throw e
+        }
       },
       /** Close vault and reset all state. */
       closeVault: async () => {
@@ -132,11 +147,13 @@ export const useVaultStore = create<VaultState>()(
           if (!await prepareTransition(id)) return
           // Point the welcome screen at the vault being opened so its overlay can
           // name it, and stamp the start so the overlay measures delay from the
-          // click rather than from its own mount. Cleared on every exit path below.
+          // click rather than from its own mount. Every exit below clears it —
+          // including the stale-transition return, which would otherwise strand
+          // the spinner for the rest of the session.
           set({ openingPath: path, openingAt: performance.now() })
           const res = await invoke<string>('open_vault', { path })
           const d = JSON.parse(res)
-          if (transitionId !== id) return
+          if (transitionId !== id) { set({ openingPath: null }); return }
           set({ name: d.name, vaultPath: path, isOpen: true, expanded: {}, openingPath: null })
           pushRecent(path)
           await get().loadTree()
