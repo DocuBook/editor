@@ -8,6 +8,7 @@
 permissions = [
   "allow-app-ready-to-close",
   "allow-ask-ai",
+  "allow-ai-settings",
   "allow-cancel-ai",
   "allow-close-vault",
   "allow-create-directory",
@@ -54,8 +55,11 @@ permissions = [
   "allow-resolve-mentions",
   "allow-restore-file",
   "allow-search-vault",
+  "allow-set-ai-settings",
   "allow-set-api-key",
   "allow-set-custom-endpoint",
+  "allow-set-probe",
+  "allow-set-probes",
   "allow-test-connection",
   "allow-wiki-backlinks",
   "allow-wiki-resolve",
@@ -63,6 +67,16 @@ permissions = [
   "allow-write-file"
 ]
 
+
+[[permission]]
+identifier = "allow-ai-settings"
+description = "Enables the ai_settings command."
+commands.allow = ["ai_settings"]
+
+[[permission]]
+identifier = "deny-ai-settings"
+description = "Denies the ai_settings command."
+commands.deny = ["ai_settings"]
 
 [[permission]]
 identifier = "allow-app-ready-to-close"
@@ -523,6 +537,36 @@ commands.allow = ["search_vault"]
 identifier = "deny-search-vault"
 description = "Denies the search_vault command."
 commands.deny = ["search_vault"]
+
+[[permission]]
+identifier = "allow-set-ai-settings"
+description = "Enables the set_ai_settings command."
+commands.allow = ["set_ai_settings"]
+
+[[permission]]
+identifier = "deny-set-ai-settings"
+description = "Denies the set_ai_settings command."
+commands.deny = ["set_ai_settings"]
+
+[[permission]]
+identifier = "allow-set-probe"
+description = "Enables the set_probe command."
+commands.allow = ["set_probe"]
+
+[[permission]]
+identifier = "deny-set-probe"
+description = "Denies the set_probe command."
+commands.deny = ["set_probe"]
+
+[[permission]]
+identifier = "allow-set-probes"
+description = "Enables the set_probes command."
+commands.allow = ["set_probes"]
+
+[[permission]]
+identifier = "deny-set-probes"
+description = "Denies the set_probes command."
+commands.deny = ["set_probes"]
 
 [[permission]]
 identifier = "allow-set-api-key"

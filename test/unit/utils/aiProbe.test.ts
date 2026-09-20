@@ -36,6 +36,19 @@ describe('isTextOnly', () => {
     expect(isTextOnly(CUSTOM_PROVIDER_ID, 'env-model', probeTools)).toBe(false)
     expect(isTextOnly(CUSTOM_PROVIDER_ID, 'ui-model', probeTools)).toBe(true)
   })
+  it('treats a missing model as text-only rather than defaulting to tools', () => {
+    // Settings renders before a model is resolved; claiming tool support while the
+    // transport withholds tools is the mismatch the shared badge rule guards.
+    expect(isTextOnly('anthropic', '', { anthropic: { m: true } })).toBe(true)
+  })
+  it('is the single rule the badge and transport must share', () => {
+    // probe true is the ONLY state that enables tools — catalog providers and
+    // custom endpoints alike, so a badge reading this helper cannot disagree.
+    const probeTools = { anthropic: { good: true, bad: false } }
+    expect(isTextOnly('anthropic', 'good', probeTools)).toBe(false)
+    expect(isTextOnly('anthropic', 'bad', probeTools)).toBe(true)
+    expect(isTextOnly('anthropic', 'unmeasured', probeTools)).toBe(true)
+  })
 })
 
 describe('autoProbe', () => {

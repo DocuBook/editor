@@ -3,8 +3,8 @@ import { createPortal } from 'react-dom'
 import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
 import { X, Eye, EyeOff, Check, Loader, ChevronsUpDown, Search } from 'lucide-react'
-import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
-import { resolveProbeModel, autoProbe } from '../utils/aiProbe'
+import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettings, setSavedProviders } from '../stores/aiSettings'
+import { resolveProbeModel, autoProbe, isTextOnly } from '../utils/aiProbe'
 import GitSettings from './GitSettings'
 import SystemSettings from './SystemSettings'
 import AppearanceSettings from './AppearanceSettings'
@@ -18,20 +18,28 @@ const CUSTOM_PROVIDER: ProviderInfo = { id: CUSTOM_PROVIDER_ID, name: 'OpenAI Co
 const providers = [CUSTOM_PROVIDER, ...PROVIDERS]
 
 /** Badge for providers currently on the text-only path (no tool-call
- *  streaming). Source of truth is the measured probe (aiSettings.probeTools):
- *  probe false → text-only; custom endpoints are text-only until probed true.
- *  Unprobed providers show no badge — permissive default sends tools. */
-const TextOnlyBadge = () => (
-  <span title="AI writes via markdown → suggestion (no tool-call streaming)"
+ *  streaming). Source of truth is the measured probe (aiSettings.probeTools)
+ *  and the SAME rule the transport applies (aiProbe.isTextOnly): probe true →
+ *  tools; probe false OR unmeasured → text-only. Sharing the helper matters
+ *  because a badge that claims tools while the transport withholds them is a
+ *  lie the user only discovers when documents stop being edited. */
+const TextOnlyBadge = ({ measured = true }: { measured?: boolean }) => (
+  <span
+    title={
+      measured
+        ? "Measured: this model rejects the tool-call payload, so AI writes via markdown → suggestion"
+        : "Not measured yet — AI writes via markdown → suggestion until a probe confirms tool-call support"
+    }
     className="text-[9px] uppercase tracking-wide px-1 py-px rounded bg-surface-active text-muted border border-border-subtle shrink-0">
     text-only
   </span>
 )
 
-const isTextOnlyProvider = (id: string, model: string, probeTools: Record<string, Record<string, boolean>>) => {
-  const probe = model ? probeTools[id]?.[model] : undefined
-  return probe === false || (id === CUSTOM_PROVIDER_ID && probe !== true)
-}
+/** Whether a probe result already exists for this provider+model. Drives the
+ *  cosmetic difference between "measured, no tools" and "not measured yet" —
+ *  both are text-only, but only the latter is worth re-probing. */
+const isProbed = (id: string, model: string, probeTools: Record<string, Record<string, boolean>>) =>
+  !!model && probeTools[id]?.[model] !== undefined
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
   const [section, setSection] = useState<'ai' | 'appearance' | 'git' | 'system'>('ai')
@@ -169,15 +177,15 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [provider])
   /* oxlint-enable react/set-state-in-effect */
 
-  /** Resync which providers have saved keys — one batch call instead of one invoke per provider. */
+  /** Resync which providers have saved keys. The server answers this from its
+   *  own state (keychain / keys.json + the bound custom endpoint), so a key
+   *  saved in another browser still shows up here. */
   useEffect(() => {
     (async () => {
-      try {
-        const ids = JSON.parse(await invoke<string>('list_api_keys', { providers: providers.map(p => p.id) })) as string[]
-        ids.forEach(id => addSavedProvider(id))
-      } catch {}
+      const cfg = await fetchAiSettings()
+      if (cfg) setSavedProviders(cfg.savedProviders)
     })()
-  }, [addSavedProvider])
+  }, [])
 
   /** Scroll highlighted provider into view on keyboard navigation */
   useEffect(() => {
@@ -231,10 +239,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
       // test_connection resolved → key is valid for this provider. Persist.
       if (isCustom) {
-        await invoke('set_custom_endpoint', { provider, baseUrl: baseUrlInput.trim(), key: keyInput })
+        await invoke('set_custom_endpoint', { provider, baseUrl: baseUrlInput.trim(), key: keyInput, model: probeModel })
         useAiSettings.getState().setBaseUrl(baseUrlInput.trim())
       } else {
-        await invoke('set_api_key', { provider, key: keyInput })
+        await invoke('set_api_key', { provider, key: keyInput, model: probeModel })
       }
       addSavedProvider(provider)
       setKeyInput('')
@@ -306,7 +314,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               className={'flex items-center gap-2 bg-background border border-border rounded-md px-3 py-[7px] cursor-pointer text-[13px] ' + (provider ? 'text-foreground' : 'text-muted')}>
               <span className="flex-1 flex items-center gap-2">
                 {selectedProvider ? <span>{selectedProvider.name}</span> : '— Select a provider —'}
-                {selectedProvider && isTextOnlyProvider(selectedProvider.id, model, probeTools) && <TextOnlyBadge />}
+                {selectedProvider && isTextOnly(selectedProvider.id, model, probeTools) && (
+                  <TextOnlyBadge measured={isProbed(selectedProvider.id, model, probeTools)} />
+                )}
                 {selectedProvider && savedSet.has(selectedProvider.id) && <Check size={12} />}
               </span>
               <ChevronsUpDown size={14} className="text-muted shrink-0" />
@@ -329,7 +339,9 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     <div key={p.id} onClick={() => selectProviderFn(p)}
                       className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-accent text-on-accent' : i === providerHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
                       <span className="flex-1">{p.name}</span>
-                      {isTextOnlyProvider(p.id, model, probeTools) && <TextOnlyBadge />}
+                      {isTextOnly(p.id, model, probeTools) && (
+                        <TextOnlyBadge measured={isProbed(p.id, model, probeTools)} />
+                      )}
                       {savedSet.has(p.id) && <Check size={12} />}
                     </div>
                   ))}
