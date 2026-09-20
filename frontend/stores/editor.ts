@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { undoDepth, redoDepth } from '@tiptap/pm/history'
 import { isBinaryPath } from '../utils/fileKind'
 import { logger } from '../utils/logger'
+import { useSyncStore, contentVersion, isRetryableError } from './sync'
 
 export interface Tab {
   path: string
@@ -19,6 +20,11 @@ export interface Tab {
   dirty: boolean
   /** File was deleted from vault (strikethrough indicator) */
   deleted: boolean
+  /** Content hash of the disk bytes this tab's edit branched from. `null` when
+   *  the file did not exist at load time (a new note). The backend rejects a
+   *  write whose baseline no longer matches disk, which is what makes an edit
+   *  safe against an external change instead of a blind overwrite. */
+  baseVersion?: string | null
 }
 
 export type EditMode = 'editor' | 'code'
@@ -54,6 +60,14 @@ interface EditorState {
   setTabDeleted: (path: string, deleted: boolean) => void
   /** Flush the WYSIWYG editor and write every dirty tab to disk (graceful close). */
   persistAllDirty: () => Promise<void>
+  /** Adopt the on-disk content for a conflicted tab, dropping the local edit. */
+  applyConflictTheirs: (path: string) => Promise<void>
+  /** Keep the local edit for a conflicted tab (overwrites disk) and rebase. */
+  applyConflictMine: (path: string) => Promise<void>
+  /** Save the local edit beside the original, leaving disk content intact. */
+  applyConflictKeepBoth: (path: string) => Promise<void>
+  /** Rebase a tab only when its queued content is still the current in-memory edit. */
+  rebaseQueuedWrite: (path: string, write: { content: string; contentVersion: string }) => void
   /** Re-read open tabs from disk after a branch switch. Dirty tabs are kept
    *  untouched (their in-memory edits stay); files missing on the new branch
    *  are marked deleted. */
@@ -67,6 +81,20 @@ interface EditorState {
 /** Autosave debounce — one timer per tab path; typing in either mode (WYSIWYG
  *  onChange or code textarea) restarts the countdown via setTabDirty(true). */
 const AUTOSAVE_DELAY_MS = 2000
+
+
+const normalizeVersion = (value: string | null): string | null => {
+  if (value === null) return null
+  let current = value
+  for (let i = 0; i < 2; i++) {
+    try {
+      const parsed = JSON.parse(current)
+      if (typeof parsed !== 'string') break
+      current = parsed
+    } catch { break }
+  }
+  return current
+}
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export const useEditorStore = create<EditorState>()(
@@ -75,11 +103,61 @@ export const useEditorStore = create<EditorState>()(
   /** Disk content for a tab carrying WYSIWYG/code edits (frontmatter kept raw). */
   const tabDiskContent = (tab: Tab) => tab.frontmatter + tab.editedContent!.replace(/^\n+/, '').replace(/\n+$/, '')
 
+  /**
+   * Write a tab through the versioned guard.
+   *
+   * Outcomes:
+   *  - written   → baseline rebased, tab marked clean.
+   *  - conflict  → disk changed under us. The edit is handed to the sync store
+   *                as a conflict and the tab stays dirty; nothing is overwritten.
+   *  - unreachable backend → the write is queued durably and the tab is marked
+   *                clean, because the edit now lives in a queue that survives a
+   *                reload. Leaving it dirty would only re-queue it on every
+   *                autosave tick.
+   *  - permanent failure (bad path, permissions) → rethrown so the caller can
+   *                report it; retrying forever would be pointless.
+   */
   const saveTabToDisk = async (tab: Tab) => {
     const content = tabDiskContent(tab)
     if (content === tab.content) { get().setTabDirty(tab.path, false); return }
-    await invoke('write_file', { path: tab.path, content })
-    set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, content, dirty: false } : t) })
+
+    const baseVersion = tab.baseVersion ?? null
+    let raw: string
+    try {
+      raw = await invoke<string>('write_file_checked', { path: tab.path, content, baseVersion })
+    } catch (error) {
+      if (isRetryableError(error)) {
+        useSyncStore.getState().enqueue({ path: tab.path, content, baseVersion })
+        set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, content, dirty: false } : t) })
+        logger.warn('write_queued_offline', { path: tab.path })
+        return
+      }
+      throw error
+    }
+
+    const outcome = JSON.parse(raw) as
+      | { status: 'written'; version: string }
+      | { status: 'conflict'; disk: string; version: string }
+
+    if (outcome.status === 'conflict') {
+      // Preserve BOTH sides: the user's edit lives in the conflict record and the
+      // winner stays on disk untouched.
+      useSyncStore.getState().addConflict({
+        path: tab.path,
+        mine: content,
+        theirs: outcome.disk,
+        theirsVersion: outcome.version,
+        baseContent: tab.content,
+      })
+      logger.warn('write_conflict', { path: tab.path })
+      return
+    }
+
+    set({
+      tabs: get().tabs.map(t => t.path === tab.path
+        ? { ...t, content, dirty: false, baseVersion: outcome.version }
+        : t),
+    })
   }
 
   const scheduleAutoSave = (path: string) => {
@@ -120,19 +198,25 @@ export const useEditorStore = create<EditorState>()(
       }
     }
     if (get().tabs.find(t => t.path === path)) { set({ activeTab: path }); return }
-    set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }], activeTab: path })
+    set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false, baseVersion: null }], activeTab: path })
     // Binary/image files are previewed via asset URL, never read as UTF-8 text.
     if (isBinaryPath(path)) return
     try {
       const raw = await invoke<string>('read_file', { path })
+      // Capture the baseline before the tab can be typed into: the version read
+      // here is what a subsequent save is validated against.
+      const version = normalizeVersion(await invoke<string | null>('file_version', { path }).catch(() => null))
       get().setContent(path, raw)
+      set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
     } catch (e) {
       const notFound = /no such file|not found|os error 2/i.test(String(e))
       if (createIfMissing && notFound) {
         // Obsidian behavior: opening a wiki link to a missing note creates it.
         try {
-          await invoke('write_file', { path, content: '' })
+          const created = await invoke<string>('write_file_checked', { path, content: '', baseVersion: null })
+          const outcome = JSON.parse(created) as { status: string; version?: string }
           get().setContent(path, '')
+          set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: outcome.version ?? contentVersion('') } : t) })
           toast.success(`Created empty note "${name}"`)
           return
         } catch { /* fall through to the error state below */ }
@@ -141,6 +225,7 @@ export const useEditorStore = create<EditorState>()(
       // Failed read must not leave the tab stuck on "Loading…" — render an
       // empty editor instead, and tell the user why.
       get().setContent(path, '')
+      set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: null } : t) })
       toast.error(notFound ? 'File not found' : 'Failed to open file')
     }
   },
@@ -208,7 +293,14 @@ export const useEditorStore = create<EditorState>()(
 
   setContent: (path, fileContent) => {
     const fm = fileContent.match(/^---[\s\S]*?\n---(?:\n|$)/)
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, content: fileContent, frontmatter: fm ? fm[0] : '', dirty: false } : t) })
+    const body = fm ? fileContent.slice(fm[0].length) : fileContent
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, content: fileContent, frontmatter: fm ? fm[0] : '', editedContent: body, dirty: false } : t) })
+  },
+  rebaseQueuedWrite: (path, write) => {
+    set({ tabs: get().tabs.map(t => {
+      if (t.path !== path || t.content !== write.content) return t
+      return { ...t, baseVersion: write.contentVersion }
+    }) })
   },
 
   setFrontmatter: (path, fm) => {
@@ -229,7 +321,9 @@ export const useEditorStore = create<EditorState>()(
       if (isBinaryPath(tab.path)) continue
       try {
         const raw = await invoke<string>('read_file', { path: tab.path })
+        const version = await invoke<string | null>('file_version', { path: tab.path }).catch(() => null)
         get().setContent(tab.path, raw)
+        set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
       } catch (error) {
         const notFound = /no such file|not found|os error 2/i.test(String(error))
         if (notFound) {
@@ -253,7 +347,9 @@ export const useEditorStore = create<EditorState>()(
       if (t.dirty || isBinaryPath(t.path)) continue
       try {
         const raw = await invoke<string>('read_file', { path: t.path })
+        const version = await invoke<string | null>('file_version', { path: t.path }).catch(() => null)
         get().setContent(t.path, raw)
+        set({ tabs: get().tabs.map(x => x.path === t.path ? { ...x, baseVersion: version ?? contentVersion(raw) } : x) })
         get().setTabDeleted(t.path, false)
       } catch {
         get().setTabDeleted(t.path, true)
@@ -272,6 +368,41 @@ export const useEditorStore = create<EditorState>()(
         }
       }
     }
+  },
+
+  /** Take the disk version as the truth: reload the tab from what won on disk. */
+  applyConflictTheirs: async (path) => {
+    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path)
+    if (!conflict) return
+    // Prefer the exact bytes captured at conflict time. Re-reading could take yet
+    // another writer's version and quietly discard the one the user just chose.
+    get().setContent(path, conflict.theirs)
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion } : t) })
+    useSyncStore.getState().resolveKeepTheirs(path)
+  },
+
+  /** Push the local edit over the disk version, then rebase the tab baseline. */
+  applyConflictMine: async (path) => {
+    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path)
+    if (!conflict) return
+    const resolved = await useSyncStore.getState().resolveKeepMine(path)
+    if (!resolved) return
+    const raw = normalizeVersion(await invoke<string | null>('file_version', { path }).catch(() => null))
+    get().setContent(path, conflict.mine)
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine) } : t) })
+  },
+
+  /** Keep both: write the local edit to a companion file, disk keeps its content. */
+  applyConflictKeepBoth: async (path) => {
+    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path)
+    if (!conflict) return
+    const copyPath = await useSyncStore.getState().resolveKeepBoth(path)
+    if (!copyPath) return
+    // The original tab now tracks the disk version; the local edit lives on in
+    // the companion note, so the tab is no longer dirty against this file.
+    get().setContent(path, conflict.theirs)
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion } : t) })
+    toast.success(`Kept your version as "${copyPath.split('/').pop()}"`)
   },
 
   setEditMode: (mode) => { set({ editMode: mode }) },

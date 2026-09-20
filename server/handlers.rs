@@ -135,7 +135,9 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
             }).await.map_err(|e| e.to_string())?
         }
         "read_file" => sync(state, cmd, args),
+        "file_version" => sync(state, cmd, args),
         "write_file" => sync(state, cmd, args),
+        "write_file_checked" => sync(state, cmd, args),
         "create_file" => sync(state, cmd, args),
         "create_directory" => sync(state, cmd, args),
         "delete_file" => sb(state, cmd, args).await,
@@ -247,6 +249,10 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Some(v) => v.read_file_limited(&s("path"), httpm::MAX_FILE_BYTES),
             None => Err("No vault".into()),
         },
+        "file_version" => match state.vault.lock().expect("lock").as_ref() {
+            Some(v) => serde_json::to_string(&v.version_of(&s("path"))?).map_err(|e| e.to_string()),
+            None => Err("No vault".into()),
+        },
         "write_file" => {
             let r = match state.vault.lock().expect("lock").as_ref() {
                 Some(v) => v
@@ -255,6 +261,24 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 None => Err("No vault".into()),
             };
             if r.is_ok() {
+                cmds::rescan_wiki(state);
+            }
+            r
+        }
+        "write_file_checked" => {
+            // `baseVersion` is absent for "new file" writes, so distinguish a
+            // missing key from an explicit null before forwarding to the vault.
+            let base = match args.get("baseVersion") {
+                Some(serde_json::Value::String(v)) => Some(v.clone()),
+                _ => None,
+            };
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v
+                    .write_file_checked(&s("path"), &s("content"), base.as_deref())
+                    .and_then(|o| serde_json::to_string(&o).map_err(|e| e.to_string())),
+                None => Err("No vault".into()),
+            };
+            if matches!(r.as_deref(), Ok(v) if v.contains("\"written\"")) {
                 cmds::rescan_wiki(state);
             }
             r

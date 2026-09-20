@@ -51,6 +51,7 @@
     "allow-open-vault",
     "allow-open-system-settings",
     "allow-read-file",
+    "allow-file-version",
     "allow-read-file-binary",
     "allow-rename-file",
     "allow-resolve-mentions",
@@ -67,6 +68,7 @@
     "allow-wiki-resolve",
     "allow-wiki-suggest",
     "allow-write-file",
+    "allow-write-file-checked",
     "opener:default",
     "core:window:allow-set-theme",
     "core:window:allow-start-dragging"

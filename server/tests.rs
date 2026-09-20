@@ -523,6 +523,80 @@ mod api_tests {
         assert!(!body.contains("api-secret"));
     }
 
+    /// End-to-end versioned write over HTTP: the guard must reject a stale
+    /// baseline and never touch the file, then accept a write that matches
+    /// what is on disk. This is the web-build half of the offline/conflict
+    /// safety net (the desktop half has its own suite).
+    #[tokio::test]
+    async fn write_file_checked_rejects_a_stale_baseline_over_http() {
+        let (app, data_dir) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let vault = data_dir.join("vaults/sync");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(vault.join("note.md"), "v1").unwrap();
+        let (status, _, body) = post_with(
+            &app,
+            "/api/open_vault",
+            json!({"path": vault.to_string_lossy()}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        // The version the client would hold after reading the file.
+        let (_, _, body) = post_with(
+            &app,
+            "/api/file_version",
+            json!({"path": "note.md"}),
+            Some(&cookie),
+        )
+        .await;
+        let version: String = result_json(&body).as_str().unwrap().to_string();
+
+        // Someone else edits the file after that read.
+        std::fs::write(vault.join("note.md"), "v2").unwrap();
+
+        let (status, _, body) = post_with(
+            &app,
+            "/api/write_file_checked",
+            json!({"path": "note.md", "content": "clobber", "baseVersion": version}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let outcome = result_json(&body);
+        assert_eq!(outcome["status"], "conflict", "{body}");
+        // The other writer's content survives untouched.
+        assert_eq!(outcome["disk"], "v2", "{body}");
+        assert_eq!(std::fs::read_to_string(vault.join("note.md")).unwrap(), "v2");
+
+        // Re-reading and writing with the CURRENT version succeeds.
+        let (_, _, body) = post_with(
+            &app,
+            "/api/file_version",
+            json!({"path": "note.md"}),
+            Some(&cookie),
+        )
+        .await;
+        let fresh: String = result_json(&body).as_str().unwrap().to_string();
+        let (status, _, body) = post_with(
+            &app,
+            "/api/write_file_checked",
+            json!({"path": "note.md", "content": "merged", "baseVersion": fresh}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(result_json(&body)["status"], "written", "{body}");
+        assert_eq!(std::fs::read_to_string(vault.join("note.md")).unwrap(), "merged");
+    }
+
     #[tokio::test]
     async fn file_route_rejects_oversized_files() {
         let (app, data_dir) = router();

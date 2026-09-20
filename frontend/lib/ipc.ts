@@ -16,6 +16,18 @@ export const isMacTauri = isTauri && import.meta.env.TAURI_ENV_PLATFORM === 'dar
 const REQUEST_TIMEOUT_MS = 30_000
 const SSE_IDLE_TIMEOUT_MS = 60_000
 
+export class IpcError extends Error {
+  readonly status?: number
+  readonly code?: string
+
+  constructor(message: string, status?: number, code?: string) {
+    super(message)
+    this.name = 'IpcError'
+    this.status = status
+    this.code = code
+  }
+}
+
 type Listener = (e: { payload: unknown }) => void
 const bus = new Map<string, Set<Listener>>()
 
@@ -94,9 +106,9 @@ async function post(cmd: string, args: Record<string, unknown>): Promise<unknown
     const message = typeof body.error === 'string' ? body.error : undefined
     if (res.status === 401) {
       emit('auth:unauthorized', undefined)
-      throw new Error(message || 'Unauthorized')
+      throw new IpcError(message || 'Unauthorized', res.status, 'UNAUTHORIZED')
     }
-    if (!res.ok || message) throw new Error(message || `HTTP ${res.status}`)
+    if (!res.ok || message) throw new IpcError(message || `HTTP ${res.status}`, res.status)
     return body.result
   } finally {
     clearTimeout(timeout)

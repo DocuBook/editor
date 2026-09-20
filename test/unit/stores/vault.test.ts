@@ -24,7 +24,8 @@ describe('vault store lifecycle', () => {
 
   it('persists dirty tabs and clears editor state when closing a vault', async () => {
     const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
-    mockInvoke.mockResolvedValue(undefined)
+    mockInvoke.mockImplementation(async (cmd: string) =>
+      cmd === 'write_file_checked' ? JSON.stringify({ status: 'written', version: 'v1' }) : undefined)
     useVaultStore.setState({ name: 'notes', isOpen: true, vaultPath: '/tmp/notes' })
     useEditorStore.setState({
       tabs: [{ path: 'note.md', name: 'note.md', content: '', frontmatter: '---\ntitle: Note\n---\n', editedContent: 'Updated', dirty: true, deleted: false }],
@@ -33,7 +34,7 @@ describe('vault store lifecycle', () => {
 
     await useVaultStore.getState().closeVault()
 
-    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'write_file', { path: 'note.md', content: '---\ntitle: Note\n---\nUpdated' })
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'write_file_checked', { path: 'note.md', content: '---\ntitle: Note\n---\nUpdated', baseVersion: null })
     expect(mockInvoke).toHaveBeenNthCalledWith(2, 'close_vault')
     expect(useEditorStore.getState()).toMatchObject({ tabs: [], activeTab: null, blockEditor: null, _flushEditor: null, canUndo: false, canRedo: false })
     expect(useVaultStore.getState()).toMatchObject({ name: '', isOpen: false, vaultPath: '', tree: [], visibleItems: [], expanded: {}, childrenCache: {} })
@@ -143,7 +144,7 @@ describe('vault store lifecycle', () => {
 
     await useVaultStore.getState().openRecent('/tmp/new')
 
-    expect(mockInvoke).toHaveBeenCalledWith('write_file', { path: 'note.md', content: 'Updated' })
+    expect(mockInvoke).toHaveBeenCalledWith('write_file_checked', { path: 'note.md', content: 'Updated', baseVersion: null })
     expect(mockInvoke).not.toHaveBeenCalledWith('open_vault', { path: '/tmp/new' })
     expect(useVaultStore.getState()).toMatchObject({ name: 'old', isOpen: true, vaultPath: '/tmp/old' })
     expect(useEditorStore.getState().tabs).toHaveLength(1)
