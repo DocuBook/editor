@@ -1,5 +1,14 @@
 // Polyfill Iterator Helpers (ES2024) for Safari < 18 — Iterator.prototype.filter.
-// Keep for other editor dependencies that may use iterator helpers in Safari 15-17.
+//
+// Trigger: mermaid's DefaultLangiumProfiler does
+// `this.records.entries().filter(...).flatMap(...)` on a Map (verified in the
+// built bundle, chunk containing `getRecords`). Iterator.prototype.filter is
+// ES2024 and absent on Safari 15-17, so diagram profiling would throw TypeError.
+//
+// History: this was originally added for @blocknote/xl-ai's `map.values().filter`,
+// which was removed when the AI layer went in-house (commit b366ac0). mermaid is
+// the remaining caller — re-verify before deleting. If no caller is left, this
+// file, its test, and the main.tsx install call can all go.
 export function installIteratorFilterPolyfill() {
   // %IteratorPrototype% — the shared prototype of MapIterator/ArrayIterator/etc.
   // (also exposed as `Iterator.prototype` on Safari 18+/Chrome 122+, but Safari

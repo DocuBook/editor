@@ -238,6 +238,12 @@ export const useSyncStore = create<SyncState>()(
 
         if (outcome.status === 'written') {
           set({ queue: get().queue.filter(q => q.seq !== item.seq) })
+          // Dynamic on purpose: editor.ts imports this module statically
+          // (useSyncStore/contentVersion/isRetryableError), so a static import
+          // back would form an ESM cycle. The cycle is harmless at call time
+          // (this only runs after a write completes, long past eval), and
+          // rolldown's INEFFECTIVE_DYNAMIC_IMPORT warning is expected here —
+          // editor.ts is in the main chunk anyway, so there is nothing to split.
           const { useEditorStore } = await import('./editor')
           useEditorStore.getState().rebaseQueuedWrite(item.path, item)
           return true
