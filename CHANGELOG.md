@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.1.0 — 2026-09-21
+
+### First Stable Release
+
+DocuBook's first stable release. The early-access series (`0.1.0-next`) is now
+promoted to stable: the API and configuration formats are considered settled,
+and the desktop and web builds share one frozen command surface.
+
+#### 🚀 Features
+
+- **Offline sync** — Edits made without a connection are queued durably and reconciled on reconnect through a content-version guard, so a stale write can no longer silently clobber newer content.
+- **AI selection and tool-call probes** — The selected model and tool-call capability are probed once and persisted across browsers, so the AI panel no longer re-discovers them per session.
+
+#### 🐛 Bug Fixes
+
+- **Editors** — Restored tabs after reload, kept the shell viewport-bound so the AI chat stays on screen, and aligned the raw caret with its WYSIWYG block across mode switches.
+- **Safari compatibility** — Restored Safari 15 rendering on macOS 12.
+- **Mentions** — Dropped the recursive tagline from mention folder rows.
+- **Vault** — Added an opening state while a vault loads and closed the gaps in the vault opening overlay.
+- **AI** — Retried the original prompt when the first attempt fails.
+- **Chrome** — Fixed settings dropdowns misplaced by the dialog `backdrop-filter`.
+- **Docker** — Scoped the `/data` ownership repair to the mount type.
+- **CI** — Kept the Docker smoke test green on non-root runners.
+
+#### 🔄 Refactor
+
+- Removed the unused `.tip` tooltip system.
+
+#### 🔧 CI
+
+- Silenced unactionable build warnings and corrected the stale polyfill note.
+
+#### 🔄 Version / Hygiene
+
+- Dependency bumps: `trash` 5.2.9, `esbuild` 0.28.2, `@tauri-apps/plugin-opener` 2.5.5, `oxlint` 1.83.0, `lint-staged` 17.5.1, Rust 1.97-alpine.
+- Fixed the Coolify mount table and documented the stale container issue.
+- Updated the README description.
+
+---
+
 ## v0.1.0-next — 2026-09-18
 
 ### Early Access Release for testing
@@ -24,8 +64,9 @@ First public build, published for early access testing. Everything listed below 
 
 This project follows **manual versioning** (not semver). Versions are:
 
-- `0.1.x-next` — Early access testing builds. Features, API, and configuration format are UNSTABLE. Breaking changes expected at any time.
-- `0.x.0-beta` — Future beta releases. API stabilization begins.
+- `0.1.0` — First stable release. API and configuration formats are settled.
+- `0.x.0-next` — Later testing builds, when a change needs field validation before it lands in a stable release. Features, API, and configuration format may change.
+- `0.x.y-beta` — Beta releases. API stabilization in progress.
 - `1.x.0` — Future stable releases.
 
 See [README.md](README.md) for documentation and setup guide.

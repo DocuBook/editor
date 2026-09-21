@@ -384,7 +384,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-server"
-version = "0.1.0-next"
+version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "ammonia",
