@@ -110,7 +110,7 @@ try {
   await page.keyboard.type('summarise @doc', { delay: 25 })
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
   const folderOption = await page.locator('[role="listbox"]').innerText()
-  ok('folder row is offered and marked recursive', folderOption.includes('docs') && folderOption.includes('recursive'), folderOption.replace(/\n/g, ' | '))
+  ok('folder row is offered', folderOption.includes('docs'), folderOption.replace(/\n/g, ' | '))
 
   await page.keyboard.press('Escape')
   await page.keyboard.press('Meta+a')

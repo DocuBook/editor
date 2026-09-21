@@ -40,9 +40,9 @@ const mentionRowClass = (selected: boolean) =>
   'flex min-h-10 w-full cursor-pointer items-center gap-2 rounded px-3 text-left text-xs ' +
   (selected ? 'bg-accent text-on-accent' : 'hover:bg-surface-active')
 
-/** Secondary text inside a row (`docs/notes`, `recursive`). `text-muted` is
- *  tuned for the dropdown surface, so on the accent it has to flip, exactly as
- *  the search modal does for its path column. */
+/** Secondary text inside a row (`docs/notes`). `text-muted` is tuned for the
+ *  dropdown surface, so on the accent it has to flip, exactly as the search
+ *  modal does for its path column. */
 const mentionMetaClass = (selected: boolean) => (selected ? 'text-on-accent opacity-80' : 'text-muted')
 
 /** Recursive vault listing for the mention picker.
@@ -279,7 +279,7 @@ export default function AiFloatingChat() {
       {mentionNotice && <div className="px-3 pt-1 text-[10px] text-muted">{mentionNotice}</div>}
       {picker && <div id={MENTION_LISTBOX_ID} role="listbox" aria-label="Mention files and folders" className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => {
           const selected = entry === activeEntry
-          return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={mentionRowClass(selected)}>{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}{entry.type === '1' && <span className={'ml-auto ' + mentionMetaClass(selected)}>recursive</span>}</button>
+          return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={mentionRowClass(selected)}>{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}</button>
         }) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
       <div className="flex w-full min-w-0 items-end gap-2 p-2">
         <textarea ref={inputRef} value={input} onChange={(event) => onInputChange(event.target.value, event.target.selectionStart)} onKeyDown={(event) => {
