@@ -115,6 +115,58 @@ export function attachLogging(page, name) {
   return { errors, logPath }
 }
 
+/** Mock the AI config backend for the browser.
+ *
+ * AI connection data lives in the server's config.json — the browser keeps NO
+ * copy (there is no localStorage persistence any more), so a harness that used
+ * to seed `docubook:ai-settings` must answer the read commands instead. The
+ * mock is stateful so a test can flip a probe or revoke a provider between
+ * reloads, exactly like the real backend would.
+ *
+ * @param page   Playwright page.
+ * @param opts.provider      provider id (default: the custom OpenAI-compatible one,
+ *                           which is text-only until probed true).
+ * @param opts.model         model id the backend reports as active.
+ * @param opts.baseUrl       endpoint URL bound to the provider.
+ * @param opts.hasKey        whether the backend holds a key (default true).
+ * @param opts.probes        probe map `{ [model]: supportsTools }`.
+ * @param opts.env           env override for the custom provider, if any.
+ * @returns a mutable `state` object: change `state.probes` / `state.saved`
+ *          and the next /api/ai_settings call reports it.
+ */
+export async function mockAiSettings(page, opts = {}) {
+  const {
+    provider = 'openai-compatible',
+    model = 'mock-model',
+    baseUrl = 'http://mock.invalid/v1',
+    hasKey = true,
+    probes = {},
+    env,
+  } = opts
+  const state = { probes: { ...probes }, hasKey, saved: [provider] }
+
+  const aiSettings = () => JSON.stringify({
+    active: state.saved.length ? provider : '',
+    endpoints: state.hasKey && state.saved.includes(provider)
+      ? { [provider]: { baseUrl, model, probes: state.probes, hasKey: true } }
+      : {},
+    savedProviders: [...state.saved],
+    ...(env ? { env } : {}),
+  })
+
+  await page.route('**/api/ai_settings', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: aiSettings() }) }))
+  await page.route('**/api/custom_ai_config', route =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ result: JSON.stringify({ source: env ? 'env' : 'file', baseUrl, model, hasKey }) }),
+    }))
+  await page.route('**/api/list_api_keys', route =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ result: JSON.stringify([]) }) }))
+  return state
+}
+
 /** CI summary: write results file, print pass/fail, print server-log tail on failure. */
 export function summary(name, results, { serverLog } = {}) {
   ensureArtifacts()

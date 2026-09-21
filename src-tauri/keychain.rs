@@ -54,30 +54,21 @@ pub fn delete_key(provider: &str) -> Result<(), String> {
     }
 }
 
-/** Account suffix binding a custom base URL to a provider's key
- *  (openai-compatible custom endpoints). Kept as a separate entry so
- *  get_key/list_keys semantics are unchanged. */
+/** Legacy account suffix that bound a custom base URL to a provider's key. A base
+ *  URL is not a secret, so it lives in `ai-settings.json` now; the suffix survives
+ *  only so `migrate_base_urls` can find and remove the old entries. */
 const BASE_URL_SUFFIX: &str = ":base_url";
 
 fn base_url_account(provider: &str) -> String {
     format!("{provider}{BASE_URL_SUFFIX}")
 }
 
-/** Store the base URL bound to a provider's API key. */
-pub fn set_base_url(provider: &str, url: &str) -> Result<(), String> {
-    let out = Command::new("security")
-        .args(["add-generic-password", "-s", SERVICE, "-a", &base_url_account(provider), "-w", url, "-U"])
-        .output()
-        .map_err(|e| format!("security add failed: {}", e))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(String::from_utf8_lossy(&out.stderr).trim().to_string())
-    }
-}
-
-/** Read the base URL bound to a provider's API key (custom endpoints). */
-pub fn get_base_url(provider: &str) -> Result<String, String> {
+/** Read the base URL left behind by an old build, if that legacy entry exists.
+ *
+ *  Deliberately NOT exposed as a general getter: the URL is not a secret, so the
+ *  selection file owns it and the keychain must not become a second source of
+ *  truth for it. Read-only — nothing writes base URLs here any more. */
+fn legacy_base_url(provider: &str) -> Result<String, String> {
     let out = Command::new("security")
         .args(["find-generic-password", "-s", SERVICE, "-a", &base_url_account(provider), "-w"])
         .output()
@@ -89,8 +80,8 @@ pub fn get_base_url(provider: &str) -> Result<String, String> {
     }
 }
 
-/** Delete the base URL bound to a provider's key. Entry-not-found is treated as success. */
-pub fn delete_base_url(provider: &str) -> Result<(), String> {
+/** Drop a legacy base-URL entry. Entry-not-found is treated as success. */
+fn delete_legacy_base_url(provider: &str) -> Result<(), String> {
     let out = Command::new("security")
         .args(["delete-generic-password", "-s", SERVICE, "-a", &base_url_account(provider)])
         .output()
@@ -104,6 +95,37 @@ pub fn delete_base_url(provider: &str) -> Result<(), String> {
     } else {
         Err(stderr.trim().to_string())
     }
+}
+
+/** One-shot migration: read legacy `<provider>:base_url` entries so the caller can
+ *  move them into the selection file, then remove those keychain entries.
+ *
+ *  Only the providers the caller names are touched — `security` cannot enumerate
+ *  the SERVICE's accounts without dumping the whole keychain, so the caller passes
+ *  the providers it knows about (catalog ids + the selection file's endpoints).
+ *
+ *  Failure is deliberately silent: if an entry cannot be read, it is LEFT IN
+ *  PLACE. A transient keychain hiccup (locked keychain, denied prompt) must not
+ *  turn into permanent data loss, and the legacy entry stays harmless until a
+ *  later launch migrates it. Idempotent: once the entries are gone this list is
+ *  empty and the caller has nothing to write. */
+pub fn migrate_base_urls(providers: &[String]) -> Vec<(String, String)> {
+    let Ok(providers) = bounded_providers(providers) else { return Vec::new() };
+    let mut out = Vec::new();
+    for provider in providers {
+        // `security` errors per entry rather than all-or-nothing, so one unreadable
+        // provider cannot abort the rest of the migration.
+        let Ok(url) = legacy_base_url(&provider) else { continue };
+        if url.is_empty() {
+            continue;
+        }
+        // Remove only AFTER a successful read: a failed read above kept the entry.
+        if delete_legacy_base_url(&provider).is_err() {
+            continue;
+        }
+        out.push((provider, url));
+    }
+    out
 }
 
 fn bounded_providers(providers: &[String]) -> Result<Vec<String>, String> {
@@ -151,14 +173,6 @@ pub fn list_keys(providers: &[String]) -> Result<Vec<String>, String> {
     Ok(found)
 }
 
-/** The provider whose custom base URL is bound, if any (openai-compatible).
- *  Separate from `list_keys` because the binding is proven by the `:base_url`
- *  entry, not by a known provider id. */
-pub fn active_provider() -> Option<String> {
-    let provider = crate::agent::CUSTOM_PROVIDER_ID;
-    get_base_url(provider).ok().filter(|u| !u.is_empty()).map(|_| provider.to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +194,23 @@ mod tests {
         let many: Vec<_> = (0..=MAX_PROVIDER_COUNT).map(|i| format!("provider-{i}")).collect();
         assert!(bounded_providers(&many).is_err());
         assert!(bounded_providers(&["x".repeat(MAX_PROVIDER_ID_BYTES + 1)]).is_err());
+    }
+
+    #[test]
+    fn base_url_account_suffix_is_stable() {
+        // The suffix encodes entries written by older builds, so it can never
+        // change without orphaning every legacy base URL in the user's keychain.
+        assert_eq!(base_url_account("openai-compatible"), "openai-compatible:base_url");
+        assert_eq!(BASE_URL_SUFFIX, ":base_url");
+    }
+
+    #[test]
+    fn migrate_base_urls_is_bounded_and_never_invents_entries() {
+        // No such keychain entries exist in CI, so this asserts the guard rails:
+        // oversized input is rejected before any `security` subprocess spawns and
+        // an absent entry yields nothing rather than an empty-URL migration.
+        let many: Vec<_> = (0..=MAX_PROVIDER_COUNT).map(|i| format!("provider-{i}")).collect();
+        assert!(migrate_base_urls(&many).is_empty());
+        assert!(migrate_base_urls(&["docubook-migration-test-provider".to_string()]).is_empty());
     }
 }

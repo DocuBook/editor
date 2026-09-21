@@ -8,6 +8,45 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 
+/** Base URL chat should use for this request, in precedence order: the custom
+ *  endpoint env override (unchanged), the endpoint saved in config.json (the
+ *  single source of truth — the browser must not be able to rebind a stored key),
+ *  the browser-supplied URL, then the catalog default. */
+fn resolve_base_url(state: &AppState, provider: &str, browser_base_url: &str) -> String {
+    // Once an endpoint exists, config.json is authoritative. The browser value is
+    // only a compatibility fallback for a provider that has not been configured.
+    let configured = state
+        .auth
+        .config
+        .lock()
+        .expect("lock")
+        .ai
+        .endpoints
+        .get(provider)
+        .map(|e| e.base_url.clone())
+        .filter(|u| !u.is_empty());
+    configured
+        .or_else(|| (!browser_base_url.is_empty()).then(|| browser_base_url.to_string()))
+        .unwrap_or_else(|| agent::catalog_base_url(provider).unwrap_or("").to_string())
+}
+
+fn resolve_model(state: &AppState, provider: &str, browser_model: &str) -> String {
+    // A configured endpoint owns its model just like its base URL. Keep the
+    // browser value only for first-time setup before an endpoint exists.
+    state
+        .auth
+        .config
+        .lock()
+        .expect("lock")
+        .ai
+        .endpoints
+        .get(provider)
+        .map(|e| e.model.clone())
+        .filter(|m| !m.is_empty())
+        .or_else(|| (!browser_model.is_empty()).then(|| browser_model.to_string()))
+        .unwrap_or_default()
+}
+
 pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Response {
     let ai_slot = match state.ai_slots.clone().try_acquire_owned() {
         Ok(slot) => slot,
@@ -33,21 +72,38 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
     let tools = args.get("tools").and_then(Value::as_str);
 
     let mut custom_resolution = None;
-    let agent_cfg = match (provider.as_str(), requested_model.as_str()) {
+    let agent_cfg = match provider.as_str() {
         // Custom endpoint is bound server-side. The webview URL is ignored.
-        (p, m) if !p.is_empty() && !m.is_empty() && p == agent::CUSTOM_PROVIDER_ID => {
+        p if !p.is_empty() && p == agent::CUSTOM_PROVIDER_ID => {
+            let requested_model = resolve_model(&state, p, &requested_model);
             let (bound_url, key, model) = match probe::custom_env_config() {
                 Some((env_url, env_key, env_model)) => {
                     let key = match env_key.or_else(|| keys::get_key(&state.data_dir, p).ok()) {
                         Some(key) => key,
                         None => return err_response("No API key found"),
                     };
-                    (env_url, key, env_model.unwrap_or_else(|| m.to_string()))
+                    (
+                        env_url,
+                        key,
+                        env_model.unwrap_or_else(|| requested_model.clone()),
+                    )
                 }
                 None => {
-                    let url = match keys::get_base_url(&state.data_dir, p) {
-                        Ok(url) => url,
-                        Err(_) => {
+                    // The bound URL comes from config.json (env override handled
+                    // above); the browser-supplied URL is ignored for this provider.
+                    let url = state
+                        .auth
+                        .config
+                        .lock()
+                        .expect("lock")
+                        .ai
+                        .endpoints
+                        .get(p)
+                        .map(|e| e.base_url.clone())
+                        .filter(|u| !u.is_empty());
+                    let url = match url {
+                        Some(url) => url,
+                        None => {
                             return err_response(
                                 "No custom base URL saved — set it in Settings → AI",
                             )
@@ -57,7 +113,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                         Ok(key) => key,
                         Err(_) => return err_response("No API key found"),
                     };
-                    (url, key, m.to_string())
+                    (url, key, requested_model)
                 }
             };
             match agent::validated_custom_addrs(&bound_url, false) {
@@ -66,7 +122,15 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
             }
             agent::Agent::new(p, &model, &key, &bound_url)
         }
-        (p, m) if !p.is_empty() && !m.is_empty() && !base_url.is_empty() => {
+        p if !p.is_empty() => {
+            let model = resolve_model(&state, p, &requested_model);
+            if model.is_empty() {
+                return err_response("Provider model is required");
+            }
+            let base_url = resolve_base_url(&state, p, &base_url);
+            if base_url.is_empty() {
+                return err_response("Provider, model, and base URL are required");
+            }
             if let Err(error) = agent::validate_provider_base_url(p, &base_url) {
                 return err_response(&error);
             }
@@ -74,7 +138,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 Ok(key) => key,
                 Err(_) => return err_response("No API key found"),
             };
-            agent::Agent::new(p, m, &key, &base_url)
+            agent::Agent::new(p, &model, &key, &base_url)
         }
         _ => return err_response("Provider, model, and base URL are required"),
     };
@@ -111,13 +175,17 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         let url = request.url();
         let body = request.body();
         let api_key = request.api_key;
+        // OpenCode Go 400s without a session id; every other provider ignores it.
+        let mut chat = client
+            .post(url)
+            .header("Authorization", format!("Bearer {api_key}"))
+            .header("User-Agent", agent::AI_USER_AGENT);
+        if provider_name == agent::SESSION_PROVIDER_ID {
+            chat = chat.header("x-opencode-session", agent::session_id());
+        }
         let response = match tokio::time::timeout(
             std::time::Duration::from_secs(30),
-            client
-                .post(url)
-                .header("Authorization", format!("Bearer {api_key}"))
-                .json(&body)
-                .send(),
+            chat.json(&body).send(),
         )
         .await
         {

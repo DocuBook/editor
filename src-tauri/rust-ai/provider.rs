@@ -33,10 +33,47 @@ pub const ALLOWED_API_HOSTS: &[&str] = &[
 /// Synthetic provider ID for user-configured OpenAI-compatible endpoints.
 pub const CUSTOM_PROVIDER_ID: &str = "openai-compatible";
 
+/** OpenCode Go rejects traffic that does not identify the calling product
+ *  explicitly, so every request we send carries our own name. */
+pub const AI_USER_AGENT: &str = "DocuBook/1.0";
+
+/** OpenCode Go routes by conversation and returns a hard 400
+ *  (`MissingSessionID`) without this header. Only that gateway needs it, so the
+ *  header is keyed off the provider id rather than sent to everyone. */
+pub const SESSION_PROVIDER_ID: &str = "opencode-go";
+
+/// Process-stable session id. The chat layer currently does not expose a
+/// conversation id, so this preserves one identity across turns in a running
+/// app without adding a vendor-specific transport abstraction.
+pub fn session_id() -> &'static str {
+    use std::sync::OnceLock;
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        format!("docubook-{nanos:x}-{:x}", std::process::id())
+    })
+}
+
 /// Catalog provider IDs, in the same order as the frontend provider list.
 /// Kept here because the web server must decide which providers have a key
 /// without trusting a client-supplied list.
 pub const PROVIDER_IDS: [&str; 4] = ["opencode-go", "anthropic", "google", "deepseek"];
+
+/// Canonical OpenAI-compatible base URL for a catalog provider. The web server
+/// resolves base URLs from config.json; this is the fallback default so the
+/// catalog does not have to be duplicated in the server.
+pub fn catalog_base_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "opencode-go" => Some("https://opencode.ai/zen/go/v1"),
+        "anthropic" => Some("https://api.anthropic.com/v1"),
+        "google" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
+        "deepseek" => Some("https://api.deepseek.com"),
+        _ => None,
+    }
+}
 
 fn is_loopback(host: &str) -> bool {
     host == "localhost"
@@ -145,15 +182,16 @@ pub fn validate_base_url(base_url: &str) -> Result<(), String> {
 #[allow(dead_code)]
 pub fn validate_provider_base_url(provider: &str, base_url: &str) -> Result<(), String> {
     validate_base_url(base_url)?;
+    let canonical = catalog_base_url(provider).ok_or("Unknown provider")?;
+    // Derive the expected host from the catalog URL rather than a second copy of
+    // the host list: adding a provider then cannot leave the two out of sync.
+    let expected = reqwest::Url::parse(canonical)
+        .map_err(|_| "Invalid catalog base URL".to_string())?
+        .host_str()
+        .unwrap_or("")
+        .to_ascii_lowercase();
     let url = reqwest::Url::parse(base_url).map_err(|_| "Invalid base URL".to_string())?;
     let host = url.host_str().unwrap_or("").to_ascii_lowercase();
-    let expected = match provider {
-        "opencode-go" => "opencode.ai",
-        "anthropic" => "api.anthropic.com",
-        "google" => "generativelanguage.googleapis.com",
-        "deepseek" => "api.deepseek.com",
-        _ => return Err("Unknown provider".into()),
-    };
     if host != expected {
         return Err("Base URL does not match provider".into());
     }
@@ -163,13 +201,19 @@ pub fn validate_provider_base_url(provider: &str, base_url: &str) -> Result<(), 
 /// Fetch model metadata from an OpenAI-compatible endpoint.
 pub async fn fetch_models(
     client: &reqwest::Client,
+    provider: &str,
     base_url: &str,
     api_key: &str,
 ) -> Result<Vec<serde_json::Value>, String> {
     let url = format!("{}/models", base_url.trim_end_matches('/'));
-    let response = client
+    let mut request = client
         .get(&url)
         .header("Authorization", format!("Bearer {api_key}"))
+        .header("User-Agent", AI_USER_AGENT);
+    if provider == SESSION_PROVIDER_ID {
+        request = request.header("x-opencode-session", session_id());
+    }
+    let response = request
         .send()
         .await
         .map_err(|error| format!("Models request failed: {error}"))?;

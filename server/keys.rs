@@ -102,6 +102,11 @@ fn decrypt_map(raw: &str, pass: &str) -> Result<HashMap<String, String>, String>
     serde_json::from_slice(&plain).map_err(|e| e.to_string())
 }
 
+/** Legacy marker for base URLs that used to live in keys.json. Kept only so
+ *  `migrate_base_urls` can find and remove them — they are not secrets and now
+ *  belong in config.json. */
+const BASE_URL_SUFFIX: &str = ":base_url";
+
 /** Envelope detection: `{"v":..,"kdf":..,"salt":..,...}` (encrypted) vs the
  *  plain provider map. Provider ids never collide with `"kdf"`. */
 fn looks_like_envelope(raw: &str) -> bool {
@@ -211,33 +216,6 @@ pub fn delete_key(data_dir: &Path, provider: &str) -> Result<(), String> {
     save(data_dir, &map)
 }
 
-/** Map key binding a custom base URL to a provider's key (openai-compatible
- *  custom endpoints). Separate key keeps get_key/list_keys semantics unchanged. */
-const BASE_URL_SUFFIX: &str = ":base_url";
-
-fn base_url_key(provider: &str) -> String {
-    format!("{provider}{BASE_URL_SUFFIX}")
-}
-
-pub fn set_base_url(data_dir: &Path, provider: &str, url: &str) -> Result<(), String> {
-    let mut map = load(data_dir);
-    map.insert(base_url_key(provider), url.to_string());
-    save(data_dir, &map)
-}
-
-pub fn get_base_url(data_dir: &Path, provider: &str) -> Result<String, String> {
-    load(data_dir)
-        .get(&base_url_key(provider))
-        .cloned()
-        .ok_or_else(|| "not_found".to_string())
-}
-
-pub fn delete_base_url(data_dir: &Path, provider: &str) -> Result<(), String> {
-    let mut map = load(data_dir);
-    map.remove(&base_url_key(provider));
-    save(data_dir, &map)
-}
-
 /** Providers that already have a saved key. */
 pub fn list_keys(data_dir: &Path, providers: &[String]) -> Vec<String> {
     let map = load(data_dir);
@@ -254,23 +232,48 @@ pub fn list_keys(data_dir: &Path, providers: &[String]) -> Vec<String> {
  * `list_keys` can only confirm providers the caller already knows about, but the
  * server must answer "what is configured?" without trusting a client list — a
  * custom endpoint, or a key saved before the catalog changed, still counts.
- * The `:base_url` companion entries are stripped; only credentials are reported.
  */
 pub fn configured_providers(data_dir: &Path) -> Vec<String> {
-    let map = load(data_dir);
-    map.keys()
-        .filter(|k| !k.contains(BASE_URL_SUFFIX))
-        .cloned()
-        .collect()
+    load(data_dir).into_keys().collect()
 }
 
-/** The provider whose custom endpoint is bound, if any (openai-compatible). */
-pub fn active_provider(data_dir: &Path) -> Option<String> {
-    let map = load(data_dir);
-    map.keys()
-        .find(|k| k.ends_with(BASE_URL_SUFFIX))
-        .map(|k| k.trim_end_matches(BASE_URL_SUFFIX).to_string())
-        .filter(|p| map.contains_key(p))
+/**
+ * One-shot migration: pull legacy `<provider>:base_url` entries out of keys.json
+ * and return them so the caller can move them into config.json. Returns empty
+ * when there is nothing to migrate or the file cannot be read (encrypted with no
+ * passphrase). Removes the entries from keys.json when it can write.
+ */
+pub fn migrate_base_urls(data_dir: &Path) -> HashMap<String, String> {
+    let mut map = load(data_dir);
+    let legacy: Vec<String> = map
+        .keys()
+        .filter(|k| k.ends_with(BASE_URL_SUFFIX))
+        .cloned()
+        .collect();
+    if legacy.is_empty() {
+        return HashMap::new();
+    }
+    let mut out = HashMap::new();
+    for key in &legacy {
+        // `trim_end_matches` eats repeated suffixes too, which keeps a malformed
+        // `p:base_url:base_url` from producing a provider id with no credentials.
+        let provider = key.trim_end_matches(BASE_URL_SUFFIX).to_string();
+        if provider.is_empty() {
+            continue;
+        }
+        if let Some(url) = map.get(key).filter(|u| !u.is_empty()) {
+            out.insert(provider, url.clone());
+        }
+    }
+    for key in &legacy {
+        map.remove(key);
+    }
+    // Best-effort: a read-only or encrypted file still migrates in memory, and
+    // the leftover suffix entries are harmless (config.json wins from now on).
+    if let Err(e) = save(data_dir, &map) {
+        tracing::warn!(event = "base_url_migration_failed", error_category = "write", error = %e);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -309,16 +312,60 @@ mod tests {
         let dir = tmp();
         let mut map = HashMap::new();
         map.insert("anthropic".to_string(), "sk-ant-x".to_string());
-        map.insert(
-            "openai-compatible:base_url".to_string(),
-            "https://x.example/v1".to_string(),
-        );
+        map.insert("openai-compatible".to_string(), "sk-custom-y".to_string());
         save_with(&dir, &map, Some("hunter2")).unwrap();
         let raw = std::fs::read_to_string(keys_file(&dir)).unwrap();
         assert!(!raw.contains("sk-ant-x"), "passphrase set must encrypt");
         assert!(looks_like_envelope(&raw));
         let loaded = load_with(&dir, Some("hunter2"));
         assert_eq!(loaded, map);
+        let _ = std::fs::remove_file(keys_file(&dir));
+    }
+
+    #[test]
+    fn migrate_base_urls_moves_legacy_entries_out() {
+        // Base URLs are not secrets: a legacy keys.json must hand them over to
+        // config.json and stop storing them, or they keep breaking across browsers.
+        let dir = tmp();
+        let mut map = HashMap::new();
+        map.insert("openai-compatible".to_string(), "sk-x".to_string());
+        map.insert(
+            "openai-compatible:base_url".to_string(),
+            "https://kenari.id/v1".to_string(),
+        );
+        // Empty URL: nothing to move, but the stray entry is still dropped.
+        map.insert("empty:base_url".to_string(), String::new());
+        save_with(&dir, &map, None).unwrap();
+
+        let migrated = migrate_base_urls(&dir);
+        assert_eq!(
+            migrated.get("openai-compatible").map(|s| s.as_str()),
+            Some("https://kenari.id/v1")
+        );
+        assert!(!migrated.contains_key("empty"));
+        assert_eq!(migrated.len(), 1);
+        // Only the key survives in keys.json.
+        assert_eq!(load_with(&dir, None).len(), 1);
+        assert!(load_with(&dir, None).contains_key("openai-compatible"));
+        // Idempotent: a second run has nothing left to do and does not rewrite.
+        assert!(migrate_base_urls(&dir).is_empty());
+        let _ = std::fs::remove_file(keys_file(&dir));
+    }
+
+    #[test]
+    fn migrate_base_urls_returns_empty_without_passphrase() {
+        // Encrypted without DB_KEYS_PASSPHRASE: the file cannot be read, so the
+        // migration must report nothing rather than pretend it found nothing to do.
+        let dir = tmp();
+        let mut map = HashMap::new();
+        map.insert(
+            "openai-compatible:base_url".to_string(),
+            "https://kenari.id/v1".to_string(),
+        );
+        save_with(&dir, &map, Some("secret")).unwrap();
+        assert!(migrate_base_urls(&dir).is_empty());
+        // Still decryptable — nothing lost.
+        assert_eq!(load_with(&dir, Some("secret")).len(), 1);
         let _ = std::fs::remove_file(keys_file(&dir));
     }
 

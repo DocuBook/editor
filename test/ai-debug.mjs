@@ -18,7 +18,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
 
 const PORT = 4275
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -109,17 +109,12 @@ try {
     if (!localStorage.getItem('docubook:vault')) {
       localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
     }
-    if (!localStorage.getItem('docubook:ai-settings')) {
-      localStorage.setItem('docubook:ai-settings', JSON.stringify({ state: {
-        provider: 'openai-compatible', model: 'mock-model',
-        savedProviders: ['openai-compatible'],
-        // No probe result → custom provider is text-only → Path B (no tools)
-        probeTools: {},
-        baseUrls: { 'openai-compatible': 'http://mock.invalid/v1' },
-        models: {},
-      }, version: 0 }))
-    }
   }, VAULT)
+
+  // AI config lives in the server's config.json now — the browser keeps no copy,
+  // so the backend is mocked instead of seeding localStorage. No probe result yet
+  // → the custom provider is text-only → Path B (no tools).
+  const aiState = await mockAiSettings(page)
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('text=notes', { timeout: 10000 })
@@ -165,14 +160,10 @@ try {
   await page.getByRole('button', { name: 'Accept' }).waitFor({ state: 'detached' })
   ok('Escape collapses AI review to the idle composer', await page.getByRole('button', { name: 'Accept' }).count() === 0)
 
-  // Switch the persisted probe to true and reload: same mock response now
-  // exercises Path A (tools are sent, model returns text, no second ask_ai).
-  await page.evaluate(() => {
-    const s = JSON.parse(localStorage.getItem('docubook:ai-settings') || '{}')
-    s.state = s.state || {}
-    s.state.probeTools = { 'openai-compatible': { 'mock-model': true } }
-    localStorage.setItem('docubook:ai-settings', JSON.stringify(s))
-  })
+  // Switch the probe to true and reload: the same mock now reports a measured
+  // model, so the request goes out WITH tools (Path A). The backend owns this
+  // state now — flipping it here is what a completed probe would have stored.
+  aiState.probes['mock-model'] = true
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('text=notes', { timeout: 10000 })
   await page.getByText('notes', { exact: true }).click()
