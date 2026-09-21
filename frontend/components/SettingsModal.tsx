@@ -479,7 +479,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   <div ref={modelDropdownRef} style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-hidden">
 
                     <div className="max-h-[200px] overflow-y-auto">
-                      {modelOptions.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">{modelsError ? 'Could not load models' : 'No models found'}</div> : modelOptions.map((m) => (
+                      {modelOptions.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">No models found</div> : modelOptions.map((m) => (
                         <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
                           className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-accent text-on-accent' : 'text-foreground-secondary hover:bg-surface-active')}>
                           <span className="flex-1">{m.id}</span>
