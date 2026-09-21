@@ -322,7 +322,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               <ChevronsUpDown size={14} className="text-muted shrink-0" />
             </div>
             {showProviderDropdown && providerDropdownPos && createPortal(
-              <div ref={providerDropdownRef} style={providerDropdownPos} className="ui-popover max-h-[280px] z-[200] overflow-clip">
+              /* overflow-hidden, not Tailwind's overflow-clip: `overflow: clip` is
+                 Safari 16+, and this minimised dropdown lists an option list whose
+                 overflow escapes the 280px cap on Safari 15 (macOS 12). */
+              <div ref={providerDropdownRef} style={providerDropdownPos} className="ui-popover max-h-[280px] z-[200] overflow-hidden">
                 <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                   <Search size={14} className="text-muted shrink-0" />
                   <input ref={searchRef} type="text" value={providerSearch} onChange={e => { setProviderSearch(e.target.value); setProviderHighlightIdx(0) }}
@@ -390,7 +393,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                   <ChevronsUpDown size={14} className="text-muted shrink-0 ml-auto" />
                 </div>
                 {showModelDropdown && modelDropdownPos && createPortal(
-                  <div ref={modelDropdownRef} style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-clip">
+                  <div ref={modelDropdownRef} style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-hidden">
                     <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
                       <Search size={14} className="text-muted shrink-0" />
                       <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}

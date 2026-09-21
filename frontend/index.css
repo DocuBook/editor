@@ -623,7 +623,14 @@ body .mobile-sidebar-drawer-body > aside {
   right: 10px;
 }
 
-.tip-wrap:has([data-plus-popup]) .tip {
+/* Hide the wrapper's tooltip while its popup is open, so the two never stack.
+   The :has() form is the supported one; :has() is Safari 15.4+, so on Safari
+   15.0-15.3 (macOS 12.0-12.2, see tauri.conf.json minimumSystemVersion) the
+   parser rejects that selector and drops the whole rule — leaving the tooltip
+   painted over the open popup. `.tip-suppress` carries the same intent as a
+   plain class the popup sets itself, which is valid on every engine. */
+.tip-wrap:has([data-plus-popup]) .tip,
+.tip-suppress .tip {
   opacity: 0;
   pointer-events: none;
 }

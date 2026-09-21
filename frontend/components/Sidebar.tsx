@@ -369,7 +369,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
               </div>
             )}
             {showPlusMenu && (
-              <div data-plus-popup>
+              <div data-plus-popup className="tip-suppress">
                 <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('file'); setNewName('') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                   <FileText size={14} /> New File
                   <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
