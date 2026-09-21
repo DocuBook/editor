@@ -4,10 +4,10 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 
 ## Prerequisites
 
-- **macOS** 12 (Monterey) or later — desktop development only
-- **Node.js** >= 22
+- **macOS** — desktop development only. CI uses macos-14 for lint/test/build; the WebKit E2E job requires macos-15 (the pinned Playwright WebKit build needs macOS 15+)
+- **Node.js** 22 — the version CI pins (`NODE_VERSION: "22"`); `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint
 - **npm**
-- **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically)
+- **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically; includes `clippy` and `rustfmt`)
 - **Tauri v2 system dependencies** — see https://v2.tauri.app/start/prerequisites/
 - **Docker** — only needed to build/test the web image (`docker build`); local server development needs no Docker
 
@@ -46,7 +46,8 @@ DATA_DIR=./data WWW_DIR=../dist cargo run --release
 # open http://localhost:8080 → setup wizard creates the admin account
 ```
 
-Or build the full image (validated in CI on every PR):
+Or build the full image (validated in CI on every PR — amd64 only on PRs; arm64
+plus multi-arch publish runs on tags):
 
 ```text
 docker compose up --build
@@ -66,6 +67,7 @@ editor/
 ├── test/          Frontend unit tests, shared fixtures, and web E2E harness
 ├── public/        Static assets copied into frontend builds
 ├── dist/          Generated frontend build output
+├── data/          Local web-server data dir (gitignored; DATA_DIR default)
 └── .github/       CI, release, and repository automation
 ```
 
@@ -83,11 +85,15 @@ editor/
 1. Fork the repo and create a branch: `git checkout -b fix/your-change`
 2. Make your change. Keep commits focused, and sign off every commit (`git commit -s`) — see [Contribution licensing](#contribution-licensing).
 3. Run checks locally:
+   - `npx oxlint frontend/ test/unit/ test/__fixtures__/`
    - `npx tsc -b`
+   - `node test/check-acl.mjs`
+   - `node test/check-docker-paths.mjs`
    - `npm test`
    - `npm run build`
    - `cd src-tauri && cargo test`
    - `cd server && cargo test`
+   - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
    - Build the web server + frontend, then the Playwright suites
      (run logs land in `test/artifacts/` — server stdout/stderr,
      browser console, and per-run results):
@@ -95,11 +101,17 @@ editor/
      `npm run test:e2e` # all suites, chromium (default)
      `BROWSER=webkit npm run test:e2e` # webkit — CI only (macos-15 runner)
 
+     All suites (one entry point, `test/run-all.mjs`): `web-smoke`, `trash`,
+     `theme-check`, `ai-debug`, `ai-chat-focus`, `ai-multiblock-follow`,
+     `overlay-surface`, `overlay-surface-fallback`, `formatting-toolbar-compact`,
+     `raw-markdown-highlight`. Any suite failing fails the run.
+
      Browser coverage:
-     - Local macOS 12 runs Chromium through the installed Playwright browser
+     - Local macOS runs Chromium through the installed Playwright browser
        or the system Chrome fallback; WebKit is CI-only.
-     - CI runs Rust and desktop checks on macOS 14, then the Chromium/WebKit
-       E2E matrix on macOS 15 as required by the pinned Playwright build.
+     - CI runs Rust, lint, and security checks on macOS 14 / Ubuntu 22.04,
+       then the Chromium/WebKit E2E matrix on macOS 15 as required by the
+       pinned Playwright build.
 4. Open a PR against `master` using the PR template.
 
 ### Commit conventions (enforced by the commit-msg hook)
@@ -128,7 +140,12 @@ editor/
 - **Release changelog = the merged PR subjects grouped by type** — each subject lands verbatim under its category in `CHANGELOG.md`; the section is assembled from commits, not rewritten (DRY)
 - The hook rejects other formats and lists the allowed types — no commitlint needed
 
-**PR CI validates both runtimes:** lint, type checks, frontend and Rust tests, Linux server tests, browser E2E, desktop DMGs, and multi-platform Docker builds. Heavy E2E, desktop, and Docker jobs may require environment approval. Release artifacts are published only from version tags.
+**PR CI validates both runtimes:** lint (oxlint over `frontend/`, `test/unit/`,
+`test/__fixtures__/`), type checks, ACL and Docker-path guards, version
+consistency, frontend and Rust tests, Rust clippy, `cargo audit`/`npm audit`,
+Linux server tests, Chromium/WebKit browser E2E, desktop DMGs, and Docker image
+builds. Heavy E2E, desktop, and Docker jobs may require environment approval.
+Release artifacts are published only from version tags.
 
 The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates), **fails if a lock changed**, then runs the type check, desktop Rust tests, server Rust tests, and frontend tests.
 
