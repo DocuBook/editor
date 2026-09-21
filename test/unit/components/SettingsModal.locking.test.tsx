@@ -130,13 +130,13 @@ describe('SettingsModal — configured provider', () => {
     // The reported bug: a fresh browser rendered an empty input column because
     // the fields came from a store snapshot instead of a fetch. Locked fields
     // must render the endpoint the backend stored — never a local buffer.
-    configure('anthropic', { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-5' })
-    useAiSettings.setState({ provider: 'anthropic', model: 'stale-browser-model' })
+    configure('opencode-go', { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'deepseek-v4-flash' })
+    useAiSettings.setState({ provider: 'opencode-go', model: 'stale-browser-model' })
     await render()
 
     const model = byLabel('Model')!
     expect(model.readOnly).toBe(true)
-    expect(model.value).toBe('claude-sonnet-5')
+    expect(model.value).toBe('deepseek-v4-flash')
 
     expect(buttons()).not.toContain('Save')
     expect(buttons()).not.toContain('Test')
@@ -155,8 +155,8 @@ describe('SettingsModal — configured provider', () => {
   })
 
   it('never reads the API key back — the locked field is empty with a saved placeholder', async () => {
-    configure('anthropic')
-    useAiSettings.setState({ provider: 'anthropic' })
+    configure('opencode-go')
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     const key = byLabel('API Key')!
@@ -170,8 +170,8 @@ describe('SettingsModal — configured provider', () => {
   it('does not write probes it merely rendered', async () => {
     // Rendering a stored probe must not re-write it: an explicit set_probe is
     // the only probe write, and only when the model had no measurement.
-    configure('anthropic', { model: 'server-model', probes: { 'server-model': true } })
-    useAiSettings.setState({ provider: 'anthropic' })
+    configure('opencode-go', { model: 'server-model', probes: { 'server-model': true } })
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     expect(invoke.mock.calls.map(c => c[0])).not.toContain('set_probe')
@@ -215,8 +215,8 @@ describe('SettingsModal — env-controlled custom provider', () => {
 
 describe('SettingsModal — revoke', () => {
   it('requires confirmation before deleting anything', async () => {
-    configure('anthropic')
-    useAiSettings.setState({ provider: 'anthropic' })
+    configure('opencode-go')
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     clickText('Revoke')
@@ -228,8 +228,8 @@ describe('SettingsModal — revoke', () => {
   })
 
   it('cancels on Escape without deleting the key or the endpoint', async () => {
-    configure('anthropic')
-    useAiSettings.setState({ provider: 'anthropic' })
+    configure('opencode-go')
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     clickText('Revoke')
@@ -241,8 +241,8 @@ describe('SettingsModal — revoke', () => {
   })
 
   it('totally revokes on confirm: delete_api_key, then the fields become editable', async () => {
-    configure('anthropic')
-    useAiSettings.setState({ provider: 'anthropic' })
+    configure('opencode-go')
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     clickText('Revoke')
@@ -256,7 +256,7 @@ describe('SettingsModal — revoke', () => {
 
     const deleteCall = invoke.mock.calls.find(c => c[0] === 'delete_api_key')
     expect(deleteCall).toBeDefined()
-    expect(deleteCall![1]).toEqual({ provider: 'anthropic' })
+    expect(deleteCall![1]).toEqual({ provider: 'opencode-go' })
     expect(useAiSettings.getState().savedProviders).toEqual([])
     // The fields are editable again: the model reverts to the picker (a picker
     // has no readOnly input), and Save is offered in place of Revoke.
@@ -266,8 +266,8 @@ describe('SettingsModal — revoke', () => {
   })
 
   it('does not call the removed bulk set_probes command', async () => {
-    configure('anthropic')
-    useAiSettings.setState({ provider: 'anthropic' })
+    configure('opencode-go')
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     clickText('Revoke')
@@ -283,7 +283,7 @@ describe('SettingsModal — revoke', () => {
 
 describe('SettingsModal — save', () => {
   it('validates with test_connection, persists, then locks from the refreshed backend', async () => {
-    useAiSettings.setState({ provider: 'anthropic' })
+    useAiSettings.setState({ provider: 'opencode-go' })
     await render()
 
     const key = byLabel('API Key')!
@@ -295,7 +295,7 @@ describe('SettingsModal — save', () => {
     })
 
     // The backend stores it as a result of the save (the UI cannot assume).
-    configure('anthropic', { baseUrl: 'https://api.anthropic.com/v1', model: 'claude-sonnet-5' })
+    configure('opencode-go', { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'deepseek-v4-flash' })
     clickText('Save')
     await settle()
 

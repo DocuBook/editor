@@ -643,18 +643,18 @@ mod tests {
         assert_eq!(c.ai.active, "", "fresh config starts unselected");
         assert!(c.ai.endpoints.is_empty(), "fresh config has no endpoints");
         c.set_endpoint(
-            "anthropic",
-            "claude-sonnet-5",
-            "https://api.anthropic.com/v1",
+            "opencode-go",
+            "deepseek-v4-flash",
+            "https://opencode.ai/zen/go/v1",
         )
         .unwrap();
 
         let reloaded = Config::load(&dir);
-        assert_eq!(reloaded.ai.active, "anthropic");
-        assert_eq!(reloaded.ai.endpoints["anthropic"].model, "claude-sonnet-5");
+        assert_eq!(reloaded.ai.active, "opencode-go");
+        assert_eq!(reloaded.ai.endpoints["opencode-go"].model, "deepseek-v4-flash");
         assert_eq!(
-            reloaded.ai.endpoints["anthropic"].base_url,
-            "https://api.anthropic.com/v1"
+            reloaded.ai.endpoints["opencode-go"].base_url,
+            "https://opencode.ai/zen/go/v1"
         );
         let _ = std::fs::remove_file(dir.join("config.json"));
     }
@@ -666,18 +666,18 @@ mod tests {
         let dir = tmp();
         let mut c = Config::load(&dir);
         c.set_endpoint(
-            "anthropic",
-            "claude-sonnet-5",
-            "https://api.anthropic.com/v1",
+            "opencode-go",
+            "deepseek-v4-flash",
+            "https://opencode.ai/zen/go/v1",
         )
         .unwrap();
         c.set_endpoint("deepseek", "deepseek-chat", "https://api.deepseek.com")
             .unwrap();
         // Selecting a provider only moves the pointer.
-        c.set_active("anthropic", "claude-sonnet-5").unwrap();
+        c.set_active("opencode-go", "deepseek-v4-flash").unwrap();
 
         let reloaded = Config::load(&dir);
-        assert_eq!(reloaded.ai.active, "anthropic");
+        assert_eq!(reloaded.ai.active, "opencode-go");
         assert_eq!(reloaded.ai.endpoints.len(), 2);
         assert_eq!(
             reloaded.ai.endpoints["deepseek"].base_url,
@@ -685,7 +685,7 @@ mod tests {
         );
         assert_eq!(
             reloaded.active_endpoint().map(|(p, _)| p),
-            Some("anthropic")
+            Some("opencode-go")
         );
         let _ = std::fs::remove_file(dir.join("config.json"));
     }
@@ -695,9 +695,9 @@ mod tests {
         // A stray selection save must not mint an endpoint with no base URL.
         let dir = tmp();
         let mut c = Config::load(&dir);
-        c.set_active("anthropic", "claude-sonnet-5").unwrap();
+        c.set_active("opencode-go", "deepseek-v4-flash").unwrap();
         assert!(c.ai.endpoints.is_empty());
-        assert_eq!(c.ai.active, "anthropic");
+        assert_eq!(c.ai.active, "opencode-go");
         assert!(
             c.active_endpoint().is_none(),
             "unresolvable selection has no endpoint"
@@ -709,15 +709,15 @@ mod tests {
     fn configured_endpoint_requires_revoke_before_reconfiguration() {
         let dir = tmp();
         let mut c = Config::load(&dir);
-        c.set_endpoint("anthropic", "model-a", "https://api.example/v1")
+        c.set_endpoint("opencode-go", "model-a", "https://api.example/v1")
             .unwrap();
 
         assert!(c
-            .set_endpoint("anthropic", "model-b", "https://other.example/v1")
+            .set_endpoint("opencode-go", "model-b", "https://other.example/v1")
             .is_err());
-        assert!(c.set_active("anthropic", "model-b").is_err());
+        assert!(c.set_active("opencode-go", "model-b").is_err());
 
-        let endpoint = c.ai.endpoints.get("anthropic").unwrap();
+        let endpoint = c.ai.endpoints.get("opencode-go").unwrap();
         assert_eq!(endpoint.model, "model-a");
         assert_eq!(endpoint.base_url, "https://api.example/v1");
         let _ = std::fs::remove_file(dir.join("config.json"));
@@ -727,27 +727,27 @@ mod tests {
     fn remove_endpoint_clears_active() {
         let dir = tmp();
         let mut c = Config::load(&dir);
-        c.set_endpoint("anthropic", "m", "https://api.anthropic.com/v1")
+        c.set_endpoint("opencode-go", "m", "https://opencode.ai/zen/go/v1")
             .unwrap();
         c.set_endpoint("deepseek", "d", "https://api.deepseek.com")
             .unwrap();
-        c.set_active("anthropic", "m").unwrap();
+        c.set_active("opencode-go", "m").unwrap();
 
-        c.remove_endpoint("anthropic").unwrap();
+        c.remove_endpoint("opencode-go").unwrap();
         assert_eq!(
             c.ai.active, "",
             "revoking the active endpoint clears the selection"
         );
-        assert!(!c.ai.endpoints.contains_key("anthropic"));
+        assert!(!c.ai.endpoints.contains_key("opencode-go"));
 
         // Revoking a non-active endpoint leaves the selection alone.
-        c.set_endpoint("anthropic", "m", "https://api.anthropic.com/v1")
+        c.set_endpoint("opencode-go", "m", "https://opencode.ai/zen/go/v1")
             .unwrap();
         c.remove_endpoint("deepseek").unwrap();
-        assert_eq!(c.ai.active, "anthropic");
+        assert_eq!(c.ai.active, "opencode-go");
 
         let reloaded = Config::load(&dir);
-        assert_eq!(reloaded.ai.active, "anthropic");
+        assert_eq!(reloaded.ai.active, "opencode-go");
         assert_eq!(reloaded.ai.endpoints.len(), 1);
         let _ = std::fs::remove_file(dir.join("config.json"));
     }
@@ -760,22 +760,22 @@ mod tests {
         let dir = tmp();
         let mut c = Config::load(&dir);
         assert!(c.ai.endpoints.is_empty(), "fresh config starts unprobed");
-        c.set_probe("anthropic", "claude-sonnet-5", true).unwrap();
-        c.set_probe("anthropic", "claude-haiku-5", false).unwrap();
+        c.set_probe("opencode-go", "deepseek-v4-flash", true).unwrap();
+        c.set_probe("opencode-go", "deepseek-v4-chat", false).unwrap();
 
         let reloaded = Config::load(&dir);
-        assert!(reloaded.ai.endpoints["anthropic"].probes["claude-sonnet-5"]);
-        assert!(!reloaded.ai.endpoints["anthropic"].probes["claude-haiku-5"]);
+        assert!(reloaded.ai.endpoints["opencode-go"].probes["deepseek-v4-flash"]);
+        assert!(!reloaded.ai.endpoints["opencode-go"].probes["deepseek-v4-chat"]);
 
         // Merging: a later probe must not drop the other models, and writing an
         // endpoint must not drop the probes either.
         let mut c2 = Config::load(&dir);
-        c2.set_probe("anthropic", "claude-opus-5", true).unwrap();
+        c2.set_probe("opencode-go", "deepseek-v4-reasoner", true).unwrap();
         c2.set_endpoint("openai-compatible", "local-1", "https://local.example/v1")
             .unwrap();
         let c3 = Config::load(&dir);
         assert_eq!(
-            c3.ai.endpoints["anthropic"].probes.len(),
+            c3.ai.endpoints["opencode-go"].probes.len(),
             3,
             "probes must merge, not replace"
         );
@@ -866,18 +866,18 @@ mod tests {
         let dir = tmp();
         std::fs::write(
             dir.join("config.json"),
-            r#"{"ai":{"provider":"anthropic","model":"claude-sonnet-5","probes":{"anthropic":{"claude-sonnet-5":true},"deepseek":{"deepseek-chat":false,"bad":"x"}}}}"#,
+            r#"{"ai":{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{"opencode-go":{"deepseek-v4-flash":true},"deepseek":{"deepseek-chat":false,"bad":"x"}}}}"#,
         )
         .unwrap();
         let c = Config::load(&dir);
-        assert_eq!(c.ai.active, "anthropic");
+        assert_eq!(c.ai.active, "opencode-go");
         assert_eq!(
             c.ai.endpoints.len(),
             2,
             "every probed provider becomes an endpoint"
         );
-        assert_eq!(c.ai.endpoints["anthropic"].model, "claude-sonnet-5");
-        assert!(c.ai.endpoints["anthropic"].probes["claude-sonnet-5"]);
+        assert_eq!(c.ai.endpoints["opencode-go"].model, "deepseek-v4-flash");
+        assert!(c.ai.endpoints["opencode-go"].probes["deepseek-v4-flash"]);
         assert_eq!(
             c.ai.endpoints["deepseek"].model, "",
             "legacy model is the active provider's only"
@@ -892,7 +892,7 @@ mod tests {
             "non-bool entry dropped"
         );
         assert_eq!(
-            c.ai.endpoints["anthropic"].base_url, "",
+            c.ai.endpoints["opencode-go"].base_url, "",
             "base URLs come from keys.json, not config"
         );
         let _ = std::fs::remove_file(dir.join("config.json"));
@@ -901,12 +901,12 @@ mod tests {
         // browser cannot recover the provider it lost.
         std::fs::write(
             dir.join("config.json"),
-            r#"{"ai":{"provider":"google","model":"gemini-3-pro","probes":{}}}"#,
+            r#"{"ai":{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{}}}"#,
         )
         .unwrap();
         let c = Config::load(&dir);
-        assert_eq!(c.ai.active, "google");
-        assert_eq!(c.ai.endpoints["google"].model, "gemini-3-pro");
+        assert_eq!(c.ai.active, "opencode-go");
+        assert_eq!(c.ai.endpoints["opencode-go"].model, "deepseek-v4-flash");
         let _ = std::fs::remove_file(dir.join("config.json"));
     }
 

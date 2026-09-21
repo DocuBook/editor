@@ -30,11 +30,11 @@ const DEFAULTS = {
 /** The backend payload in its current shape: one entry per configured provider. */
 const payload = (over: Record<string, unknown> = {}) =>
   JSON.stringify({
-    active: "anthropic",
+    active: "opencode-go",
     endpoints: {
-      anthropic: { baseUrl: "https://api.anthropic.com/v1", model: "claude-sonnet-5", probes: {}, hasKey: true },
+      'opencode-go': { baseUrl: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-flash", probes: {}, hasKey: true },
     },
-    savedProviders: ["anthropic"],
+    savedProviders: ["opencode-go"],
     ...over,
   });
 
@@ -59,8 +59,8 @@ describe("aiSettings store", () => {
     // empty) fields instead of what config.json says. Any AI write here would
     // reintroduce a second source of truth.
     invoke.mockResolvedValue(payload());
-    useAiSettings.getState().setProvider("anthropic");
-    useAiSettings.getState().setModel("claude-sonnet-5");
+    useAiSettings.getState().setProvider("opencode-go");
+    useAiSettings.getState().setModel("deepseek-v4-flash");
     useAiSettings.getState().setApiKey("sk-secret-42");
     await hydrateAiSettings();
 
@@ -72,11 +72,11 @@ describe("aiSettings store", () => {
     invoke.mockResolvedValue(payload());
     await hydrateAiSettings();
 
-    expect(useAiSettings.getState().provider).toBe("anthropic");
-    expect(useAiSettings.getState().model).toBe("claude-sonnet-5");
-    expect(useAiSettings.getState().savedProviders).toEqual(["anthropic"]);
-    expect(useAiSettings.getState().baseUrls["anthropic"]).toBe("https://api.anthropic.com/v1");
-    expect(useAiSettings.getState().models["anthropic"]).toBe("claude-sonnet-5");
+    expect(useAiSettings.getState().provider).toBe("opencode-go");
+    expect(useAiSettings.getState().model).toBe("deepseek-v4-flash");
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
+    expect(useAiSettings.getState().baseUrls["opencode-go"]).toBe("https://opencode.ai/zen/go/v1");
+    expect(useAiSettings.getState().models["opencode-go"]).toBe("deepseek-v4-flash");
   });
 
   it("hydrateAiSettings does not leave stale local state behind", async () => {
@@ -86,8 +86,8 @@ describe("aiSettings store", () => {
     invoke.mockResolvedValue(payload());
     await hydrateAiSettings();
 
-    expect(useAiSettings.getState().provider).toBe("anthropic");
-    expect(useAiSettings.getState().savedProviders).toEqual(["anthropic"]);
+    expect(useAiSettings.getState().provider).toBe("opencode-go");
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
   });
 
   it("hydrateAiSettings replaces savedProviders with the server list", async () => {
@@ -97,7 +97,7 @@ describe("aiSettings store", () => {
     invoke.mockResolvedValue(payload());
     await hydrateAiSettings();
 
-    expect(useAiSettings.getState().savedProviders).toEqual(["anthropic"]);
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
   });
 
   it("hydrateAiSettings restores a custom endpoint base URL from the backend", async () => {
@@ -126,22 +126,22 @@ describe("aiSettings store", () => {
     // (two requests), and until it lands the provider runs text-only.
     invoke.mockResolvedValue(
       JSON.stringify({
-        active: "anthropic",
+        active: "opencode-go",
         endpoints: {
-          anthropic: {
-            baseUrl: "https://api.anthropic.com/v1",
-            model: "claude-sonnet-5",
-            probes: { "claude-sonnet-5": true, "claude-haiku-5": false },
+          'opencode-go': {
+            baseUrl: "https://opencode.ai/zen/go/v1",
+            model: "deepseek-v4-flash",
+            probes: { "deepseek-v4-flash": true, "deepseek-v4-chat": false },
             hasKey: true,
           },
         },
-        savedProviders: ["anthropic"],
+        savedProviders: ["opencode-go"],
       })
     );
     await hydrateAiSettings();
 
-    expect(useAiSettings.getState().probeTools["anthropic"]?.["claude-sonnet-5"]).toBe(true);
-    expect(useAiSettings.getState().probeTools["anthropic"]?.["claude-haiku-5"]).toBe(false);
+    expect(useAiSettings.getState().probeTools["opencode-go"]?.["deepseek-v4-flash"]).toBe(true);
+    expect(useAiSettings.getState().probeTools["opencode-go"]?.["deepseek-v4-chat"]).toBe(false);
   });
 
   it("hydrateAiSettings keeps multi-endpoint probes apart", async () => {
@@ -187,27 +187,27 @@ describe("aiSettings store", () => {
     // a bad payload must be dropped rather than stored.
     invoke.mockResolvedValue(
       JSON.stringify({
-        active: "anthropic",
+        active: "opencode-go",
         endpoints: {
-          anthropic: { baseUrl: "", model: "m", probes: { ok: true, bad: "yes" }, hasKey: true },
+          'opencode-go': { baseUrl: "", model: "m", probes: { ok: true, bad: "yes" }, hasKey: true },
         },
-        savedProviders: ["anthropic"],
+        savedProviders: ["opencode-go"],
       })
     );
     await hydrateAiSettings();
 
-    expect(useAiSettings.getState().probeTools["anthropic"]).toEqual({ ok: true });
+    expect(useAiSettings.getState().probeTools["opencode-go"]).toEqual({ ok: true });
   });
 
   it("hydrateAiSettings ignores a malformed payload", async () => {
     // A half-parsed response must not overwrite state with empty fields.
-    useAiSettings.setState({ provider: "anthropic", model: "claude-sonnet-5" });
+    useAiSettings.setState({ provider: "opencode-go", model: "deepseek-v4-flash" });
     for (const raw of ["null", "[]", "not json", JSON.stringify({ endpoints: "nope", active: "" })]) {
       invoke.mockResolvedValue(raw);
       await hydrateAiSettings();
 
-      expect(useAiSettings.getState().provider).toBe("anthropic");
-      expect(useAiSettings.getState().model).toBe("claude-sonnet-5");
+      expect(useAiSettings.getState().provider).toBe("opencode-go");
+      expect(useAiSettings.getState().model).toBe("deepseek-v4-flash");
     }
   });
 
@@ -219,11 +219,11 @@ describe("aiSettings store", () => {
 
   it("setSavedProviders replaces with the server list", () => {
     useAiSettings.setState({ savedProviders: ["openai-compatible"] });
-    setSavedProviders(["anthropic"]);
-    expect(useAiSettings.getState().savedProviders).toEqual(["anthropic"]);
+    setSavedProviders(["opencode-go"]);
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
     // Idempotent: re-hydrating with a known provider must not duplicate it.
-    setSavedProviders(["anthropic"]);
-    expect(useAiSettings.getState().savedProviders).toEqual(["anthropic"]);
+    setSavedProviders(["opencode-go"]);
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
   });
 
   it("setModel saves per-provider and restores on provider switch", () => {
@@ -233,24 +233,22 @@ describe("aiSettings store", () => {
     expect(useAiSettings.getState().models["openai"]).toBe("gpt-5.6");
 
     // switch to another provider, pick a different model
-    useAiSettings.getState().setProvider("anthropic");
-    expect(useAiSettings.getState().model).toBe("claude-sonnet-5");
+    useAiSettings.getState().setProvider("opencode-go");
+    expect(useAiSettings.getState().model).toBe("deepseek-v4-flash");
     useAiSettings.getState().setModel("opus-5");
-    expect(useAiSettings.getState().models["anthropic"]).toBe("opus-5");
+    expect(useAiSettings.getState().models["opencode-go"]).toBe("opus-5");
 
     // switch back — last model for openai is restored, not defaulted to cheapest
     useAiSettings.getState().setProvider("openai");
     expect(useAiSettings.getState().model).toBe("gpt-5.6");
 
-    useAiSettings.getState().setProvider("anthropic");
+    useAiSettings.getState().setProvider("opencode-go");
     expect(useAiSettings.getState().model).toBe("opus-5");
   });
 
   it("setProvider uses valid bootstrap models before keyed discovery is available", () => {
     for (const [provider, model] of [
       ["opencode-go", "deepseek-v4-flash"],
-      ["anthropic", "claude-sonnet-5"],
-      ["google", "gemini-3.7-flash"],
       ["deepseek", "deepseek-v4-flash"],
     ]) {
       useAiSettings.getState().setProvider(provider);
@@ -354,9 +352,9 @@ describe("aiSettings store", () => {
     // over the backend is how endpoint values got silently overwritten.
     vi.useFakeTimers();
     invoke.mockResolvedValue("null");
-    useAiSettings.getState().setProvider("anthropic");
-    useAiSettings.getState().setModel("claude-opus-5");
-    useAiSettings.getState().setProbeTools("anthropic", "claude-opus-5", true);
+    useAiSettings.getState().setProvider("opencode-go");
+    useAiSettings.getState().setModel("deepseek-v4-reasoner");
+    useAiSettings.getState().setProbeTools("opencode-go", "deepseek-v4-reasoner", true);
     useAiSettings.getState().setBaseUrl("https://proxy.example.com/v1");
     await vi.advanceTimersByTimeAsync(1000);
 

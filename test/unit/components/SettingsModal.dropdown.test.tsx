@@ -83,25 +83,25 @@ describe('SettingsModal — dropdown placement', () => {
 
     act(() => clickable('— Select a provider —').click())
 
-    const search = document.querySelector<HTMLInputElement>('input[placeholder="Search providers..."]')
-    expect(search).not.toBeNull()
-    expect(document.body.contains(search)).toBe(true)
-    expect(dialog().contains(search)).toBe(false)
-    expect((search!.closest('.ui-popover') as HTMLElement).style.position).toBe('fixed')
+    const menu = document.querySelector<HTMLElement>('.ui-popover')
+    expect(menu).not.toBeNull()
+    expect(document.body.contains(menu)).toBe(true)
+    expect(dialog().contains(menu)).toBe(false)
+    expect(menu!.style.position).toBe('fixed')
   })
 
   it('renders the model menu outside the blurring dialog too', async () => {
-    aiState.provider = 'anthropic'
+    aiState.provider = 'opencode-go'
     render()
     await flush()
 
     act(() => clickable('— Select a model —').click())
 
-    const search = document.querySelector<HTMLInputElement>('input[placeholder="Search models..."]')
-    expect(search).not.toBeNull()
-    expect(document.body.contains(search)).toBe(true)
-    expect(dialog().contains(search)).toBe(false)
-    expect((search!.closest('.ui-popover') as HTMLElement).style.position).toBe('fixed')
+    const menu = document.querySelector<HTMLElement>('.ui-popover')
+    expect(menu).not.toBeNull()
+    expect(document.body.contains(menu)).toBe(true)
+    expect(dialog().contains(menu)).toBe(false)
+    expect(menu!.style.position).toBe('fixed')
   })
 
   it('keeps the menu open while interacting with it, closing only on an outside click', async () => {
@@ -109,11 +109,11 @@ describe('SettingsModal — dropdown placement', () => {
     await flush()
 
     act(() => clickable('— Select a provider —').click())
-    const search = document.querySelector<HTMLInputElement>('input[placeholder="Search providers..."]')!
-    act(() => search.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
-    expect(document.querySelector('input[placeholder="Search providers..."]')).not.toBeNull()
+    const menu = document.querySelector<HTMLElement>('.ui-popover')!
+    act(() => menu.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
+    expect(document.querySelector('.ui-popover')).not.toBeNull()
 
     act(() => document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })))
-    expect(document.querySelector('input[placeholder="Search providers..."]')).toBeNull()
+    expect(document.querySelector('.ui-popover')).toBeNull()
   })
 })

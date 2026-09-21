@@ -8,14 +8,14 @@ describe('resolveProbeModel', () => {
   })
   it('UI model used when no env model', () => {
     expect(resolveProbeModel(CUSTOM_PROVIDER_ID, 'ui-model')).toBe('ui-model')
-    expect(resolveProbeModel('anthropic', 'claude-x')).toBe('claude-x')
+    expect(resolveProbeModel('opencode-go', 'deepseek-v4-flash')).toBe('deepseek-v4-flash')
   })
 })
 
 describe('resolveRequestModel', () => {
   it('uses env model only for custom env endpoints', () => {
     expect(resolveRequestModel(CUSTOM_PROVIDER_ID, 'saved-model', 'env-model')).toBe('env-model')
-    expect(resolveRequestModel('anthropic', 'claude-x', 'env-model')).toBe('claude-x')
+    expect(resolveRequestModel('opencode-go', 'deepseek-v4-flash', 'env-model')).toBe('deepseek-v4-flash')
   })
   it('keeps saved model when env config is absent or empty', () => {
     expect(resolveRequestModel(CUSTOM_PROVIDER_ID, 'saved-model')).toBe('saved-model')
@@ -26,9 +26,9 @@ describe('resolveRequestModel', () => {
 describe('isTextOnly', () => {
   it('text-only until probed true — same rule for every provider', () => {
     expect(isTextOnly(CUSTOM_PROVIDER_ID, 'm', {})).toBe(true)   // unmeasured → text-only
-    expect(isTextOnly('anthropic', 'm', {})).toBe(true)          // catalog unmeasured → text-only too
-    expect(isTextOnly('anthropic', 'm', { anthropic: { m: true } })).toBe(false)
-    expect(isTextOnly('anthropic', 'm', { anthropic: { m: false } })).toBe(true)
+    expect(isTextOnly('opencode-go', 'm', {})).toBe(true)          // catalog unmeasured → text-only too
+    expect(isTextOnly('opencode-go', 'm', { 'opencode-go': { m: true } })).toBe(false)
+    expect(isTextOnly('opencode-go', 'm', { 'opencode-go': { m: false } })).toBe(true)
   })
   it('probe keyed by resolved model', () => {
     // transport resolves env model, so probe must live under env-model
@@ -39,15 +39,15 @@ describe('isTextOnly', () => {
   it('treats a missing model as text-only rather than defaulting to tools', () => {
     // Settings renders before a model is resolved; claiming tool support while the
     // transport withholds tools is the mismatch the shared badge rule guards.
-    expect(isTextOnly('anthropic', '', { anthropic: { m: true } })).toBe(true)
+    expect(isTextOnly('opencode-go', '', { 'opencode-go': { m: true } })).toBe(true)
   })
   it('is the single rule the badge and transport must share', () => {
     // probe true is the ONLY state that enables tools — catalog providers and
     // custom endpoints alike, so a badge reading this helper cannot disagree.
-    const probeTools = { anthropic: { good: true, bad: false } }
-    expect(isTextOnly('anthropic', 'good', probeTools)).toBe(false)
-    expect(isTextOnly('anthropic', 'bad', probeTools)).toBe(true)
-    expect(isTextOnly('anthropic', 'unmeasured', probeTools)).toBe(true)
+    const probeTools = { 'opencode-go': { good: true, bad: false } }
+    expect(isTextOnly('opencode-go', 'good', probeTools)).toBe(false)
+    expect(isTextOnly('opencode-go', 'bad', probeTools)).toBe(true)
+    expect(isTextOnly('opencode-go', 'unmeasured', probeTools)).toBe(true)
   })
 })
 

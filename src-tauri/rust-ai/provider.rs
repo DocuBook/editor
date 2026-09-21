@@ -21,14 +21,7 @@ impl Agent {
 }
 
 /// Hosts allowed as AI API base URLs from the provider catalog.
-pub const ALLOWED_API_HOSTS: &[&str] = &[
-    "127.0.0.1",
-    "localhost",
-    "opencode.ai",
-    "api.anthropic.com",
-    "generativelanguage.googleapis.com",
-    "api.deepseek.com",
-];
+pub const ALLOWED_API_HOSTS: &[&str] = &["127.0.0.1", "localhost", "opencode.ai", "api.deepseek.com"];
 
 /// Synthetic provider ID for user-configured OpenAI-compatible endpoints.
 pub const CUSTOM_PROVIDER_ID: &str = "openai-compatible";
@@ -60,7 +53,7 @@ pub fn session_id() -> &'static str {
 /// Catalog provider IDs, in the same order as the frontend provider list.
 /// Kept here because the web server must decide which providers have a key
 /// without trusting a client-supplied list.
-pub const PROVIDER_IDS: [&str; 4] = ["opencode-go", "anthropic", "google", "deepseek"];
+pub const PROVIDER_IDS: [&str; 2] = ["opencode-go", "deepseek"];
 
 /// Canonical OpenAI-compatible base URL for a catalog provider. The web server
 /// resolves base URLs from config.json; this is the fallback default so the
@@ -68,8 +61,6 @@ pub const PROVIDER_IDS: [&str; 4] = ["opencode-go", "anthropic", "google", "deep
 pub fn catalog_base_url(provider: &str) -> Option<&'static str> {
     match provider {
         "opencode-go" => Some("https://opencode.ai/zen/go/v1"),
-        "anthropic" => Some("https://api.anthropic.com/v1"),
-        "google" => Some("https://generativelanguage.googleapis.com/v1beta/openai"),
         "deepseek" => Some("https://api.deepseek.com"),
         _ => None,
     }
@@ -267,17 +258,20 @@ mod tests {
 
     #[test]
     fn validate_base_url_allows_catalog_providers_and_loopback() {
-        assert!(validate_base_url("https://api.anthropic.com/v1").is_ok());
         assert!(validate_base_url("https://api.deepseek.com/v1").is_ok());
+        assert!(validate_base_url("https://opencode.ai/zen/go/v1").is_ok());
         assert!(validate_base_url("http://localhost:11434/v1").is_ok());
         assert!(validate_base_url("http://127.0.0.1:8080/v1").is_ok());
     }
 
     #[test]
     fn validate_provider_base_url_binds_key_to_catalog_host() {
-        assert!(validate_provider_base_url("anthropic", "https://api.anthropic.com/v1").is_ok());
-        assert!(validate_provider_base_url("anthropic", "https://api.deepseek.com/v1").is_err());
-        assert!(validate_provider_base_url("unknown", "https://api.anthropic.com/v1").is_err());
+        assert!(validate_provider_base_url("deepseek", "https://api.deepseek.com/v1").is_ok());
+        assert!(
+            validate_provider_base_url("opencode-go", "https://opencode.ai/zen/go/v1").is_ok()
+        );
+        assert!(validate_provider_base_url("deepseek", "https://opencode.ai/zen/go/v1").is_err());
+        assert!(validate_provider_base_url("unknown", "https://api.deepseek.com/v1").is_err());
     }
 
     #[test]

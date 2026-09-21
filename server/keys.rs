@@ -311,11 +311,11 @@ mod tests {
     fn encrypt_decrypt_roundtrip() {
         let dir = tmp();
         let mut map = HashMap::new();
-        map.insert("anthropic".to_string(), "sk-ant-x".to_string());
+        map.insert("opencode-go".to_string(), "sk-oc-x".to_string());
         map.insert("openai-compatible".to_string(), "sk-custom-y".to_string());
         save_with(&dir, &map, Some("hunter2")).unwrap();
         let raw = std::fs::read_to_string(keys_file(&dir)).unwrap();
-        assert!(!raw.contains("sk-ant-x"), "passphrase set must encrypt");
+        assert!(!raw.contains("sk-oc-x"), "passphrase set must encrypt");
         assert!(looks_like_envelope(&raw));
         let loaded = load_with(&dir, Some("hunter2"));
         assert_eq!(loaded, map);

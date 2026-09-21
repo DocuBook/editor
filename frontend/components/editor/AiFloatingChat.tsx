@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { ListFilterPlus, ArrowUp, Check, RotateCcw, Loader2, X, FileText, Folder } from 'lucide-react'
+
+import { Maximize2, ArrowUp, Check, RotateCcw, Loader2, X, FileText, Folder, ChevronsUpDown } from 'lucide-react'
 import type { AiMenuState } from '../../utils/aiExtension'
 import { getDefaultAIMenuItems } from '../../utils/aiMenu'
 import { useEditorStore } from '../../stores/editor'
@@ -10,6 +11,9 @@ import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
 import { parseMentions } from '../../utils/aiMentions'
+import { fetchProviderModels, type DiscoveredModel } from '../../utils/modelDiscovery'
+import { PROVIDERS } from '../../data/providers'
+import { CUSTOM_PROVIDER_ID } from '../../stores/aiSettings'
 
 type TreeEntry = { path: string; name: string; type: string }
 
@@ -24,6 +28,11 @@ const optionId = (position: number) => `mention-option-${position}`
 
 /** `aria-controls` target for the composer while the picker is open. */
 const MENTION_LISTBOX_ID = 'mention-listbox'
+const MODEL_PROVIDER_LABELS: Record<string, string> = {
+  'opencode-go': 'Go',
+  deepseek: 'DS',
+  [CUSTOM_PROVIDER_ID]: 'OPC',
+}
 
 /** Folder part of a vault path (`docs/notes` for `docs/notes/guide.md`), empty
  *  at the vault root. */
@@ -90,7 +99,18 @@ export default function AiFloatingChat() {
   const vaultPath = useVaultStore((s) => s.vaultPath)
   const { selectionPromptOpen, expanded, input, focusRequest, mentionNotice, setExpanded, setInput, setSelectionPromptOpen, setMentionNotice } = useAiChat()
   const provider = useAiSettings((s) => s.provider)
+  const model = useAiSettings((s) => s.model)
   const savedProviders = useAiSettings((s) => s.savedProviders)
+  const baseUrls = useAiSettings((s) => s.baseUrls)
+  const setProvider = useAiSettings((s) => s.setProvider)
+  const setModel = useAiSettings((s) => s.setModel)
+  const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  const [modelOptions, setModelOptions] = useState<Record<string, DiscoveredModel[]>>({})
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsError, setModelsError] = useState(false)
+
+  const modelPickerRef = useRef<HTMLDivElement>(null)
+  const modelTriggerRef = useRef<HTMLButtonElement>(null)
   const aiConfigured = !!provider && savedProviders.includes(provider)
   const [picker, setPicker] = useState<{ start: number; end: number; query: string } | null>(null)
   const [index, setIndex] = useState<{ vault: string; entries: TreeEntry[]; unreadable: number } | null>(null)
@@ -254,8 +274,6 @@ export default function AiFloatingChat() {
     return getDefaultAIMenuItems(editor, 'user-input').map((item) => ({ ...item, onItemClick: () => { setExpanded(false); item.onItemClick((prompt) => useAiChat.getState().focusInput(prompt)) } }))
   }, [status, editor, setExpanded, selectionPromptOpen])
 
-  if (!ai) return null
-
   const submit = () => {
     const prompt = input.trim()
     if (!prompt || !aiConfigured) return
@@ -273,6 +291,50 @@ export default function AiFloatingChat() {
   const accept = () => { setExpanded(false); ai.acceptChanges() }
   const revert = () => { setExpanded(false); ai.rejectChanges() }
 
+  const modelProviders = savedProviders.filter((id) => id === CUSTOM_PROVIDER_ID || PROVIDERS.some((item) => item.id === id))
+  const loadModels = async () => {
+    setModelsLoading(true)
+    setModelsError(false)
+    let failed = false
+    const discovered = await Promise.all(modelProviders.map(async (id) => {
+      const baseUrl = baseUrls[id] || PROVIDERS.find((item) => item.id === id)?.api
+      if (!baseUrl) return [id, []] as const
+      try { return [id, await fetchProviderModels(id, baseUrl)] as const } catch { failed = true; return [id, []] as const }
+    }))
+    setModelOptions(Object.fromEntries(discovered))
+    setModelsError(failed)
+    setModelsLoading(false)
+  }
+  /** The active selection always has a row, so a failed or empty discovery cannot
+   *  make a configured provider look like it has no models at all. */
+  const discoveredOptions = modelProviders.flatMap((id) => (modelOptions[id] ?? []).map((option) => ({ id, model: option.id })))
+  const pickerOptions = aiConfigured && provider && model && !discoveredOptions.some((option) => option.id === provider && option.model === model)
+    ? [{ id: provider, model }, ...discoveredOptions]
+    : discoveredOptions
+  const selectModel = (id: string, nextModel: string) => {
+    if (!nextModel) return
+    if (provider !== id) setProvider(id)
+    setModel(nextModel)
+    setModelPickerOpen(false)
+  }
+  useEffect(() => {
+    if (!modelPickerOpen) return
+    const dismissOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (!modelPickerRef.current?.contains(target) && !modelTriggerRef.current?.contains(target)) setModelPickerOpen(false)
+    }
+    document.addEventListener('mousedown', dismissOutside)
+    return () => document.removeEventListener('mousedown', dismissOutside)
+  }, [modelPickerOpen])
+
+  if (!ai) return null
+
+  const modelPicker = modelPickerOpen && (
+    <div id="ai-model-listbox" ref={modelPickerRef} className="absolute bottom-full right-0 z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="AI models">
+      {modelsLoading ? <div className="px-2.5 py-1.5 text-[11px] text-muted">Loading models…</div> : pickerOptions.length === 0 ? <div className="px-2.5 py-1.5 text-[11px] text-muted">{modelsError ? 'Could not load models' : 'No models found'}</div> : pickerOptions.map((option) => <button key={`${option.id}:${option.model}`} role="option" aria-selected={option.id === provider && option.model === model} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(option.id, option.model)} className="flex w-full cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] hover:bg-surface-active"><span className="shrink-0 text-[9px] font-semibold text-accent">{MODEL_PROVIDER_LABELS[option.id] || option.id}</span><span className="truncate font-mono">{option.model}</span></button>)}
+    </div>
+  )
+
   const promptInput = (
     <>
       {mentions.length > 0 && <div className="flex flex-wrap gap-1 px-3 pt-2">{mentions.map((mention) => <span key={`${mention.start}:${mention.end}`} className="flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-1 text-[11px] text-accent"><FileText size={11} />{mention.token}<button aria-label={`Remove @${mention.token}`} className="p-1 cursor-pointer hover:text-foreground" onClick={() => removeMention(mention)}><X size={11} /></button></span>)}</div>}
@@ -289,7 +351,13 @@ export default function AiFloatingChat() {
           if (event.key === 'Backspace' && !input && mentions.length) { event.preventDefault(); removeMention(mentions[mentions.length - 1]); return }
           if (event.key === 'Enter' && !event.shiftKey && hasInput && promptEnabled) { event.preventDefault(); submit() }
         }} rows={1} role="combobox" aria-label="AI prompt" aria-expanded={pickerOpen} aria-controls={pickerOpen ? MENTION_LISTBOX_ID : undefined} aria-autocomplete="list" aria-activedescendant={pickerOpen && activeEntry ? optionId(activeIndex) : undefined} disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
-        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <ListFilterPlus size={16} />}</button>}
+        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <Maximize2 size={16} />}</button>}
+      </div>
+      <div className="relative flex justify-end px-2 pb-2">
+        {modelPicker}
+        <button ref={modelTriggerRef} type="button" disabled={!aiConfigured} onClick={() => { setModelPickerOpen((open) => !open); if (!modelPickerOpen) void loadModels() }} aria-label="Select AI model" title={aiConfigured ? 'Select AI model' : 'Configure an API key in Settings (⌘,)'} aria-expanded={modelPickerOpen} aria-controls={modelPickerOpen ? 'ai-model-listbox' : undefined} className="flex max-w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-[10px] text-muted hover:bg-surface-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent">
+          <span className="max-w-52 truncate font-mono">{model || 'Select model'}</span><ChevronsUpDown size={11} />
+        </button>
       </div>
     </>
   )

@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
-import { X, Eye, EyeOff, Check, Loader, RefreshCw, ChevronsUpDown, Search } from 'lucide-react'
+import { X, Eye, EyeOff, Check, Loader, RefreshCw, ChevronsUpDown } from 'lucide-react'
 import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettings, setSavedProviders, type BackendAiSettings, type BackendEndpoint } from '../stores/aiSettings'
 import { resolveProbeModel, autoProbe, isTextOnly } from '../utils/aiProbe'
 import GitSettings from './GitSettings'
@@ -202,13 +202,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [provider, setModel])
   /* oxlint-enable react/set-state-in-effect */
 
-  const [providerSearch, setProviderSearch] = useState('')
   const [showProviderDropdown, setShowProviderDropdown] = useState(false)
-  const [providerHighlightIdx, setProviderHighlightIdx] = useState(0)
-
-  const [modelSearch, setModelSearch] = useState('')
   const [showModelDropdown, setShowModelDropdown] = useState(false)
-  const [modelHighlightIdx, setModelHighlightIdx] = useState(0)
   const [providerDropdownPos, setProviderDropdownPos] = useState<React.CSSProperties | null>(null)
   const [modelDropdownPos, setModelDropdownPos] = useState<React.CSSProperties | null>(null)
 
@@ -221,10 +216,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const providerRef = useRef<HTMLDivElement>(null)
   const modelRef = useRef<HTMLDivElement>(null)
-  const searchRef = useRef<HTMLInputElement>(null)
-  const modelSearchRef = useRef<HTMLInputElement>(null)
-  const providerListRef = useRef<HTMLDivElement>(null)
-  const modelListRef = useRef<HTMLDivElement>(null)
+
   /** The dropdowns are rendered into document.body (see the createPortal calls
    *  below): .ui-dialog applies backdrop-filter, which makes it the containing
    *  block for position:fixed descendants, so dropdown coordinates taken from
@@ -250,19 +242,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
   }, [backendCfg, provider])
   /* oxlint-enable react/set-state-in-effect */
 
-  /** Scroll highlighted provider into view on keyboard navigation */
-  useEffect(() => {
-    if (!showProviderDropdown) return
-    const el = providerListRef.current?.children[providerHighlightIdx] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [providerHighlightIdx, showProviderDropdown])
-
-  /** Scroll highlighted model into view on keyboard navigation */
-  useEffect(() => {
-    if (!showModelDropdown) return
-    const el = modelListRef.current?.children[modelHighlightIdx] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [modelHighlightIdx, showModelDropdown])
 
   useEffect(() => {
     const h = (e: MouseEvent) => { const t = e.target as Node; if (providerRef.current && !providerRef.current.contains(t) && !providerDropdownRef.current?.contains(t)) { setShowProviderDropdown(false); setProviderDropdownPos(null) } }
@@ -275,10 +254,6 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     window.addEventListener('mousedown', h)
     return () => window.removeEventListener('mousedown', h)
   }, [])
-
-  const filteredProviders = providers.filter(p =>
-    !providerSearch || p.name.toLowerCase().includes(providerSearch.toLowerCase()) || p.id.toLowerCase().includes(providerSearch.toLowerCase())
-  )
 
   const selectProviderFn = (p: ProviderInfo) => {
     setProvider(p.id) // restores saved apiKey + model for this provider (model default is picked by the discovery effect above)
@@ -403,7 +378,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             <div onClick={() => { 
                 const r = providerRef.current?.getBoundingClientRect()
                 if (r) setProviderDropdownPos({ position: 'fixed', top: r.bottom + 4, left: r.left, right: window.innerWidth - r.right, width: r.width })
-                setShowProviderDropdown(o => !o); setTimeout(() => searchRef.current?.focus(), 50) 
+                setShowProviderDropdown(o => !o)
               }}
               className={'flex items-center gap-2 bg-background border border-border rounded-md px-3 py-[7px] cursor-pointer text-[13px] ' + (provider ? 'text-foreground' : 'text-muted')}>
               <span className="flex-1 flex items-center gap-2">
@@ -420,21 +395,11 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                  Safari 16+, and this minimised dropdown lists an option list whose
                  overflow escapes the 280px cap on Safari 15 (macOS 12). */
               <div ref={providerDropdownRef} style={providerDropdownPos} className="ui-popover max-h-[280px] z-[200] overflow-hidden">
-                <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
-                  <Search size={14} className="text-muted shrink-0" />
-                  <input ref={searchRef} type="text" value={providerSearch} onChange={e => { setProviderSearch(e.target.value); setProviderHighlightIdx(0) }}
-                    onKeyDown={e => {
-                      if (e.key === 'ArrowDown') { e.preventDefault(); setProviderHighlightIdx(i => Math.min(i + 1, filteredProviders.length - 1)) }
-                      if (e.key === 'ArrowUp') { e.preventDefault(); setProviderHighlightIdx(i => Math.max(i - 1, 0)) }
-                      if (e.key === 'Enter' && filteredProviders[providerHighlightIdx]) { e.preventDefault(); selectProviderFn(filteredProviders[providerHighlightIdx]) }
-                      if (e.key === 'Escape') { e.preventDefault(); setShowProviderDropdown(false) }
-                    }}
-                    placeholder="Search providers..." className="w-full bg-transparent border-none outline-none text-xs text-foreground" />
-                </div>
-                <div ref={providerListRef} className="max-h-[240px] overflow-y-auto">
-                  {filteredProviders.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">No providers found</div> : filteredProviders.map((p, i) => (
+
+                <div className="max-h-[240px] overflow-y-auto">
+                  {providers.map((p) => (
                     <div key={p.id} onClick={() => selectProviderFn(p)}
-                      className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-accent text-on-accent' : i === providerHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
+                      className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-[13px] ' + (provider === p.id ? 'bg-accent text-on-accent' : 'text-foreground-secondary hover:bg-surface-active')}>
                       <span className="flex-1">{p.name}</span>
                       {isTextOnly(p.id, model, probeTools) && (
                         <TextOnlyBadge measured={isProbed(p.id, model, probeTools)} />
@@ -477,11 +442,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
               ) : (
                 <>
                   <label className="text-xs font-medium text-foreground mb-1.5 block">Model</label>
-                  {/* The catalog endpoint the transport will use. Rendered for a
-                      CONFIGURED provider too (from the fetched endpoint, falling
-                      back to the catalog): the lock must show what is bound, not
-                      hide the connection the user is locked to. */}
-                  <div className="text-[10px] text-muted font-mono mb-1 break-all">Base URL: {locked ? (stored?.baseUrl || selectedProvider.api) : selectedProvider.api}</div>
+
                   {/* While the backend fetch is in flight, the lock state is not yet
                       KNOWN — offering the picker here is what let a configured
                       provider look editable for a frame. */}
@@ -505,7 +466,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 <div onClick={() => { 
                     const r = modelRef.current?.getBoundingClientRect()
                     if (r) setModelDropdownPos({ position: 'fixed', top: r.bottom + 4, left: r.left, right: window.innerWidth - r.right, width: r.width })
-                    setShowModelDropdown(o => !o); setTimeout(() => modelSearchRef.current?.focus(), 50) 
+                    setShowModelDropdown(o => !o)
                   }}
                   className="flex items-center gap-2 bg-background border border-border rounded-md px-3 py-[7px] cursor-pointer text-[13px] text-foreground">
                   {modelsLoading ? <span className="text-muted">Loading models…</span> : model ? (() => {
@@ -516,28 +477,14 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                 </div>
                 {showModelDropdown && modelDropdownPos && createPortal(
                   <div ref={modelDropdownRef} style={modelDropdownPos} className="ui-popover max-h-[240px] z-[200] overflow-hidden">
-                    <div className="px-2 py-1.5 border-b border-border-subtle flex items-center gap-1.5">
-                      <Search size={14} className="text-muted shrink-0" />
-                      <input ref={modelSearchRef} type="text" value={modelSearch} onChange={e => { setModelSearch(e.target.value); setModelHighlightIdx(0) }}
-                        onKeyDown={e => {
-                          const filtered = modelOptions.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
-                          if (e.key === 'ArrowDown') { e.preventDefault(); setModelHighlightIdx(i => Math.min(i + 1, filtered.length - 1)) }
-                          if (e.key === 'ArrowUp') { e.preventDefault(); setModelHighlightIdx(i => Math.max(i - 1, 0)) }
-                          if (e.key === 'Enter' && filtered[modelHighlightIdx]) { e.preventDefault(); setModel(filtered[modelHighlightIdx].id); setShowModelDropdown(false) }
-                          if (e.key === 'Escape') { e.preventDefault(); setShowModelDropdown(false) }
-                        }}
-                        placeholder="Search models..." className="w-full bg-transparent border-none outline-none text-xs text-foreground" />
-                    </div>
-                    <div ref={modelListRef} className="max-h-[200px] overflow-y-auto">
-                      {(() => {
-                        const filtered = modelOptions.filter(m => !modelSearch || m.name.toLowerCase().includes(modelSearch.toLowerCase()) || m.id.toLowerCase().includes(modelSearch.toLowerCase()))
-                        return filtered.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">No models found</div> : filtered.map((m, i) => (
-                          <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
-                            className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-accent text-on-accent' : i === modelHighlightIdx ? 'bg-surface-active text-foreground-secondary' : 'text-foreground-secondary')}>
-                            <span className="flex-1">{m.id}</span>
-                          </div>
-                        ))
-                      })()}
+
+                    <div className="max-h-[200px] overflow-y-auto">
+                      {modelOptions.length === 0 ? <div className="py-4 px-3 text-xs text-muted text-center">{modelsError ? 'Could not load models' : 'No models found'}</div> : modelOptions.map((m) => (
+                        <div key={m.id} onClick={() => { setModel(m.id); setShowModelDropdown(false) }}
+                          className={'flex items-center gap-2 px-3 py-[7px] cursor-pointer text-xs font-mono ' + (m.id === model ? 'bg-accent text-on-accent' : 'text-foreground-secondary hover:bg-surface-active')}>
+                          <span className="flex-1">{m.id}</span>
+                        </div>
+                      ))}
                     </div>
                   </div>,
                   document.body,
@@ -571,7 +518,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
                     </button>
                     <button onClick={handleTest} disabled={!keyInput || testing || (isCustom && !baseUrlInput.trim())}
                       aria-label="Check connection" title="Check connection"
-                      className="p-[7px] rounded-md bg-transparent text-muted border border-border cursor-pointer flex items-center justify-center hover:bg-surface-active hover:text-foreground-secondary disabled:opacity-40 disabled:cursor-default">
+                      className="p-[7px] rounded-md bg-success-surface text-success border border-success-border cursor-pointer flex items-center justify-center hover:bg-success hover:text-on-accent disabled:opacity-40 disabled:cursor-default">
                       {testing ? <Loader size={13} className="animate-spin" /> : <RefreshCw size={13} />}
                       <span className="sr-only">Test</span>
                     </button>

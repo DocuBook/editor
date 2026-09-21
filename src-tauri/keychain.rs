@@ -185,8 +185,8 @@ mod tests {
 
     #[test]
     fn bounded_providers_deduplicates_in_order() {
-        let providers = vec!["anthropic".into(), "google".into(), "anthropic".into()];
-        assert_eq!(bounded_providers(&providers).unwrap(), ["anthropic", "google"]);
+        let providers = vec!["opencode-go".into(), "deepseek".into(), "opencode-go".into()];
+        assert_eq!(bounded_providers(&providers).unwrap(), ["opencode-go", "deepseek"]);
     }
 
     #[test]

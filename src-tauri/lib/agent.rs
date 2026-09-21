@@ -741,26 +741,26 @@ mod tests {
         // provider becomes an endpoint, but the legacy model is the active
         // provider's only — copying it onto the others would claim a model they were
         // never used with.
-        let raw = r#"{"provider":"anthropic","model":"claude-sonnet-5","probes":{"anthropic":{"claude-sonnet-5":true},"deepseek":{"deepseek-chat":false,"bad":"x"}}}"#;
+        let raw = r#"{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{"opencode-go":{"deepseek-v4-flash":true},"deepseek":{"deepseek-chat":false,"bad":"x"}}}"#;
         let s = parse_selection(raw);
-        assert_eq!(s.active, "anthropic");
+        assert_eq!(s.active, "opencode-go");
         assert_eq!(s.endpoints.len(), 2, "every probed provider becomes an endpoint");
-        assert_eq!(s.endpoints["anthropic"].model, "claude-sonnet-5");
-        assert!(s.endpoints["anthropic"].probes["claude-sonnet-5"]);
+        assert_eq!(s.endpoints["opencode-go"].model, "deepseek-v4-flash");
+        assert!(s.endpoints["opencode-go"].probes["deepseek-v4-flash"]);
         assert_eq!(s.endpoints["deepseek"].model, "", "legacy model belongs to the active provider");
         assert!(!s.endpoints["deepseek"].probes["deepseek-chat"], "probe results migrate");
         assert_eq!(s.endpoints["deepseek"].probes.len(), 1, "non-bool entry dropped");
-        assert_eq!(s.endpoints["anthropic"].base_url, "", "base URLs come from the keychain, not the file");
+        assert_eq!(s.endpoints["opencode-go"].base_url, "", "base URLs come from the keychain, not the file");
     }
 
     #[test]
     fn selected_but_unprobed_provider_survives_migration() {
         // A provider selected but never probed still has to survive the migration,
         // or the UI cannot recover the selection it lost.
-        let s = parse_selection(r#"{"provider":"google","model":"gemini-3-pro","probes":{}}"#);
-        assert_eq!(s.active, "google");
-        assert_eq!(s.endpoints["google"].model, "gemini-3-pro");
-        assert!(s.endpoints["google"].probes.is_empty());
+        let s = parse_selection(r#"{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{}}"#);
+        assert_eq!(s.active, "opencode-go");
+        assert_eq!(s.endpoints["opencode-go"].model, "deepseek-v4-flash");
+        assert!(s.endpoints["opencode-go"].probes.is_empty());
     }
 
     #[test]
