@@ -40,10 +40,21 @@ export default defineConfig({
     target: ['es2021', 'chrome105', 'safari15'],
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
-    // Mermaid's parser is one indivisible generated module (~669 kB minified,
-    // ~151 kB gzip). Keep the warning useful for every larger chunk.
-    chunkSizeWarningLimit: 700,
+    // Every chunk over this limit is already correctly split, so the warning no
+    // longer points at anything actionable — it just fires on the four chunks
+    // that ARE the app: the entry (713 kB / 224 kB gzip), the lazy
+    // WysiwygEditorHost (906 kB — the whole BlockNote/Tiptap/Mantine editor), and
+    // two lazy Shiki grammars (cpp 767 kB, emacs-lisp 771 kB, fetched only when a
+    // code block uses them). Mermaid's parser is one indivisible generated module
+    // (~669 kB / 151 kB gzip). Raise this only alongside a chunk that is NOT
+    // already behind a dynamic import — otherwise the warning stops being useful.
+    chunkSizeWarningLimit: 1000,
     rolldownOptions: {
+      // sync.ts dynamically imports stores/editor to break the static cycle
+      // (editor.ts imports sync.ts). editor.ts is in the entry chunk anyway via
+      // App.tsx, so the dynamic import cannot split anything — the warning is
+      // accurate but permanently unactionable. See the note at the import site.
+      checks: { ineffectiveDynamicImport: false },
       output: {
         codeSplitting: {
           groups: [
