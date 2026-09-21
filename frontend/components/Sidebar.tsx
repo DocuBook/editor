@@ -58,7 +58,6 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const [newName, setNewName] = useState('')
   const newInputRef = useRef<HTMLInputElement>(null)
   const createBusyRef = useRef(false)
-  const plusMenuRef = useRef<HTMLSpanElement>(null)
   const ctxMenuRef = useRef<HTMLDivElement>(null)
   const sidebarActionsRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
@@ -337,11 +336,10 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           </button>
 
         </span>
-        <span className="tip-wrap relative shrink-0" ref={plusMenuRef}>
-          <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
-            <Plus size={14} />
+        <span className="relative shrink-0">
+          <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" title="Create a file/folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
+            <Plus size={15} />
           </button>
-          <span className="tip tip-left">Create a file/folder</span>
 
         </span>
         {(vaultMenuOpen || showPlusMenu) && (
@@ -369,7 +367,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
               </div>
             )}
             {showPlusMenu && (
-              <div data-plus-popup className="tip-suppress">
+              <div data-plus-popup>
                 <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('file'); setNewName('') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                   <FileText size={14} /> New File
                   <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
@@ -383,7 +381,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           </SidebarPopover>
         )}
         <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" title="Settings" className={iconBtn}>
-          <Settings size={14} />
+          <Settings size={15} />
         </button>
       </div>
       <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
