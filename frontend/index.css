@@ -636,6 +636,19 @@ body .mobile-sidebar-drawer-body > aside {
     }
 }
 
+/* Pinned chrome on compact screens (<640px): the rail has height 0, so the
+   composer's `bottom` has to be resolved against the scroll container's edge or
+   the window's, whichever is nearer — `1.25rem` is the pre-`max()` fallback. */
+@media (max-width: 639px) {
+    #root .editor-tab-bar {
+        position: sticky;
+        top: 0;
+    }
+    #root .editor-ai-floating {
+        bottom: max(calc(100% - 100vh), 1.25rem);
+    }
+}
+
 /* Tab boundaries live on the strip, not on every tab: a divider only between
    neighbouring tabs, so there is no dangling border after the last one. */
 .tab-strip > .tab-item + .tab-item {
