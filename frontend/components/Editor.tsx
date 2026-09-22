@@ -127,7 +127,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     <div className="editor-root relative isolate flex-1 flex flex-col min-w-0 min-h-0">
       <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       <div className="relative z-0 flex-1 flex flex-col min-h-0">
-        <div className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' ? 'max-[639px]:pb-40' : '')}>
+        <div className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-32 max-[639px]:pb-40' : '')}>
           {inner}
         </div>
         {kind === 'wysiwyg' && editMode === 'editor' && (
