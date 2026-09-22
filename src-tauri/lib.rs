@@ -74,7 +74,7 @@ pub fn run() {
             commands::git::git_settings, commands::git::git_add_remote, commands::git::git_remove_remote, commands::git::git_set_identity, commands::git::git_init,
             commands::git::git_remote_probe, commands::git::git_fetch, commands::git::git_pull, commands::git::git_remote_merge, commands::git::git_rebase, commands::git::git_rebase_continue, commands::git::git_rebase_abort, commands::git::git_merge_abort,
             commands::wiki::wiki_backlinks, commands::wiki::wiki_suggest, commands::wiki::wiki_resolve, commands::search::search_vault, commands::git::git_diff_summary, commands::git::git_stage, commands::git::git_commit, commands::git::git_push_only, commands::git::git_branches, commands::git::git_create_branch, commands::git::git_checkout, commands::git::git_status,
-            commands::agent::custom_ai_config, commands::agent::ai_settings, commands::agent::set_ai_settings, commands::agent::set_probe, commands::agent::set_probes,
+            commands::agent::custom_ai_config, commands::agent::ai_settings, commands::agent::set_ai_settings, commands::agent::set_probe,
             commands::markdown::md_to_html, commands::agent::ask_ai, commands::agent::cancel_ai, commands::agent::set_api_key, commands::agent::set_custom_endpoint, commands::agent::delete_api_key, commands::agent::list_api_keys, commands::agent::test_connection, commands::agent::list_models,
     commands::app::health, commands::app::app_ready_to_close, commands::vault::open_system_settings,
         ])

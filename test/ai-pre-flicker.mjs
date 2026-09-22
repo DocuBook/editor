@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
 
 const PORT = 4277
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -54,12 +54,10 @@ try {
     })
   })
 
+  await mockAiSettings(page)
+
   await page.addInitScript((vaultPath) => {
     localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
-    localStorage.setItem('docubook:ai-settings', JSON.stringify({ state: {
-      provider: 'openai-compatible', model: 'mock-model', savedProviders: ['openai-compatible'],
-      probeTools: {}, baseUrls: { 'openai-compatible': 'http://mock.invalid/v1' }, models: {},
-    }, version: 0 }))
   }, VAULT)
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })

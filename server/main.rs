@@ -9,8 +9,6 @@
 //! Docker: see ../Dockerfile (multi-stage, single binary, non-root).
 #[path = "../src-tauri/agent/mod.rs"]
 mod agent;
-#[path = "../src-tauri/rust-ai/mod.rs"]
-mod rust_ai;
 mod ai;
 mod auth;
 mod auth_routes;
@@ -24,6 +22,8 @@ mod keys;
 #[path = "../src-tauri/markdown.rs"]
 mod markdown;
 mod probe;
+#[path = "../src-tauri/rust-ai/mod.rs"]
+mod rust_ai;
 #[path = "../src-tauri/search/mod.rs"]
 mod search;
 #[path = "../src-tauri/vault/mod.rs"]
@@ -147,6 +147,40 @@ fn main() {
         auth: Arc::new(AuthState::new(Path::new(&data_dir))),
         data_dir: data_dir.clone().into(),
     };
+
+    // Move legacy keys.json `<provider>:base_url` entries into config.json (single
+    // source of truth for AI endpoints). Idempotent: no-op once migrated.
+    let migrated = keys::migrate_base_urls(Path::new(&data_dir));
+    if !migrated.is_empty() {
+        // One guard, one batch: config.json is written once per moved URL instead
+        // of once per entry, and no second lock is taken while it is held.
+        let mut cfg = state.auth.config.lock().expect("lock");
+        let mut moved = Vec::new();
+        for (provider, url) in migrated {
+            // Never clobber a URL already in config.json — that one was written
+            // after the migration and is the more recent truth.
+            if cfg
+                .ai
+                .endpoints
+                .get(&provider)
+                .is_some_and(|e| !e.base_url.is_empty())
+            {
+                continue;
+            }
+            let model = cfg
+                .ai
+                .endpoints
+                .get(&provider)
+                .map(|e| e.model.clone())
+                .unwrap_or_default();
+            let _ = cfg.migrate_endpoint(&provider, &model, &url);
+            moved.push(provider);
+        }
+        drop(cfg);
+        if !moved.is_empty() {
+            info!(event = "base_url_migrated", providers = ?moved);
+        }
+    }
 
     let app = build_router(state, PathBuf::from(&www_dir));
 

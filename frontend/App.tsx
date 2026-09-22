@@ -20,6 +20,7 @@ import SetupWizard from './components/SetupWizard'
 import Login from './components/Login'
 import { logger } from './utils/logger'
 import { useTheme } from './stores/theme'
+import { hydrateAiSettings } from './stores/aiSettings'
 
 /** Root application component with keyboard shortcuts. */
 export default function App() {
@@ -84,6 +85,11 @@ export default function App() {
   }, [isVaultOpen, modalOpen, status])
   /* oxlint-enable react/set-state-in-effect */
   useEffect(() => { useAuth.getState().init() }, [])
+
+  /** AI connection data lives in the backend's config.json — the browser keeps no
+   *  copy across sessions (no persist middleware), so it must be fetched once at
+   *  boot, before anything renders a provider or a model. */
+  useEffect(() => { void hydrateAiSettings() }, [])
 
   /** Single git-status poller shared by the editor UI. */
   useGitPolling()

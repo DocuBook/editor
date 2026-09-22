@@ -17,10 +17,12 @@ export async function getAiConfig(): Promise<AiConfig> {
     const p = provider
       ? PROVIDERS.find((x) => x.id === provider)
       : undefined;
-    /** Custom OpenAI-compatible endpoints aren't in the catalog — their base URL
-     *  lives in the store and is bound server-side at save time. The backend is
-     *  only consulted when the store lost it (fresh browser), never per send. */
-    let baseUrl = p?.api;
+    /** Base URL resolution order: the store (hydrated from the backend's
+     *  endpoints, which own the persisted value) wins; the catalog entry is only
+     *  a default for a provider the backend has no URL for. Custom endpoints get
+     *  one extra step — the env override, which is what the backend actually
+     *  sends — and never a per-send backend round-trip. */
+    let baseUrl = st.baseUrls[provider] || p?.api;
     if (provider === CUSTOM_PROVIDER_ID) {
       baseUrl = st.baseUrls[provider] || (await customBaseUrl()) || undefined;
     }

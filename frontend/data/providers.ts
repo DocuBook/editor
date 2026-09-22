@@ -23,7 +23,5 @@ export interface ProviderInfo {
 
 export const PROVIDERS: ProviderInfo[] = [
   { id: 'opencode-go', name: 'Opencode Go', api: 'https://opencode.ai/zen/go/v1', defaultModel: 'deepseek-v4-flash' },
-  { id: 'anthropic', name: 'Anthropic', api: 'https://api.anthropic.com/v1', defaultModel: 'claude-sonnet-5' },
-  { id: 'google', name: 'Google Gemini', api: 'https://generativelanguage.googleapis.com/v1beta/openai', defaultModel: 'gemini-3.7-flash' },
   { id: 'deepseek', name: 'DeepSeek', api: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash' },
 ]

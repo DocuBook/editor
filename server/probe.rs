@@ -23,6 +23,24 @@ pub(crate) fn custom_env_base_url() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/** Fallback for callers that do not hold a URL: the endpoint saved in config.json
+ *  is the single source of truth, with the provider catalog as the last resort.
+ *  A browser that has not loaded its settings yet (auto-probe on first load) then
+ *  still reaches the configured gateway instead of erroring. */
+fn configured_base_url(state: &AppState, provider: &str) -> Option<String> {
+    let saved = state
+        .auth
+        .config
+        .lock()
+        .expect("lock")
+        .ai
+        .endpoints
+        .get(provider)
+        .map(|e| e.base_url.clone())
+        .filter(|u| !u.is_empty());
+    saved.or_else(|| agent::catalog_base_url(provider).map(str::to_string))
+}
+
 /** Mirrors lib.rs ask_ai + test_connection — streams SSE events to the browser. */
 /** Runtime model discovery — GET {baseUrl}/models with the stored key (data dir),
  *  so the frontend never holds API keys. SSRF-guarded + no redirects. */
@@ -43,14 +61,19 @@ pub(crate) async fn list_models(
         .ok_or_else(|| "No API key found".to_string())?;
     let effective_base_url = if let Some((env_url, _, _)) = env_custom {
         env_url
-    } else if provider == agent::CUSTOM_PROVIDER_ID {
-        keys::get_base_url(&state.data_dir, provider)
-            .map_err(|_| "No custom base URL saved".to_string())?
     } else {
-        if base_url.is_empty() {
-            return Err("Base URL is required".into());
-        }
-        base_url.to_string()
+        // Once configured, the backend-owned endpoint is authoritative. The
+        // browser URL is only accepted during first-time custom setup.
+        let resolved = configured_base_url(state, provider).or_else(|| {
+            (!base_url.is_empty()).then(|| base_url.to_string())
+        });
+        resolved.ok_or_else(|| {
+            if provider == agent::CUSTOM_PROVIDER_ID {
+                "No custom base URL saved".to_string()
+            } else {
+                "Base URL is required".to_string()
+            }
+        })?
     };
     let custom_resolution = if provider == agent::CUSTOM_PROVIDER_ID {
         Some(agent::validated_custom_addrs(&effective_base_url, false)?)
@@ -68,7 +91,7 @@ pub(crate) async fn list_models(
     let client = client_builder
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
-    let models = agent::fetch_models(&client, &effective_base_url, &api_key).await?;
+    let models = agent::fetch_models(&client, provider, &effective_base_url, &api_key).await?;
     serde_json::to_string(&models).map_err(|e| e.to_string())
 }
 
@@ -96,9 +119,14 @@ pub(crate) async fn test_connection(
     } else {
         api_key
     };
-    let base_url = if base_url.is_empty() && provider == agent::CUSTOM_PROVIDER_ID {
-        keys::get_base_url(&state.data_dir, provider)
-            .map_err(|_| "No custom base URL saved".to_string())?
+    let base_url = if base_url.is_empty() {
+        configured_base_url(state, provider).ok_or_else(|| {
+            if provider == agent::CUSTOM_PROVIDER_ID {
+                "No custom base URL saved".to_string()
+            } else {
+                "Base URL is required".to_string()
+            }
+        })?
     } else {
         base_url
     };
@@ -121,11 +149,18 @@ pub(crate) async fn test_connection(
         .build()
         .map_err(|e| format!("Client error: {}", e))?;
     let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    // OpenCode Go 400s without a session id; every other provider ignores it.
+    let session = (provider == agent::SESSION_PROVIDER_ID).then(agent::session_id);
 
     let basic_body = json!({ "model": model, "messages": [{ "role": "user", "content": "say ok" }], "max_tokens": 8 });
-    let res = client
+    let mut basic = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", api_key))
+        .header("User-Agent", agent::AI_USER_AGENT);
+    if let Some(session) = &session {
+        basic = basic.header("x-opencode-session", *session);
+    }
+    let res = basic
         .json(&basic_body)
         .send()
         .await
@@ -171,9 +206,13 @@ pub(crate) async fn test_connection(
         "tool_choice": "required",
         "max_tokens": 50,
     });
-    let tool_req = client
+    let mut tool_req = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", api_key));
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("User-Agent", agent::AI_USER_AGENT);
+    if let Some(session) = &session {
+        tool_req = tool_req.header("x-opencode-session", *session);
+    }
     let tool_res = tool_req
         .json(&tool_body)
         .send()
@@ -184,9 +223,14 @@ pub(crate) async fn test_connection(
         // support tool calls in "auto" mode (e.g. opencode.ai, DeepSeek thinking).
         // Retry once with "auto" before concluding tools:false.
         tool_body["tool_choice"] = json!("auto");
-        let auto = client
+        let mut retry = client
             .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
+            .header("User-Agent", agent::AI_USER_AGENT);
+        if let Some(session) = &session {
+            retry = retry.header("x-opencode-session", *session);
+        }
+        let auto = retry
             .json(&tool_body)
             .send()
             .await;
