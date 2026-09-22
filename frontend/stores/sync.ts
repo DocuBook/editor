@@ -114,8 +114,7 @@ interface SyncState {
   resolveKeepMine: (path: string) => Promise<boolean>
   /** Resolve a conflict by adopting the disk content and dropping the local edit. */
   resolveKeepTheirs: (path: string) => void
-  /** Resolve by saving the local copy beside the original, leaving disk intact. */
-  resolveKeepBoth: (path: string) => Promise<string | null>
+
   /** Attempt to flush the queue; safe to call repeatedly and concurrently. */
   drain: () => Promise<void>
   /** Queue depth — drives the "N changes pending" indicator. */
@@ -143,21 +142,6 @@ export function contentVersion(content: string): string {
   return hash.toString(16).padStart(16, '0')
 }
 
-/** Suffix inserted before the extension for a "keep both" copy. Exported so the
- *  editor store can name the same companion file in its toast. */
-export function conflictCopyPath(path: string, suffix = ' (conflicted copy)'): string {
-  const slash = path.lastIndexOf('/')
-  const dir = slash === -1 ? '' : path.slice(0, slash + 1)
-  const name = path.slice(slash + 1)
-  const dot = name.lastIndexOf('.')
-  const stem = dot > 0 ? name.slice(0, dot) : name
-  const ext = dot > 0 ? name.slice(dot) : ''
-  return `${dir}${stem}${suffix}${ext}`
-}
-
-function uniqueConflictCopyPath(path: string): string {
-  return conflictCopyPath(path, ` (conflicted copy ${createId('')})`)
-}
 
 const RETRYABLE = /cannot reach server|not responding|no vault|timed out|network|failed to fetch|load failed/i
 
@@ -345,28 +329,6 @@ export const useSyncStore = create<SyncState>()(
           set({ conflicts: get().conflicts.filter(c => c.path !== path) })
         },
 
-        resolveKeepBoth: async (path) => {
-          const conflict = get().conflicts.find(c => c.path === path)
-          if (!conflict) return null
-          let copyPath = conflictCopyPath(path)
-          for (let attempt = 0; attempt < 2; attempt++) {
-            const raw = await invoke<string>('write_file_checked', {
-              path: copyPath,
-              content: conflict.mine,
-              baseVersion: null,
-            })
-            const outcome = JSON.parse(raw) as WriteOutcome
-            if (outcome.status === 'written') {
-              set({ conflicts: get().conflicts.filter(c => c.path !== path) })
-              return copyPath
-            }
-            // Only a target-exists conflict means the candidate name collided.
-            // Missing/legacy reason is treated conservatively as a version conflict.
-            if (outcome.reason !== 'target_exists') throw new Error('Could not create a conflicted copy because the target changed')
-            copyPath = uniqueConflictCopyPath(path)
-          }
-          throw new Error('Could not create a conflicted copy; both candidate names are occupied')
-        },
 
         drain: async () => {
           const state = get()

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useSyncStore, contentVersion, isRetryableError, conflictCopyPath, persistedSyncState } from '../../../frontend/stores/sync'
+import { useSyncStore, contentVersion, isRetryableError, persistedSyncState } from '../../../frontend/stores/sync'
 import { invoke } from '../../../frontend/lib/ipc'
 
 vi.mock('../../../frontend/lib/ipc', () => ({
@@ -39,20 +39,6 @@ describe('contentVersion', () => {
   })
 })
 
-describe('conflictCopyPath', () => {
-  it('inserts the marker before the extension and keeps the folder', () => {
-    expect(conflictCopyPath('notes/plan.md')).toBe('notes/plan (conflicted copy).md')
-    expect(conflictCopyPath('README.md')).toBe('README (conflicted copy).md')
-  })
-
-  it('does not treat a leading dot as an extension', () => {
-    expect(conflictCopyPath('.gitignore')).toBe('.gitignore (conflicted copy)')
-  })
-
-  it('appends when there is no extension', () => {
-    expect(conflictCopyPath('notes/plain')).toBe('notes/plain (conflicted copy)')
-  })
-})
 
 describe('isRetryableError', () => {
   it('treats transport and closed-vault failures as retryable', () => {
@@ -152,36 +138,6 @@ describe('sync store queue and drain', () => {
     await first
   })
 
-
-  it('resolves keep-mine with a UUID companion after the readable name is occupied', async () => {
-    vi.stubGlobal('crypto', { randomUUID: () => 'test-id' })
-    vi.mocked(invoke)
-      .mockResolvedValueOnce(conflicted('existing', 'v1', 'target_exists'))
-      .mockResolvedValueOnce(written('v2'))
-    useSyncStore.setState({
-      conflicts: [{ id: 'conflict-a', path: 'a.md', mine: 'mine', theirs: 'theirs', theirsVersion: 'v9', baseContent: null, detectedAt: 0 }],
-      queue: [], draining: false, attempts: 0, lastError: '',
-    })
-
-    await expect(useSyncStore.getState().resolveKeepBoth('a.md')).resolves.toBe('a (conflicted copy test-id).md')
-    expect(invoke).toHaveBeenNthCalledWith(2, 'write_file_checked', {
-      path: 'a (conflicted copy test-id).md', content: 'mine', baseVersion: null,
-    })
-    vi.unstubAllGlobals()
-  })
-
-  it('keeps the conflict when both keep-both names are occupied', async () => {
-    vi.stubGlobal('crypto', { randomUUID: () => 'test-id' })
-    vi.mocked(invoke).mockResolvedValue(conflicted('existing', 'v1', 'target_exists'))
-    useSyncStore.setState({
-      conflicts: [{ id: 'conflict-a', path: 'a.md', mine: 'mine', theirs: 'theirs', theirsVersion: 'v9', baseContent: null, detectedAt: 0 }],
-      queue: [], draining: false, attempts: 0, lastError: '',
-    })
-
-    await expect(useSyncStore.getState().resolveKeepBoth('a.md')).rejects.toThrow('both candidate names are occupied')
-    expect(useSyncStore.getState().conflicts).toHaveLength(1)
-    vi.unstubAllGlobals()
-  })
 
   it('resolves keep-mine by re-basing on the current disk version', async () => {
     vi.mocked(invoke).mockResolvedValue(written('v10'))

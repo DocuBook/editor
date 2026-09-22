@@ -64,8 +64,7 @@ interface EditorState {
   applyConflictTheirs: (path: string) => Promise<void>
   /** Keep the local edit for a conflicted tab (overwrites disk) and rebase. */
   applyConflictMine: (path: string) => Promise<void>
-  /** Save the local edit beside the original, leaving disk content intact. */
-  applyConflictKeepBoth: (path: string) => Promise<void>
+
   /** Rebase a tab only when its queued content is still the current in-memory edit. */
   rebaseQueuedWrite: (path: string, write: { content: string; contentVersion: string }) => void
   /** Re-read open tabs from disk after a branch switch. Dirty tabs are kept
@@ -392,18 +391,7 @@ export const useEditorStore = create<EditorState>()(
     set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine) } : t) })
   },
 
-  /** Keep both: write the local edit to a companion file, disk keeps its content. */
-  applyConflictKeepBoth: async (path) => {
-    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path)
-    if (!conflict) return
-    const copyPath = await useSyncStore.getState().resolveKeepBoth(path)
-    if (!copyPath) return
-    // The original tab now tracks the disk version; the local edit lives on in
-    // the companion note, so the tab is no longer dirty against this file.
-    get().setContent(path, conflict.theirs)
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion } : t) })
-    toast.success(`Kept your version as "${copyPath.split('/').pop()}"`)
-  },
+
 
   setEditMode: (mode) => { set({ editMode: mode }) },
   /** Toggle editor mode; flush Editor → store BEFORE switching to Code so edits are not lost. */

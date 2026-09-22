@@ -102,13 +102,12 @@ export default function App() {
   const [dismissedConflicts, setDismissedConflicts] = useState<Record<string, true>>({})
   const conflictIdentity = (conflict: typeof conflicts[number]) => conflict.id
   const activeConflict = conflicts.find(c => !dismissedConflicts[conflictIdentity(c)])
-  const resolveConflict = useCallback(async (choice: 'mine' | 'theirs' | 'both') => {
+  const resolveConflict = useCallback(async (choice: 'mine' | 'theirs') => {
     const path = useSyncStore.getState().conflicts.find(c => !dismissedConflicts[conflictIdentity(c)])?.path
     if (!path) return
     const editor = useEditorStore.getState()
     if (choice === 'mine') await editor.applyConflictMine(path)
-    else if (choice === 'theirs') await editor.applyConflictTheirs(path)
-    else await editor.applyConflictKeepBoth(path)
+    else await editor.applyConflictTheirs(path)
   }, [dismissedConflicts])
 
   /** Offline queue: drain when connectivity returns or auth/vault becomes ready. */

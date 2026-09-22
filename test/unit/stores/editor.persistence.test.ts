@@ -291,23 +291,6 @@ describe('editor store tab persistence', () => {
     expect(useEditorStore.getState().tabs[0].dirty).toBe(false)
   })
 
-  /** "Keep both" is the only resolution that cannot lose data, so it must
-   *  actually preserve the local edit and leave the disk winner in place. */
-  it('keeps the local edit as a companion file when the user picks keep-both', async () => {
-    const disk = mockGuardedWrites()
-    disk.set('notes/a.md', 'disk-version')
-    useSyncStore.setState({
-      conflicts: [{ id: 'conflict-a', path: 'notes/a.md', mine: 'my-version', theirs: 'disk-version', theirsVersion: 'disk-v', baseContent: 'base', detectedAt: 0 }],
-      queue: [], draining: false, attempts: 0, lastError: '',
-    })
-
-    await useEditorStore.getState().applyConflictKeepBoth('notes/a.md')
-
-    expect(invoke).toHaveBeenCalledWith('write_file_checked', {
-      path: 'notes/a (conflicted copy).md', content: 'my-version', baseVersion: null,
-    })
-    expect(useSyncStore.getState().conflicts).toHaveLength(0)
-  })
 
   it('adopts the disk version and drops the local edit when the user picks theirs', async () => {
     useSyncStore.setState({

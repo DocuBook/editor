@@ -56,11 +56,12 @@ describe('ConflictDialog', () => {
     expect(theirs.textContent).toContain('their line')
   })
 
-  it('offers exactly the three safe resolutions', () => {
+  it('offers the two explicit resolutions and lets the user decide later', () => {
     renderDialog()
 
     const labels = Array.from(dialog().querySelectorAll('button')).map(b => b.textContent)
-    expect(labels).toEqual(expect.arrayContaining(['Keep my version', 'Use the disk version', 'Keep both', 'Decide later']))
+    expect(labels).toEqual(expect.arrayContaining(['Keep my version', 'Use the disk version', 'Decide later']))
+    expect(labels).not.toContain('Keep both')
   })
 
   it('reports the chosen side back to the caller', async () => {
@@ -71,13 +72,6 @@ describe('ConflictDialog', () => {
     expect(onResolve).toHaveBeenCalledWith('mine')
   })
 
-  it('reports keep-both so the local edit can be saved as a copy', async () => {
-    const { onResolve } = renderDialog()
-
-    await act(async () => { button('Keep both').click() })
-
-    expect(onResolve).toHaveBeenCalledWith('both')
-  })
 
   it('reports the disk side when the user adopts it', async () => {
     const { onResolve } = renderDialog()

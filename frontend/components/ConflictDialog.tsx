@@ -27,16 +27,14 @@ function diffLines(mine: string, theirs: string) {
 
 interface ConflictDialogProps {
   conflict: Conflict
-  onResolve: (choice: 'mine' | 'theirs' | 'both') => void
+  onResolve: (choice: 'mine' | 'theirs') => void
   onClose: () => void
 }
 
 /** Shown when a save was rejected because the file changed on disk.
  *
- *  The dialog never picks a side for the user: silently "merging" two prose
- *  edits produces confident nonsense, and silently keeping either one destroys
- *  work. It shows both versions, names the file, and makes the three safe
- *  outcomes one click each. */
+ *  The dialog shows both versions and requires the user to explicitly choose
+ *  which version to keep, or defer the decision without discarding either side. */
 export default function ConflictDialog({ conflict, onResolve, onClose }: ConflictDialogProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -45,7 +43,7 @@ export default function ConflictDialog({ conflict, onResolve, onClose }: Conflic
 
   useEffect(() => { mineRef.current?.focus() }, [conflict.path])
 
-  const run = (choice: 'mine' | 'theirs' | 'both') => {
+  const run = (choice: 'mine' | 'theirs') => {
     setBusy(true)
     setError('')
     // Resolution touches disk, so a failure must keep the dialog open rather
@@ -101,13 +99,7 @@ export default function ConflictDialog({ conflict, onResolve, onClose }: Conflic
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button onClick={onClose} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Decide later</button>
-          <button
-            disabled={busy}
-            onClick={() => run('both')}
-            className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active disabled:opacity-50"
-          >
-            Keep both
-          </button>
+
           <button
             disabled={busy}
             onClick={() => run('theirs')}
