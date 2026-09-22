@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.1 — 2026-09-22
+
+### Patch Release
+
+#### 🚀 Features
+
+- **AI settings sync** — Persisted the selected provider, model, configured endpoints, API-key state, and tool-call probes in the backend so AI settings survive browser changes and reloads.
+
+#### 🐛 Bug Fixes
+
+- **Mobile editor** — Kept the mobile chrome sticky so editor controls remain available while scrolling.
+- **Sync conflicts** — Removed the misleading “Keep both” resolution option.
+
 ## v0.1.0 — 2026-09-21
 
 ### First Stable Release
