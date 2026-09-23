@@ -19,6 +19,13 @@ type TreeEntry = { path: string; name: string; type: string }
 
 /** Dropdown cap — the picker is a filter over the vault, not a browser. */
 const MENTION_LIST_LIMIT = 40
+/** Scroll-direction fade: no hiding while the document is inside the top band,
+ *  or a single tick of momentum scroll would blink the composer on every
+ *  overscroll back to the top. */
+const TOP_SHOW_THRESHOLD = 64
+/** Minimum px per animation frame before a scroll direction counts — absorbs
+ *  trackpad jitter and the tiny deltas of an inertial scroll winding down. */
+const SCROLL_DIRECTION_TOLERANCE = 3
 /** Concurrent list_tree calls. Serial recursion made the dropdown wait for the
  *  whole vault; unbounded fan-out would flood the IPC. */
 const MENTION_LIST_CONCURRENCY = 6
@@ -94,7 +101,7 @@ async function listVaultEntries(): Promise<{ entries: TreeEntry[]; unreadable: n
   return { entries, unreadable }
 }
 
-export default function AiFloatingChat() {
+export default function AiFloatingChat({ scrollContainer, obscured = false }: { scrollContainer?: HTMLDivElement | null; obscured?: boolean }) {
   const editor = useEditorStore((s) => s.blockEditor)
   const vaultPath = useVaultStore((s) => s.vaultPath)
   const { selectionPromptOpen, expanded, input, focusRequest, mentionNotice, setExpanded, setInput, setSelectionPromptOpen, setMentionNotice } = useAiChat()
@@ -134,7 +141,25 @@ export default function AiFloatingChat() {
   const canTogglePrompts = status === 'closed' || status === 'user-input'
   const promptEnabled = aiConfigured && canPrompt
 
-  useEffect(() => { if (focusRequest) inputRef.current?.focus({ preventScroll: true }) }, [focusRequest])
+  /** Latest interaction guards for the scroll listener below. Status comes
+   *  from the rust-ai store, so it is not part of the component's own render. */
+  const scrollGuards = useRef({ expanded, pickerOpen, selectionPromptOpen, hasInput, status })
+  useEffect(() => { scrollGuards.current = { expanded, pickerOpen, selectionPromptOpen, hasInput, status } })
+
+  /** Hidden by scroll direction and/or by the mobile sidebar drawer covering
+   *  the editor (the portaled drawer would otherwise render UNDER this z-50
+   *  surface and the composer would float over it while open). */
+  const [hideOnScroll, setHideOnScroll] = useState(false)
+  const covered = hideOnScroll || obscured
+
+  /* oxlint-disable react/set-state-in-effect -- focusRequest is an external event (⌃⌥L / toolbar prompt); revealing the composer must not wait for another render */
+  useEffect(() => { if (focusRequest) { setHideOnScroll(false); inputRef.current?.focus({ preventScroll: true }) } }, [focusRequest])
+  /* oxlint-enable react/set-state-in-effect */
+  useEffect(() => {
+    if (!obscured) return
+    const active = document.activeElement
+    if (active instanceof HTMLElement && rootRef.current?.contains(active)) active.blur()
+  }, [obscured])
   useEffect(() => {
     if (!focusRequest) return
     const el = inputRef.current
@@ -192,6 +217,42 @@ export default function AiFloatingChat() {
    *  previous version re-listed every folder on each character, so a large
    *  vault showed "No matching files or folders" for seconds while the user
    *  typed. Filtering is now pure in-memory. */
+  /** Scroll-direction visibility: scrolling down hides the composer so it stops
+   *  covering the document, scrolling up fades it back in. It never hides while
+   *  it is in use (focus, input, picker/prompt menus, an active AI run) or when
+   *  the document is near its top. The listener mounts once per container — the
+   *  guards are read through a ref so per-keystroke re-renders cannot go stale. */
+  useEffect(() => {
+    const container = scrollContainer
+    const root = rootRef.current
+    if (!container) return
+    let lastY = container.scrollTop
+    let frame = 0
+    const reveal = () => setHideOnScroll(false)
+    const update = () => {
+      frame = 0
+      const y = container.scrollTop
+      const g = scrollGuards.current
+      const inUse = g.expanded || g.pickerOpen || g.selectionPromptOpen || g.hasInput || g.status !== 'closed'
+      if (inUse || document.activeElement === inputRef.current || y <= TOP_SHOW_THRESHOLD) { lastY = y; reveal(); return }
+      const delta = y - lastY
+      lastY = y
+      if (delta > SCROLL_DIRECTION_TOLERANCE) setHideOnScroll(true)
+      else if (delta < -SCROLL_DIRECTION_TOLERANCE) reveal()
+    }
+    const onScroll = () => { if (!frame) frame = requestAnimationFrame(update) }
+    container.addEventListener('scroll', onScroll, { passive: true })
+    container.addEventListener('focusin', reveal)
+    root?.addEventListener('focusin', reveal)
+    update()
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      container.removeEventListener('scroll', onScroll)
+      container.removeEventListener('focusin', reveal)
+      root?.removeEventListener('focusin', reveal)
+    }
+  }, [scrollContainer])
+
   useEffect(() => {
     if (!pickerOpen) return
     const vault = vaultPath ?? ''
@@ -364,7 +425,7 @@ export default function AiFloatingChat() {
 
   const statusBar = status === 'thinking' || status === 'ai-writing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><Loader2 size={13} className="animate-spin text-accent" /><span className="text-xs text-foreground-secondary">{status === 'thinking' ? 'Thinking…' : 'Writing…'}</span><button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className="ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Stop</button></div> : status === 'user-reviewing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><span className="text-xs text-foreground-secondary">Review the changes</span><div className="ml-auto flex items-center gap-2"><button onClick={revert} onMouseDown={(event) => event.preventDefault()} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Revert</button><button onClick={accept} onMouseDown={(event) => event.preventDefault()} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover"><Check size={11} />Accept</button></div></div> : status === 'error' ? <div className="ai-chat-status border-b border-border-subtle px-3 py-2"><div className="wrap-break-word text-[11px] text-danger">{typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}</div><div className="mt-2 flex justify-end gap-2"><button onClick={() => { setExpanded(false); ai.rejectChanges() }} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Cancel</button><button onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover"><RotateCcw size={11} />Retry</button></div></div> : null
 
-  return <div ref={rootRef} className="editor-ai-floating pointer-events-auto absolute bottom-5 left-1/2 z-50 flex -translate-x-1/2 flex-col items-end gap-2">
+  return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
     {aiConfigured && !selectionPromptOpen && status === 'user-input' && expanded && !hasInput && items.length > 0 && <div className="relative z-30 flex max-w-full flex-col items-end gap-2 overflow-x-hidden">{items.map((item) => <button key={item.key} onClick={item.onItemClick} onMouseDown={(event) => event.preventDefault()} className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer"><span className="flex w-5 shrink-0 items-center justify-center text-accent">{item.icon}</span>{item.title}</button>)}</div>}
     <div className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{statusBar}{promptInput}</div>
   </div>
