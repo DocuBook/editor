@@ -317,7 +317,10 @@ const extensionFactory = ({ editor, options }: any) => {
       reject()
     },
     async retry() {
-      if (store.state.aiMenuState === 'closed' || store.state.aiMenuState.status !== 'error' || !session) throw new Error('retry() is only valid when a previous response failed')
+      // The error UI can outlive the session when the editor is closed or the
+      // request is aborted. Treat a stale click as a no-op instead of creating
+      // an unhandled rejection from the floating composer.
+      if (store.state.aiMenuState === 'closed' || store.state.aiMenuState.status !== 'error' || !session) return
       /** Resend the ORIGINAL prompt. The transport sends only the latest user
        *  message (no conversation history), so replacing the prompt with an
        *  error notice left rust-ai with no task — the model then answered
