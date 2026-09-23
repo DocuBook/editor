@@ -87,9 +87,32 @@ export default function App() {
   useEffect(() => { useAuth.getState().init() }, [])
 
   /** AI connection data lives in the backend's config.json — the browser keeps no
-   *  copy across sessions (no persist middleware), so it must be fetched once at
-   *  boot, before anything renders a provider or a model. */
-  useEffect(() => { void hydrateAiSettings() }, [])
+   *  copy across sessions (no persist middleware), so it must be fetched once
+   *  before anything renders a provider or a model, AND only once the session is
+   *  authenticated: /api/ai_settings answers 401 to a bare browser, and a silent
+   *  hydration failure at boot would leave a fresh browser (new device / new
+   *  browser) with an empty store — a disabled composer that looks like it holds
+   *  another session's state while the server actually has the config. Gating on
+   *  `ready` also re-hydrates after a re-login, picking up config saved elsewhere. */
+  useEffect(() => {
+    if (status !== 'ready') return
+    let cancelled = false
+    let attempt = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const hydrate = async () => {
+      if (await hydrateAiSettings() || cancelled || attempt >= 3) return
+      const delay = 1000 * 2 ** attempt
+      attempt += 1
+      timer = setTimeout(() => { void hydrate() }, delay)
+    }
+
+    void hydrate()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [status])
 
   /** Single git-status poller shared by the editor UI. */
   useGitPolling()

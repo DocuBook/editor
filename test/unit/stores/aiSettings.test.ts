@@ -213,8 +213,25 @@ describe("aiSettings store", () => {
 
   it("hydrateAiSettings keeps local state when the backend command is unavailable", async () => {
     invoke.mockRejectedValue(new Error("unknown command"));
-    await expect(hydrateAiSettings()).resolves.toBeUndefined();
+    await expect(hydrateAiSettings()).resolves.toBe(false);
     expect(useAiSettings.getState().provider).toBe("");
+  });
+
+  it("hydrateAiSettings survives a boot-time 401 and picks up the config when retried", async () => {
+    // Browser B boots before login: auth_mw answers 401 for /api/ai_settings and
+    // the failure is silent (catch → null → no setState). Without a retry the
+    // composer would stay disabled forever even though the server holds the
+    // config — the exact "must configure twice" gap. App gates hydration on
+    // auth `ready`, so the second run here is the post-login retry.
+    invoke.mockRejectedValue(new Error("Unauthorized"));
+    await expect(hydrateAiSettings()).resolves.toBe(false);
+    expect(useAiSettings.getState().provider).toBe("");
+    expect(useAiSettings.getState().savedProviders).toEqual([]);
+
+    invoke.mockResolvedValue(payload());
+    await expect(hydrateAiSettings()).resolves.toBe(true);
+    expect(useAiSettings.getState().provider).toBe("opencode-go");
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
   });
 
   it("setSavedProviders replaces with the server list", () => {

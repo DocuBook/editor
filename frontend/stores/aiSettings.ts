@@ -107,10 +107,11 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
  * hydrated before a provider was saved elsewhere) must end up with the server's
  * values rather than keeping an empty local snapshot forever.
  */
-export async function hydrateAiSettings(): Promise<void> {
+export async function hydrateAiSettings(): Promise<boolean> {
   const cfg = await fetchAiSettings()
-  if (!cfg) return
+  if (!cfg) return false
   useAiSettings.setState(applyBackendSettings(cfg))
+  return true
 }
 
 /** Map the backend payload onto store state. Pure so it can be reasoned about
