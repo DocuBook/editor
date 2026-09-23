@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.1.2 — 2026-09-23
+
+### Patch Release
+
+#### 🚀 Features
+
+- **Scroll-aware AI composer** — The floating AI composer now hides while scrolling down and fades back in when scrolling up, without covering content, and without clashing with the mobile sidebar drawer below 640px.
+
+#### 🐛 Bug Fixes
+
+- **AI settings across browsers** — Hydrating AI settings now waits for a logged-in session and retries with bounded backoff, so a fresh browser (or one that logged in after the server was briefly unreachable) no longer shows a disabled AI composer after the config was saved elsewhere.
+- **Desktop AI composer padding** — Restored desktop padding so the composer does not overlap the last lines of the document.
+
 ## v0.1.1 — 2026-09-22
 
 ### Patch Release
