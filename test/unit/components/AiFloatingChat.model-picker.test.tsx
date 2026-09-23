@@ -29,6 +29,9 @@ import { useEditorStore } from '../../../frontend/stores/editor'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
+/** jsdom has no layout, so the dropdown's scroll-into-view is a no-op here. */
+Element.prototype.scrollIntoView = () => {}
+
 let root: Root | null
 
 function makeAi(aiMenuState: any = 'closed') {
@@ -64,6 +67,7 @@ afterEach(() => {
   if (root) act(() => root!.unmount())
   root = null
   useEditorStore.setState({ blockEditor: null })
+  Element.prototype.scrollIntoView = () => {}
   vi.clearAllMocks()
 })
 
@@ -132,6 +136,32 @@ describe('composer model picker', () => {
 
     expect(useAiSettings.getState().provider).toBe('deepseek')
     expect(useAiSettings.getState().model).toBe('deepseek-chat')
+  })
+
+  it('highlights the active model and scrolls it into view when the picker opens', async () => {
+    // The reported bug: with a long model list the active model sat below the
+    // fold (max-h-64 + overflow-y-auto) with no highlight, so nothing pointed
+    // at the current selection.
+    const scrollSpy = vi.fn()
+    Element.prototype.scrollIntoView = scrollSpy as unknown as typeof Element.prototype.scrollIntoView
+    useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'deepseek-reasoner',
+      savedProviders: ['opencode-go'],
+      models: { 'opencode-go': 'deepseek-reasoner' },
+      baseUrls: { 'opencode-go': 'https://opencode.ai/zen/go/v1' },
+    })
+    renderComposer()
+
+    openPicker()
+    await settle()
+
+    const rows = Array.from(document.querySelectorAll('#ai-model-listbox [role="option"]')) as HTMLButtonElement[]
+    const activeRow = rows.find((row) => row.getAttribute('aria-selected') === 'true')
+    expect(activeRow?.textContent).toContain('deepseek-reasoner')
+    expect(activeRow?.className).toContain('bg-accent')
+    // The scroll-into-view lands on the active row, not the top of the list.
+    expect(scrollSpy.mock.instances.at(-1)).toBe(activeRow)
   })
 
   it('survives a late hydration that still reports the backend active model', async () => {

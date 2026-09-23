@@ -61,6 +61,18 @@ const mentionRowClass = (selected: boolean) =>
  *  modal does for its path column. */
 const mentionMetaClass = (selected: boolean) => (selected ? 'text-on-accent opacity-80' : 'text-muted')
 
+/** Model picker row chrome: the active model keeps a persistent highlight so a
+ *  long list still shows what is selected at a glance. The hover tint is only
+ *  on unselected rows, or hovering would paint over the highlight. */
+const modelRowClass = (selected: boolean) =>
+  'flex w-full cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] ' +
+  (selected ? 'bg-accent text-on-accent' : 'hover:bg-surface-active')
+
+/** Provider badge inside a model row — the accent tint flips on the selected
+ *  row, exactly as mentionMetaClass flips text for the dropdown surface. */
+const modelBadgeClass = (selected: boolean) =>
+  'shrink-0 text-[9px] font-semibold ' + (selected ? 'text-on-accent opacity-80' : 'text-accent')
+
 /** Recursive vault listing for the mention picker.
  *
  *  A folder that cannot be listed (deleted/renamed mid-walk, permissions) only
@@ -119,6 +131,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   const modelPickerRef = useRef<HTMLDivElement>(null)
   const modelTriggerRef = useRef<HTMLButtonElement>(null)
+  const modelActiveRef = useRef<HTMLButtonElement>(null)
   const aiConfigured = !!provider && savedProviders.includes(provider)
   const [picker, setPicker] = useState<{ start: number; end: number; query: string } | null>(null)
   const [index, setIndex] = useState<{ vault: string; entries: TreeEntry[]; unreadable: number } | null>(null)
@@ -373,6 +386,14 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const pickerOptions = aiConfigured && provider && model && !discoveredOptions.some((option) => option.id === provider && option.model === model)
     ? [{ id: provider, model }, ...discoveredOptions]
     : discoveredOptions
+  /** Opening the picker over a long model list must land on the active model:
+   *  the listbox is max-h-64 + overflow-y-auto, so the current selection can
+   *  sit below the fold, invisible. Re-runs when discovery lands (modelsLoading
+   *  flips) so the initially-empty listbox still gets its scroll. */
+  useEffect(() => {
+    if (!modelPickerOpen || modelsLoading) return
+    modelActiveRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [modelPickerOpen, modelsLoading, provider, model])
   const selectModel = (id: string, nextModel: string) => {
     if (!nextModel) return
     if (provider !== id) setProvider(id)
@@ -397,7 +418,10 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   const modelPicker = modelPickerOpen && (
     <div id="ai-model-listbox" ref={modelPickerRef} className="absolute bottom-full right-0 z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="AI models">
-      {modelsLoading ? <div className="px-2.5 py-1.5 text-[11px] text-muted">Loading models…</div> : pickerOptions.length === 0 ? <div className="px-2.5 py-1.5 text-[11px] text-muted">{modelsError ? 'Could not load models' : 'No models found'}</div> : pickerOptions.map((option) => <button key={`${option.id}:${option.model}`} role="option" aria-selected={option.id === provider && option.model === model} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(option.id, option.model)} className="flex w-full cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] hover:bg-surface-active"><span className="shrink-0 text-[9px] font-semibold text-accent">{MODEL_PROVIDER_LABELS[option.id] || option.id}</span><span className="truncate font-mono">{option.model}</span></button>)}
+      {modelsLoading ? <div className="px-2.5 py-1.5 text-[11px] text-muted">Loading models…</div> : pickerOptions.length === 0 ? <div className="px-2.5 py-1.5 text-[11px] text-muted">{modelsError ? 'Could not load models' : 'No models found'}</div> : pickerOptions.map((option) => {
+        const active = option.id === provider && option.model === model
+        return <button key={`${option.id}:${option.model}`} ref={active ? modelActiveRef : undefined} role="option" aria-selected={active} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(option.id, option.model)} className={modelRowClass(active)}><span className={modelBadgeClass(active)}>{MODEL_PROVIDER_LABELS[option.id] || option.id}</span><span className="truncate font-mono">{option.model}</span>{active && <Check size={11} className="ml-auto shrink-0" />}</button>
+      })}
     </div>
   )
 
