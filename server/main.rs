@@ -34,7 +34,6 @@ mod wiki;
 use config::AuthState;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::Request;
@@ -102,7 +101,8 @@ struct AppState {
     vault: Arc<Mutex<Option<vault::Vault>>>,
     wiki: Arc<Mutex<Option<wiki::WikiIndex>>>,
     git: Arc<Mutex<Option<git::Git>>>,
-    ai_cancel: Arc<AtomicBool>,
+    /** One cancellation slot per in-flight AI request, addressed by request id. */
+    ai_requests: Arc<rust_ai::requests::AiRequests>,
     ai_slots: Arc<tokio::sync::Semaphore>,
     auth: Arc<AuthState>,
     data_dir: PathBuf,
@@ -142,7 +142,7 @@ fn main() {
         vault: Arc::new(Mutex::new(None)),
         wiki: Arc::new(Mutex::new(None)),
         git: Arc::new(Mutex::new(None)),
-        ai_cancel: Arc::new(AtomicBool::new(false)),
+        ai_requests: Arc::new(rust_ai::requests::AiRequests::new()),
         ai_slots: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_AI_REQUESTS)),
         auth: Arc::new(AuthState::new(Path::new(&data_dir))),
         data_dir: data_dir.clone().into(),

@@ -33,7 +33,8 @@ pub(crate) struct AppState {
     pub(crate) vault: std::sync::Arc<Mutex<Option<vault::Vault>>>,
     pub(crate) wiki: Mutex<Option<wiki::WikiIndex>>,
     pub(crate) git: Mutex<Option<git::Git>>,
-    pub(crate) ai_cancel: std::sync::Arc<AtomicBool>,
+    /** One cancellation slot per in-flight AI request, addressed by request id. */
+    pub(crate) ai_requests: std::sync::Arc<rust_ai::requests::AiRequests>,
     /** Set when the frontend confirmed it is safe to close (graceful shutdown). */
     pub(crate) closing: AtomicBool,
 }
@@ -49,7 +50,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { vault: std::sync::Arc::new(Mutex::new(None)), wiki: Mutex::new(None), git: Mutex::new(None), ai_cancel: std::sync::Arc::new(AtomicBool::new(false)), closing: AtomicBool::new(false) })
+        .manage(AppState { vault: std::sync::Arc::new(Mutex::new(None)), wiki: Mutex::new(None), git: Mutex::new(None), ai_requests: std::sync::Arc::new(rust_ai::requests::AiRequests::new()), closing: AtomicBool::new(false) })
         .on_window_event(|window, event| {
             // Graceful shutdown: ask the frontend to flush & save, then confirm.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

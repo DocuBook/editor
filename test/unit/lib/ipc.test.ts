@@ -149,4 +149,32 @@ describe('web IPC bridge', () => {
 
     await expect(invoke('ask_ai', { messages: '[]' })).rejects.toThrow('stream was interrupted')
   })
+
+  it('cancels only the request named by cancel_ai', async () => {
+    // A Stop for a turn the user already abandoned must not abort the stream
+    // that replaced it — request identity is what keeps the two apart.
+    let aborted: boolean | undefined
+    vi.stubGlobal('fetch', vi.fn((url: string, init: any) => {
+      if (!String(url).includes('ask_ai')) {
+        return Promise.resolve(new Response(JSON.stringify({ result: null }), { status: 200 }))
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener?.('abort', () => {
+          aborted = true
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+        // Never resolves: the stream stays open until cancelled.
+      })
+    }))
+
+    const settled = invoke('ask_ai', { messages: '[]', requestId: 'turn-2' }).catch(() => 'aborted')
+    // Let `invoke` register the in-flight request before Stop arrives.
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await invoke('cancel_ai', { requestId: 'turn-1' })
+    expect(aborted).toBeUndefined()
+
+    await invoke('cancel_ai', { requestId: 'turn-2' })
+    await expect(settled).resolves.toBe('aborted')
+  })
 })

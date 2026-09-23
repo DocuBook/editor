@@ -67,21 +67,29 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
     return invoke<T>(cmd, args)
   }
   if (cmd === 'ask_ai') {
+    const requestId = String((args as { requestId?: unknown })?.requestId ?? '')
     const controller = new AbortController()
-    activeAskAiController = controller
+    activeAskAi = { requestId, controller }
     try {
       await streamAskAi(args ?? {}, controller.signal)
     } finally {
-      if (activeAskAiController === controller) activeAskAiController = null
+      if (activeAskAi?.controller === controller) activeAskAi = null
     }
     return undefined as T
   }
-  if (cmd === 'cancel_ai') activeAskAiController?.abort()
+  // Cancel by request id: the AI menu can abandon a turn and immediately start a
+  // new one, and a late Stop for the old turn must not abort the new stream.
+  if (cmd === 'cancel_ai') {
+    const requestId = String((args as { requestId?: unknown })?.requestId ?? '')
+    const active = activeAskAi
+    if (active && (!requestId || active.requestId === requestId)) active.controller.abort()
+  }
   const data = await post(cmd, args ?? {})
   return data as T
 }
 
-let activeAskAiController: AbortController | null = null
+/** The one in-flight ask_ai stream: its id lets Stop target the right request. */
+let activeAskAi: { requestId: string; controller: AbortController } | null = null
 
 async function post(cmd: string, args: Record<string, unknown>): Promise<unknown> {
   const controller = new AbortController()

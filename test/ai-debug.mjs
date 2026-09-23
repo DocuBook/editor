@@ -18,7 +18,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
 
 const PORT = 4275
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -64,20 +64,16 @@ try {
   attachLogging(page, 'ai-debug')
 
   /** Mock Path B text output and Path A tool calls at browser fetch level. */
-  let askAiHits = 0
-  await page.route('**/api/ask_ai', route => {
-    askAiHits++
-    const request = route.request().postDataJSON()
+  const askAiHits = await mockAskAi(page, request => {
     const messages = String(request?.messages || '')
     const useTools = typeof request?.tools === 'string' && request.tools.length > 0
     const noOp = messages.toLowerCase().includes('leave unchanged')
     if (!useTools) {
-      const mockSSE = [
-        'event: ai:token', 'data: "## Summary\\n\\n- point one\\n- point two\\n- point three"', '',
-        'event: ai:tools_done', 'data: ""', '',
-        'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
-      ].join('\n')
-      return route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
+      return [
+        ['ai:token', { token: '## Summary\n\n- point one\n- point two\n- point three' }],
+        ['ai:tools_done', {}],
+        ['ai:done', { provider: 'mock', truncated: false }],
+      ]
     }
     const ids = [
       ...messages.matchAll(
@@ -97,12 +93,11 @@ try {
         }],
       },
     }
-    const mockSSE = [
-      'event: ai:tool_call', `data: ${JSON.stringify(toolPayload)}`, '',
-      'event: ai:tools_done', 'data: ""', '',
-      'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
-    ].join('\n')
-    route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
+    return [
+      ['ai:tool_call', toolPayload],
+      ['ai:tools_done', {}],
+      ['ai:done', { provider: 'mock', truncated: false }],
+    ]
   })
 
   await page.addInitScript((vaultPath) => {
@@ -151,7 +146,7 @@ try {
   // Review keeps the prompt input mounted (old AIMenu parity): the user can
   // type the next instruction while deciding accept/revert.
   await page.locator('textarea[aria-label="AI prompt"]').waitFor()
-  ok('Path B: text-only request renders review', askAiHits === 1)
+  ok('Path B: text-only request renders review', askAiHits() === 1)
 
   // Escape dismisses the AI review back to the idle composer (the FAB is gone;
   // the composer stays mounted). The panel listens on window capture so the
@@ -175,7 +170,7 @@ try {
   await page.keyboard.press('Enter')
   await page.getByText('Accept', { exact: true }).waitFor()
   await page.getByText('Revert', { exact: true }).waitFor()
-  ok('Path A: tool request renders review', askAiHits === 2)
+  ok('Path A: tool request renders review', askAiHits() === 2)
   ok('Path A: hostile HTML stays inert', await page.locator('.bn-editor script, .bn-editor [onerror]').count() === 0)
 
   // Revert closes the review and restores the editor; the composer stays mounted,

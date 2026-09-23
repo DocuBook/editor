@@ -5,10 +5,15 @@ import { buildHtmlDocumentState, hasAISelection, restoreAISelection } from './ai
 import { uuid } from './uuid'
 
 export type AiMenuState =
-  | { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any }
+  | { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any; retriesLeft?: number }
   | 'closed'
 
 type InvokeOptions = { userPrompt: string; useSelection?: boolean }
+
+/** Manual Retry budget. The button is a full provider request, so cap it the way
+ *  the non-AI retries are capped (settings hydration tries 3 times, sync 5)
+ *  instead of letting a stuck request loop as long as the user keeps clicking. */
+const MAX_AI_RETRIES = 3
 
 const pluginKey = new PluginKey('docubook-ai')
 
@@ -164,7 +169,7 @@ function readPart(value: any) {
 const extensionFactory = ({ editor, options }: any) => {
   const store = createStore<{ aiMenuState: AiMenuState }>({ aiMenuState: 'closed' })
   const agentCursor = options?.agentCursor ?? {}
-  let session: { options: InvokeOptions; controller: AbortController; before: any[] } | undefined
+  let session: { options: InvokeOptions; controller: AbortController; before: any[]; retries: number } | undefined
   /** Live position of the streaming caret, or null when nothing is being written. */
   let writingPos: number | null = null
   /** Non-null while freshly written content is being revealed character by
@@ -321,19 +326,24 @@ const extensionFactory = ({ editor, options }: any) => {
       // request is aborted. Treat a stale click as a no-op instead of creating
       // an unhandled rejection from the floating composer.
       if (store.state.aiMenuState === 'closed' || store.state.aiMenuState.status !== 'error' || !session) return
+      const retries = session.retries + 1
+      // The UI disables Retry once the budget is spent; this guard covers a
+      // stale click (or a programmatic caller) so it can never become an
+      // unbounded provider loop.
+      if (retries > MAX_AI_RETRIES) return
       /** Resend the ORIGINAL prompt. The transport sends only the latest user
        *  message (no conversation history), so replacing the prompt with an
        *  error notice left rust-ai with no task — the model then answered
        *  "no last prompt content… cannot retry" instead of redoing the work. */
-      return this.invokeAI(session.options)
+      return this.invokeAI(session.options, retries)
     },
     setAIResponseStatus: setStatus,
-    async invokeAI(invokeOptions: InvokeOptions) {
+    async invokeAI(invokeOptions: InvokeOptions, retries = 0) {
       const state = store.state.aiMenuState
       if (state === 'closed') return
       const controller = new AbortController()
       const before = editor.document.map((block: any) => ({ ...block, children: block.children?.map((child: any) => ({ ...child })) || [] }))
-      session = { options: invokeOptions, controller, before }
+      session = { options: invokeOptions, controller, before, retries }
       setStatus('thinking')
       try {
         if (invokeOptions.useSelection && hasAISelection(editor) && !restoreAISelection(editor)) throw new Error('Text selection is no longer available')
@@ -368,7 +378,9 @@ const extensionFactory = ({ editor, options }: any) => {
         setStatus('user-reviewing')
       } catch (error) {
         if (controller.signal.aborted) return
-        setStatus({ status: 'error', error })
+        /** `retriesLeft` drives the Retry button state: rust-ai renders the error
+         *  surface, so the budget has to travel with it. */
+        setStatus({ status: 'error', error, retriesLeft: Math.max(0, MAX_AI_RETRIES - retries) })
       }
     },
   }

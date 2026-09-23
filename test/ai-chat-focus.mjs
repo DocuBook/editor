@@ -24,7 +24,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
 
 const PORT = 4288
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -87,14 +87,11 @@ try {
   const log = attachLogging(page, 'ai-chat-focus')
 
   // Mock the AI transport: a plain token stream is enough to reach review.
-  await page.route('**/api/ask_ai', (route) => {
-    const mockSSE = [
-      'event: ai:token', 'data: "## Summary\\n\\n- point one\\n- point two"', '',
-      'event: ai:tools_done', 'data: ""', '',
-      'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
-    ].join('\n')
-    route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
-  })
+  await mockAskAi(page, () => [
+    ['ai:token', { token: '## Summary\n\n- point one\n- point two' }],
+    ['ai:tools_done', {}],
+    ['ai:done', { provider: 'mock', truncated: false }],
+  ])
 
   // AI config comes from the backend (no browser copy any more): the mock
   // answers ai_settings so the composer is enabled (aiConfigured = the server

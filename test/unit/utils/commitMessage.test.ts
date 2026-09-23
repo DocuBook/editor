@@ -31,6 +31,13 @@ function emit(event: string, payload: unknown) {
   ipc.listeners.get(event)?.forEach(cb => cb({ payload }))
 }
 
+/** Emit a token the way the backend does — tagged with the request that asked
+ *  for it. `ask_ai` args carry the id, so tests exercise the same filter the
+ *  real transport uses instead of a payload shape that no longer exists. */
+function emitToken(requestId: unknown, token: string) {
+  emit('ai:token', { requestId: String(requestId ?? ''), token })
+}
+
 beforeEach(() => {
   ipc.handlers.clear()
   ipc.listeners.clear()
@@ -110,14 +117,28 @@ describe('generateCommitMessage', () => {
 
   it('collects streamed tokens into a sanitized message', async () => {
     configureAi()
-    ipc.handlers.set('ask_ai', () => {
-      emit('ai:token', 'fix(editor): ')
-      emit('ai:token', 'guard empty selection')
+    ipc.handlers.set('ask_ai', args => {
+      emitToken(args?.requestId, 'fix(editor): ')
+      emitToken(args?.requestId, 'guard empty selection')
       return undefined
     })
 
     await expect(generateCommitMessage([{ status: 'M', path: 'a.md' }]))
       .resolves.toBe('Auto commit : fix(editor): guard empty selection')
+  })
+
+  it('ignores tokens belonging to another request', async () => {
+    // Regression: `ai:token` is shared, so a concurrent AI panel turn used to
+    // bleed its tokens into the commit subject.
+    configureAi()
+    ipc.handlers.set('ask_ai', args => {
+      emitToken('someone-else', 'WRONG ')
+      emitToken(args?.requestId, 'notes: add backlinks')
+      return undefined
+    })
+
+    await expect(generateCommitMessage([{ status: 'M', path: 'a.md' }]))
+      .resolves.toBe('Auto commit : notes: add backlinks')
   })
 
   it('prompts the model with every changed file and the diff excerpt', async () => {
@@ -126,7 +147,7 @@ describe('generateCommitMessage', () => {
     ipc.handlers.set('ask_ai', args => {
       const messages = JSON.parse(String(args?.messages)) as { role: string; content: string }[]
       prompt = messages[1].content
-      emit('ai:token', 'notes: add backlinks')
+      emitToken(args?.requestId, 'notes: add backlinks')
       return undefined
     })
 
@@ -143,8 +164,8 @@ describe('generateCommitMessage', () => {
 
   it('still answers when the diff loader fails', async () => {
     configureAi()
-    ipc.handlers.set('ask_ai', () => {
-      emit('ai:token', 'notes: add backlinks')
+    ipc.handlers.set('ask_ai', args => {
+      emitToken(args?.requestId, 'notes: add backlinks')
       return undefined
     })
 
@@ -175,8 +196,8 @@ describe('autoCommitMessage', () => {
 
   it('uses the AI message when the provider is configured', async () => {
     configureAi()
-    ipc.handlers.set('ask_ai', () => {
-      emit('ai:token', 'add backlinks across notes')
+    ipc.handlers.set('ask_ai', args => {
+      emitToken(args?.requestId, 'add backlinks across notes')
       return undefined
     })
 

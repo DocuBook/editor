@@ -29,15 +29,19 @@ type Captured = { url: string; body: any }
 function captureFetch() {
   const calls: Captured[] = []
   vi.stubGlobal('fetch', vi.fn(async (url: any, init: any) => {
-    calls.push({ url: String(url), body: init?.body ? JSON.parse(init.body) : undefined })
+    const body = init?.body ? JSON.parse(init.body) : undefined
+    calls.push({ url: String(url), body })
     if (String(url).includes('resolve_mentions')) {
       return new Response(JSON.stringify({ result: JSON.stringify(BUNDLE) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
+    // Echo the request id the transport sent: it filters events by id, so an
+    // untagged frame would be dropped and this would silently test nothing.
+    const id = String(body?.requestId ?? '')
     return new Response(sseStream([
       'event: ai:token\n',
-      'data: "ok"\n\n',
+      `data: {"requestId":"${id}","token":"ok"}\n\n`,
       'event: ai:done\n',
-      'data: {"provider":"test","truncated":false}\n\n',
+      `data: {"requestId":"${id}","provider":"test","truncated":false}\n\n`,
     ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
   }))
   return calls
@@ -95,16 +99,17 @@ describe('transport mention retrieval', () => {
 
   it('degrades to no context when the mention payload is not valid JSON', async () => {
     const urls: string[] = []
-    vi.stubGlobal('fetch', vi.fn(async (url: any) => {
+    vi.stubGlobal('fetch', vi.fn(async (url: any, init: any) => {
       urls.push(String(url))
       if (String(url).includes('resolve_mentions')) {
         return new Response(JSON.stringify({ result: 'not-json' }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
+      const id = String(JSON.parse(String(init?.body ?? '{}'))?.requestId ?? '')
       return new Response(sseStream([
         'event: ai:token\n',
-        'data: "ok"\n\n',
+        `data: {"requestId":"${id}","token":"ok"}\n\n`,
         'event: ai:done\n',
-        'data: {"provider":"test","truncated":false}\n\n',
+        `data: {"requestId":"${id}","provider":"test","truncated":false}\n\n`,
       ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
     }))
     const transport = createAiTransport({ getEditor: () => null, filePath: 'notes/current.md' })

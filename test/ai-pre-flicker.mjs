@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
 
 const PORT = 4277
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -45,14 +45,11 @@ try {
   const page = await context.newPage()
   attachLogging(page, 'ai-pre-flicker')
 
-  await page.route('**/api/ask_ai', route => {
-    const output = code('after', 45)
-    route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: ['event: ai:token', `data: ${JSON.stringify(output)}`, '', 'event: ai:tools_done', 'data: ""', '', 'event: ai:done', 'data: {"provider":"mock","truncated":false}', ''].join('\n'),
-    })
-  })
+  await mockAskAi(page, () => [
+    ['ai:token', { token: code('after', 45) }],
+    ['ai:tools_done', {}],
+    ['ai:done', { provider: 'mock', truncated: false }],
+  ])
 
   await mockAiSettings(page)
 
