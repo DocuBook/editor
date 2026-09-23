@@ -591,6 +591,9 @@ pub async fn test_connection(
 
 // ── Shared streaming adapter ──
 
+/// Stream an AI response. Deliberately takes no `apiKey`: the key is resolved
+/// from the keychain/backend, and a key sent in the request payload is ignored
+/// (Tauri resolves args by name, so an undeclared key is never read).
 #[tauri::command]
 pub async fn ask_ai(
     messages: String,
@@ -598,7 +601,6 @@ pub async fn ask_ai(
     provider: Option<String>,
     model: Option<String>,
     base_url: Option<String>,
-    _api_key: Option<String>,
     tools: Option<String>,
     request_id: Option<String>,
 ) -> Result<(), String> {
