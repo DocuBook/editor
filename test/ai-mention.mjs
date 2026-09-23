@@ -12,7 +12,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
 
 const PORT = 4281
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -65,14 +65,13 @@ try {
   // Not intercepted beyond counting: the real server resolver must answer.
   await page.route('**/api/resolve_mentions', route => { resolveHits++; return route.continue() })
 
-  await page.route('**/api/ask_ai', route => {
-    askAiBodies.push(route.request().postDataJSON())
-    const mockSSE = [
-      'event: ai:token', 'data: "Rewritten paragraph."', '',
-      'event: ai:tools_done', 'data: ""', '',
-      'event: ai:done', 'data: {"provider":"mock","truncated":false}', '',
-    ].join('\n')
-    return route.fulfill({ status: 200, contentType: 'text/event-stream', body: mockSSE })
+  await mockAskAi(page, (request) => {
+    askAiBodies.push(request)
+    return [
+      ['ai:token', { token: 'Rewritten paragraph.' }],
+      ['ai:tools_done', {}],
+      ['ai:done', { provider: 'mock', truncated: false }],
+    ]
   })
 
   await mockAiSettings(page)

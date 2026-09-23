@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
 
 const PORT = 4289
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -49,13 +49,11 @@ try {
   const page = await context.newPage()
   attachLogging(page, 'ai-multiblock-follow')
 
-  await page.route('**/api/ask_ai', route => {
-    route.fulfill({
-      status: 200,
-      contentType: 'text/event-stream',
-      body: ['event: ai:token', `data: ${JSON.stringify(MULTI_BLOCK)}`, '', 'event: ai:tools_done', 'data: ""', '', 'event: ai:done', 'data: {"provider":"mock","truncated":false}', ''].join('\n'),
-    })
-  })
+  await mockAskAi(page, () => [
+    ['ai:token', { token: MULTI_BLOCK }],
+    ['ai:tools_done', {}],
+    ['ai:done', { provider: 'mock', truncated: false }],
+  ])
 
   await mockAiSettings(page)
 

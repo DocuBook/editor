@@ -167,6 +167,45 @@ export async function mockAiSettings(page, opts = {}) {
   return state
 }
 
+/**
+ * Frame one mock SSE event in the server's wire format.
+ *
+ * Every event carries the `requestId` the frontend sent with the request: the
+ * transport drops frames whose id does not match the turn it is currently
+ * streaming (a late event from a stopped/retried turn must not be folded in),
+ * and tokens arrive wrapped as `{ requestId, token }` rather than a bare string.
+ */
+export function sseFrames(requestId, events) {
+  return events.flatMap(([name, payload]) => {
+    const tagged = payload.requestId ? payload : { requestId, ...payload }
+    return [`event: ${name}`, `data: ${JSON.stringify(tagged)}`, '']
+  }).join('\n')
+}
+
+/**
+ * Mock `POST /api/ask_ai` with a scripted SSE stream.
+ *
+ * `build(request, hits)` returns the event list for that call, so a suite can
+ * switch between a text answer and tool calls by inspecting the request body.
+ * Each frame is tagged with the request's own id (see `sseFrames`).
+ *
+ *   await mockAskAi(page, () => [['ai:token', { token: 'hi' }], ['ai:done', { provider: 'mock', truncated: false }]])
+ */
+export async function mockAskAi(page, build) {
+  let hits = 0
+  await page.route('**/api/ask_ai', route => {
+    hits++
+    const request = route.request().postDataJSON() || {}
+    const events = build(request, hits) || []
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: sseFrames(String(request.requestId || ''), events),
+    })
+  })
+  return () => hits
+}
+
 /** CI summary: write results file, print pass/fail, print server-log tail on failure. */
 export function summary(name, results, { serverLog } = {}) {
   ensureArtifacts()
