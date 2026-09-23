@@ -111,6 +111,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const baseUrls = useAiSettings((s) => s.baseUrls)
   const setProvider = useAiSettings((s) => s.setProvider)
   const setModel = useAiSettings((s) => s.setModel)
+  const markSelectionDirty = useAiSettings((s) => s.markSelectionDirty)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
   const [modelOptions, setModelOptions] = useState<Record<string, DiscoveredModel[]>>({})
   const [modelsLoading, setModelsLoading] = useState(false)
@@ -376,6 +377,10 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     if (!nextModel) return
     if (provider !== id) setProvider(id)
     setModel(nextModel)
+    /** A composer pick is session-local until Settings saves it — tell hydration
+     *  (which may still be retrying from boot) not to clobber it with the
+     *  backend's stale active model. */
+    markSelectionDirty()
     setModelPickerOpen(false)
   }
   useEffect(() => {

@@ -52,6 +52,11 @@ interface AiSettingsState {
    *  Ground truth for whether OUR payload passes that gateway — no static
    *  exclusions; unmeasured providers/models are treated as text-only. */
   probeTools: Record<string, Record<string, boolean>>
+  /** True once the composer has picked a model this session. Composer picks are
+   *  session-local (the backend is only told on an explicit Settings save), so a
+   *  repeat/delayed hydration must preserve the live selection instead of
+   *  re-applying the backend's stale active model. */
+  dirtySelection: boolean
   setProvider: (p: string) => void
   setModel: (m: string) => void
   setApiKey: (key: string) => void
@@ -60,6 +65,7 @@ interface AiSettingsState {
   clearApiKey: (providerId: string) => void
   addSavedProvider: (id: string) => void
   removeSavedProvider: (id: string) => void
+  markSelectionDirty: () => void
 }
 
 /** UI state for AI settings. No persist middleware: `config.json` on the backend
@@ -76,6 +82,7 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
   models: {},
   baseUrls: {},
   probeTools: {},
+  dirtySelection: false,
   /** Restore the saved model, or use a valid bootstrap model so a new key can be validated before discovery. */
   setProvider: (p) => {
     set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || PROVIDERS.find(x => x.id === p)?.defaultModel || '' })
@@ -97,6 +104,7 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
   clearApiKey: (pid) => set((s) => { const { [pid]: _, ...rest } = s.apiKeys; return { apiKeys: rest, ...(s.provider === pid ? { apiKey: '' } : {}) } }),
   addSavedProvider: (id) => set({ savedProviders: [...new Set([...get().savedProviders, id])] }),
   removeSavedProvider: (id) => set({ savedProviders: get().savedProviders.filter(x => x !== id) }),
+  markSelectionDirty: () => set({ dirtySelection: true }),
 }))
 
 /**
@@ -149,7 +157,23 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
     || models[currentProvider]
     || PROVIDERS.find(x => x.id === currentProvider)?.defaultModel
     || ''
-  return { provider: cfg.active || currentProvider, model, savedProviders: cfg.savedProviders, models, baseUrls, probeTools }
+  /** Composer picks are session-local (Settings Save is what tells the backend), so
+   *  a repeat/delayed hydration — the App retry loop exists precisely because a
+   *  later attempt can land after the user already took over — must preserve the
+   *  live provider+model instead of re-applying the backend's stale active model.
+   *  Only the SELECTION is preserved: endpoints, savedProviders and probes below
+   *  stay authoritative, and a fresh session (no pick yet) always adopts the
+   *  server's values. */
+  const live = useAiSettings.getState()
+  const preserveSelection = live.dirtySelection && !!live.provider && !!live.model
+  return {
+    provider: preserveSelection ? live.provider : cfg.active || currentProvider,
+    model: preserveSelection ? live.model : model,
+    savedProviders: cfg.savedProviders,
+    models,
+    baseUrls,
+    probeTools,
+  }
 }
 
 /** Read the backend AI configuration. Null when the command is unavailable

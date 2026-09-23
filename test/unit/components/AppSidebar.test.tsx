@@ -39,7 +39,7 @@ vi.mock('../../../frontend/components/SettingsModal', () => ({ default: () => <d
 vi.mock('../../../frontend/components/StatusBar', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/SetupWizard', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/Login', () => ({ default: () => null }))
-vi.mock('../../../frontend/stores/gitStatus', () => ({ useGitPolling: () => {} }))
+vi.mock('../../../frontend/stores/gitStatus', () => ({ useGitStatusRefresh: () => {} }))
 vi.mock('../../../frontend/stores/editor', () => ({
   useEditorStore: { getState: () => ({ persistAllDirty: vi.fn(async () => {}) }) },
 }))

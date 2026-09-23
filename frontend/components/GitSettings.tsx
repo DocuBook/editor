@@ -74,7 +74,7 @@ export default function GitSettings() {
     try {
       const res: InitResult = JSON.parse(await invoke<string>('git_init', { branch: initialBranch }))
       toast.success(res.created ? `Git repository initialized on ${res.branch}` : `Already a git repository on ${res.branch}`)
-      await load(); await pollGitStatus()
+      await load(); await pollGitStatus(true)
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 

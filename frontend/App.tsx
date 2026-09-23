@@ -8,7 +8,7 @@ import SettingsModal from './components/SettingsModal'
 import ShortcutsModal from './components/ShortcutsModal'
 import { Toaster, toast } from 'sonner'
 
-import { useGitPolling } from './stores/gitStatus'
+import { useGitStatusRefresh } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
 import { useVaultStore } from './stores/vault'
 import { useSyncStore, installSyncListeners } from './stores/sync'
@@ -114,8 +114,9 @@ export default function App() {
     }
   }, [status])
 
-  /** Single git-status poller shared by the editor UI. */
-  useGitPolling()
+  /** Single event-driven git-status refresher shared by the editor UI — runs on
+   *  git actions, vault open/close, and window focus (no interval). */
+  useGitStatusRefresh()
   useAuthGuard()
 
   const conflicts = useSyncStore(s => s.conflicts)

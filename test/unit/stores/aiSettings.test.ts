@@ -25,6 +25,7 @@ const DEFAULTS = {
   models: {},
   baseUrls: {},
   probeTools: {},
+  dirtySelection: false,
 };
 
 /** The backend payload in its current shape: one entry per configured provider. */
@@ -98,6 +99,27 @@ describe("aiSettings store", () => {
     await hydrateAiSettings();
 
     expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
+  });
+
+  it("a repeat hydration preserves a live composer pick instead of re-applying the backend's stale active model", async () => {
+    // The reported bug: picking a model in the composer went back to the
+    // currently active model. Composer picks are session-local (Settings Save is
+    // what tells the backend), so a delayed/boot-retry hydration that still
+    // reports the old active model must not clobber them. A fresh session (no
+    // pick, dirtySelection false) still adopts the server selection.
+    invoke.mockResolvedValue(payload());
+    await hydrateAiSettings(); // first hydration adopts the backend
+    expect(useAiSettings.getState().model).toBe("deepseek-v4-flash");
+
+    useAiSettings.getState().setModel("deepseek-reasoner");
+    useAiSettings.getState().markSelectionDirty();
+
+    await hydrateAiSettings(); // pending retry lands with the old active model
+    expect(useAiSettings.getState().model).toBe("deepseek-reasoner");
+    expect(useAiSettings.getState().provider).toBe("opencode-go");
+    // The data still refreshes — only the live selection is preserved.
+    expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
+    expect(useAiSettings.getState().models["opencode-go"]).toBe("deepseek-v4-flash");
   });
 
   it("hydrateAiSettings restores a custom endpoint base URL from the backend", async () => {
