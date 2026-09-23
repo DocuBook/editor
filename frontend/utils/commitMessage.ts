@@ -10,6 +10,7 @@
 import { invoke, listen } from '../lib/ipc'
 import { useAiSettings, CUSTOM_PROVIDER_ID } from '../stores/aiSettings'
 import { getAiConfig } from './aiConfig'
+import { uuid } from './uuid'
 
 export interface CommitFile {
   /** Porcelain index/worktree letter (`A`, `M`, `D`, `R`, `U`). */
@@ -76,8 +77,8 @@ export function sanitizeCommitMessage(raw: string): string {
  *  Throws when AI is unconfigured or the stream fails — callers fall back to the
  *  deterministic message. `loadDiff` is only called once the model is known to
  *  be configured, and a failing diff degrades the prompt instead of the result.
- *  Tokens arrive on the shared `ai:token` event, so a concurrent AI panel stream
- *  would interleave; commit generation is short and user-initiated. */
+ *  `ai:token` is a shared event, so this request carries its own id and ignores
+ *  any other stream's tokens (a concurrent AI panel turn included). */
 export async function generateCommitMessage(files: CommitFile[], loadDiff?: () => Promise<string>): Promise<string> {
   const { provider, model, baseUrl } = await getAiConfig()
   if (!provider || !model || !baseUrl) throw new Error('AI is not configured')
@@ -86,7 +87,11 @@ export async function generateCommitMessage(files: CommitFile[], loadDiff?: () =
   }
   const diff = loadDiff ? await loadDiff().catch(() => '') : ''
   const tokens: string[] = []
-  const unlisten = await listen<string>('ai:token', event => { tokens.push(String(event.payload)) })
+  const requestId = uuid()
+  const unlisten = await listen<{ requestId?: string; token?: string }>('ai:token', event => {
+    if (event.payload?.requestId !== requestId) return
+    tokens.push(String(event.payload.token ?? ''))
+  })
   try {
     await invoke('ask_ai', {
       messages: JSON.stringify([
@@ -96,6 +101,7 @@ export async function generateCommitMessage(files: CommitFile[], loadDiff?: () =
       provider,
       model,
       baseUrl,
+      requestId,
     })
   } finally {
     unlisten()

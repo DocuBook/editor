@@ -8,8 +8,6 @@
 //! reset and a webview storage wipe alike.
 
 use crate::AppState;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tauri::{Emitter, Manager, State};
 
 const MAX_PROBE_MODELS_PER_PROVIDER: usize = 128;
@@ -602,6 +600,7 @@ pub async fn ask_ai(
     base_url: Option<String>,
     _api_key: Option<String>,
     tools: Option<String>,
+    request_id: Option<String>,
 ) -> Result<(), String> {
     let provider =
         provider.ok_or_else(|| "Provider, model, and base URL are required".to_string())?;
@@ -626,7 +625,10 @@ pub async fn ask_ai(
     };
 
     let state = app.state::<AppState>();
-    state.ai_cancel.store(false, Ordering::SeqCst);
+    // Own this turn's cancellation slot before the request goes out. The guard
+    // releases it when the command returns (including every early `?`), and the
+    // per-request flag means a Stop aimed at this turn cannot revive another.
+    let request_guard = state.ai_requests.begin(request_id.as_deref().unwrap_or(""));
     let started = std::time::Instant::now();
     let mut client_builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -661,7 +663,7 @@ pub async fn ask_ai(
     .map_err(|e| crate::rust_ai::error::sanitize_ai_error(&e.to_string()))?;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-    let cancel = Arc::clone(&state.ai_cancel);
+    let cancel = request_guard.flag();
     tokio::spawn(crate::rust_ai::sse::stream_chat(
         response,
         agent.provider.clone(),
@@ -670,51 +672,23 @@ pub async fn ask_ai(
         started,
         tx,
     ));
+    let request_id = request_id.unwrap_or_default();
     while let Some(event) = rx.recv().await {
-        match event {
-            Ok(crate::rust_ai::events::AiEvent::Token(token)) => {
-                app.emit(crate::rust_ai::events::TOKEN_EVENT, token)
-                    .map_err(|e| e.to_string())?;
-            }
-            Ok(crate::rust_ai::events::AiEvent::ToolCall {
-                tool_call_id,
-                tool_name,
-                input,
-            }) => {
-                app.emit(
-                    crate::rust_ai::events::TOOL_CALL_EVENT,
-                    serde_json::json!({
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "input": input,
-                    }),
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            Ok(crate::rust_ai::events::AiEvent::ToolsDone) => {
-                app.emit(crate::rust_ai::events::TOOLS_DONE_EVENT, "")
-                    .map_err(|e| e.to_string())?;
-            }
-            Ok(crate::rust_ai::events::AiEvent::Done {
-                provider,
-                truncated,
-            }) => {
-                app.emit(
-                    crate::rust_ai::events::DONE_EVENT,
-                    serde_json::json!({ "provider": provider, "truncated": truncated }),
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            Err(error) => return Err(error),
-        }
+        let event = event?;
+        let (name, payload) = event.to_wire(&request_id);
+        app.emit(name, payload).map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
-/// Cancel in-flight AI request. Desktop-only policy; web keeps its own request lifecycle.
+/// Cancel the in-flight AI request identified by `request_id`; an empty id
+/// cancels every in-flight request. Desktop-only policy; web keeps its own
+/// request lifecycle.
 #[tauri::command]
-pub fn cancel_ai(state: State<AppState>) {
-    state.ai_cancel.store(true, Ordering::SeqCst);
+pub fn cancel_ai(state: State<AppState>, request_id: Option<String>) {
+    state
+        .ai_requests
+        .cancel(request_id.as_deref().unwrap_or(""));
 }
 
 #[cfg(test)]

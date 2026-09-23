@@ -442,7 +442,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         }
         "md_to_html" => Ok(markdown::markdown_to_safe_html(&s("content"))),
         "cancel_ai" => {
-            state.ai_cancel.store(true, Ordering::SeqCst);
+            state.ai_requests.cancel(&s("requestId"));
             Ok("null".into())
         }
         "set_api_key" => {

@@ -9,5 +9,6 @@ pub mod events;
 pub mod prompt;
 pub mod provider;
 pub mod request;
+pub mod requests;
 pub mod sse;
 pub mod tool_schema;

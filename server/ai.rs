@@ -4,8 +4,6 @@
 
 use super::*;
 use crate::rust_ai::{events::AiEvent, request::AiRequest, sse::stream_chat};
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use tokio_stream::wrappers::ReceiverStream;
 
 /** Base URL chat should use for this request, in precedence order: the custom
@@ -69,6 +67,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
     let requested_model = string_arg("model");
     let base_url = string_arg("baseUrl");
     let messages = string_arg("messages");
+    let request_id = string_arg("requestId");
     let tools = args.get("tools").and_then(Value::as_str);
 
     let mut custom_resolution = None;
@@ -143,7 +142,11 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         _ => return err_response("Provider, model, and base URL are required"),
     };
 
-    state.ai_cancel.store(false, Ordering::SeqCst);
+    // Own this turn's cancellation slot for as long as the provider stream runs.
+    // `ask_ai` returns as soon as the SSE response is handed to axum, so the
+    // guard has to live in the producing task — otherwise `cancel_ai` (a
+    // separate HTTP request) would find no slot to cancel.
+    let request_guard = state.ai_requests.begin(&request_id);
     let started = std::time::Instant::now();
     let mut client_builder = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -167,10 +170,11 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         Err(error) => return err_response(&error),
     };
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<AiEvent, String>>(64);
-    let cancel = Arc::clone(&state.ai_cancel);
+    let cancel = request_guard.flag();
     let provider_name = agent_cfg.provider.clone();
     let model_name = agent_cfg.model.clone();
     tokio::spawn(async move {
+        let _request_guard = request_guard;
         let _ai_slot = ai_slot;
         let url = request.url();
         let body = request.body();
@@ -237,18 +241,10 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         let mut event_rx = event_rx;
         while let Some(event) = event_rx.recv().await {
             let result = match event {
-                Ok(AiEvent::Token(token)) => Event::default()
-                    .event(crate::rust_ai::events::TOKEN_EVENT)
-                    .data(serde_json::to_string(&token).unwrap_or_else(|_| "\"\"".into())),
-                Ok(AiEvent::ToolCall { tool_call_id, tool_name, input }) => Event::default()
-                    .event(crate::rust_ai::events::TOOL_CALL_EVENT)
-                    .data(json!({ "toolCallId": tool_call_id, "toolName": tool_name, "input": input }).to_string()),
-                Ok(AiEvent::ToolsDone) => Event::default()
-                    .event(crate::rust_ai::events::TOOLS_DONE_EVENT)
-                    .data("\"\""),
-                Ok(AiEvent::Done { provider, truncated }) => Event::default()
-                    .event(crate::rust_ai::events::DONE_EVENT)
-                    .data(json!({ "provider": provider, "truncated": truncated }).to_string()),
+                Ok(event) => {
+                    let (name, payload) = event.to_wire(&request_id);
+                    Event::default().event(name).data(payload.to_string())
+                }
                 Err(error) => Event::default()
                     .event(crate::rust_ai::events::ERROR_EVENT)
                     .data(error),

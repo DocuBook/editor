@@ -70,9 +70,11 @@ pub async fn stream_chat(
     };
     let mut byte_buf = Vec::new();
     let mut first_chunk = Some(first);
+    let mut cancelled = false;
 
     loop {
         if cancel.load(Ordering::SeqCst) {
+            cancelled = true;
             break;
         }
         if started.elapsed().as_secs() >= AI_MAX_SECONDS {
@@ -92,6 +94,7 @@ pub async fn stream_chat(
         match chunk {
             Ok(Some(chunk)) => {
                 if cancel.load(Ordering::SeqCst) {
+                    cancelled = true;
                     break;
                 }
                 byte_buf.extend_from_slice(&chunk);
@@ -125,6 +128,13 @@ pub async fn stream_chat(
                 return;
             }
         }
+    }
+
+    if cancelled {
+        // A cancelled stream is not a result. Emitting the buffered tool calls or
+        // a `Done` here would hand a superseded turn's output to whoever is
+        // listening now — the newer request's listeners included.
+        return;
     }
 
     if !byte_buf.is_empty() {
@@ -368,6 +378,57 @@ mod tests {
         let stop = json!({ "choices": [{ "delta": {}, "finish_reason": "stop" }] }).to_string();
         process_sse_data(&stop, &mut state, &tx).await.unwrap();
         assert!(!state.truncated);
+    }
+
+    /// Minimal one-shot HTTP server: answers the first request with a single
+    /// SSE frame and closes, so `stream_chat` sees exactly one chunk.
+    async fn one_sse_frame(payload: &'static str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            // Read the request head so the client finishes sending before we reply.
+            let mut head = [0_u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut head).await;
+            let body = format!("data: {payload}\n\n");
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}"
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.flush().await;
+        });
+        addr.to_string()
+    }
+
+    #[tokio::test]
+    async fn cancelled_stream_emits_nothing() {
+        // Regression: a cancelled request used to fall through and emit its
+        // buffered tool calls plus a `Done`, which a newer request's listeners
+        // could not tell apart from their own.
+        let addr = one_sse_frame(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).await;
+        let response = reqwest::Client::new()
+            .get(format!("http://{addr}/chat"))
+            .send()
+            .await
+            .unwrap();
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let cancel = Arc::new(AtomicBool::new(true));
+        stream_chat(
+            response,
+            "test".into(),
+            "test".into(),
+            cancel,
+            Instant::now(),
+            tx,
+        )
+        .await;
+
+        assert!(
+            rx.recv().await.is_none(),
+            "a cancelled stream must not deliver tokens, tool calls, or Done"
+        );
     }
 
     #[tokio::test]
