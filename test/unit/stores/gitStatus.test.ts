@@ -1,43 +1,83 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+// @vitest-environment jsdom
 
-const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('../../../frontend/lib/ipc', () => ({ invoke }))
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { pollGitStatus, useGitStatus } from '../../../frontend/stores/gitStatus'
-import { useAuth } from '../../../frontend/stores/auth'
+const invoke = vi.fn();
+vi.mock("../../../frontend/lib/ipc", () => ({
+  invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
+}));
 
-describe('pollGitStatus (skip polling while unauthenticated)', () => {
+import { pollGitStatus, useGitStatus } from "../../../frontend/stores/gitStatus";
+import { useAuth } from "../../../frontend/stores/auth";
+import { useVaultStore } from "../../../frontend/stores/vault";
+
+/** The backend's git_status payload for a working repository. */
+const repoPayload = () =>
+  JSON.stringify({
+    isRepo: true,
+    hasRemote: true,
+    branch: "main",
+    upstream: "origin/main",
+    status: "",
+    ahead: 0,
+    behind: 0,
+    pushTarget: "origin",
+    hasCommits: true,
+    remotes: ["origin"],
+    state: "clean",
+  });
+
+describe("git status polling", () => {
   beforeEach(() => {
-    invoke.mockReset()
-    useGitStatus.setState({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' })
-    useAuth.setState({ status: 'login' })
-  })
+    localStorage.clear();
+    invoke.mockReset();
+    invoke.mockResolvedValue(repoPayload());
+    useAuth.setState({ status: "ready" });
+    useVaultStore.setState({ isOpen: true });
+  });
 
-  it('skips the invoke while not authenticated — no 401 spam', async () => {
-    await pollGitStatus()
-    expect(invoke).not.toHaveBeenCalled()
-  })
+  it("does not call the backend while unauthenticated", async () => {
+    useAuth.setState({ status: "login" });
+    await pollGitStatus(true);
+    expect(invoke).not.toHaveBeenCalled();
+  });
 
-  it('polls and updates state when authenticated', async () => {
-    useAuth.setState({ status: 'ready' })
-    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1, pushTarget: 'origin', hasCommits: true, remotes: ['origin', 'backup'], state: 'rebase' }))
-    await pollGitStatus()
-    expect(invoke).toHaveBeenCalledWith('git_status')
-    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: ' M file.md', ahead: 2, behind: 1, pushTarget: 'origin', hasCommits: true, remotes: ['origin', 'backup'], repoState: 'rebase' })
-  })
+  it("does not call the backend while no vault is open", async () => {
+    useVaultStore.setState({ isOpen: false });
+    await pollGitStatus(true);
+    expect(invoke).not.toHaveBeenCalled();
+  });
 
-  it('resets state when the poll fails', async () => {
-    useAuth.setState({ status: 'ready' })
-    useGitStatus.setState({ isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: 'X', ahead: 1, behind: 0, pushTarget: 'origin', hasCommits: true, remotes: ['origin'], repoState: 'clean' })
-    invoke.mockRejectedValue(new Error('network'))
-    await pollGitStatus()
-    expect(useGitStatus.getState()).toEqual({ isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' })
-  })
+  it("stops re-polling a known non-repo vault, and a forced call re-probes it", async () => {
+    // Learn repo-ness (forced), then plain events must not keep asking a vault
+    // that has no .git — the continuous-request traffic the 3s timer caused.
+    invoke.mockResolvedValue(JSON.stringify({ ...JSON.parse(repoPayload()), isRepo: false }));
+    await pollGitStatus(true);
+    expect(invoke).toHaveBeenCalledTimes(1);
 
-  it('defaults the multi-remote fields when the server omits them', async () => {
-    useAuth.setState({ status: 'ready' })
-    invoke.mockResolvedValue(JSON.stringify({ isRepo: true, hasRemote: true, branch: 'main', upstream: '', status: '', ahead: 0, behind: 0 }))
-    await pollGitStatus()
-    expect(useGitStatus.getState()).toEqual({ isRepo: true, hasRemote: true, branch: 'main', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' })
-  })
-})
+    invoke.mockClear();
+    await pollGitStatus();
+    await pollGitStatus();
+    expect(invoke).not.toHaveBeenCalled();
+
+    // git init / vault reopen is a forced event — it probes again.
+    await pollGitStatus(true);
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the next event re-probe after a transient backend failure", async () => {
+    await pollGitStatus(true); // normalize: repo-ness known
+    invoke.mockClear();
+
+    invoke.mockRejectedValueOnce(new Error("backend down"));
+    await pollGitStatus(true);
+    expect(useGitStatus.getState().isRepo).toBe(false);
+
+    // The failure reset the gate, so the next event asks again instead of being
+    // stuck on the empty state.
+    invoke.mockResolvedValueOnce(repoPayload());
+    await pollGitStatus();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(useGitStatus.getState().branch).toBe("main");
+  });
+});

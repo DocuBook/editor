@@ -257,6 +257,64 @@ mod api_tests {
     }
 
     #[tokio::test]
+    async fn ai_settings_lists_a_configured_custom_provider() {
+        // Regression: the custom provider was dropped from `savedProviders` by the
+        // catalog filter (PROVIDER_IDS has no openai-compatible id), so a working
+        // custom endpoint reported hasKey:true but an empty list — which disables
+        // the composer (aiConfigured = savedProviders.includes(provider)) on every
+        // browser and after every redeploy even though the backend holds the key.
+        let (app, _) = router();
+        let (_, h, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({ "email": "a@b.c", "password": "password1" }),
+        )
+        .await;
+        let cookie = session_cookie(&h);
+
+        let (s, _, b) = post_with(
+            &app,
+            "/api/set_api_key",
+            json!({ "provider": "openai-compatible", "key": "sk-test-42", "baseUrl": "https://kenari.id/v1", "model": "deepseek-v4-1-flash" }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+
+        let (s, _, b) = post_with(
+            &app,
+            "/api/ai_settings",
+            json!({}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+        let j = result_json(&b);
+        assert_eq!(j["endpoints"]["openai-compatible"]["hasKey"], true, "{b}");
+        let saved: Vec<&str> = j["savedProviders"]
+            .as_array()
+            .expect("savedProviders array")
+            .iter()
+            .map(|p| p.as_str().unwrap())
+            .collect();
+        assert!(
+            saved.contains(&"openai-compatible"),
+            "custom provider must appear in savedProviders: {saved:?} ({b})"
+        );
+        // The invariant the frontend relies on: every endpoint with hasKey=true
+        // appears in savedProviders.
+        let endpoints = j["endpoints"].as_object().expect("endpoints object");
+        for (provider, endpoint) in endpoints {
+            if endpoint["hasKey"] == true {
+                assert!(
+                    saved.contains(&provider.as_str()),
+                    "savedProviders must list keyed endpoint {provider}: {saved:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn setup_admin_token_required_via_http() {
         let state = test_state();
         state.auth.config.lock().unwrap().setup_token = Some("tok-secret-1".to_string());

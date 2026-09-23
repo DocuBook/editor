@@ -577,7 +577,13 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             // custom endpoint or a key saved before the catalog changed still
             // shows up after a browser/device switch.
             let mut saved = keys::configured_providers(&data_dir);
-            saved.retain(|p| agent::PROVIDER_IDS.iter().any(|id| id == p));
+            // The catalog filter must keep the custom provider alive: it is
+            // configured by its own endpoint + key, not by a catalog id (mirrors
+            // the desktop saved_providers(), which unions the selection endpoints
+            // for the same reason). Dropping it here made ai_settings report
+            // `savedProviders: []` for a working custom endpoint, which disabled
+            // the composer despite endpoints.hasKey being true.
+            saved.retain(|p| agent::PROVIDER_IDS.iter().any(|id| id == p) || p == agent::CUSTOM_PROVIDER_ID);
             if env.is_some() && !saved.iter().any(|p| p == agent::CUSTOM_PROVIDER_ID) {
                 saved.push(agent::CUSTOM_PROVIDER_ID.to_string());
             }
