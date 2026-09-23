@@ -98,22 +98,39 @@ export function restoreAISelection(editor: any): boolean {
  * active. Tool operations only need ids for selected blocks; nearby blocks are
  * included without ids as lightweight structural context.
  */
+function isEmptyParagraph(block: any): boolean {
+  if (!block || (block.type && block.type !== "paragraph")) return false;
+  const content = Array.isArray(block.content) ? block.content : [];
+  return content.length === 0 || content.every((item: any) =>
+    item?.type === "text" && String(item.text ?? "").length === 0,
+  );
+}
+
+function isEmptyDocument(editor: any, documentBlocks: any[]): boolean {
+  const topLevel = Array.isArray(editor?.document) ? editor.document : [];
+  return topLevel.length === 1 && documentBlocks.length === 1 && isEmptyParagraph(topLevel[0]);
+}
+
 export async function buildHtmlDocumentState(editor: any, useSelection = false): Promise<any> {
   const flatten = (blocks: any[]): any[] => blocks.flatMap((block) => [block, ...(block?.children?.length ? flatten(block.children) : [])])
   const documentBlocks = flatten(Array.isArray(editor?.document) ? editor.document : [])
+  const emptyDocument = isEmptyDocument(editor, documentBlocks)
   if (useSelection) {
     const selected = editor?.getSelectionCutBlocks?.(true)?.blocks || editor?.getSelection?.()?.blocks || []
     return {
-      isEmptyDocument: documentBlocks.length === 0,
+      isEmptyDocument: emptyDocument,
       selection: true,
       selectedBlocks: await Promise.all(selected.map(async (block: any) => ({ id: `${block.id}$`, block: await editor.blocksToHTMLLossy([block]) }))),
       blocks: await Promise.all(documentBlocks.map(async (block: any) => ({ block: await editor.blocksToHTMLLossy([block]) }))),
     }
   }
-  const cursor = editor?.getTextCursorPosition?.()?.block?.id
+  // Cursor mode must use the menu anchor, not the live cursor. The composer
+  // takes focus and the AI extension makes the editor read-only while a request
+  // is running, so getTextCursorPosition() can resolve to a stale block.
+  const cursor = resolveActiveBlockId(editor) || editor?.getTextCursorPosition?.()?.block?.id
   const blocks = await Promise.all(documentBlocks.map(async (block: any) => ({ id: `${block.id}$`, block: await editor.blocksToHTMLLossy([block]) })))
   const withCursor = blocks.flatMap((block: any) => block.id === `${cursor}$` ? [block, { cursor: true }] : [block])
-  return { selection: false, isEmptyDocument: documentBlocks.length === 0, blocks: withCursor }
+  return { selection: false, isEmptyDocument: emptyDocument, blocks: withCursor }
 }
 
 export function createSelectionAwareDocumentStateBuilder(defaultBuilder: any) {
@@ -714,6 +731,25 @@ export async function buildApplyDocumentInput(
       return { type: "applyDocumentOperations", operations };
     }
     const cursor = editor.getTextCursorPosition();
+    const emptyBlock = Array.isArray(editor.document) && editor.document.length === 1 && isEmptyParagraph(editor.document[0])
+      ? editor.document[0]
+      : null;
+    if (emptyBlock) {
+      const operations: any[] = [{
+        type: "update",
+        id: `${emptyBlock.id}$`,
+        block: editor.blocksToHTMLLossy([parsed[0]]),
+      }];
+      if (parsed.length > 1) {
+        operations.push({
+          type: "add",
+          referenceId: `${emptyBlock.id}$`,
+          position: "after",
+          blocks: parsed.slice(1).map((block: any) => editor.blocksToHTMLLossy([block])),
+        });
+      }
+      return { type: "applyDocumentOperations", operations };
+    }
     /** Focus-loss tolerant anchor: when the user submits from the floating
      *  composer, the editor is locked and unfocused, so `getTextCursorPosition()`
      *  can be stale. Prefer the AI menu's anchored block (resolved at invoke time)

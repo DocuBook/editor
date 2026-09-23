@@ -277,11 +277,41 @@ describe("buildApplyDocumentInput", () => {
     expect(input.operations[0].referenceId).toBe("b-full$");
   });
 
-  it("keeps cursor anchor on single empty block", async () => {
-    const editor = mockEditor({ cursorBlockId: "b-only" });
+  it("updates the placeholder block in a single empty document", async () => {
+    const editor: any = mockEditor({ cursorBlockId: "b-only" });
+    editor.document = [{ id: "b-only", type: "paragraph", content: [] }];
     editor.getTextCursorPosition = () => ({ block: { id: "b-only" } });
     const input = await buildApplyDocumentInput(editor, "Hello world");
-    expect(input.operations[0].referenceId).toBe("b-only$");
+    expect(input.operations[0]).toEqual({
+      type: "update",
+      id: "b-only$",
+      block: "<p>Hello world</p>",
+    });
+  });
+
+  it("keeps additional generated blocks after the empty placeholder", async () => {
+    const editor: any = mockEditor({
+      cursorBlockId: "b-only",
+      parse: async () => [
+        { type: "paragraph", content: [{ type: "text", text: "First" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Second" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Third" }] },
+      ],
+    });
+    editor.document = [{ id: "b-only", type: "paragraph", content: [] }];
+    editor.getTextCursorPosition = () => ({ block: { id: "b-only" } });
+
+    const input = await buildApplyDocumentInput(editor, "Create three lines");
+
+    expect(input.operations).toEqual([
+      { type: "update", id: "b-only$", block: "<p>First</p>" },
+      {
+        type: "add",
+        referenceId: "b-only$",
+        position: "after",
+        blocks: ["<p>Second</p>", "<p>Third</p>"],
+      },
+    ]);
   });
 
   it("builds add operation after cursor with $-suffixed referenceId and HTML blocks", async () => {

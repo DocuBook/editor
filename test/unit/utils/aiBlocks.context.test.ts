@@ -1,6 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { buildDocumentContext, CURSOR_MARKER } from "../../../frontend/utils/aiBlocks";
+import {
+  buildDocumentContext,
+  buildHtmlDocumentState,
+  CURSOR_MARKER,
+} from "../../../frontend/utils/aiBlocks";
 import { buildAiPrompt } from "../../../frontend/utils/aiPrompt";
+
+describe("buildHtmlDocumentState", () => {
+  it("marks a single placeholder paragraph as an empty document", async () => {
+    const editor: any = {
+      document: [{ id: "empty", type: "paragraph", content: [] }],
+      blocksToHTMLLossy: () => "<p></p>",
+      getSelection: () => undefined,
+      getTextCursorPosition: () => ({ block: { id: "empty" } }),
+      getExtension: () => ({
+        store: { state: { aiMenuState: { blockId: "empty", status: "user-input" } } },
+      }),
+    };
+
+    await expect(buildHtmlDocumentState(editor)).resolves.toMatchObject({
+      isEmptyDocument: true,
+      selection: false,
+    });
+  });
+
+  it("uses the AI menu anchor instead of a stale live cursor", async () => {
+    const blocks = [
+      { id: "anchored", type: "paragraph" },
+      { id: "stale", type: "paragraph" },
+    ];
+    const editor: any = {
+      document: blocks,
+      blocksToHTMLLossy: (value: any[]) => `<p>${value[0].id}</p>`,
+      getSelection: () => undefined,
+      getTextCursorPosition: () => ({ block: { id: "stale" } }),
+      getExtension: () => ({
+        store: {
+          state: { aiMenuState: { blockId: "anchored", status: "error" } },
+        },
+      }),
+    };
+
+    const state = await buildHtmlDocumentState(editor);
+
+    expect(state.blocks).toEqual([
+      { id: "anchored$", block: "<p>anchored</p>" },
+      { cursor: true },
+      { id: "stale$", block: "<p>stale</p>" },
+    ]);
+    expect(state.blocks.findIndex((block: any) => block.cursor)).toBe(1);
+  });
+});
 
 describe("buildDocumentContext", () => {
   const editor: any = {
