@@ -22,6 +22,10 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   const vaultPath = useVaultStore(s => s.vaultPath)
   const [onboardingDone, setOnboardingDone] = useState(() => isOnboardingDone())
   const cursorOffsets = useRef(new Map<string, number>())
+  /** Scroll container of the document surface. The AI composer lives OUTSIDE it
+   *  (in the rail) and pins itself to the viewport, so it watches this element
+   *  to know the scroll direction for its hide-on-scroll-down reveal. */
+  const [editorScroll, setEditorScroll] = useState<HTMLDivElement | null>(null)
 
   useEffect(() => {
     clearEditorCache()
@@ -127,12 +131,15 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     <div className="editor-root relative isolate flex-1 flex flex-col min-w-0 min-h-0">
       <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       <div className="relative z-0 flex-1 flex flex-col min-h-0">
-        <div className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-32 max-[639px]:pb-40' : '')}>
+        <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-32 max-[639px]:pb-40' : '')}>
           {inner}
         </div>
         {kind === 'wysiwyg' && editMode === 'editor' && (
+          /** Kept mounted while the mobile drawer covers it (state must survive:
+           *  unmounting would wipe draft input on every drawer toggle) — the
+           *  composer suppresses itself instead via `obscured`. */
           <div className="editor-ai-rail pointer-events-none absolute inset-x-0 bottom-0 z-50 mx-auto h-0">
-            <Suspense fallback={null}><AiFloatingChat /></Suspense>
+            <Suspense fallback={null}><AiFloatingChat scrollContainer={editorScroll} obscured={!isDesktop && sidebarOpen} /></Suspense>
           </div>
         )}
       </div>

@@ -336,3 +336,139 @@ describe('AI floating composer', () => {
     expect((document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('scroll-direction reveal', () => {
+  /** Scroll container with a controllable scrollTop (jsdom has no layout, so
+   *  the property is defined by hand). Returns the ref the composer watches
+   *  and a helper that moves the scroll position and fires the scroll event. */
+  function makeScrollContainer() {
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    let top = 0
+    Object.defineProperty(container, 'scrollTop', {
+      get: () => top,
+      set: (value: number) => { top = value },
+      configurable: true,
+    })
+    const scrollTo = (value: number) => {
+      act(() => {
+        top = value
+        container.dispatchEvent(new Event('scroll'))
+        // The listener is rAF-throttled; advance exactly one frame.
+        vi.advanceTimersByTime(16)
+      })
+    }
+    return { container, scrollTo }
+  }
+
+  /** rAF must resolve inside the act() window even if the environment does not
+   *  provide one (vitest jsdom exposes it, but CI runners should not depend on
+   *  that). Same cadence as jsdom's pretendToBeVisual implementation. */
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  function renderComposer(obscured = false) {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+    const { container, scrollTo } = makeScrollContainer()
+    act(() => root!.render(<AiFloatingChat scrollContainer={container} obscured={obscured} />))
+    const floating = () => document.querySelector('.editor-ai-floating')!
+    const visible = () => floating().getAttribute('data-ai-chat-hidden') !== 'true'
+    return { ai, scrollTo, floating, visible }
+  }
+
+  function typeInto(textarea: HTMLTextAreaElement, value: string) {
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, value)
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+  }
+
+  it('stays visible by default and inside the top show band', () => {
+    const { scrollTo, floating, visible } = renderComposer()
+    expect(visible()).toBe(true)
+    expect(floating().getAttribute('data-ai-chat-hidden')).toBe('false')
+
+    // Scrolling down inside the first 64px must not blink the composer.
+    scrollTo(40)
+    expect(visible()).toBe(true)
+  })
+
+  it('hides when scrolling past the top band and fades back in on scroll-up', () => {
+    const { scrollTo, floating, visible } = renderComposer()
+
+    scrollTo(300)
+    expect(visible()).toBe(false)
+    expect(floating().getAttribute('data-ai-chat-hidden')).toBe('true')
+    expect(floating().getAttribute('aria-hidden')).toBeNull()
+
+    scrollTo(200)
+    expect(visible()).toBe(true)
+    expect(floating().getAttribute('data-ai-chat-hidden')).toBe('false')
+  })
+
+  it('stays visible while the user is typing a prompt', () => {
+    const { scrollTo, visible } = renderComposer()
+    typeInto(document.querySelector('textarea')!, 'hello world')
+
+    scrollTo(300)
+    expect(visible()).toBe(true)
+  })
+
+  it.each(['thinking', 'ai-writing', 'user-reviewing', 'error'])('stays visible while an AI run is %s', (status) => {
+    const { ai, scrollTo, visible } = renderComposer()
+    act(() => ai.setMenuState({ blockId: 'b1', status, error: new Error('boom') }))
+
+    scrollTo(300)
+    expect(visible()).toBe(true)
+  })
+
+  it('stays visible while prompt UI owns the composer', () => {
+    const { scrollTo, visible } = renderComposer()
+
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    scrollTo(300)
+    expect(visible()).toBe(true)
+
+    act(() => useAiChat.setState({ selectionPromptOpen: true }))
+    scrollTo(300)
+    expect(visible()).toBe(true)
+  })
+
+  it('reveals on a focus request even after a scroll-down hide', () => {
+    const { scrollTo, visible, floating } = renderComposer()
+    scrollTo(300)
+    expect(visible()).toBe(false)
+
+    act(() => useAiChat.getState().focusInput())
+    expect(visible()).toBe(true)
+    expect(document.activeElement).toBe(document.querySelector('textarea'))
+    expect(floating().getAttribute('data-ai-chat-hidden')).toBe('false')
+  })
+
+  it('suppresses the composer while the mobile drawer covers the editor, keeping the draft mounted', () => {
+    const { scrollTo, visible } = renderComposer(true)
+    typeInto(document.querySelector('textarea')!, 'draft kept')
+
+    // Obscured wins regardless of scroll direction and input state.
+    expect(visible()).toBe(false)
+    scrollTo(200)
+    expect(visible()).toBe(false)
+    expect(document.querySelector('.editor-ai-floating')!.getAttribute('aria-hidden')).toBe('true')
+    // The composer stays mounted: reopening async drawer must not wipe the draft.
+    expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('draft kept')
+  })
+})

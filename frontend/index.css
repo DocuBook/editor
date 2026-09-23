@@ -574,6 +574,23 @@ body .mobile-sidebar-drawer-body > aside {
 .editor-ai-floating {
     width: calc(100% - 2rem);
     max-width: 100%;
+    /* Use the classic transform property for Safari/WKWebView compatibility.
+       The horizontal centering and reveal offset are composed here so the
+       fade cannot lose its centering when the state changes. */
+    transform: translate(-50%, 0);
+    opacity: 1;
+    pointer-events: auto;
+    transition: opacity 180ms ease-out, transform 180ms ease-out;
+}
+.editor-ai-floating[data-ai-chat-hidden='true'] {
+    transform: translate(-50%, 0.75rem);
+    opacity: 0;
+    pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .editor-ai-floating {
+        transition: none;
+    }
 }
 @media (min-width: 640px) {
     .editor-ai-floating {
