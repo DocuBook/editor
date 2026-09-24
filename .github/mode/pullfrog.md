@@ -83,7 +83,7 @@ DocuBook Editor — one repo, three targets:
 Run every chain that applies, and never call a check passing unless you ran it. Report each failure with its first real error line.
 
 - **Frontend chain:** `npx oxlint frontend/ test/__fixtures__/` · `npx tsc -b` · `npm test` · `node test/check-acl.mjs` · `node test/check-docker-paths.mjs`
-- **Rust chain** (when `src-tauri/` or `server/` is touched): `(cd src-tauri && cargo test)` · `(cd server && cargo test)` · `(cd src-tauri && cargo clippy -D warnings)`
+- **Rust chain** (when `src-tauri/` or `server/` is touched): `(cd src-tauri && cargo test)` · `(cd server && cargo test)` · `(cd src-tauri && cargo clippy -- -D warnings)` — without the `--`, cargo takes `-D` as its own argument and the command fails before linting anything.
 - **E2E** (only when a user-visible flow changed, and only if this environment can run Playwright): `(cd server && cargo build)`, then `npm run build`, then `npm run test:e2e` (Chromium); logs land in `test/artifacts/`. If it cannot run here, say exactly that instead of implying it passed.
 
 ### Commit & PR
@@ -110,7 +110,7 @@ Run `npx oxlint frontend/ test/__fixtures__/`, `npx tsc -b`, `npm test`, `node t
 ### `--checks-rust`
 
 ```text
-Run `(cd src-tauri && cargo test)`, `(cd server && cargo test)`, and `(cd src-tauri && cargo clippy -D warnings)`. Report each failure with its first real error line.
+Run `(cd src-tauri && cargo test)`, `(cd server && cargo test)`, and `(cd src-tauri && cargo clippy -- -D warnings)`. Report each failure with its first real error line.
 ```
 
 ### `--checks-e2e`
