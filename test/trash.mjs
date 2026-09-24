@@ -5,6 +5,7 @@
  *   3. Restore from the panel → file back in the tree, tab disabled again.
  *   4. Delete from the panel → in-app confirmation gates it, cancel is a no-op,
  *      confirm permanently deletes the item.
+ *   5. A permission failure offers the System Settings pane, not a dead toast.
  *
  * Note: the Linux-only delete→`.trash/` move is covered by the cfg(target_os
  * = "linux") Rust unit test. On macOS dev the delete path goes to the system
@@ -14,67 +15,22 @@
  * Logs: test/artifacts/trash.{server,browser}.log
  * Run: npm run build && node test/trash.mjs
  */
-import { execSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { runSuite, PORTS } from './lib.mjs'
 
-const PORT = 4274
-try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
-const DATA = '/tmp/docubook-e2e-trash'
-const VAULT = `${DATA}/vaults/myvault`
-const BASE = `http://localhost:${PORT}`
-
-const ADMIN = { email: 'trash@test.dev', password: 'password1' }
-const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
-
-mkdirSync('test/artifacts', { recursive: true })
-rmSync(DATA, { recursive: true, force: true })
-mkdirSync(VAULT, { recursive: true }) // empty vault — no .trash yet
-
-const server = startServer('trash', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
-let browser
-let page
-
-async function api(cmd, args = {}, cookie = '') {
-  const res = await fetch(`${BASE}/api/${cmd}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
-    body: JSON.stringify(args),
-  })
-  return { status: res.status, text: await res.text() }
-}
-
-try {
-  await waitForServer(BASE)
-  // API bootstrap: admin → session → open vault (vault dir pre-created on disk)
-  const sa = await api('setup_admin', { email: ADMIN.email, password: ADMIN.password })
-  ok('setup_admin: ok', sa.status === 200, sa.text.slice(0, 80))
-  const login = await fetch(`${BASE}/api/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ADMIN),
-  })
-  const setCookie = login.headers.get('set-cookie') || ''
-  ok('login: session cookie issued', login.status === 200 && /db_session=/.test(setCookie), String(login.status))
-  const cookie = setCookie.split(';')[0]
-  const ov = await api('open_vault', { path: VAULT }, cookie)
-  ok('open_vault: ok', ov.status === 200, ov.text.slice(0, 80))
-
-  browser = await launchBrowser()
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-  // The API login cookie must reach the browser context (Node fetch ≠ browser).
-  await context.addCookies([{ name: 'db_session', value: cookie.split('=').slice(1).join('='), url: BASE }])
-  page = await context.newPage()
-  attachLogging(page, 'trash')
+await runSuite('trash', {
+  port: PORTS.trash,
+  /* The suite injects TRASH_PERMISSION itself (section 5 asserts the dialog it
+     raises), so that console error is declared, not ignored. */
+  allow: [/TRASH_PERMISSION/],
+}, async ({ page, ok, base, vaultPath }) => {
   // Seed persisted vault so resumeVault auto-opens it on boot
-  await page.addInitScript((vaultPath) => {
-    localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
-  }, VAULT)
+  await page.addInitScript((path) => {
+    localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath: path }, version: 0 }))
+  }, vaultPath)
   const initialTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await page.goto(base, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid="desktop-sidebar"]', { timeout: 10000 })
   await initialTrash
   ok('vault open: empty vault shown', true)
@@ -147,8 +103,8 @@ try {
   ok('trash tab: not selected while the vault panel is active', await trashTab.getAttribute('aria-selected') === 'false')
 
   // 2. Seed the server-side trash → reload → tab enabled
-  mkdirSync(`${VAULT}/.trash`, { recursive: true })
-  writeFileSync(`${VAULT}/.trash/1700000000000-notes.md`, '# Notes\n\ncontent')
+  mkdirSync(`${vaultPath}/.trash`, { recursive: true })
+  writeFileSync(`${vaultPath}/.trash/1700000000000-notes.md`, '# Notes\n\ncontent')
   const refreshedTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
   await page.reload({ waitUntil: 'domcontentloaded' })
   await refreshedTrash
@@ -163,7 +119,7 @@ try {
   await trashPanel.getByText('Trash (1)').waitFor({ timeout: 5000 })
 
   // 4. Delete → in-app confirmation gates it; cancel is a no-op, confirm deletes.
-  writeFileSync(`${VAULT}/.trash/1700000004000-doomed.md`, '# Doomed\n')
+  writeFileSync(`${vaultPath}/.trash/1700000004000-doomed.md`, '# Doomed\n')
   const reseededTrash = page.waitForResponse(r => r.url().endsWith('/api/list_trash') && r.ok())
   await trashTab.click()
   await reseededTrash
@@ -188,7 +144,7 @@ try {
   await deleteCheckbox.waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
   ok('delete: confirmed item is gone from the panel', await deleteCheckbox.count() === 0)
 
-  // 6. A permission failure must offer the System Settings pane, not a dead toast.
+  // 5. A permission failure must offer the System Settings pane, not a dead toast.
   //    The web server has no macOS privacy gate, so stub the command to fail the
   //    way the desktop backend does and assert the dialog (not a toast) appears.
   await page.route('**/api/restore_file', route => route.fulfill({
@@ -196,7 +152,7 @@ try {
     contentType: 'application/json',
     body: JSON.stringify({ error: 'TRASH_PERMISSION:accessibility' }),
   }))
-  writeFileSync(`${VAULT}/.trash/1700000005000-locked.md`, '# Locked\n')
+  writeFileSync(`${vaultPath}/.trash/1700000005000-locked.md`, '# Locked\n')
   await trashTab.click()
   await trashPanel.getByText('locked.md', { exact: true }).waitFor({ timeout: 5000 })
   await trashPanel.getByRole('checkbox', { name: 'Select locked.md' }).check()
@@ -209,7 +165,7 @@ try {
   await permissionDialog.waitFor({ state: 'detached' })
   await page.unroute('**/api/restore_file')
 
-  // 5. Restore → file back in the tree, tab disabled again
+  // 6. Restore → file back in the tree, tab disabled again
   const restoreCheckbox = trashPanel.getByRole('checkbox', { name: 'Select notes.md' })
   await restoreCheckbox.check()
   const restoreResponse = page.waitForResponse(r => r.url().endsWith('/api/restore_file') && r.ok())
@@ -221,12 +177,4 @@ try {
   await page.getByTestId('sidebar-panel-vault').click()
   await page.getByText('notes', { exact: true }).waitFor({ timeout: 5000 })
   ok('restore: notes.md back in the tree', await page.getByText('notes', { exact: true }).count() >= 1)
-} catch (e) {
-  results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
-  process.exitCode = 1
-} finally {
-  await browser?.close().catch(() => {})
-  server.bin.kill()
-}
-
-if (!summary('trash', results, { serverLog: server.logPath })) process.exitCode = 1
+})

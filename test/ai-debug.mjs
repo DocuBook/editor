@@ -6,95 +6,77 @@
  * the FULL frontend chain runs: transport → buildApplyDocumentInput → rust-ai
  * suggestion. This isolates the frontend — no provider reachability needed.
  *
- * Key question it answers: does rust-ai reject our generated applyDocument
- * Operations (→ "Error calling LLM" with NO [ai] log, stream "succeeded"
- * from our side) or does the transport itself fail (→ [ai] log)?
+ * Guards the two paths that matter for safety: a text-only request renders a
+ * review, a tool request applies operations, hostile HTML in a tool payload
+ * stays inert, and a semantic no-op is rejected instead of offering Accept.
  *
  * Run: npm run build && node test/ai-debug.mjs
  * Cross-browser: BROWSER=webkit node test/ai-debug.mjs (also chromium, the
- * default) — lib.mjs resolves the engine binary. Safari-15-specific focus
- * behavior is covered by the mousedown-preventDefault assertions below.
+ * default) — lib.mjs resolves the engine binary.
  */
-import { execSync } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 
-import { startServer, summary, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
+import { runSuite, mockAiSettings, mockAskAi, openNote, PORTS } from './lib.mjs'
 
-const PORT = PORTS.aiDebug
-try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
-const DATA = '/tmp/docubook-e2e-ai'
-const VAULT = `${DATA}/vaults/myva`
-const BASE = `http://localhost:${PORT}`
-
-const results = []
-const ok = createOk(results)
-
-mkdirSync('test/artifacts', { recursive: true })
-rmSync(DATA, { recursive: true, force: true })
-mkdirSync(VAULT, { recursive: true })
 const ORIGINAL_MARKDOWN = '# _Notes_\n\nhello world'
-writeFileSync(`${VAULT}/notes.md`, ORIGINAL_MARKDOWN)
+/* Both are produced by the transport mocks in `setup` and read by the body. */
+let askAiHits
+let aiState
 
-const server = startServer('ai-debug', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
-let browser
-
-try {
-  const session = await bootstrapSession('ai-debug', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 1280, height: 800 } })
-  browser = session.browser
-  const page = session.page
-
-  /** Mock Path B text output and Path A tool calls at browser fetch level. */
-  const askAiHits = await mockAskAi(page, request => {
-    const messages = String(request?.messages || '')
-    const useTools = typeof request?.tools === 'string' && request.tools.length > 0
-    const noOp = messages.toLowerCase().includes('leave unchanged')
-    if (!useTools) {
+await runSuite('ai-debug', {
+  port: PORTS.aiDebug,
+  seed: [{ path: 'notes.md', content: ORIGINAL_MARKDOWN }],
+  setup: async ({ page, vaultPath }) => {
+    /** Mock Path B text output and Path A tool calls at browser fetch level. */
+    askAiHits = await mockAskAi(page, request => {
+      const messages = String(request?.messages || '')
+      const useTools = typeof request?.tools === 'string' && request.tools.length > 0
+      const noOp = messages.toLowerCase().includes('leave unchanged')
+      if (!useTools) {
+        return [
+          ['ai:token', { token: '## Summary\n\n- point one\n- point two\n- point three' }],
+          ['ai:tools_done', {}],
+          ['ai:done', { provider: 'mock', truncated: false }],
+        ]
+      }
+      const ids = [
+        ...messages.matchAll(
+          /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
+        ),
+      ]
+      const id = ids[0]?.[0] || 'missing'
+      const toolPayload = {
+        toolCallId: 'mock-tool-call',
+        toolName: 'applyDocumentOperations',
+        input: {
+          operations: noOp ? [] : [{
+            type: 'add',
+            referenceId: `${id}$`,
+            position: 'after',
+            blocks: ['<p><script>alert(1)</script>AI tool change<img src="x" onerror="alert(1)"></p>'],
+          }],
+        },
+      }
       return [
-        ['ai:token', { token: '## Summary\n\n- point one\n- point two\n- point three' }],
+        ['ai:tool_call', toolPayload],
         ['ai:tools_done', {}],
         ['ai:done', { provider: 'mock', truncated: false }],
       ]
-    }
-    const ids = [
-      ...messages.matchAll(
-        /[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi,
-      ),
-    ]
-    const id = ids[0]?.[0] || 'missing'
-    const toolPayload = {
-      toolCallId: 'mock-tool-call',
-      toolName: 'applyDocumentOperations',
-      input: {
-        operations: noOp ? [] : [{
-          type: 'add',
-          referenceId: `${id}$`,
-          position: 'after',
-          blocks: ['<p><script>alert(1)</script>AI tool change<img src="x" onerror="alert(1)"></p>'],
-        }],
-      },
-    }
-    return [
-      ['ai:tool_call', toolPayload],
-      ['ai:tools_done', {}],
-      ['ai:done', { provider: 'mock', truncated: false }],
-    ]
-  })
+    })
 
-  await page.addInitScript((vaultPath) => {
-    if (!localStorage.getItem('docubook:vault')) {
-      localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
-    }
-  }, VAULT)
-
-  // AI config lives in the server's config.json now — the browser keeps no copy,
-  // so the backend is mocked instead of seeding localStorage. No probe result yet
-  // → the custom provider is text-only → Path B (no tools).
-  const aiState = await mockAiSettings(page)
-
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('text=notes', { timeout: 10000 })
-  await page.getByText('notes', { exact: true }).click()
-  await page.getByText('hello world', { exact: true }).waitFor()
+    // AI config lives in the server's config.json now — the browser keeps no copy,
+    // so the backend is mocked instead of seeding localStorage. No probe result yet
+    // → the custom provider is text-only → Path B (no tools).
+    aiState = await mockAiSettings(page)
+    await page.addInitScript((path) => {
+      if (!localStorage.getItem('docubook:vault')) {
+        localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath: path }, version: 0 }))
+      }
+    }, vaultPath)
+  },
+}, async ({ page, ok, base, vaultPath }) => {
+  await page.goto(base, { waitUntil: 'domcontentloaded' })
+  await openNote(page)
 
   // Opening/closing the prompt list only toggles editor editability. TipTap emits
   // an update for that UI-only change; it must not dirty and lossy-serialize the file.
@@ -102,7 +84,7 @@ try {
   await page.locator('textarea[aria-label="AI prompt"]').waitFor()
   await page.keyboard.press('Escape')
   await page.waitForTimeout(2200)
-  ok('prompt open/close preserves raw Markdown bytes', readFileSync(`${VAULT}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
+  ok('prompt open/close preserves raw Markdown bytes', readFileSync(`${vaultPath}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
 
   // Select the document content so the AI edit path (update ops) is exercised
   await page.keyboard.press('Meta+a')
@@ -112,8 +94,6 @@ try {
   await page.waitForTimeout(900)
   const promptBox = page.locator('textarea[aria-label="AI prompt"]')
   await promptBox.waitFor()
-  // Selection-aware prompts intentionally do not show “Write Anything”; chip
-  // focus behavior has its own ai-chat-focus suite.
   await promptBox.fill('summarize the note')
   const hSingle = await promptBox.evaluate((el) => el.getBoundingClientRect().height)
   await page.keyboard.press('Shift+Enter')
@@ -140,9 +120,7 @@ try {
   // state now — flipping it here is what a completed probe would have stored.
   aiState.probes['mock-model'] = true
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('text=notes', { timeout: 10000 })
-  await page.getByText('notes', { exact: true }).click()
-  await page.getByText('hello world', { exact: true }).waitFor()
+  await openNote(page)
   await page.keyboard.press('Meta+a')
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
@@ -163,12 +141,4 @@ try {
   const bodyNoOp = await page.locator('body').innerText()
   ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))
-} catch (e) {
-  results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
-  process.exitCode = 1
-} finally {
-  await browser?.close().catch(() => {})
-  server.bin.kill()
-}
-
-if (!summary('ai-debug', results, { serverLog: server.logPath })) process.exitCode = 1
+})

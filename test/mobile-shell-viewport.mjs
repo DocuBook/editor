@@ -7,16 +7,6 @@
  * focused composer, and the tab bar is dragged off screen while the composer rises
  * — the two move in opposite directions at once, and the offset sticks.
  *
- * Two rules that looked like fixes could not work, and this suite keeps them gone:
- *   - `position: sticky; top: 0` on the tab bar: its scrollport is the shell's own
- *     `overflow: hidden`, so it only ever moves WITH the shell (caniuse: sticky
- *     sticks to the nearest ancestor with a scrolling mechanism "even if that
- *     ancestor isn't the nearest actually scrolling ancestor").
- *   - `bottom: max(calc(100% - 100vh), 1.25rem)` on the composer: its containing
- *     block `.editor-ai-rail` is `h-0`, so `100%` was 0, the term was always
- *     negative and the rule always resolved to the `1.25rem` `bottom-5` already
- *     sets — dead code that hid the real problem.
- *
  * Why the fix is asserted as a CSS/meta artifact AND as live geometry: headless
  * engines have no dynamic browser UI, so `100vh === dvh` there and the runtime
  * geometry of the bug is identical to the fix. The difference only shows on a
@@ -27,65 +17,17 @@
  *
  * Logs: test/artifacts/mobile-shell-viewport.{server,browser}.log
  */
-import { mkdirSync } from 'node:fs'
+import { runSuite, mockAiSettings, stubBackend, openNote, PORTS } from './lib.mjs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, stubBackend, PORTS, ok as createOk } from './lib.mjs'
-
-mkdirSync('test/artifacts', { recursive: true })
-
-const PORT = PORTS.mobileShell
-const BASE = `http://localhost:${PORT}`
-const PHONE = { width: 390, height: 720 }
 const NOTE = 'alpha bravo charlie delta'
-
-/** Fixture responses for the web IPC bridge (`POST /api/<cmd>`). */
 const NOTE_TEXT = `# Notes\n\n${NOTE}\n`
-const results = []
-const ok = createOk(results)
 
-const server = startServer('mobile-shell-viewport', {
-  cmd: 'npx', args: ['vite', 'preview', '--port', String(PORT), '--strictPort'], shell: true,
-  port: PORT, dataDir: '/tmp/docubook-e2e-shell', wwwDir: 'dist',
-})
-let browser
-let page
-
-/** Shell/composer/tab-bar box model. `composerHeight` is measured live, so the
- *  room assertion below cannot drift from the composer's real markup. */
-const measure = () => page.evaluate(() => {
-  const q = (sel) => document.querySelector(sel)
-  const shell = q('.editor-shell')
-  const ai = q('.editor-ai-floating')
-  const bar = q('.editor-tab-bar')
-  const content = q('.editor-content')
-  const ta = q('.editor-ai-floating textarea')
-  if (!shell || !ai || !bar || !content || !ta) return null
-  const aiStyle = getComputedStyle(ai)
-  const taStyle = getComputedStyle(ta)
-  const shellRect = shell.getBoundingClientRect()
-  return {
-    viewportHeight: document.documentElement.clientHeight,
-    shellHeight: shellRect.height,
-    shellBottom: shellRect.bottom,
-    aiBottom: ai.getBoundingClientRect().bottom,
-    offset: parseFloat(aiStyle.bottom),
-    barPosition: getComputedStyle(bar).position,
-    barTop: bar.getBoundingClientRect().top,
-    composerHeight: ai.getBoundingClientRect().height,
-    textareaHeight: ta.getBoundingClientRect().height,
-    maxHeight: parseFloat(taStyle.maxHeight),
-    contentPaddingBottom: parseFloat(getComputedStyle(content).paddingBottom),
-    docScrollHeight: document.scrollingElement.scrollHeight,
-    docClientHeight: document.scrollingElement.clientHeight,
-    scrollY: window.scrollY,
-  }
-})
-
-try {
-  await waitForServer(BASE, 50)
-  browser = await launchBrowser()
-  page = await browser.newPage({ viewport: PHONE })
-  attachLogging(page, 'mobile-shell-viewport')
+await runSuite('mobile-shell-viewport', {
+  port: PORTS.mobileShell,
+  /* Static frontend only: every /api/** call is stubbed in the browser. */
+  server: 'preview',
+  viewport: { width: 390, height: 720 },
+}, async ({ page, ok, base }) => {
   await stubBackend(page, { email: 'shell@example.test', noteText: NOTE_TEXT })
   /** A configured provider, so the composer's prompt field is enabled and can be
    *  grown to its real maximum height for the room assertion below. */
@@ -98,12 +40,41 @@ try {
     localStorage.setItem('docubook-onboarding-done', 'true')
   })
 
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  /** Shell/composer/tab-bar box model. `composerHeight` is measured live, so the
+   *  room assertions cannot drift from the composer's real markup. */
+  const measure = () => page.evaluate(() => {
+    const q = (sel) => document.querySelector(sel)
+    const shell = q('.editor-shell')
+    const ai = q('.editor-ai-floating')
+    const bar = q('.editor-tab-bar')
+    const content = q('.editor-content')
+    const ta = q('.editor-ai-floating textarea')
+    if (!shell || !ai || !bar || !content || !ta) return null
+    const aiStyle = getComputedStyle(ai)
+    const taStyle = getComputedStyle(ta)
+    const shellRect = shell.getBoundingClientRect()
+    return {
+      viewportHeight: document.documentElement.clientHeight,
+      shellHeight: shellRect.height,
+      shellBottom: shellRect.bottom,
+      aiBottom: ai.getBoundingClientRect().bottom,
+      offset: parseFloat(aiStyle.bottom),
+      barPosition: getComputedStyle(bar).position,
+      barTop: bar.getBoundingClientRect().top,
+      composerHeight: ai.getBoundingClientRect().height,
+      textareaHeight: ta.getBoundingClientRect().height,
+      maxHeight: parseFloat(taStyle.maxHeight),
+      contentPaddingBottom: parseFloat(getComputedStyle(content).paddingBottom),
+      docScrollHeight: document.scrollingElement.scrollHeight,
+      docClientHeight: document.scrollingElement.clientHeight,
+      scrollY: window.scrollY,
+    }
+  })
+
+  await page.goto(base, { waitUntil: 'domcontentloaded' })
+  /* A phone starts with the sidebar closed; the note tree lives inside it. */
   await page.locator('[data-testid="sidebar-toggle"]').click()
-  const noteEntry = page.getByText('notes', { exact: true }).first()
-  await noteEntry.waitFor({ timeout: 15000 })
-  await noteEntry.click()
-  await page.waitForSelector(`text=${NOTE}`, { timeout: 15000 })
+  await openNote(page, NOTE)
   /* The composer is its own lazy chunk (Suspense), so wait for it explicitly instead
      of assuming the note text implies it is mounted — WebKit in CI is slower here. */
   await page.locator('.editor-ai-floating textarea').waitFor({ timeout: 15000 })
@@ -119,7 +90,7 @@ try {
   ok('css: shell height is dvh-gated (Safari 15 / chrome105 keep the 100vh fallback)',
     /@supports\(height:100dvh\)\{[^}]*\.editor-shell\{height:100dvh\}/.test(shipped.css))
 
-  /* Page is already at PHONE (context viewport); let the first layout settle. */
+  /* Page is already at the phone viewport; let the first layout settle. */
   await page.waitForTimeout(400)
   const phone = await measure()
   ok('phone: the composer is rendered', !!phone)
@@ -159,13 +130,4 @@ try {
   ok('phone: focusing the composer scrolls nothing',
     focused && focused.scrollY === 0 && Math.abs(focused.barTop) < 0.5,
     focused ? `scrollY=${focused.scrollY} tabBar.top=${focused.barTop}` : 'no composer')
-
-} catch (e) {
-  results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
-  process.exitCode = 1
-} finally {
-  await browser?.close().catch(() => {})
-  server.bin.kill()
-}
-
-if (!summary('mobile-shell-viewport', results, { serverLog: server.logPath })) process.exitCode = 1
+})

@@ -3,68 +3,54 @@
  *
  * Reproduces the reported failure: typing `@change` in the composer must
  * surface the vault's CHANGELOG.md, and sending must ship that file's content
- * to the model as framed vault context. /api/ask_ai is mocked (we assert on the
+ * to the model as framed (untrusted) vault context — exactly once, and never
+ * for a prompt that carries no mention. /api/ask_ai is mocked (we assert on the
  * request it receives); /api/resolve_mentions is NOT mocked, so the real server
  * resolver and its IPC route are exercised.
  *
  * Run: npm run build && node test/ai-mention.mjs
  */
-import { execSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { runSuite, mockAiSettings, mockAskAi, openNote, PORTS } from './lib.mjs'
 
-import { startServer, summary, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
+/* Both are produced by the mocks in `setup` and read by the body. */
+let askAiBodies
+let resolveHits
 
-const PORT = PORTS.aiMention
-try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
-const DATA = '/tmp/docubook-e2e-mention'
-const VAULT = `${DATA}/vaults/myva`
-const BASE = `http://localhost:${PORT}`
+await runSuite('ai-mention', {
+  port: PORTS.aiMention,
+  viewport: { width: 1280, height: 900 },
+  seed: [
+    { path: 'notes.md', content: '# _Notes_\n\nhello world' },
+    { path: 'CHANGELOG.md', content: '# Changelog\n\nCHANGELOG BODY\n' },
+    { path: 'docs/guide.md', content: 'guide body' },
+    { path: 'docs/CHANGELOG-old.md', content: 'old body' },
+  ],
+  setup: async ({ page, vaultPath }) => {
+    askAiBodies = []
+    resolveHits = 0
 
-const results = []
-const ok = createOk(results)
+    // Not intercepted beyond counting: the real server resolver must answer.
+    await page.route('**/api/resolve_mentions', route => { resolveHits++; return route.continue() })
 
-mkdirSync('test/artifacts', { recursive: true })
-rmSync(DATA, { recursive: true, force: true })
-mkdirSync(`${VAULT}/docs`, { recursive: true })
-writeFileSync(`${VAULT}/notes.md`, '# _Notes_\n\nhello world')
-writeFileSync(`${VAULT}/CHANGELOG.md`, '# Changelog\n\nCHANGELOG BODY\n')
-writeFileSync(`${VAULT}/docs/guide.md`, 'guide body')
-writeFileSync(`${VAULT}/docs/CHANGELOG-old.md`, 'old body')
+    await mockAskAi(page, (request) => {
+      askAiBodies.push(request)
+      return [
+        ['ai:token', { token: 'Rewritten paragraph.' }],
+        ['ai:tools_done', {}],
+        ['ai:done', { provider: 'mock', truncated: false }],
+      ]
+    })
 
-const server = startServer('ai-mention', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
-let browser
-
-try {
-  const session = await bootstrapSession('ai-mention', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 1280, height: 900 } })
-  browser = session.browser
-  const page = session.page
-
-  const askAiBodies = []
-  let resolveHits = 0
-
-  // Not intercepted beyond counting: the real server resolver must answer.
-  await page.route('**/api/resolve_mentions', route => { resolveHits++; return route.continue() })
-
-  await mockAskAi(page, (request) => {
-    askAiBodies.push(request)
-    return [
-      ['ai:token', { token: 'Rewritten paragraph.' }],
-      ['ai:tools_done', {}],
-      ['ai:done', { provider: 'mock', truncated: false }],
-    ]
-  })
-
-  await mockAiSettings(page)
-  await page.addInitScript((vaultPath) => {
-    if (!localStorage.getItem('docubook:vault')) {
-      localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath }, version: 0 }))
-    }
-  }, VAULT)
-
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('text=notes', { timeout: 10000 })
-  await page.getByText('notes', { exact: true }).click()
-  await page.getByText('hello world', { exact: true }).waitFor()
+    await mockAiSettings(page)
+    await page.addInitScript((path) => {
+      if (!localStorage.getItem('docubook:vault')) {
+        localStorage.setItem('docubook:vault', JSON.stringify({ state: { vaultPath: path }, version: 0 }))
+      }
+    }, vaultPath)
+  },
+}, async ({ page, ok, base }) => {
+  await page.goto(base, { waitUntil: 'domcontentloaded' })
+  await openNote(page)
 
   const prompt = page.locator('textarea[aria-label="AI prompt"]')
   await prompt.click()
@@ -173,8 +159,4 @@ try {
   ok('a second (mention-free) request was sent', askAiBodies.length === 2, `bodies=${askAiBodies.length}`)
   ok('no vault context for a mention-free prompt', !second.includes('<vault_context>'))
   ok('no extra resolve_mentions call for a mention-free prompt', resolveHits === 1, `hits=${resolveHits}`)
-} finally {
-  if (browser) await browser.close().catch(() => {})
-  server.bin.kill()
-  summary('ai-mention', results, { serverLog: server.logPath })
-}
+})
