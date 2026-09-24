@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { flush } from '../harness'
+
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 const aiState = vi.hoisted(() => ({
   provider: null as string | null,
@@ -40,8 +42,6 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 Element.prototype.scrollIntoView = vi.fn() as unknown as typeof Element.prototype.scrollIntoView
 
 let root: Root | null
-
-const flush = () => act(async () => { await Promise.resolve() })
 
 function render() {
   root = createRoot(document.getElementById('root')!)

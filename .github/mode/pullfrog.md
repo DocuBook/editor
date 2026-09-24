@@ -82,7 +82,7 @@ DocuBook Editor — one repo, three targets:
 
 Run every chain that applies, and never call a check passing unless you ran it. Report each failure with its first real error line.
 
-- **Frontend chain:** `npx oxlint frontend/ test/unit/ test/__fixtures__/` · `npx tsc -b` · `npm test` · `node test/check-acl.mjs` · `node test/check-docker-paths.mjs`
+- **Frontend chain:** `npx oxlint frontend/ test/__fixtures__/` · `npx tsc -b` · `npm test` · `node test/check-acl.mjs` · `node test/check-docker-paths.mjs`
 - **Rust chain** (when `src-tauri/` or `server/` is touched): `(cd src-tauri && cargo test)` · `(cd server && cargo test)` · `(cd src-tauri && cargo clippy -D warnings)`
 - **E2E** (only when a user-visible flow changed, and only if this environment can run Playwright): `(cd server && cargo build)`, then `npm run build`, then `npm run test:e2e` (Chromium); logs land in `test/artifacts/`. If it cannot run here, say exactly that instead of implying it passed.
 
@@ -104,7 +104,7 @@ Cite `path:line` for code facts, give the exact command and outcome for anything
 ### `--checks`
 
 ```text
-Run `npx oxlint frontend/ test/unit/ test/__fixtures__/`, `npx tsc -b`, `npm test`, `node test/check-acl.mjs`, and `node test/check-docker-paths.mjs`. Report each failure with its first real error line. Do not call a check passing unless you ran it.
+Run `npx oxlint frontend/ test/__fixtures__/`, `npx tsc -b`, `npm test`, `node test/check-acl.mjs`, and `node test/check-docker-paths.mjs`. Report each failure with its first real error line. Do not call a check passing unless you ran it.
 ```
 
 ### `--checks-rust`

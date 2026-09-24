@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { flush } from '../harness'
+
 const gitState = vi.hoisted(() => ({
   isRepo: true,
   hasRemote: true,
@@ -97,8 +99,6 @@ const syncOutcome = (overrides: Partial<{ success: boolean; message: string; err
 
 const pullOutcome = (overrides: Partial<{ success: boolean; state: string; strategy: string; remote: string; branch: string; remoteChanged: boolean; ahead: number; behind: number; message: string; error: string; conflicts: string[] }> = {}) =>
   JSON.stringify({ success: true, state: 'upToDate', strategy: 'none', remote: 'origin', branch: 'main', remoteChanged: false, ahead: 0, behind: 0, message: 'Already up to date with origin/main', error: '', conflicts: [], ...overrides })
-
-const flush = () => act(async () => { await Promise.resolve() })
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'

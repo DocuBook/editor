@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { flush } from '../harness'
+
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 const pollGitStatus = vi.hoisted(() => vi.fn(async () => {}))
 
@@ -16,9 +18,6 @@ import GitSettings from '../../../frontend/components/GitSettings'
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let root: Root | null
-
-/** Resolve the async `load()` / handler promise chains inside act. */
-const flush = () => act(async () => { await Promise.resolve() })
 
 const REPO_SETTINGS = {
   isRepo: true, noVault: false, name: 'Doc', email: 'doc@example.com', defaultBranch: 'main',

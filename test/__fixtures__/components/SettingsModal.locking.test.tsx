@@ -11,6 +11,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { settle } from '../harness'
+
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
 const { toastSuccess, toastError } = vi.hoisted(() => ({ toastSuccess: vi.fn(), toastError: vi.fn() }))
 
@@ -38,9 +40,6 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 Element.prototype.scrollIntoView = vi.fn() as unknown as typeof Element.prototype.scrollIntoView
 
 let root: Root | null
-const flush = () => act(async () => { await Promise.resolve() })
-/** refreshBackend awaits a Promise.all of two invokes; one extra turn drains it. */
-const settle = async () => { await flush(); await flush() }
 
 /** A configured provider, as the backend would report it. */
 function configure(provider: string, over: Partial<{ baseUrl: string; model: string; probes: Record<string, boolean> }> = {}) {

@@ -23,5 +23,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
   },
-  "include": ["frontend", "test/unit", "test/__fixtures__"],
+  "include": ["frontend", "test/__fixtures__"],
 }

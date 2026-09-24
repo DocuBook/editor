@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { settle } from '../harness'
+
 vi.mock('../../../frontend/utils/aiMenu', () => ({
   getDefaultAIMenuItems: () => [],
 }))
@@ -48,14 +50,6 @@ function typeInto(el: HTMLTextAreaElement, value: string) {
   setter.call(el, value)
   el.setSelectionRange(value.length, value.length)
   el.dispatchEvent(new Event('input', { bubbles: true }))
-}
-
-async function settle() {
-  await act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
-    await Promise.resolve()
-  })
 }
 
 const options = () => Array.from(document.querySelectorAll('[role="option"]')).map(node => node.textContent ?? '')
