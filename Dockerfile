@@ -13,7 +13,6 @@ RUN npm ci
 COPY index.html tsconfig.json tsconfig.app.json tsconfig.node.json vite.config.ts ./
 COPY frontend ./frontend
 COPY public ./public
-COPY test/unit ./test/unit
 COPY test/__fixtures__ ./test/__fixtures__
 RUN npm run build
 

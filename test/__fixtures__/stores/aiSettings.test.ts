@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createMemoryStorage } from "../../__fixtures__/memoryStorage";
+import { createMemoryStorage } from "../memoryStorage";
 
 /** A storage that WOULD receive anything the store persisted. The store must leave
  *  it untouched: config.json on the backend is the only source of truth. */

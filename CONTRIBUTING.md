@@ -85,7 +85,7 @@ editor/
 1. Fork the repo and create a branch: `git checkout -b fix/your-change`
 2. Make your change. Keep commits focused, and sign off every commit (`git commit -s`) — see [Contribution licensing](#contribution-licensing).
 3. Run checks locally:
-   - `npx oxlint frontend/ test/unit/ test/__fixtures__/`
+   - `npx oxlint frontend/ test/__fixtures__/`
    - `npx tsc -b`
    - `node test/check-acl.mjs`
    - `node test/check-docker-paths.mjs`
@@ -101,10 +101,13 @@ editor/
      `npm run test:e2e` # all suites, chromium (default)
      `BROWSER=webkit npm run test:e2e` # webkit — CI only (macos-15 runner)
 
-     All suites (one entry point, `test/run-all.mjs`): `web-smoke`, `trash`,
-     `theme-check`, `ai-debug`, `ai-chat-focus`, `ai-multiblock-follow`,
-     `overlay-surface`, `overlay-surface-fallback`, `formatting-toolbar-compact`,
-     `raw-markdown-highlight`. Any suite failing fails the run.
+      `test/run-all.mjs` discovers every `test/*.mjs` E2E suite automatically;
+      scripts, runner coverage, and this guide therefore stay aligned. Any suite
+      failing fails the run. `test/check-*.mjs` are repository guards, not E2E suites.
+
+      The mobile shell suite keeps runtime geometry checks and shipped artifact
+      pins for the dvh gate and viewport meta key. It does not pin negative CSS
+      strings or the composer rail's implementation-specific height.
 
      Browser coverage:
      - Local macOS runs Chromium through the installed Playwright browser
@@ -140,7 +143,7 @@ editor/
 - **Release changelog = the merged PR subjects grouped by type** — each subject lands verbatim under its category in `CHANGELOG.md`; the section is assembled from commits, not rewritten (DRY)
 - The hook rejects other formats and lists the allowed types — no commitlint needed
 
-**PR CI validates both runtimes:** lint (oxlint over `frontend/`, `test/unit/`,
+**PR CI validates both runtimes:** lint (oxlint over `frontend/`,
 `test/__fixtures__/`), type checks, ACL and Docker-path guards, version
 consistency, frontend and Rust tests, Rust clippy, `cargo audit`/`npm audit`,
 Linux server tests, Chromium/WebKit browser E2E, desktop DMGs, and Docker image

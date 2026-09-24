@@ -9,8 +9,12 @@
  * suite fails — so CI gates on the whole set, not just the first.
  */
 import { spawnSync } from 'node:child_process'
+import { readdirSync } from 'node:fs'
 
-const SUITES = ['web-smoke', 'trash', 'theme-check', 'ai-debug', 'ai-chat-focus', 'ai-multiblock-follow', 'overlay-surface', 'overlay-surface-fallback', 'formatting-toolbar-compact', 'raw-markdown-highlight']
+const SUITES = readdirSync('test')
+  .filter(file => file.endsWith('.mjs') && file !== 'run-all.mjs' && !file.startsWith('check-') && file !== 'lib.mjs')
+  .map(file => file.slice(0, -4))
+  .sort()
 const results = []
 
 for (const suite of SUITES) {

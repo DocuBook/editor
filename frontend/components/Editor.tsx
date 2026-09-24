@@ -131,7 +131,13 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     <div className="editor-root relative isolate flex-1 flex flex-col min-w-0 min-h-0">
       <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       <div className="relative z-0 flex-1 flex flex-col min-h-0">
-        <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-32 max-[639px]:pb-40' : '')}>
+        {/* `pb-50` (200px) reserves room for the composer at its tallest: measured at
+            175px + its 20px bottom offset — a prompt grown to the textarea's `max-h-30`
+            (120px) plus the prompt row, the model row and the surface border. One value
+            at every width, since the composer's height does not depend on its width, and
+            it keeps the document's last line readable above a long prompt instead of
+            trapped under it. test/mobile-shell-viewport.mjs re-measures this. */}
+        <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-50' : '')}>
           {inner}
         </div>
         {kind === 'wysiwyg' && editMode === 'editor' && (

@@ -27,7 +27,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Oxlint
-        run: npx oxlint frontend/ test/unit/ test/__fixtures__/
+        run: npx oxlint frontend/ test/__fixtures__/
       - name: TypeScript type check
         run: npx tsc -b
       - name: ACL guard (every Tauri command has an allow entry)
@@ -87,10 +87,9 @@ jobs:
     # driver's PushAPIEnabled context setting.
     runs-on: macos-15
     needs: [test]
-    # Heavy matrix job: PRs wait for the same approval gate as the build job;
-    # push to master / tags / manual run without approval (behavior unchanged).
-    environment:
-      name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
+    # No approval gate: the browser matrix is a required PR check, so waiting on
+    # a manual build-approval deployment stalls every PR for no artifact gain.
+    # Only `build` (the DMGs) still asks for approval.
     strategy:
       matrix:
         browser: [chromium, webkit]
@@ -131,7 +130,7 @@ jobs:
         run: cargo build --manifest-path server/Cargo.toml
       - name: Build frontend
         run: npm run build
-      - name: "E2E — all suites (web-smoke, trash, theme, AI transport)"
+      - name: "E2E — all suites (smoke, trash, AI transport, mobile shell)"
         run: npm run test:e2e
         env:
           BROWSER: ${{ matrix.browser }}

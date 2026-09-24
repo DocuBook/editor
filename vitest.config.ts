@@ -10,7 +10,7 @@ import {
 export default defineConfig({
   plugins: [blocknoteMathWhitespaceCompat(), tiptapViewProxyCompat()],
   test: {
-    include: ["test/unit/**/*.test.ts", "test/unit/**/*.test.tsx"],
+    include: ["test/__fixtures__/**/*.test.ts", "test/__fixtures__/**/*.test.tsx"],
     css: true,
     server: {
       deps: {

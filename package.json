@@ -14,17 +14,9 @@
     "prepare": "husky",
     "test:e2e": "node test/run-all.mjs",
     "test:e2e:smoke": "node test/web-smoke.mjs",
-    "test:e2e:trash": "node test/trash.mjs",
-    "test:e2e:theme": "node test/theme-check.mjs",
     "test:e2e:ai": "node test/ai-debug.mjs",
     "test:e2e:ai-mention": "node test/ai-mention.mjs",
-    "test:e2e:ai-pre": "node test/ai-pre-flicker.mjs",
-    "test:e2e:ai-follow": "node test/ai-multiblock-follow.mjs",
-    "test:e2e:overlay": "node test/overlay-surface.mjs",
-    "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs",
-    "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs",
-    "test:e2e:raw-md": "node test/raw-markdown-highlight.mjs",
-    "test:e2e:cursor-table": "node test/cursor-table-mode-switch.mjs"
+    "test:e2e:shell": "node test/mobile-shell-viewport.mjs"
   },
   "dependencies": {
     "@blocknote/core": "0.54.2",
