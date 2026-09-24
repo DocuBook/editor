@@ -1,6 +1,8 @@
 import { File, Folder, Trash } from 'lucide-react'
 import { useRef, useState } from 'react'
 
+import OverlayPortal from '../OverlayPortal'
+
 export interface TrashItem {
   name: string
   original: string
@@ -87,25 +89,27 @@ export default function TrashPanel({ items, loading, error, busy, onRestore, onD
       </div>
 
       {confirmOpen && (
-        <div
-          role="alertdialog"
-          aria-modal="true"
-          aria-label="Delete permanently"
-          className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
-          onClick={closeConfirm}
-          onKeyDown={e => { if (e.key === 'Escape') closeConfirm() }}
-        >
-          <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
-            <div className="text-sm font-semibold mb-1">
-              Delete {selectedItems.length === 1 ? `“${selectedItems[0].original}”` : `${selectedItems.length} selected items`} permanently?
-            </div>
-            <div className="text-xs text-foreground-secondary mb-4">This cannot be undone — the {selectedItems.length === 1 ? 'item' : 'items'} will not go to Trash.</div>
-            <div className="flex justify-end gap-2">
-              <button ref={cancelRef} autoFocus onClick={closeConfirm} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
-              <button onClick={() => { setConfirmOpen(false); void runAction(onDelete) }} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Delete</button>
+        <OverlayPortal>
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-label="Delete permanently"
+            className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
+            onClick={closeConfirm}
+            onKeyDown={e => { if (e.key === 'Escape') closeConfirm() }}
+          >
+            <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
+              <div className="text-sm font-semibold mb-1">
+                Delete {selectedItems.length === 1 ? `“${selectedItems[0].original}”` : `${selectedItems.length} selected items`} permanently?
+              </div>
+              <div className="text-xs text-foreground-secondary mb-4">This cannot be undone — the {selectedItems.length === 1 ? 'item' : 'items'} will not go to Trash.</div>
+              <div className="flex justify-end gap-2">
+                <button ref={cancelRef} autoFocus onClick={closeConfirm} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
+                <button onClick={() => { setConfirmOpen(false); void runAction(onDelete) }} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Delete</button>
+              </div>
             </div>
           </div>
-        </div>
+        </OverlayPortal>
       )}
     </section>
   )

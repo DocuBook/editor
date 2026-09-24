@@ -69,6 +69,17 @@ describe('TrashPanel', () => {
     expect(dialogButton('Delete')).not.toBeUndefined()
   })
 
+  /** The mobile sidebar drawer transforms its content, which would make the
+   *  drawer the containing block of a `fixed` in-tree dialog and clip it down to
+   *  the drawer — so the confirmation is portaled to document.body instead. */
+  it('renders the confirmation outside the panel so the mobile drawer cannot clip it', () => {
+    renderPanel({ items: [fileItem] })
+    act(() => checkbox('Select notes/file-1.md').click())
+    act(() => textButton('Delete').click())
+
+    expect(dialog()!.parentElement).toBe(document.body)
+  })
+
   it('names a single item in the confirmation', () => {
     renderPanel({ items: [fileItem, folderItem] })
     act(() => checkbox('Select notes/file-1.md').click())

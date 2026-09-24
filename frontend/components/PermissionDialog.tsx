@@ -2,6 +2,7 @@ import { ShieldAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { openSystemSettings, type SystemSettingsPane } from '../lib/ipc'
+import OverlayPortal from './OverlayPortal'
 
 interface PermissionDialogProps {
   /** Which macOS privacy pane the action needs. */
@@ -24,48 +25,50 @@ export default function PermissionDialog({ pane, message, detail, onClose }: Per
   useEffect(() => { openRef.current?.focus() }, [])
 
   return (
-    <div
-      role="alertdialog"
-      aria-modal="true"
-      aria-label="Permission required"
-      className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
-      onClick={onClose}
-      onKeyDown={e => { if (e.key === 'Escape') onClose() }}
-    >
-      <div className="ui-popover p-4 w-96" onClick={e => e.stopPropagation()}>
-        <div className="mb-2 flex items-center gap-2">
-          <ShieldAlert size={16} className="shrink-0 text-danger" />
-          <div className="text-sm font-semibold">Permission required</div>
-        </div>
-        <div className="mb-2 text-xs text-foreground-secondary">{message}</div>
-        {detail && <div className="mb-2 break-all rounded bg-surface-active px-2 py-1 text-[11px] text-muted font-mono">{detail}</div>}
-        <div className="mb-4 text-xs text-foreground-secondary">
-          Open <span className="text-foreground">System Settings › Privacy &amp; Security › {paneLabel}</span> and enable
-          DocuBook Editor, then try again.
-        </div>
-        {/* Only reachable when the deep link itself fails, which leaves the
-            written path above as the sole way forward — so the dialog stays
-            open instead of closing on a click that did nothing. */}
-        {openFailed && (
-          <div role="alert" className="mb-3 text-[11px] text-danger">
-            System Settings could not be opened automatically. Follow the path above.
+    <OverlayPortal>
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Permission required"
+        className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
+        onClick={onClose}
+        onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+      >
+        <div className="ui-popover p-4 w-96" onClick={e => e.stopPropagation()}>
+          <div className="mb-2 flex items-center gap-2">
+            <ShieldAlert size={16} className="shrink-0 text-danger" />
+            <div className="text-sm font-semibold">Permission required</div>
           </div>
-        )}
-        <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Not now</button>
-          <button
-            ref={openRef}
-            onClick={() => {
-              void openSystemSettings(pane).then(opened => {
-                if (opened) onClose(); else setOpenFailed(true)
-              })
-            }}
-            className="text-xs px-3 py-1.5 rounded bg-accent text-on-accent cursor-pointer border-none hover:bg-accent-hover"
-          >
-            Open System Settings
-          </button>
+          <div className="mb-2 text-xs text-foreground-secondary">{message}</div>
+          {detail && <div className="mb-2 break-all rounded bg-surface-active px-2 py-1 text-[11px] text-muted font-mono">{detail}</div>}
+          <div className="mb-4 text-xs text-foreground-secondary">
+            Open <span className="text-foreground">System Settings › Privacy &amp; Security › {paneLabel}</span> and enable
+            DocuBook Editor, then try again.
+          </div>
+          {/* Only reachable when the deep link itself fails, which leaves the
+              written path above as the sole way forward — so the dialog stays
+              open instead of closing on a click that did nothing. */}
+          {openFailed && (
+            <div role="alert" className="mb-3 text-[11px] text-danger">
+              System Settings could not be opened automatically. Follow the path above.
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <button onClick={onClose} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Not now</button>
+            <button
+              ref={openRef}
+              onClick={() => {
+                void openSystemSettings(pane).then(opened => {
+                  if (opened) onClose(); else setOpenFailed(true)
+                })
+              }}
+              className="text-xs px-3 py-1.5 rounded bg-accent text-on-accent cursor-pointer border-none hover:bg-accent-hover"
+            >
+              Open System Settings
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </OverlayPortal>
   )
 }

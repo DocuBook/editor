@@ -675,6 +675,18 @@ describe('GitPanel — remote sync', () => {
     expect(confirmDialog()).toBeNull()
   })
 
+  /** The mobile sidebar drawer transforms its content, which would make the
+   *  drawer the containing block of a `fixed` in-tree dialog and clip it down to
+   *  the drawer — so the confirmation is portaled to document.body instead. */
+  it('renders the abort confirmation outside the panel so the mobile drawer cannot clip it', () => {
+    gitState.repoState = 'merge'
+    renderPanel()
+
+    act(() => syncButton('Abort')!.click())
+
+    expect(confirmDialog()!.parentElement).toBe(document.body)
+  })
+
   it('aborts a rebase only after confirmation', async () => {
     gitState.repoState = 'rebase'
     renderPanel()

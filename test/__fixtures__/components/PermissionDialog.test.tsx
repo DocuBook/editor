@@ -43,6 +43,15 @@ describe('PermissionDialog', () => {
     expect(dialog().textContent).toContain('Put Back needs Accessibility access')
   })
 
+  /** The mobile sidebar drawer transforms its content, which would make the
+   *  drawer the containing block of a `fixed` in-tree dialog and clip it down to
+   *  the drawer — so the dialog is portaled to document.body instead. */
+  it('renders outside the component tree so no transformed ancestor can clip it', () => {
+    renderDialog()
+
+    expect(dialog().parentElement).toBe(document.body)
+  })
+
   it('labels the pane for each permission kind', () => {
     renderDialog({ pane: 'automation' })
     expect(dialog().textContent).toContain('Automation')
