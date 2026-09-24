@@ -131,6 +131,14 @@ Commit subject `<type>(<scope>): <subject>` — lowercase, imperative, type ∈ 
 Ground every claim: cite `path:line` for code facts, give the exact command and outcome for anything you ran, and mark anything unverified as unverified. Never describe work you did not do.
 ```
 
+### `--security`
+
+> Optional, for ad-hoc deep audits: `@pullfrog audit the auth flow --security`.
+
+```text
+Treat this as a security audit, not a code review. Map the attack surface the change adds, then report findings by severity with `path:line`, how each one is reached, and the smallest fix. Cover trust boundaries and what crosses them, input validation (paths, URLs, user text), authorization checks, secret and key handling, dependency risk, and whether failures open or close. State explicitly what you checked and found clean.
+```
+
 ---
 
 ## review
@@ -143,10 +151,12 @@ Ground every claim: cite `path:line` for code facts, give the exact command and 
 **Look at, in this order**
 
 1. **Correctness & regressions** — does the diff do what the PR/issue claims, and what else calls the code it changes? Trace the callers.
-2. **Security & trust boundary** — vault-root path handling, key handling, SSRF validation on outbound AI URLs, ACL/permission drift against the standing invariants.
+2. **Security & trust boundary** — the attack surface this diff adds: vault-root path handling, key handling, SSRF validation on outbound AI URLs, user text crossing the IPC boundary, ACL/permission drift against the standing invariants.
 3. **Failure modes** — error paths, unawaited/uncancelled async work, partial writes, empty or oversized input, platform differences (`src-tauri` vs `server`, macOS vs Linux).
-4. **Tests** — is the new behavior covered by a test that would fail without the change? Name the missing case, don't just ask for "more tests".
+4. **Tests** — is the new behavior covered by a test that would fail without the change? Name the missing case, don't just ask for "more tests". A test that was already failing, or is flaky, **before** this diff is not a blocker — label it pre-existing/flaky instead of folding it into the verdict.
 5. **Repo invariants** — shared modules edited once, command-surface trio in sync, lockfiles and version fields untouched.
+6. **Over-engineering** — speculative abstraction, a standard-library call reimplemented by hand, a dependency doing what ten lines could, config nobody sets.
+7. **UI changes** (`frontend/` only) — keyboard reachability and focus order, overlay/floating-menu behavior, IME/table/cursor edge cases, and render cost on a large document.
 
 **Rules**
 
@@ -195,7 +205,7 @@ Ground every claim: cite `path:line` for code facts, give the exact command and 
 1. Read the issue, its comments, and the relevant code first. Cite real paths (`path:line` where it matters) — a plan that names files it hasn't opened is a guess.
 2. **3–7 atomic tasks**, in order, each one-line-scope and each with the check that proves it — the standing frontend chain, the Rust chain, or the specific test to run. Drop any task that can't be verified.
 3. Cover the invariants when they are in the blast radius: shared-module edits, the command-surface trio, ACL and Docker-path guards, and docs (`README` / `CONTRIBUTING` / `.env.example`) when behavior or config changes.
-4. **Test strategy:** which existing test file grows, or which new case is needed, and what it would catch. Name an E2E suite only when a user-visible flow changes.
+4. **Test strategy:** case design and regression priority — which existing test file grows, which new case is needed, what it would catch, and which existing behavior must not regress. Name an E2E suite only when a user-visible flow changes.
 5. **Out of scope:** state explicitly what this plan will not touch, so Build doesn't wander.
 6. **Risks / unknowns:** what must be verified first, and the fallback if it turns out otherwise.
 
@@ -216,7 +226,7 @@ Ground every claim: cite `path:line` for code facts, give the exact command and 
 **Goal:** the smallest correct diff that satisfies the plan or issue — verified, committed, opened as a PR.
 
 1. Restate the acceptance criteria you are building to (from the plan if there is one), then explore **before** editing: reuse the utilities and patterns of the files you touch, and match their style.
-2. Implement. Handle failure modes, keep errors typed, leave no placeholders, TODOs, or dead code. If you find an unrelated bug, open a follow-up issue instead of fixing it inline.
+2. Implement. Handle failure modes, keep errors typed, leave no placeholders, TODOs, or dead code. Comment only non-obvious intent, constraints, or tradeoffs — never restate what the code does. If you find an unrelated bug, open a follow-up issue instead of fixing it inline.
 3. **Tests:** add or extend a test that fails without your change — vitest for pure frontend logic, `cargo test` for the Rust side. Never weaken, skip, or delete an existing test to go green.
 4. Keep the invariants: the command-surface trio in one change, shared modules edited once, guards updated when the surface changes, docs updated when behavior or config changes.
 5. Verify with the standing **Verify before claiming done** chains: the frontend chain always; add the Rust chain when `src-tauri/` or `server/` is touched; E2E only for user-visible flow changes on an environment that can run it.
@@ -257,11 +267,12 @@ Report per the standing **Evidence** rule.
 **Goal:** green CI by fixing the cause — never by loosening the check.
 
 1. Read the failing job's logs (`get_check_suite_logs`) and quote the first real error, not the downstream symptom.
-2. Reproduce it locally with the same command the workflow runs in `.github/workflows/ci.yml`.
-3. Fix the root cause. If the failure is pre-existing on the target branch or unrelated to this PR's diff, say so and stop instead of guessing.
-4. Re-run the failing command, then the standing frontend chain (and the Rust chain when Rust is involved). Push a new commit and report the outcome per the standing **Evidence** rule.
+2. **Classify before you touch code:** async/race → concurrency reasoning; type, null, or data-shape → data-type errors; slowdown or memory growth → profiling; timing/nondeterminism → flakiness analysis. Say which class you concluded, and why.
+3. Reproduce it locally with the same command the workflow runs in `.github/workflows/ci.yml`. For a flaky test, find the source of nondeterminism — a retry or a longer timeout is not a fix.
+4. Fix the root cause. If the failure is pre-existing on the target branch or unrelated to this PR's diff, say so and stop instead of guessing.
+5. Re-run the failing command, then the standing frontend chain (and the Rust chain when Rust is involved). Push a new commit and report the outcome per the standing **Evidence** rule.
 
-**Never:** disable, skip, loosen, or `continue-on-error` a check; edit workflow config to hide a failure; retry the same fix twice without new evidence.
+**Never:** disable, skip, loosen, or `continue-on-error` a check; edit workflow config to hide a failure; retry the same fix twice without new evidence; add a retry/timeout knob instead of removing the nondeterminism.
 <!-- end:fix-ci -->
 
 ---
@@ -280,13 +291,16 @@ Apply 1–3 labels from the repo's existing set only: `bug` for defects, `enhanc
 
 Each card distills one or more global agent skills, so the reasoning behind a line is traceable when this file is edited:
 
-| Card              | Source concepts                                                                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `review`          | **code-review** — mode selection, severity scoring, concrete fixes, verdict + top-N priorities, scope discipline (review the diff, not the repo) |
-| `enrich-issues`   | **analysis-rca** (root-cause area, evidence over assertion) + **code-review** (context before opinion)                                            |
-| `plan`            | **session-planner** — 3–7 atomic verifiable tasks grouped into phases, dependencies, acceptance criteria; **test-generation** (test strategy)     |
-| `build`           | **code-quality** — simplest solution, typed errors, failure modes, no placeholders, self-review checklist; **test-generation** — AAA, edge cases |
-| `address-reviews` | **analysis-rca** — fix the cause, not the symptom, regression-checked; **code-quality** — behavior preserved for refactoring, flag bugs separately |
-| `fix-ci`          | **analysis-rca** — log interpretation, minimal fix, fix verification                                                                             |
+| Card              | Source concepts                                                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `review`          | **code-review** (severity scoring, concrete fixes, verdict + top-N priorities, review the diff not the repo) · **ponytail-review** (over-engineering hunt) · **security-audit** (attack surface of the new input) · **non-functional-testing** (keyboard/focus, overlay behavior, render cost) · **test-quality** (flaky vs broken) |
+| `enrich-issues`   | **analysis-rca** (root-cause area, evidence over assertion) · **code-review** (context before opinion)                                                                                                                                            |
+| `plan`            | **session-planner** (3–7 atomic verifiable tasks, phases, acceptance criteria) · **test-planning** (case design, regression priority) · **test-generation** (what the test must assert)                                                            |
+| `build`           | **code-quality** (smallest diff, typed errors, failure modes, no placeholders, self-review checklist) · **code-documentation** (comment the why, not the what) · **test-generation** (a test that fails without the change)                        |
+| `address-reviews` | **analysis-rca** (cause, not symptom, regression-checked) · **code-quality** (behavior preserved for refactoring, flag bugs separately)                                                                                                            |
+| `fix-ci`          | **analysis-rca** (log interpretation, minimal fix, fix verification) · **concurrency-async** / **data-type-errors** / **performance-memory** (failure-class routing) · **test-quality** (flakiness)                                                 |
+| `flags: --security` | **security-audit** (audit rubric for ad-hoc runs)                                                                                                                                                                                               |
+
+**Concept only — do not assume a skill tool at run time.** These skills execute in the Zed agent, where local MCP servers (`local-memory`, `task-write`, `context7`) are available. A Pullfrog run in GitHub Actions has none of them — it gets the `pullfrog` tools (`get_review_comments`, `get_check_suite_logs`, `gh`, `git`, …). What transfers is the reasoning: FSM shape, rule tables, checklists. Never write a card that expects a skill file, a task database, or a memory server to exist.
 
 Shape of every card — goal → what to do → guardrails → output — is stable on purpose; only the mode-specific delta changes.
