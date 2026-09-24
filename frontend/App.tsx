@@ -211,6 +211,8 @@ export default function App() {
         </main>
       </div>
 
+      {/* 70% of the viewport: on a phone the drawer is the primary navigation
+          surface, and the old fixed 224px truncated every folder name. */}
       <Drawer
         id="mobile-sidebar-drawer"
         data-testid="mobile-sidebar-drawer"
@@ -218,7 +220,7 @@ export default function App() {
         onClose={closeMobileDrawer}
         title="Vault navigation"
         position="left"
-        size={224}
+        size="70%"
         padding={0}
         zIndex={40}
         closeButtonProps={{ 'aria-label': 'Close sidebar drawer', autoFocus: true, icon: <PanelLeftClose size={16} /> }}

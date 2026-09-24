@@ -11,14 +11,14 @@ const vaultState = vi.hoisted(() => ({
 }))
 
 vi.mock('@mantine/core', () => ({
-  Drawer: ({ opened, onClose, onExitTransitionEnd, children }: { opened: boolean; onClose: () => void; onExitTransitionEnd?: () => void; children?: ReactNode }) => {
+  Drawer: ({ opened, onClose, onExitTransitionEnd, size, children }: { opened: boolean; onClose: () => void; onExitTransitionEnd?: () => void; size?: number | string; children?: ReactNode }) => {
     const wasOpened = useRef(false)
     useEffect(() => {
       if (wasOpened.current && !opened) onExitTransitionEnd?.()
       wasOpened.current = opened
     }, [onExitTransitionEnd, opened])
     return (
-      <section data-testid="drawer" data-opened={String(opened)}>
+      <section data-testid="drawer" data-opened={String(opened)} data-size={String(size)}>
         {opened && <><button aria-label="close-drawer" onClick={onClose}>Close</button>{children}</>}
       </section>
     )
@@ -134,5 +134,15 @@ describe('responsive sidebar', () => {
 
     act(() => toggle.click())
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('false')
+  })
+
+  /** The drawer is the whole navigation surface on a phone, so it takes most of
+   *  the viewport instead of a fixed column that truncated every folder name. */
+  it('sizes the mobile drawer to 70% of the viewport', () => {
+    act(() => setDesktop(false))
+    const toggle = document.querySelector<HTMLButtonElement>('[aria-label="toggle-sidebar"]')!
+    act(() => toggle.click())
+
+    expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-size')).toBe('70%')
   })
 })
