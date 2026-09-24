@@ -25,7 +25,8 @@
     "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs",
     "test:e2e:shell": "node test/mobile-shell-viewport.mjs",
     "test:e2e:raw-md": "node test/raw-markdown-highlight.mjs",
-    "test:e2e:cursor-table": "node test/cursor-table-mode-switch.mjs"
+    "test:e2e:cursor-table": "node test/cursor-table-mode-switch.mjs",
+    "test:e2e:git-branch": "node test/git-branch-e2e.mjs"
   },
   "dependencies": {
     "@blocknote/core": "0.54.2",

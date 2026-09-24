@@ -21,9 +21,9 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, PORTS } from './lib.mjs'
 
-const PORT = 4281
+const PORT = PORTS.gitBranch
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }); } catch {};
 const DATA = '/tmp/docubook-git-e2e'
 const VAULT = `${DATA}/vaults/gitvault`

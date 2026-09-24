@@ -10,6 +10,89 @@ import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 
+export const PORTS = {
+  theme: 4173,
+  overlay: 4176,
+  toolbar: 4179,
+  rawMarkdown: 4180,
+  cursorTable: 4181,
+  mobileShell: 4182,
+  webSmoke: 4273,
+  trash: 4274,
+  aiDebug: 4275,
+  aiPreFlicker: 4277,
+  aiChatFocus: 4288,
+  aiMultiblock: 4289,
+  aiMention: 4290,
+  gitBranch: 4281,
+}
+
+export function ok(results) {
+  return (name, condition, extra = '') => {
+    results.push([condition ? 'PASS' : 'FAIL', name, extra])
+    if (!condition) process.exitCode = 1
+  }
+}
+
+const API_FIXTURES = {
+  setup_status: { setupRequired: false, setupToken: false },
+  list_tree: [{ path: 'notes.md', name: 'notes.md', type: 'file' }],
+  open_vault: { name: 'demo' },
+  git_status: { status: '', isRepo: false, hasRemote: false, ahead: 0, upstream: '', repoState: 'clean' },
+  list_trash: [],
+  get_backlinks: [],
+  wiki_backlinks: [],
+}
+const RAW_RESULTS = new Set(['read_file'])
+
+export async function stubBackend(page, { email, noteText }) {
+  const api = { ...API_FIXTURES, setup_admin: { email }, account_get: { email }, read_file: noteText }
+  await page.route('**/api/**', async route => {
+    const command = route.request().url().split('/api/')[1]?.split('?')[0] || ''
+    const result = Object.prototype.hasOwnProperty.call(api, command) ? api[command] : {}
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ result: RAW_RESULTS.has(command) ? result : JSON.stringify(result) }),
+    })
+  })
+}
+
+export async function bootstrapSession(name, { port, dataDir, vaultPath = `${dataDir}/vaults/myva`, viewport }) {
+  const base = `http://localhost:${port}`
+  const api = async (command, args = {}, cookie = '') => {
+    const response = await fetch(`${base}/api/${command}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+      body: JSON.stringify(args),
+    })
+    return { status: response.status, text: await response.text() }
+  }
+
+  await waitForServer(base)
+  const admin = { email: `${name}@test.dev`, password: 'password1' }
+  const setup = await api('setup_admin', admin)
+  if (setup.status !== 200) throw new Error(`setup_admin failed: ${setup.text}`)
+  const login = await fetch(`${base}/api/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(admin),
+  })
+  const setCookie = login.headers.get('set-cookie') || ''
+  const cookie = setCookie.split(';')[0]
+  if (login.status !== 200 || !cookie.startsWith('db_session=')) {
+    throw new Error(`login failed: ${login.status} ${setCookie}`)
+  }
+  const opened = await api('open_vault', { path: vaultPath }, cookie)
+  if (opened.status !== 200) throw new Error(`open_vault failed: ${opened.text}`)
+
+  const browser = await launchBrowser()
+  const context = await browser.newContext({ viewport })
+  await context.addCookies([{ name: 'db_session', value: cookie.slice('db_session='.length), url: base }])
+  const page = await context.newPage()
+  const logging = attachLogging(page, name)
+  return { browser, context, page, logging, base, api }
+}
+
 const ARTIFACTS = 'test/artifacts'
 
 /** Locate the Playwright browser binary — env override (CHROMIUM_EXE /
@@ -106,11 +189,15 @@ export function attachLogging(page, name) {
   const sink = (tag, line) => appendFileSync(logPath, `[${tag}] ${line}\n`)
   page.on('console', m => {
     sink(m.type(), m.text())
-    if (m.type() === 'error') errors.push(m.text().slice(0, 200))
+    if (m.type() === 'error' && !/Viewport argument key "interactive-widget" not recognized/.test(m.text())) {
+      errors.push(m.text().slice(0, 200))
+      process.exitCode = 1
+    }
   })
   page.on('pageerror', e => {
     sink('pageerror', String(e))
     errors.push('pageerror: ' + String(e).slice(0, 200))
+    process.exitCode = 1
   })
   return { errors, logPath }
 }

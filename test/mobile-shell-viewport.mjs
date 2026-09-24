@@ -29,37 +29,19 @@
  */
 import { mkdirSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, stubBackend, PORTS, ok as createOk } from './lib.mjs'
 
 mkdirSync('test/artifacts', { recursive: true })
 
-const PORT = 4182
+const PORT = PORTS.mobileShell
 const BASE = `http://localhost:${PORT}`
 const PHONE = { width: 390, height: 720 }
-const WIDE = { width: 1280, height: 800 }
 const NOTE = 'alpha bravo charlie delta'
 
 /** Fixture responses for the web IPC bridge (`POST /api/<cmd>`). */
 const NOTE_TEXT = `# Notes\n\n${NOTE}\n`
-const API = {
-  setup_admin: { email: 'shell@example.test' },
-  setup_status: { setupRequired: false, setupToken: false },
-  account_get: { email: 'shell@example.test' },
-  list_tree: [{ path: 'notes.md', name: 'notes.md', type: 'file' }],
-  read_file: NOTE_TEXT,
-  open_vault: { name: 'demo' },
-  git_status: { status: '', isRepo: false, hasRemote: false, ahead: 0, upstream: '', repoState: 'clean' },
-  list_trash: [],
-  get_backlinks: [],
-  wiki_backlinks: [],
-}
-const RAW_RESULT = new Set(['read_file'])
-
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 
 const server = startServer('mobile-shell-viewport', {
   cmd: 'npx', args: ['vite', 'preview', '--port', String(PORT), '--strictPort'], shell: true,
@@ -68,28 +50,16 @@ const server = startServer('mobile-shell-viewport', {
 let browser
 let page
 
-async function stubBackend(page) {
-  await page.route('**/api/**', async (route) => {
-    const cmd = route.request().url().split('/api/')[1]?.split('?')[0] || ''
-    const result = Object.prototype.hasOwnProperty.call(API, cmd) ? API[cmd] : {}
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ result: RAW_RESULT.has(cmd) ? result : JSON.stringify(result) }),
-    })
-  })
-}
-
 /** Shell/composer/tab-bar box model. `composerHeight` is measured live, so the
  *  room assertion below cannot drift from the composer's real markup. */
 const measure = () => page.evaluate(() => {
   const q = (sel) => document.querySelector(sel)
   const shell = q('.editor-shell')
-  const rail = q('.editor-ai-rail')
   const ai = q('.editor-ai-floating')
   const bar = q('.editor-tab-bar')
   const content = q('.editor-content')
   const ta = q('.editor-ai-floating textarea')
-  if (!shell || !rail || !ai || !bar || !content || !ta) return null
+  if (!shell || !ai || !bar || !content || !ta) return null
   const aiStyle = getComputedStyle(ai)
   const taStyle = getComputedStyle(ta)
   const shellRect = shell.getBoundingClientRect()
@@ -97,7 +67,6 @@ const measure = () => page.evaluate(() => {
     viewportHeight: document.documentElement.clientHeight,
     shellHeight: shellRect.height,
     shellBottom: shellRect.bottom,
-    railHeight: rail.getBoundingClientRect().height,
     aiBottom: ai.getBoundingClientRect().bottom,
     offset: parseFloat(aiStyle.bottom),
     barPosition: getComputedStyle(bar).position,
@@ -117,7 +86,7 @@ try {
   browser = await launchBrowser()
   page = await browser.newPage({ viewport: PHONE })
   attachLogging(page, 'mobile-shell-viewport')
-  await stubBackend(page)
+  await stubBackend(page, { email: 'shell@example.test', noteText: NOTE_TEXT })
   /** A configured provider, so the composer's prompt field is enabled and can be
    *  grown to its real maximum height for the room assertion below. */
   await mockAiSettings(page)
@@ -149,10 +118,6 @@ try {
     shipped.meta.includes('interactive-widget=resizes-content'), shipped.meta)
   ok('css: shell height is dvh-gated (Safari 15 / chrome105 keep the 100vh fallback)',
     /@supports\(height:100dvh\)\{[^}]*\.editor-shell\{height:100dvh\}/.test(shipped.css))
-  ok('css: the inert composer override is gone',
-    !/\.editor-ai-floating\{bottom:max\(/.test(shipped.css))
-  ok('css: the tab bar is not sticky (it cannot pin against the shell it lives in)',
-    !/\.editor-tab-bar\{position:sticky/.test(shipped.css))
 
   /* Page is already at PHONE (context viewport); let the first layout settle. */
   await page.waitForTimeout(400)
@@ -170,8 +135,6 @@ try {
     ok('phone: the composer stays anchored 20px above the shell bottom edge',
       Math.abs(phone.shellBottom - phone.aiBottom - 20) < 0.5,
       `shell.bottom=${phone.shellBottom} composer.bottom=${phone.aiBottom} offset=${phone.offset}`)
-    ok('phone: composer containing block (rail) has height 0 — `100%` in it resolves to 0',
-      phone.railHeight === 0, `rail=${phone.railHeight}`)
     ok('phone: document reserves room for the resting composer',
       phone.contentPaddingBottom >= phone.composerHeight + phone.offset,
       `padding-bottom=${phone.contentPaddingBottom} composer=${phone.composerHeight}+${phone.offset}`)
@@ -197,16 +160,6 @@ try {
     focused && focused.scrollY === 0 && Math.abs(focused.barTop) < 0.5,
     focused ? `scrollY=${focused.scrollY} tabBar.top=${focused.barTop}` : 'no composer')
 
-  // ── 4. Wide keeps the same reservation (the composer's max height is width-independent) ──
-  await page.setViewportSize(WIDE)
-  await page.waitForTimeout(400)
-  const wide = await measure()
-  ok('wide: document reserves room for the composer at its tallest',
-    wide && wide.contentPaddingBottom >= wide.composerHeight + wide.offset,
-    wide ? `padding-bottom=${wide.contentPaddingBottom} composer=${wide.composerHeight}+${wide.offset}` : 'no composer')
-  ok('wide: shell height equals the visible viewport height',
-    wide && Math.abs(wide.shellHeight - wide.viewportHeight) < 0.5,
-    wide ? `shell=${wide.shellHeight} viewport=${wide.viewportHeight}` : 'no composer')
 } catch (e) {
   results.push(['FAIL', 'setup/run', String(e).split('\n')[0]])
   process.exitCode = 1

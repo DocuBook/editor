@@ -12,20 +12,16 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
 
-const PORT = 4281
+const PORT = PORTS.aiMention
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
 const DATA = '/tmp/docubook-e2e-mention'
 const VAULT = `${DATA}/vaults/myva`
 const BASE = `http://localhost:${PORT}`
 
-const ADMIN = { email: 'mention@test.dev', password: 'password1' }
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
@@ -46,18 +42,9 @@ async function api(cmd, args = {}, cookie = '') {
 }
 
 try {
-  await waitForServer(BASE)
-  const sa = await api('setup_admin', { email: ADMIN.email, password: ADMIN.password })
-  if (sa.status !== 200) throw new Error(`setup_admin failed: ${sa.text}`)
-  const login = await fetch(`${BASE}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ADMIN) })
-  const cookie = (login.headers.get('set-cookie') || '').split(';')[0]
-  await api('open_vault', { path: VAULT }, cookie)
-
-  browser = await launchBrowser()
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
-  await context.addCookies([{ name: 'db_session', value: cookie.split('=').slice(1).join('='), url: BASE }])
-  const page = await context.newPage()
-  attachLogging(page, 'ai-mention')
+  const session = await bootstrapSession('ai-mention', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 1280, height: 900 } })
+  browser = session.browser
+  const page = session.page
 
   const askAiBodies = []
   let resolveHits = 0

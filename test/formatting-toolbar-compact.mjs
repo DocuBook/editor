@@ -28,11 +28,11 @@
  */
 import { mkdirSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, stubBackend, PORTS, ok as createOk } from './lib.mjs'
 
 mkdirSync('test/artifacts', { recursive: true })
 
-const PORT = 4179
+const PORT = PORTS.toolbar
 const BASE = `http://localhost:${PORT}`
 const PHONE = { width: 390, height: 720 }
 const WIDE = { width: 1280, height: 800 }
@@ -42,26 +42,8 @@ const NOTE = 'alpha bravo charlie delta'
  *  Two response shapes: `read_file` is the raw file text (the editor
  *  regex-matches the frontmatter out of it), everything else a JSON string. */
 const NOTE_TEXT = `# Notes\n\n${NOTE}\n`
-const API = {
-  setup_admin: { email: 'formatting@example.test' },
-  setup_status: { setupRequired: false, setupToken: false },
-  account_get: { email: 'formatting@example.test' },
-  list_tree: [{ path: 'notes.md', name: 'notes.md', type: 'file' }],
-  read_file: NOTE_TEXT,
-  open_vault: { name: 'demo' },
-  git_status: { status: '', isRepo: false, hasRemote: false, ahead: 0, upstream: '', repoState: 'clean' },
-  list_trash: [],
-  get_backlinks: [],
-  wiki_backlinks: [],
-}
-/** Commands whose `result` is passed through verbatim instead of JSON-encoded. */
-const RAW_RESULT = new Set(['read_file'])
-
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 
 const server = startServer('formatting-toolbar-compact', {
   cmd: 'npx', args: ['vite', 'preview', '--port', String(PORT), '--strictPort'], shell: true,
@@ -71,17 +53,6 @@ let browser
 let page
 
 /** Serve fixtures for every bridge call the editor makes while booting. */
-async function stubBackend(page) {
-  await page.route('**/api/**', async (route) => {
-    const cmd = route.request().url().split('/api/')[1]?.split('?')[0] || ''
-    const result = Object.prototype.hasOwnProperty.call(API, cmd) ? API[cmd] : {}
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ result: RAW_RESULT.has(cmd) ? result : JSON.stringify(result) }),
-    })
-  })
-}
-
 /** Select a phrase in the open note, then wait for the bubble menu. */
 async function selectPhrase(page, phrase) {
   await page.evaluate((needle) => {
@@ -183,7 +154,7 @@ try {
   browser = await launchBrowser()
   page = await browser.newPage({ viewport: PHONE })
   attachLogging(page, 'formatting-toolbar-compact')
-  await stubBackend(page)
+  await stubBackend(page, { email: 'formatting@example.test', noteText: NOTE_TEXT })
   /* Seed the persisted vault so `resumeVault` on zustand rehydrate opens it,
      and skip the onboarding guide so the fixture note renders. */
   await page.addInitScript(() => {

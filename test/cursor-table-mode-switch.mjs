@@ -17,11 +17,11 @@
  */
 import { mkdirSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, stubBackend, PORTS, ok as createOk } from './lib.mjs'
 
 mkdirSync('test/artifacts', { recursive: true })
 
-const PORT = 4181
+const PORT = PORTS.cursorTable
 const BASE = `http://localhost:${PORT}`
 const VIEWPORT = { width: 1000, height: 820 }
 
@@ -44,25 +44,8 @@ const NOTE_TEXT = [
 const BRAVO_END = NOTE_TEXT.indexOf('bravo') + 'bravo'.length
 const ALPHA_END = NOTE_TEXT.indexOf('alpha') + 'alpha'.length
 
-const API = {
-  setup_admin: { email: 'cursor@example.test' },
-  setup_status: { setupRequired: false, setupToken: false },
-  account_get: { email: 'cursor@example.test' },
-  list_tree: [{ path: 'notes.md', name: 'notes.md', type: 'file' }],
-  read_file: NOTE_TEXT,
-  open_vault: { name: 'demo' },
-  git_status: { status: '', isRepo: false, hasRemote: false, ahead: 0, upstream: '', repoState: 'clean' },
-  list_trash: [],
-  get_backlinks: [],
-  wiki_backlinks: [],
-}
-const RAW_RESULT = new Set(['read_file'])
-
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 
 const server = startServer('cursor-table-mode-switch', {
   cmd: 'npx', args: ['vite', 'preview', '--port', String(PORT), '--strictPort'], shell: true,
@@ -71,17 +54,6 @@ const server = startServer('cursor-table-mode-switch', {
 
 let browser
 let page
-
-async function stubBackend(page) {
-  await page.route('**/api/**', async (route) => {
-    const cmd = route.request().url().split('/api/')[1]?.split('?')[0] || ''
-    const result = Object.prototype.hasOwnProperty.call(API, cmd) ? API[cmd] : {}
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ result: RAW_RESULT.has(cmd) ? result : JSON.stringify(result) }),
-    })
-  })
-}
 
 /** Where the WYSIWYG caret sits: the anchor text node and offset inside it. */
 const editorCaret = () => page.evaluate(() => {
@@ -127,7 +99,7 @@ async function run() {
   browser = await launchBrowser()
   page = await browser.newPage({ viewport: VIEWPORT })
   const logging = attachLogging(page, 'cursor-table-mode-switch')
-  await stubBackend(page)
+  await stubBackend(page, { email: 'cursor@example.test', noteText: NOTE_TEXT })
   await page.addInitScript(() => {
     localStorage.setItem('docubook:vault', JSON.stringify({
       state: { vaultPath: '/demo', expanded: {}, recent: [{ path: '/demo', name: 'demo', parent: '/' }] },

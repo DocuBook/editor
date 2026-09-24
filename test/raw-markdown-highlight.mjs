@@ -22,11 +22,11 @@
  */
 import { mkdirSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, stubBackend as stubApiBackend, PORTS, ok as createOk } from './lib.mjs'
 
 mkdirSync('test/artifacts', { recursive: true })
 
-const PORT = 4180
+const PORT = PORTS.rawMarkdown
 const BASE = `http://localhost:${PORT}`
 const VIEWPORT = { width: 1000, height: 820 }
 
@@ -58,26 +58,8 @@ const NOTE_TEXT = [
   '',
 ].join('\n')
 
-const API = {
-  setup_admin: { email: 'raw-md@example.test' },
-  setup_status: { setupRequired: false, setupToken: false },
-  account_get: { email: 'raw-md@example.test' },
-  list_tree: [{ path: 'notes.md', name: 'notes.md', type: 'file' }],
-  read_file: NOTE_TEXT,
-  open_vault: { name: 'demo' },
-  git_status: { status: '', isRepo: false, hasRemote: false, ahead: 0, upstream: '', repoState: 'clean' },
-  list_trash: [],
-  get_backlinks: [],
-  wiki_backlinks: [],
-}
-/** Commands whose `result` is passed through verbatim instead of JSON-encoded. */
-const RAW_RESULT = new Set(['read_file'])
-
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 
 const server = startServer('raw-markdown-highlight', {
   cmd: 'npx', args: ['vite', 'preview', '--port', String(PORT), '--strictPort'], shell: true,
@@ -154,22 +136,11 @@ let browser
 let page
 
 /** Serve fixtures for every bridge call the editor makes while booting. */
-async function stubBackend(page) {
-  await page.route('**/api/**', async (route) => {
-    const cmd = route.request().url().split('/api/')[1]?.split('?')[0] || ''
-    const result = Object.prototype.hasOwnProperty.call(API, cmd) ? API[cmd] : {}
-    await route.fulfill({
-      contentType: 'application/json',
-      body: JSON.stringify({ result: RAW_RESULT.has(cmd) ? result : JSON.stringify(result) }),
-    })
-  })
-}
-
 async function run() {
   browser = await launchBrowser()
   page = await browser.newPage({ viewport: VIEWPORT })
   const logging = attachLogging(page, 'raw-markdown-highlight')
-  await stubBackend(page)
+  await stubApiBackend(page, { email: 'raw-md@example.test', noteText: NOTE_TEXT })
   /* Seed the persisted vault so `resumeVault` on zustand rehydrate opens it,
      and skip the onboarding guide so the fixture note renders. */
   await page.addInitScript(() => {

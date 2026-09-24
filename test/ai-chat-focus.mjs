@@ -24,20 +24,16 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
 
-const PORT = 4288
+const PORT = PORTS.aiChatFocus
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
 const DATA = '/tmp/docubook-e2e-aichat'
 const VAULT = `${DATA}/vaults/myvault`
 const BASE = `http://localhost:${PORT}`
 
-const ADMIN = { email: 'aichat@test.dev', password: 'password1' }
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 const PAGEERRORS = (errors) => errors.filter((e) => e.startsWith('pageerror:'))
 
 mkdirSync('test/artifacts', { recursive: true })
@@ -67,24 +63,10 @@ const aiToolbarBtn = () => page.locator('button[aria-label="Edit with AI"]')
 const chip = (name) => page.getByRole('button', { name }).or(page.getByRole('option', { name }))
 
 try {
-  await waitForServer(BASE)
-  const sa = await api('setup_admin', { email: ADMIN.email, password: ADMIN.password })
-  ok('setup_admin: ok', sa.status === 200, sa.text.slice(0, 80))
-  const login = await fetch(`${BASE}/api/login`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ADMIN),
-  })
-  const setCookie = login.headers.get('set-cookie') || ''
-  ok('login: session cookie issued', login.status === 200 && /db_session=/.test(setCookie), String(login.status))
-  const cookie = setCookie.split(';')[0]
-  const ov = await api('open_vault', { path: VAULT }, cookie)
-  ok('open_vault: ok', ov.status === 200, ov.text.slice(0, 80))
-
-  browser = await launchBrowser()
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-  // The API login cookie must reach the browser context (Node fetch ≠ browser).
-  await context.addCookies([{ name: 'db_session', value: cookie.split('=').slice(1).join('='), url: BASE }])
-  page = await context.newPage()
-  const log = attachLogging(page, 'ai-chat-focus')
+  const session = await bootstrapSession('ai-chat-focus', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 1280, height: 800 } })
+  browser = session.browser
+  page = session.page
+  const log = session.logging
 
   // Mock the AI transport: a plain token stream is enough to reach review.
   await mockAskAi(page, () => [

@@ -18,20 +18,16 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi } from './lib.mjs'
+import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
 
-const PORT = 4275
+const PORT = PORTS.aiDebug
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
 const DATA = '/tmp/docubook-e2e-ai'
 const VAULT = `${DATA}/vaults/myva`
 const BASE = `http://localhost:${PORT}`
 
-const ADMIN = { email: 'ai@test.dev', password: 'password1' }
 const results = []
-const ok = (name, cond, extra = '') => {
-  results.push([cond ? 'PASS' : 'FAIL', name, extra])
-  if (!cond) process.exitCode = 1
-}
+const ok = createOk(results)
 
 mkdirSync('test/artifacts', { recursive: true })
 rmSync(DATA, { recursive: true, force: true })
@@ -50,18 +46,9 @@ async function api(cmd, args = {}, cookie = '') {
 }
 
 try {
-  await waitForServer(BASE)
-  const sa = await api('setup_admin', { email: ADMIN.email, password: ADMIN.password })
-  if (sa.status !== 200) throw new Error(`setup_admin failed: ${sa.text}`)
-  const login = await fetch(`${BASE}/api/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(ADMIN) })
-  const cookie = (login.headers.get('set-cookie') || '').split(';')[0]
-  await api('open_vault', { path: VAULT }, cookie)
-
-  browser = await launchBrowser()
-  const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
-  await context.addCookies([{ name: 'db_session', value: cookie.split('=').slice(1).join('='), url: BASE }])
-  const page = await context.newPage()
-  attachLogging(page, 'ai-debug')
+  const session = await bootstrapSession('ai-debug', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 1280, height: 800 } })
+  browser = session.browser
+  const page = session.page
 
   /** Mock Path B text output and Path A tool calls at browser fetch level. */
   const askAiHits = await mockAskAi(page, request => {

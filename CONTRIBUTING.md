@@ -101,10 +101,13 @@ editor/
      `npm run test:e2e` # all suites, chromium (default)
      `BROWSER=webkit npm run test:e2e` # webkit — CI only (macos-15 runner)
 
-     All suites (one entry point, `test/run-all.mjs`): `web-smoke`, `trash`,
-     `theme-check`, `ai-debug`, `ai-chat-focus`, `ai-multiblock-follow`,
-     `overlay-surface`, `overlay-surface-fallback`, `formatting-toolbar-compact`,
-     `raw-markdown-highlight`. Any suite failing fails the run.
+      `test/run-all.mjs` discovers every `test/*.mjs` E2E suite automatically;
+      scripts, runner coverage, and this guide therefore stay aligned. Any suite
+      failing fails the run. `test/check-*.mjs` are repository guards, not E2E suites.
+
+      The mobile shell suite keeps runtime geometry checks and shipped artifact
+      pins for the dvh gate and viewport meta key. It does not pin negative CSS
+      strings or the composer rail's implementation-specific height.
 
      Browser coverage:
      - Local macOS runs Chromium through the installed Playwright browser

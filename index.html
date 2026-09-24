@@ -6,7 +6,8 @@
         <!-- `interactive-widget=resizes-content` (Chromium 108+ / Android): the soft
              keyboard resizes the layout viewport, so the shell and every `dvh` anchor
              in it shrink with the keyboard instead of leaving the composer behind it.
-             Engines that do not know the key ignore it. The default is
+             Engines that do not know the key ignore it functionally; WebKit reports
+             it as an error-level console warning, allowlisted by the e2e harness. The default is
              `resizes-visual`, which resizes only the visual viewport. -->
         <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
         <meta name="theme-color" content="#0c0c0d" />
