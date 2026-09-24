@@ -24,7 +24,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
+import { startServer, summary, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
 
 const PORT = PORTS.aiChatFocus
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -44,15 +44,6 @@ writeFileSync(`${VAULT}/test.md`, '# Hello\n\nSome content for the AI chat audit
 const server = startServer('ai-chat-focus', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
 let browser
 let page
-
-async function api(cmd, args = {}, cookie = '') {
-  const res = await fetch(`${BASE}/api/${cmd}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
-    body: JSON.stringify(args),
-  })
-  return { status: res.status, text: await res.text() }
-}
 
 const textarea = () => page.locator('textarea[aria-label="AI prompt"]')
 const showPrompts = () => page.locator('button[aria-label="Show AI prompts"]')

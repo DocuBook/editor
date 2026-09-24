@@ -18,7 +18,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
+import { startServer, summary, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
 
 const PORT = PORTS.aiDebug
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -37,13 +37,6 @@ writeFileSync(`${VAULT}/notes.md`, ORIGINAL_MARKDOWN)
 
 const server = startServer('ai-debug', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
 let browser
-
-async function api(cmd, args = {}, cookie = '') {
-  const res = await fetch(`${BASE}/api/${cmd}`, {
-    method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(args),
-  })
-  return { status: res.status, text: await res.text() }
-}
 
 try {
   const session = await bootstrapSession('ai-debug', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 1280, height: 800 } })

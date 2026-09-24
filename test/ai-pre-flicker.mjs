@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 
-import { startServer, waitForServer, attachLogging, summary, launchBrowser, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
+import { startServer, summary, mockAiSettings, mockAskAi, bootstrapSession, PORTS, ok as createOk } from './lib.mjs'
 
 const PORT = PORTS.aiPreFlicker
 try { execSync(`lsof -ti :${PORT} | xargs kill -9`, { stdio: 'ignore' }) } catch {}
@@ -19,13 +19,6 @@ writeFileSync(`${VAULT}/notes.md`, code('before', 45))
 
 const server = startServer('ai-pre-flicker', { binary: 'server/target/debug/docubook-server', port: PORT, dataDir: DATA, wwwDir: 'dist' })
 let browser
-
-async function api(cmd, args = {}, cookie = '') {
-  const response = await fetch(`${BASE}/api/${cmd}`, {
-    method: 'POST', headers: { 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: JSON.stringify(args),
-  })
-  return { status: response.status, text: await response.text() }
-}
 
 try {
   const session = await bootstrapSession('ai-pre-flicker', { port: PORT, dataDir: DATA, vaultPath: VAULT, viewport: { width: 900, height: 320 } })
