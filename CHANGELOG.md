@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.1.3 — 2026-09-24
+
+### Patch Release
+
+#### 🐛 Bug Fixes
+
+- **Request-scoped AI streams** — Every AI request now carries its own id, and both transports tag each event with the request that produced it. Stop, retry, and a superseded attempt can only affect the turn they belong to, so a commit-message generation running next to an AI panel turn no longer interleaves their tokens or cancels the wrong stream.
+- **Prose fallback in tool mode** — A tool-capable provider that answers with prose instead of calling a tool is now re-asked once with the text-only prompt rather than failing the turn. The prose itself is never converted into a document edit, so the block ids from the tool prompt cannot leak into the text.
+- **Retry budget** — Manual Retry is capped per turn and disabled once the budget is spent, and a stale Retry click against a closed or aborted session is a no-op instead of an unhandled rejection.
+- **Composer model pick** — A model chosen in the composer now survives the settings hydration that can still land after boot, and the picker keeps the active model visible with a highlighted row, a check mark, and a scroll into view over a long model list.
+- **Empty documents** — A document holding a single empty paragraph now counts as empty instead of only a document with zero blocks, so prompts and placeholders take the empty path. Prompt cursor context also resolves from the AI menu anchor rather than the live cursor, which goes stale once the composer takes focus and the editor is locked.
+- **Git status without a timer** — Replaced the 3-second git-status poller with event-driven refreshes on git actions, vault open/close, and window focus. Vaults that are not repositories no longer fire a request every three seconds, and a failed refresh no longer leaves the store permanently empty.
+- **Custom AI provider** — The server's saved-provider list keeps a custom OpenAI-compatible endpoint instead of filtering it out, so saving one no longer reports an empty provider list and disables the composer on the next browser or redeploy.
+- **Mobile shell viewport** — The app shell is sized against the visible viewport (`dvh`, with the `100vh` fallback for Safari 15 and chrome105), and the soft keyboard resizes the layout viewport on Chromium, so the tab bar and the composer no longer scroll apart when the composer is focused on a phone. The document also reserves room for the composer at its full height at every width.
+
+#### 🔄 Refactor
+
+- Unit tests moved from `test/unit` to `test/__fixtures__`, with the shared React-settle helpers extracted into one harness, and the Docker build no longer copies the test directory.
+
+#### 🔧 CI
+
+- Added the `pullfrog.yml` workflow with dry-mode prompts for review, plan, build, and address-reviews.
+- The browser E2E matrix no longer waits on the manual build-approval gate — it is a required PR check.
+- E2E suites are discovered from `test/*.mjs` instead of a hardcoded list, a failing suite writes a per-assertion frame trail as an artifacts GIF, and a new mobile-shell suite pins the viewport contract as live geometry plus shipped artifacts.
+- Retired the stale one-off E2E scripts (`trash`, `theme`, `overlay-surface`, `raw-markdown-highlight`, formatting toolbar, cursor table) and the `test:e2e:*` aliases that pointed at them.
+
 ## v0.1.2 — 2026-09-23
 
 ### Patch Release
