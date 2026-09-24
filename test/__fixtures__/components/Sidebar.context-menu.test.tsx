@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { flush } from '../harness'
+import { flush, tick } from '../harness'
 
 const ipc = vi.hoisted(() => ({ invoke: vi.fn(async () => '[]') }))
 const vaultState = vi.hoisted(() => ({
@@ -101,12 +101,24 @@ describe('Sidebar context menu', () => {
     openMenu()
 
     expect(menu()).not.toBeNull()
-    expect(menu()!.parentElement).toBe(document.body)
+    expect(menu()!.closest('#root')).toBeNull()
     expect(menu()!.closest('#sidebar')).toBeNull()
     expect(menu()!.style.top).toBe('120px')
     expect(menu()!.style.left).toBe('40px')
     expect(menu()!.textContent).toContain('Rename')
     expect(menu()!.textContent).toContain('Delete')
+  })
+
+  /** Leaving the drawer's trap also left its tabbable set, so the menu has to
+   *  claim focus itself — otherwise nothing but a mouse can reach its actions. */
+  it('takes focus so the keyboard can reach its actions', async () => {
+    renderSidebar()
+    await flush()
+    openMenu()
+
+    await tick()
+
+    expect(document.activeElement).toBe(menuButton('Rename'))
   })
 
   it('closes on a click outside the portaled menu', async () => {

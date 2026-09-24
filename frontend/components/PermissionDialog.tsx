@@ -1,5 +1,5 @@
 import { ShieldAlert } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import { openSystemSettings, type SystemSettingsPane } from '../lib/ipc'
 import OverlayPortal from './OverlayPortal'
@@ -18,11 +18,8 @@ interface PermissionDialogProps {
  *  lands them on the exact System Settings pane they must toggle, which is the
  *  only step that actually unblocks them. */
 export default function PermissionDialog({ pane, message, detail, onClose }: PermissionDialogProps) {
-  const openRef = useRef<HTMLButtonElement>(null)
   const [openFailed, setOpenFailed] = useState(false)
   const paneLabel = pane === 'accessibility' ? 'Accessibility' : pane === 'files' ? 'Full Disk Access' : 'Automation'
-
-  useEffect(() => { openRef.current?.focus() }, [])
 
   return (
     <OverlayPortal>
@@ -55,8 +52,11 @@ export default function PermissionDialog({ pane, message, detail, onClose }: Per
           )}
           <div className="flex justify-end gap-2">
             <button onClick={onClose} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Not now</button>
+            {/* The opening control takes initial focus, ahead of "Not now": the
+                dialog exists to send the user to System Settings, and the trap
+                owns focus order, so it is claimed with Mantine's marker. */}
             <button
-              ref={openRef}
+              data-autofocus
               onClick={() => {
                 void openSystemSettings(pane).then(opened => {
                   if (opened) onClose(); else setOpenFailed(true)

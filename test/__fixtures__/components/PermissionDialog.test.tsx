@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { tick } from '../harness'
+
 import PermissionDialog from '../../../frontend/components/PermissionDialog'
 
 const openSystemSettings = vi.hoisted(() => vi.fn())
@@ -49,7 +51,17 @@ describe('PermissionDialog', () => {
   it('renders outside the component tree so no transformed ancestor can clip it', () => {
     renderDialog()
 
-    expect(dialog().parentElement).toBe(document.body)
+    expect(dialog().closest('#root')).toBeNull()
+  })
+
+  /** The portal's trap owns focus order and claims `[data-autofocus]` on open,
+   *  so initial focus still lands on the action that unblocks the user. */
+  it('takes focus on the action that unblocks the user', async () => {
+    renderDialog()
+
+    await tick()
+
+    expect(document.activeElement).toBe(button('Open System Settings'))
   })
 
   it('labels the pane for each permission kind', () => {

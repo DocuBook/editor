@@ -684,7 +684,7 @@ describe('GitPanel — remote sync', () => {
 
     act(() => syncButton('Abort')!.click())
 
-    expect(confirmDialog()!.parentElement).toBe(document.body)
+    expect(confirmDialog()!.closest('#root')).toBeNull()
   })
 
   it('aborts a rebase only after confirmation', async () => {
