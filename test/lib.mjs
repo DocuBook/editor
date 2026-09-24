@@ -6,6 +6,12 @@
  *     cannot carry (a Rust 500, a refused request, an engine warning)
  *   - pass/fail lines -> artifacts/<name>.results.txt, and the failing run prints
  *     the tail of the server log to stdout
+ *
+ * Before writing a suite that changes the viewport: `page.setViewportSize()` lies.
+ * It can report success (`page.viewportSize()` reads back the new size) while the
+ * renderer keeps the old layout viewport — measured: repeated calls at the same
+ * width left `innerWidth` at 1280px until a call with a DIFFERENT width was made.
+ * Verify the media query (or `innerWidth`) actually flipped before asserting.
  */
 import { execFileSync, execSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -15,7 +21,6 @@ import { dirname } from 'node:path'
 export const PORTS = {
   mobileShell: 4182,
   webSmoke: 4273,
-  trash: 4274,
   aiDebug: 4275,
   aiMention: 4290,
 }
@@ -79,13 +84,18 @@ function frameTrail(page, name) {
 }
 
 /** A full ffmpeg (gif muxer + palette filters) — Playwright's own build cannot
- *  encode GIF, so the system one is required. `FFMPEG_EXE` overrides. */
+ *  encode GIF and the macOS CI runners ship no ffmpeg at all, so a missing one
+ *  is normal; the caller keeps the frames. `FFMPEG_EXE` overrides. */
 function systemFfmpeg() {
   if (process.env.FFMPEG_EXE) return process.env.FFMPEG_EXE
   try {
     const found = execSync('command -v ffmpeg', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
     if (found) return found
   } catch {}
+  /* Homebrew bins are not always on a CI job's PATH. */
+  for (const candidate of ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']) {
+    if (existsSync(candidate)) return candidate
+  }
   return undefined
 }
 
