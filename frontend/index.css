@@ -653,16 +653,28 @@ body .mobile-sidebar-drawer-body > aside {
     }
 }
 
-/* Pinned chrome on compact screens (<640px): the rail has height 0, so the
-   composer's `bottom` has to be resolved against the scroll container's edge or
-   the window's, whichever is nearer — `1.25rem` is the pre-`max()` fallback. */
-@media (max-width: 639px) {
-    #root .editor-tab-bar {
-        position: sticky;
-        top: 0;
-    }
-    #root .editor-ai-floating {
-        bottom: max(calc(100% - 100vh), 1.25rem);
+/* The app shell (`.editor-shell`) is what compact chrome pins against: the composer is
+   anchored to its bottom edge, the tab bar sits at its top. Sizing that shell with
+   `100vh` anchors both to the LARGE viewport (browser UI and IME retracted), which on
+   a phone is taller than what the user actually sees: the page gains scroll range, the
+   browser scrolls it to reveal the focused composer, and that drags the tab bar off
+   screen while the composer rises — the two move in opposite directions at once.
+
+   `position: sticky; top: 0` cannot hold the tab bar against that: its scrollport is
+   the shell's own `overflow: hidden` (caniuse: sticky sticks to the nearest ancestor
+   with a scrolling mechanism "even if that ancestor isn't the nearest actually
+   scrolling ancestor"), so it only ever moves WITH the shell, never against it. The
+   composer's `bottom: max(calc(100% - 100vh), 1.25rem)` could not either — the rail
+   that is its containing block is `h-0`, so `100%` was 0 and the rule always resolved
+   to the same `1.25rem` the `bottom-5` utility already sets.
+
+   `dvh` tracks the visible viewport, so the shell never overflows and nothing has to
+   scroll. Gate: `dvh` is Chrome/Edge 108+, Safari 15.4+ (caniuse: viewport unit
+   variants) and the oldest targets here are safari15 / chrome105
+   (vite.config.ts build.target) — those keep the `h-screen` (100vh) fallback. */
+@supports (height: 100dvh) {
+    #root .editor-shell {
+        height: 100dvh;
     }
 }
 

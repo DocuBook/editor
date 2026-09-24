@@ -200,7 +200,7 @@ export default function App() {
   if (status === 'login') return <Login />
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col bg-background text-foreground">
+    <div className="editor-shell h-screen overflow-hidden flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
         {isVaultOpen && isDesktop && desktopSidebarOpen && (
           <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />

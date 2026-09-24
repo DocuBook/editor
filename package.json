@@ -23,6 +23,7 @@
     "test:e2e:overlay": "node test/overlay-surface.mjs",
     "test:e2e:overlay-fallback": "node test/overlay-surface-fallback.mjs",
     "test:e2e:toolbar": "node test/formatting-toolbar-compact.mjs",
+    "test:e2e:shell": "node test/mobile-shell-viewport.mjs",
     "test:e2e:raw-md": "node test/raw-markdown-highlight.mjs",
     "test:e2e:cursor-table": "node test/cursor-table-mode-switch.mjs"
   },
