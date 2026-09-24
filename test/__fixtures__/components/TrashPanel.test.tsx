@@ -69,6 +69,34 @@ describe('TrashPanel', () => {
     expect(dialogButton('Delete')).not.toBeUndefined()
   })
 
+  /** The mobile sidebar drawer transforms its content, which would make the
+   *  drawer the containing block of a `fixed` in-tree dialog and clip it down to
+   *  the drawer — so the confirmation is portaled to document.body instead. */
+  it('renders the confirmation outside the panel so the mobile drawer cannot clip it', () => {
+    renderPanel({ items: [fileItem] })
+    act(() => checkbox('Select notes/file-1.md').click())
+    act(() => textButton('Delete').click())
+
+    expect(dialog()!.closest('#root')).toBeNull()
+  })
+
+  /** In-tree the confirmation was part of the drawer's focus trap; portaled it
+   *  needs one of its own, or a Tab off its last control hands focus to the
+   *  drawer behind the overlay and the dialog cannot be reached again. */
+  it('contains keyboard focus on the confirmation', async () => {
+    renderPanel({ items: [fileItem] })
+    act(() => checkbox('Select notes/file-1.md').click())
+    act(() => textButton('Delete').click())
+    expect(document.activeElement).toBe(dialogButton('Cancel'))
+
+    act(() => {
+      dialogButton('Delete').focus()
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+    })
+
+    expect(document.activeElement).toBe(dialogButton('Cancel'))
+  })
+
   it('names a single item in the confirmation', () => {
     renderPanel({ items: [fileItem, folderItem] })
     act(() => checkbox('Select notes/file-1.md').click())

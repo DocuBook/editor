@@ -9,6 +9,7 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
 import SidebarFooter from './SidebarFooter'
 import SidebarPopover from './SidebarPopover'
+import OverlayPortal from './OverlayPortal'
 import GitPanel from './panels/GitPanel'
 import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
@@ -386,18 +387,20 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       </div>
       <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
       {ctxItem && (
-        <div ref={ctxMenuRef} data-ctx-menu className="ui-popover fixed p-1 min-w-30 z-100" style={{ top: ctxPos.y, left: ctxPos.x }}>
-          <button onClick={async () => {
-              closeContextMenu()
-              setRenaming({ path: ctxItem.path, name: ctxItem.name, type: ctxItem.type })
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Rename</button>
-          <button onClick={async () => {
-              closeContextMenu()
-              try { await invoke('delete_file', { path: ctxItem.path }); await loadTree(); await loadTrash(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
-            }}
-            className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Delete</button>
-        </div>
+        <OverlayPortal>
+          <div ref={ctxMenuRef} data-ctx-menu className="ui-popover fixed p-1 min-w-30 z-100" style={{ top: ctxPos.y, left: ctxPos.x }}>
+            <button onClick={async () => {
+                closeContextMenu()
+                setRenaming({ path: ctxItem.path, name: ctxItem.name, type: ctxItem.type })
+              }}
+              className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Rename</button>
+            <button onClick={async () => {
+                closeContextMenu()
+                try { await invoke('delete_file', { path: ctxItem.path }); await loadTree(); await loadTrash(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
+              }}
+              className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Delete</button>
+          </div>
+        </OverlayPortal>
       )}
 
     </aside>

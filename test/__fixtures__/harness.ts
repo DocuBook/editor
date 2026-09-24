@@ -17,3 +17,7 @@ export const flush = () => act(async () => { await Promise.resolve(); });
 /** Deeper drain: a state update that schedules another (3 hops, the deepest
  *  chain in the suite today). */
 export const settle = async () => { await flush(); await flush(); await flush(); };
+
+/** One macrotask hop — for effects that settle through `setTimeout(0)`, such as
+ *  Mantine's focus trap claiming a control on the next task. */
+export const tick = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });

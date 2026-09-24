@@ -6,6 +6,7 @@ import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import SidebarPopover from '../SidebarPopover'
+import OverlayPortal from '../OverlayPortal'
 import { autoCommitMessage } from '../../utils/commitMessage'
 import { toast } from 'sonner'
 
@@ -342,16 +343,18 @@ function SyncBar() {
       {err && <div className="mt-1.5 text-[10px] text-danger">{err}</div>}
 
       {confirmAbort && (
-        <div role="alertdialog" aria-modal="true" aria-label="Abort in-progress operation" tabIndex={-1} ref={abortRef} className="fixed inset-0 z-220 flex items-center justify-center bg-overlay outline-none" onClick={cancelAbort} onKeyDown={e => { if (e.key === 'Escape') cancelAbort() }}>
-          <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
-            <div className="text-sm font-semibold mb-1">Abort the {confirmAbort}?</div>
-            <div className="text-xs text-foreground-secondary mb-4">Every uncommitted change made during the {confirmAbort} is discarded — resolved and unresolved files alike, staged or not — and the branch returns to its previous state.</div>
-            <div className="flex justify-end gap-2">
-              <button autoFocus onClick={cancelAbort} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
-              <button onClick={() => void abort()} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Abort</button>
+        <OverlayPortal>
+          <div role="alertdialog" aria-modal="true" aria-label="Abort in-progress operation" tabIndex={-1} ref={abortRef} className="fixed inset-0 z-220 flex items-center justify-center bg-overlay outline-none" onClick={cancelAbort} onKeyDown={e => { if (e.key === 'Escape') cancelAbort() }}>
+            <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
+              <div className="text-sm font-semibold mb-1">Abort the {confirmAbort}?</div>
+              <div className="text-xs text-foreground-secondary mb-4">Every uncommitted change made during the {confirmAbort} is discarded — resolved and unresolved files alike, staged or not — and the branch returns to its previous state.</div>
+              <div className="flex justify-end gap-2">
+                <button autoFocus onClick={cancelAbort} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
+                <button onClick={() => void abort()} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Abort</button>
+              </div>
             </div>
           </div>
-        </div>
+        </OverlayPortal>
       )}
     </div>
   )
