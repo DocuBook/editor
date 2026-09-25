@@ -1,6 +1,11 @@
 use serde_json::Value;
 
 pub const TOKEN_EVENT: &str = "ai:token";
+/** Sent once per stream, when the first non-empty delta arrives — prose or
+ *  tool-call arguments: the provider has started writing, even though the
+ *  completed call is only emitted at end of stream. Lets the UI leave its
+ *  "thinking" state when writing actually starts instead of waiting for the end. */
+pub const GENERATING_EVENT: &str = "ai:generating";
 pub const TOOL_CALL_EVENT: &str = "ai:tool_call";
 pub const TOOLS_DONE_EVENT: &str = "ai:tools_done";
 pub const DONE_EVENT: &str = "ai:done";
@@ -23,6 +28,7 @@ pub struct ToolCall {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AiEvent {
     Token(String),
+    Generating,
     ToolCall {
         tool_call_id: String,
         tool_name: String,
@@ -45,6 +51,10 @@ impl AiEvent {
             AiEvent::Token(token) => (
                 TOKEN_EVENT,
                 serde_json::json!({ "requestId": request_id, "token": token }),
+            ),
+            AiEvent::Generating => (
+                GENERATING_EVENT,
+                serde_json::json!({ "requestId": request_id }),
             ),
             AiEvent::ToolCall {
                 tool_call_id,
@@ -84,6 +94,9 @@ pub struct StreamSummary {
     pub text: String,
     pub tool_calls: Vec<ToolCall>,
     pub truncated: bool,
+    /// True once the first non-empty delta was forwarded as `AiEvent::Generating`,
+    /// so the signal fires at most once per stream.
+    pub generating_sent: bool,
 }
 
 pub fn local_tool_call_id(index: usize) -> String {
@@ -100,6 +113,7 @@ mod wire_tests {
         // superseded stream; a payload without it silently reopens the bug.
         let events = [
             AiEvent::Token("hi".into()),
+            AiEvent::Generating,
             AiEvent::ToolCall {
                 tool_call_id: "call-1".into(),
                 tool_name: "applyDocumentOperations".into(),

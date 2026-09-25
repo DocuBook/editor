@@ -378,3 +378,87 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(parts.filter(p => p.type === 'tool-input-available').length).toBe(1)
   })
 })
+
+describe('createAiTransport writing-started marker', () => {
+  /** Tool-capable provider + tool definitions → Path A, where the provider writes
+   *  the operations inside the tool call rather than as streamed prose. */
+  const usePathA = () => {
+    useAiSettings.setState({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      probeTools: { deepseek: { 'deepseek-v4-flash': true } },
+    })
+  }
+  const toolsEditor = () => ({
+    document: [{ id: 'b1', type: 'paragraph', content: 'before' }],
+    getBlock: (id: string) => (id === 'b1' ? { id: 'b1' } : undefined),
+    getSelection: () => undefined,
+    getTextCursorPosition: () => ({ block: { id: 'b1', content: [] } }),
+    blocksToMarkdownLossy: () => '',
+    blocksToHTMLLossy: (blocks: any[]) => `<p>${blocks?.[0]?.content ?? ''}</p>`,
+    tryParseHTMLToBlocks: (html: string) => [
+      { type: 'paragraph', content: html.replace(/^<p>|<\/p>$/g, '') },
+    ],
+    tryParseMarkdownToBlocks: async (markdown: string) => [
+      { type: 'paragraph', content: markdown },
+    ],
+  })
+
+  const drainTypes = async () => {
+    const stream = await createAiTransport({ getEditor: toolsEditor }).sendMessages({
+      messages: [{ role: 'user', content: 'edit the document' }],
+      body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit doc', inputSchema: {} } } },
+    })
+    const reader = stream.getReader()
+    const types: string[] = []
+    for (;;) {
+      try {
+        const r = await reader.read()
+        if (r.done) break
+        types.push(r.value?.type)
+      } catch {
+        break
+      }
+    }
+    return types
+  }
+
+  it('surfaces ai:generating before the completed tool call', async () => {
+    usePathA()
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      'event: ai:token\n',
+      `data: {"requestId":"${id}","token":"commentary"}\n\n`,
+      'event: ai:generating\n',
+      `data: {"requestId":"${id}"}\n\n`,
+      'event: ai:tool_call\n',
+      `data: {"requestId":"${id}","toolCallId":"c1","toolName":"applyDocumentOperations","input":{"operations":[{"type":"update","id":"b1","block":"<p>after</p>"}]}}\n\n`,
+      'event: ai:tools_done\n',
+      `data: {"requestId":"${id}"}\n\n`,
+      'event: ai:done\n',
+      `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+    ]))
+
+    const types = await drainTypes()
+
+    // The marker precedes the ops: the menu can say "writing" while the model is
+    // still producing the call, not only when it lands.
+    expect(types).toContain('writing-started')
+    expect(types.indexOf('writing-started')).toBeLessThan(types.indexOf('tool-input-available'))
+  })
+
+  it('emits no marker when the backend sends no ai:generating event', async () => {
+    // Rust signals on the first non-empty delta of either kind, so a prose turn
+    // carries the event too. This guards the transport from inventing the marker
+    // client-side (tokens alone must not flip the label).
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      'event: ai:token\n',
+      `data: {"requestId":"${id}","token":"## Heading\\n\\nProse only."}\n\n`,
+      'event: ai:done\n',
+      `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+    ]))
+
+    const types = await drainTypes()
+
+    expect(types).not.toContain('writing-started')
+  })
+})

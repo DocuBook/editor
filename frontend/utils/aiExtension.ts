@@ -161,9 +161,15 @@ function blockEndPos(doc: any, id: string): number | null {
   return pos
 }
 
-function readPart(value: any) {
+/** First part of `type` in a streamed chunk. The transport enqueues one part per
+ *  chunk, but a batched array must still be understood. */
+function partOfType(value: any, type: string) {
   const parts = Array.isArray(value) ? value : [value]
-  return parts.find((part) => part?.type === 'tool-input-available')?.input
+  return parts.find((part) => part?.type === type)
+}
+
+function readPart(value: any) {
+  return partOfType(value, 'tool-input-available')?.input
 }
 
 const extensionFactory = ({ editor, options }: any) => {
@@ -365,6 +371,11 @@ const extensionFactory = ({ editor, options }: any) => {
         while (true) {
           const next = await reader.read()
           if (next.done) break
+          /** The provider started emitting tool-call arguments: the document is
+           *  being written now, even though the completed operations only arrive at
+           *  end of stream. Reflect that instead of staying in "thinking" until the
+           *  client-side reveal begins. */
+          if (partOfType(next.value, 'writing-started')) setStatus('ai-writing')
           const input = readPart(next.value)
           if (!input) continue
           toolInput = input
