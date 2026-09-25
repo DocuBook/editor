@@ -3,12 +3,14 @@ use super::events::{
     AiEvent, StreamSummary, ToolCall, AI_MAX_SECONDS, MAX_AI_BUFFER, MAX_TOOL_ARGS_SIZE,
     MAX_TOOL_CALLS_PER_REQUEST,
 };
+use eventsource_stream::Eventsource;
 use reqwest::Response;
 use serde_json::Value;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tokio_stream::StreamExt as _;
 
 pub type EventSender = mpsc::Sender<Result<AiEvent, String>>;
 
@@ -36,32 +38,7 @@ pub async fn stream_chat(
         return;
     }
 
-    let mut stream = response;
-    let first = match tokio::time::timeout(Duration::from_secs(30), stream.chunk()).await {
-        Ok(Ok(Some(chunk))) => chunk,
-        Ok(Ok(None)) => {
-            send_error(&tx, "AI provider returned an empty response").await;
-            return;
-        }
-        Ok(Err(error)) => {
-            send_error(&tx, sanitize_ai_error(&error.to_string())).await;
-            return;
-        }
-        Err(_) => {
-            tracing::warn!(
-                event = "ai_request_failure",
-                provider = %provider,
-                model = %model,
-                status = status.as_u16(),
-                duration_ms = started.elapsed().as_millis() as u64,
-                body_bytes = 0_u64,
-                error_category = "first_chunk_timeout"
-            );
-            send_error(&tx, "AI provider did not respond — try again").await;
-            return;
-        }
-    };
-
+    let mut events = std::pin::pin!(response.bytes_stream().eventsource());
     let mut summary = StreamSummary {
         provider: provider.clone(),
         text: String::new(),
@@ -69,8 +46,7 @@ pub async fn stream_chat(
         truncated: false,
         generating_sent: false,
     };
-    let mut byte_buf = Vec::new();
-    let mut first_chunk = Some(first);
+    let mut saw_event = false;
     let mut cancelled = false;
 
     loop {
@@ -88,22 +64,42 @@ pub async fn stream_chat(
             .await;
             return;
         }
-        let chunk = match first_chunk.take() {
-            Some(chunk) => Ok(Some(chunk)),
-            None => stream.chunk().await,
+        // Only the event carrying the prefill latency is bounded here; a stall later
+        // in the stream is the transport's read timeout to catch.
+        let next = if saw_event {
+            events.next().await
+        } else {
+            match tokio::time::timeout(Duration::from_secs(30), events.next()).await {
+                Ok(next) => next,
+                Err(_) => {
+                    tracing::warn!(
+                        event = "ai_request_failure",
+                        provider = %provider,
+                        model = %model,
+                        status = status.as_u16(),
+                        duration_ms = started.elapsed().as_millis() as u64,
+                        body_bytes = 0_u64,
+                        error_category = "first_chunk_timeout"
+                    );
+                    send_error(&tx, "AI provider did not respond — try again").await;
+                    return;
+                }
+            }
         };
-        match chunk {
-            Ok(Some(chunk)) => {
+        match next {
+            Some(Ok(event)) => {
                 if cancel.load(Ordering::SeqCst) {
                     cancelled = true;
                     break;
                 }
-                byte_buf.extend_from_slice(&chunk);
-                if byte_buf.len() > MAX_AI_BUFFER {
+                saw_event = true;
+                // The parser buffers a whole event before handing it over, so it is
+                // capped here — the guard the byte buffer used to provide.
+                if event.data.len() > MAX_AI_BUFFER {
                     send_error(&tx, "AI response too large").await;
                     return;
                 }
-                if let Err(error) = process_buffer(&mut byte_buf, &mut summary, &tx).await {
+                if let Err(error) = process_sse_data(&event.data, &mut summary, &tx).await {
                     send_error(&tx, error).await;
                     return;
                 }
@@ -114,8 +110,7 @@ pub async fn stream_chat(
                     break;
                 }
             }
-            Ok(None) => break,
-            Err(error) => {
+            Some(Err(error)) => {
                 tracing::warn!(
                     event = "ai_request_failure",
                     provider = %provider,
@@ -128,6 +123,11 @@ pub async fn stream_chat(
                 send_error(&tx, sanitize_ai_error(&error.to_string())).await;
                 return;
             }
+            None if !saw_event => {
+                send_error(&tx, "AI provider returned an empty response").await;
+                return;
+            }
+            None => break,
         }
     }
 
@@ -136,20 +136,6 @@ pub async fn stream_chat(
         // a `Done` here would hand a superseded turn's output to whoever is
         // listening now — the newer request's listeners included.
         return;
-    }
-
-    if !byte_buf.is_empty() {
-        let line = String::from_utf8_lossy(&byte_buf);
-        let data = line
-            .trim_end_matches('\r')
-            .strip_prefix("data: ")
-            .unwrap_or("");
-        if !data.is_empty() {
-            if let Err(error) = process_sse_data(data, &mut summary, &tx).await {
-                send_error(&tx, error).await;
-                return;
-            }
-        }
     }
 
     for (index, tool_call) in summary.tool_calls.iter().enumerate() {
@@ -194,31 +180,6 @@ pub async fn stream_chat(
 
 async fn send_error(tx: &EventSender, message: impl Into<String>) {
     let _ = tx.send(Err(message.into())).await;
-}
-
-async fn process_buffer(
-    byte_buf: &mut Vec<u8>,
-    summary: &mut StreamSummary,
-    tx: &EventSender,
-) -> Result<(), String> {
-    let mut start = 0;
-    while let Some(pos) = byte_buf[start..].iter().position(|&byte| byte == b'\n') {
-        let line_end = start + pos;
-        let line = String::from_utf8_lossy(&byte_buf[start..line_end]);
-        let data = line
-            .trim_end_matches('\r')
-            .strip_prefix("data: ")
-            .unwrap_or("");
-        start = line_end + 1;
-        if !data.is_empty() {
-            process_sse_data(data, summary, tx).await?;
-        }
-        if summary.truncated {
-            break;
-        }
-    }
-    byte_buf.drain(..start);
-    Ok(())
 }
 
 pub async fn process_sse_data(
@@ -442,9 +403,10 @@ mod tests {
         assert!(!state.truncated);
     }
 
-    /// Minimal one-shot HTTP server: answers the first request with a single
-    /// SSE frame and closes, so `stream_chat` sees exactly one chunk.
-    async fn one_sse_frame(payload: &'static str) -> String {
+    /// Minimal one-shot HTTP server: answers the first request with an SSE body
+    /// delivered in `parts`, one TCP write each (with a short gap between them), so
+    /// `stream_chat` sees the body split exactly where the test wants it.
+    async fn sse_body_in_parts(parts: Vec<Vec<u8>>) -> String {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -453,14 +415,30 @@ mod tests {
             // Read the request head so the client finishes sending before we reply.
             let mut head = [0_u8; 1024];
             let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut head).await;
-            let body = format!("data: {payload}\n\n");
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}"
-            );
-            let _ = socket.write_all(response.as_bytes()).await;
-            let _ = socket.flush().await;
+            let _ = socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                )
+                .await;
+            for (index, part) in parts.iter().enumerate() {
+                if index > 0 {
+                    // Separate writes get coalesced into one chunk otherwise, which
+                    // would hide the chunk-boundary handling under test.
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                let _ = socket.write_all(part).await;
+                let _ = socket.flush().await;
+            }
         });
         addr.to_string()
+    }
+
+    async fn one_sse_frame(payload: &str) -> String {
+        sse_body_in_parts(vec![format!("data: {payload}\n\n").into_bytes()]).await
+    }
+
+    async fn get_sse(url: String) -> Response {
+        reqwest::Client::new().get(url).send().await.unwrap()
     }
 
     #[tokio::test]
@@ -469,11 +447,7 @@ mod tests {
         // buffered tool calls plus a `Done`, which a newer request's listeners
         // could not tell apart from their own.
         let addr = one_sse_frame(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).await;
-        let response = reqwest::Client::new()
-            .get(format!("http://{addr}/chat"))
-            .send()
-            .await
-            .unwrap();
+        let response = get_sse(format!("http://{addr}/chat")).await;
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
         let cancel = Arc::new(AtomicBool::new(true));
@@ -494,22 +468,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn byte_buffer_preserves_split_events_and_utf8() {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
-        let mut state = summary();
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"data: {\"choices\":[{\"delta\":{\"content\":\"caf");
-        bytes.extend_from_slice("é".as_bytes());
-        bytes.extend_from_slice(b"\"}}]}\n");
-        let split = bytes.iter().position(|byte| *byte == b'\xc3').unwrap() + 1;
-        let (first, second) = bytes.split_at(split);
-        let mut buffer = first.to_vec();
-        process_buffer(&mut buffer, &mut state, &tx).await.unwrap();
-        buffer.extend_from_slice(second);
-        process_buffer(&mut buffer, &mut state, &tx).await.unwrap();
-        assert_eq!(state.text, "café");
+    async fn split_utf8_across_chunks_is_reassembled() {
+        // A frame (and the é inside it) split across TCP writes must survive:
+        // the parser holds the partial sequence instead of decoding per chunk.
+        let mut frame = Vec::new();
+        frame.extend_from_slice(b"data: {\"choices\":[{\"delta\":{\"content\":\"caf");
+        frame.extend_from_slice("é".as_bytes());
+        frame.extend_from_slice(b"\"}}]}\n\n");
+        let split = frame.iter().position(|byte| *byte == 0xc3).unwrap() + 1;
+        let (first, second) = frame.split_at(split);
+
+        let addr = sse_body_in_parts(vec![first.to_vec(), second.to_vec()]).await;
+        let response = get_sse(format!("http://{addr}/chat")).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        stream_chat(
+            response,
+            "test".into(),
+            "test".into(),
+            Arc::new(AtomicBool::new(false)),
+            Instant::now(),
+            tx,
+        )
+        .await;
+
         // The signal announced by the first delta precedes the text it carries.
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(value))) if value == "café"));
+    }
+
+    #[tokio::test]
+    async fn unterminated_trailing_event_is_dropped() {
+        // Spec behaviour: an event whose blank line never arrives is discarded at
+        // EOF. The hand-rolled flush parsed it instead, which shipped half a frame
+        // whenever a connection died mid-event.
+        let addr = sse_body_in_parts(vec![
+            b"data: {\"choices\":[{\"delta\":{\"content\":\"half\"}}]}\n".to_vec(),
+        ])
+        .await;
+        let response = get_sse(format!("http://{addr}/chat")).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        stream_chat(
+            response,
+            "test".into(),
+            "test".into(),
+            Arc::new(AtomicBool::new(false)),
+            Instant::now(),
+            tx,
+        )
+        .await;
+
+        assert_eq!(
+            rx.recv().await,
+            Some(Err("AI provider returned an empty response".into()))
+        );
+        assert!(rx.recv().await.is_none());
     }
 }

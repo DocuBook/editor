@@ -34,6 +34,7 @@ sha2 = "0.10"
 getrandom = "0.2"
 rand = "0.8"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
+eventsource-stream = "0.2.3"
 
 [profile.release]
 # Drop DWARF but keep the symbol table so RUST_BACKTRACE=1 shows function names

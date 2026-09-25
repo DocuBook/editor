@@ -31,3 +31,5 @@ reqwest = { version = "0.13", features = ["stream", "json"] }
 tracing = "0.1"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
 tauri-plugin-opener = "2.5.4"
+eventsource-stream = "0.2.3"
+tokio-stream = "0.1.19"
