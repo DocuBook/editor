@@ -1,15 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useVaultStore } from '../stores/vault'
+import { useVaultStore, type FileInfo } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
 import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
-import { MARKDOWN_EXTENSIONS, stripMarkdownExt } from '../utils/fileKind'
+import { useTreeActions } from '../hooks/useTreeActions'
+import { stripMarkdownExt } from '../utils/fileKind'
 import SidebarFooter from './SidebarFooter'
 import SidebarPopover from './SidebarPopover'
-import OverlayPortal from './OverlayPortal'
+import SidebarContextMenu from './SidebarContextMenu'
 import GitPanel from './panels/GitPanel'
 import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
@@ -54,72 +55,24 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortcuts, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
-  const [creating, setCreating] = useState<'file'|'folder'|null>(null)
   const [showPlusMenu, setShowPlusMenu] = useState(false)
-  const [newName, setNewName] = useState('')
-  const newInputRef = useRef<HTMLInputElement>(null)
-  const createBusyRef = useRef(false)
-  const ctxMenuRef = useRef<HTMLDivElement>(null)
   const sidebarActionsRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
   const [activePanel, setActivePanel] = useState<SidebarPanelId>('vault')
 
-  useEffect(() => {
-    if (creating) setTimeout(() => newInputRef.current?.focus(), 50)
-  }, [creating])
-
   /** Declared before closeContextMenu so it reads an initialized binding (react/immutability). */
-  const [ctxItem, setCtxItem] = useState<{path:string;name:string;type:string}|null>(null)
+  const [ctxItem, setCtxItem] = useState<FileInfo | null>(null)
   const [ctxPos, setCtxPos] = useState({x:0,y:0})
   const closeContextMenu = () => setCtxItem(null)
 
-  // Close popups / menus on click outside
+  // Close popups on click outside; the context menu and the inline inputs each
+  // own theirs.
   useClickOutside(sidebarActionsRef, () => { setShowPlusMenu(false); setVaultMenuOpen(false) })
-  useClickOutside(newInputRef, () => { if (creating) { setCreating(null); setNewName('') } })
-  useClickOutside(ctxMenuRef, closeContextMenu)
 
-
-  const handleCreate = async () => {
-    if (!newName.trim() || !isOpen || loading || !creating || createBusyRef.current) return
-    createBusyRef.current = true
-    const targetVaultPath = vaultPath
-    try {
-      let name = newName.trim()
-      if (creating === 'file' && !/\.\w{1,10}$/i.test(name)) name = name + '.md'
-      const fullPath = currentFolder ? (name.startsWith(currentFolder + '/') ? name : currentFolder + '/' + name) : name
-      if (creating === 'folder') {
-        await invoke('create_directory', { path: fullPath })
-      } else {
-        const p = await invoke<string>('create_file', { path: fullPath })
-        await openFile(p, name)
-      }
-      if (useVaultStore.getState().vaultPath !== targetVaultPath || !useVaultStore.getState().isOpen) return
-      await loadTree()
-      setNewName('')
-      setCreating(null)
-      if (creating === 'file') onNavigate()
-    } catch(e) { console.error(e); toast.error('Failed to create') }
-    finally { createBusyRef.current = false }
-  }
   const { name, isOpen, vaultPath, recent, visibleItems, loading, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
-  const openContextMenu = (item: any, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY }) }
-  const [renaming, setRenaming] = useState<{path:string;name:string;type:string}|null>(null)
-  const renameRef = useRef<HTMLInputElement>(null)
-  const [currentFolder, setCurrentFolder] = useState('')
-  /** Keep the modal's onSelect wired to the sidebar's create-target folder:
-   *  search is owned by App (works with the sidebar closed), which calls this
-   *  callback only while the sidebar is mounted. */
-  useEffect(() => registerSearchFolder(setCurrentFolder), [registerSearchFolder])
-  /* oxlint-disable react/set-state-in-effect -- resets local UI state on vault change */
-  useEffect(() => {
-    setCurrentFolder('')
-    setCreating(null)
-    setNewName('')
-    setActivePanel('vault')
-  }, [vaultPath, isOpen])
-  /* oxlint-enable react/set-state-in-effect */
+  const openContextMenu = (item: FileInfo, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY }) }
   const [trashItems, setTrashItems] = useState<TrashItem[]>([])
   const [trashLoading, setTrashLoading] = useState(false)
   const [trashError, setTrashError] = useState('')
@@ -141,6 +94,19 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       setTrashLoading(false)
     }
   }, [])
+
+  /** Tree mutations and the inline create/rename inputs they drive. Deleting has
+   *  to refresh the trash panel, which this component owns. */
+  const {
+    creating, newName, setNewName, newInputRef, onCreateKeyDown, startCreate,
+    renaming, renameRef, onRenameKeyDown, startRename,
+    currentFolder, setCurrentFolder, deleteItem,
+  } = useTreeActions({ registerSearchFolder, onDeleted: loadTrash, onNavigate })
+
+  /* oxlint-disable react/set-state-in-effect -- resets the panel on vault change */
+  useEffect(() => { setActivePanel('vault') }, [vaultPath, isOpen])
+  /* oxlint-enable react/set-state-in-effect */
+
   const selectPanel = async (panel: SidebarPanelId) => {
     setShowPlusMenu(false)
     setVaultMenuOpen(false)
@@ -187,10 +153,6 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     return failed.length === 0
   }
 
-  useEffect(() => {
-    if (renaming) setTimeout(() => renameRef.current?.focus(), 50)
-  }, [renaming])
-
   // Keyboard shortcuts
   useKeyboard((e: KeyboardEvent) => {
     if (e.key === 'Escape') { setShowPlusMenu(false); setVaultMenuOpen(false) }
@@ -204,12 +166,12 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     if (newFile) {
       e.preventDefault()
       if (!isOpen || loading) { toast.error('Open a vault first — press ⌘O'); return }
-      setActivePanel('vault'); setCreating('file'); setNewName('')
+      setActivePanel('vault'); startCreate('file')
     }
     if (newFolder) {
       e.preventDefault()
       if (!isOpen || loading) { toast.error('Open a vault first — press ⌘O'); return }
-      setActivePanel('vault'); setCreating('folder'); setNewName('')
+      setActivePanel('vault'); startCreate('folder')
     }
   })
 
@@ -257,39 +219,18 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
             {loading && <div className="text-foreground-subtle text-xs p-2">Loading...</div>}
             {!loading && visibleItems.length === 0 && !creating && <div className="text-foreground-subtle italic text-xs p-2">Empty vault</div>}
             {renaming && (
-              <input ref={renameRef} type="text" defaultValue={stripMarkdownExt(renaming.name)}
+              /* Keyed by path: the input is uncontrolled, so a rename started on
+                 another row has to remount it instead of inheriting the text
+                 typed for the previous one. */
+              <input key={renaming.path} ref={renameRef} type="text" defaultValue={stripMarkdownExt(renaming.name)}
                 className="w-full bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none mb-1"
-                onKeyDown={async e => {
-                  if (e.key === 'Enter') {
-                    const dir = renaming.path.substring(0, renaming.path.lastIndexOf('/') + 1)
-                    let target = (e.target as HTMLInputElement).value
-                    if (MARKDOWN_EXTENSIONS.some(e => renaming.path.toLowerCase().endsWith(e)) && !/\.\w{1,10}$/i.test(target)) target = target + '.md'
-                    const newPath = dir + target
-                    try {
-                      await useEditorStore.getState().flushEditor()
-                      await invoke('rename_file', { from: renaming.path, to: newPath })
-                      await useEditorStore.getState().renameTab(renaming.path, newPath)
-                      /* Keep the create-here target in sync: create_file re-creates missing
-                       * parent dirs, so a stale currentFolder would silently recreate the
-                       * old folder (A -> Z then new file lands in A/). */
-                      if (renaming.type === '1') setCurrentFolder(prev => {
-                        if (!prev) return prev
-                        if (prev === renaming.path) return newPath
-                        if (prev.startsWith(renaming.path + '/')) return newPath + prev.slice(renaming.path.length)
-                        return prev
-                      })
-                      await loadTree()
-                    } catch(err) { console.error(err); toast.error('Failed to rename') }
-                    setRenaming(null)
-                  }
-                  if (e.key === 'Escape') setRenaming(null)
-                }} />
+                onKeyDown={onRenameKeyDown} />
             )}
             {creating && (
               <input ref={newInputRef} type="text" value={newName} onChange={e => setNewName(e.target.value)}
                 placeholder={creating === 'file' ? (currentFolder ? 'File in ' + currentFolder + '/' : 'Filename...') : (currentFolder ? 'Folder in ' + currentFolder + '/' : 'Folder name...')}
                 className="w-full bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none mb-1"
-                onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') { setCreating(null); setNewName('') } }} />
+                onKeyDown={onCreateKeyDown} />
             )}
             {visibleItems.map(item => (
               <div key={item.path}>
@@ -369,11 +310,11 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
             )}
             {showPlusMenu && (
               <div data-plus-popup>
-                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('file'); setNewName('') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); startCreate('file') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                   <FileText size={14} /> New File
                   <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
                 </button>
-                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); setCreating('folder'); setNewName('') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); startCreate('folder') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
                   <Folder size={14} /> New Folder
                   <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
                 </button>
@@ -387,20 +328,14 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       </div>
       <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
       {ctxItem && (
-        <OverlayPortal>
-          <div ref={ctxMenuRef} data-ctx-menu className="ui-popover fixed p-1 min-w-30 z-100" style={{ top: ctxPos.y, left: ctxPos.x }}>
-            <button onClick={async () => {
-                closeContextMenu()
-                setRenaming({ path: ctxItem.path, name: ctxItem.name, type: ctxItem.type })
-              }}
-              className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Rename</button>
-            <button onClick={async () => {
-                closeContextMenu()
-                try { await invoke('delete_file', { path: ctxItem.path }); await loadTree(); await loadTrash(); useEditorStore.getState().setTabDeleted(ctxItem.path, true) } catch(e) { console.error(e); toast.error('Failed to delete') }
-              }}
-              className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded w-full text-left hover:bg-surface-active">Delete</button>
-          </div>
-        </OverlayPortal>
+        <SidebarContextMenu
+          item={ctxItem}
+          position={ctxPos}
+          onClose={closeContextMenu}
+          onCreate={startCreate}
+          onRename={startRename}
+          onDelete={deleteItem}
+        />
       )}
 
     </aside>
