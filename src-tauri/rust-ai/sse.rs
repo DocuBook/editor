@@ -67,6 +67,7 @@ pub async fn stream_chat(
         text: String::new(),
         tool_calls: Vec::new(),
         truncated: false,
+        generating_sent: false,
     };
     let mut byte_buf = Vec::new();
     let mut first_chunk = Some(first);
@@ -249,7 +250,9 @@ pub async fn process_sse_data(
     }
 
     let mut next_tool_calls = summary.tool_calls.clone();
+    let mut tool_call_delta = false;
     if let Some(tool_calls) = value["choices"][0]["delta"]["tool_calls"].as_array() {
+        tool_call_delta = !tool_calls.is_empty();
         for tool_call in tool_calls {
             let index = tool_call["index"].as_i64().unwrap_or(0);
             let id = tool_call["id"].as_str().unwrap_or("").to_string();
@@ -288,7 +291,17 @@ pub async fn process_sse_data(
     if next_tool_calls.len() > MAX_TOOL_CALLS_PER_REQUEST || tool_args_size > MAX_TOOL_ARGS_SIZE {
         return Err("AI response too large".into());
     }
+    let text_delta = content.is_some_and(|delta| !delta.is_empty());
     summary.tool_calls = next_tool_calls;
+    // First non-empty delta — prose or tool-call arguments — means the provider has
+    // begun writing. One signal per stream, sent before the completed call — without
+    // it the UI sits in "thinking" for the whole write and only flips at the end.
+    if (tool_call_delta || text_delta) && !summary.generating_sent {
+        summary.generating_sent = true;
+        tx.send(Ok(AiEvent::Generating))
+            .await
+            .map_err(|_| "AI stream consumer closed".to_string())?;
+    }
     if let Some(content) = content {
         summary.text.push_str(content);
         tx.send(Ok(AiEvent::Token(content.to_string())))
@@ -309,11 +322,60 @@ mod tests {
             text: String::new(),
             tool_calls: Vec::new(),
             truncated: false,
+            generating_sent: false,
         }
     }
 
     fn tool_delta(index: i64, arguments: &str) -> String {
         json!({ "choices": [{ "delta": { "tool_calls": [{ "index": index, "id": format!("call-{index}"), "function": { "name": "test", "arguments": arguments } }] } }] }).to_string()
+    }
+
+    #[tokio::test]
+    async fn first_tool_call_delta_signals_generating_once() {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mut state = summary();
+        process_sse_data(&tool_delta(0, "{\"operations\""), &mut state, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
+
+        // Argument deltas of the same call must not repeat the signal.
+        process_sse_data(&tool_delta(0, ":[],\"x\":1}"), &mut state, &tx)
+            .await
+            .unwrap();
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn first_content_delta_signals_generating_once() {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mut state = summary();
+        let data = json!({ "choices": [{ "delta": { "content": "hi" } }] }).to_string();
+        process_sse_data(&data, &mut state, &tx).await.unwrap();
+        // Signal first, then the text it announces.
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(token))) if token == "hi"));
+
+        process_sse_data(&data, &mut state, &tx).await.unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Token(_)))));
+        assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn empty_leading_delta_does_not_signal_generating() {
+        // Providers open with a role-only frame (`content: ""`); announcing
+        // "writing" for it would flip the label before any content exists.
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mut state = summary();
+        let data =
+            json!({ "choices": [{ "delta": { "role": "assistant", "content": "" } }] }).to_string();
+        process_sse_data(&data, &mut state, &tx).await.unwrap();
+        assert!(!state.generating_sent);
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(_)))));
     }
 
     #[tokio::test]
@@ -446,6 +508,8 @@ mod tests {
         buffer.extend_from_slice(second);
         process_buffer(&mut buffer, &mut state, &tx).await.unwrap();
         assert_eq!(state.text, "café");
+        // The signal announced by the first delta precedes the text it carries.
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(value))) if value == "café"));
     }
 }

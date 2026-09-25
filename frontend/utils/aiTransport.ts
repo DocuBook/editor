@@ -178,6 +178,15 @@ async function runSendMessages(
         toolBuffer.push(e.payload);
       });
       const unsubToolsDone = await listen<{ requestId?: string }>("ai:tools_done", () => {});
+      /** rust-ai: the first tool-call delta means the provider has started writing
+       *  the document operations. Surface it now so the AI menu leaves "thinking"
+       *  while the write happens, not only when the completed call lands. */
+      const unsubGenerating = await listen<{ requestId?: string }>("ai:generating", (e) => {
+        if (abortSignal?.aborted || closed || !isCurrent(e.payload)) return;
+        try {
+          controller.enqueue({ type: "writing-started" });
+        } catch {}
+      });
       /** Server-side truncation signal: the response hit MAX_AI_BUFFER and the
        *  stream ended early with `ai:done { truncated: true }`. Without this the
        *  partial text would be promoted as a valid response (retry prompts). */
@@ -508,6 +517,7 @@ async function runSendMessages(
         unsubToken();
         unsubTool();
         unsubToolsDone();
+        unsubGenerating();
         unsubDone();
         try {
           controller.close();

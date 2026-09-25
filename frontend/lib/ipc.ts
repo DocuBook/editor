@@ -168,7 +168,7 @@ async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
     const payload = data.join('\n')
     arm()
     if (event === 'error') throw new Error(payload || 'AI request failed')
-    if (event !== 'ai:token' && event !== 'ai:tool_call' && event !== 'ai:tools_done' && event !== 'ai:done') return
+    if (event !== 'ai:token' && event !== 'ai:generating' && event !== 'ai:tool_call' && event !== 'ai:tools_done' && event !== 'ai:done') return
     emit(event, parseSseJson(payload))
   }
   const takeFrame = () => {
