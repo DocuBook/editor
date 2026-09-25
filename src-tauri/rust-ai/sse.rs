@@ -3,16 +3,101 @@ use super::events::{
     AiEvent, StreamSummary, ToolCall, AI_MAX_SECONDS, MAX_AI_BUFFER, MAX_TOOL_ARGS_SIZE,
     MAX_TOOL_CALLS_PER_REQUEST,
 };
-use eventsource_stream::Eventsource;
+use eventsource_stream::{EventStreamError, Eventsource};
+use futures_util::StreamExt as _;
 use reqwest::Response;
 use serde_json::Value;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt as _;
 
 pub type EventSender = mpsc::Sender<Result<AiEvent, String>>;
+
+/// Counts the bytes handed over by the underlying stream and trips once `limit` is
+/// exceeded.
+///
+/// The SSE parser buffers a whole event before yielding it, so a limit applied
+/// downstream of it only runs after the allocation has already happened. Capping the
+/// raw chunks keeps that in-flight buffer bounded no matter what the provider sends.
+struct BoundedBytes<S> {
+    inner: S,
+    seen: usize,
+    limit: usize,
+    tripped: bool,
+}
+
+impl<S> BoundedBytes<S> {
+    fn new(inner: S, limit: usize) -> Self {
+        Self {
+            inner,
+            seen: 0,
+            limit,
+            tripped: false,
+        }
+    }
+}
+
+/// Either the transport failed or the cap tripped. The caller matches on the variant
+/// so only a real transport error goes through `sanitize_ai_error`.
+#[derive(Debug)]
+enum BodyError<E> {
+    Transport(E),
+    TooLarge,
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for BodyError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Transport(error) => error.fmt(f),
+            Self::TooLarge => f.write_str(TOO_LARGE_MESSAGE),
+        }
+    }
+}
+
+impl<E: std::error::Error + 'static> std::error::Error for BodyError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Transport(error) => Some(error),
+            Self::TooLarge => None,
+        }
+    }
+}
+
+impl<S, E> futures_util::Stream for BoundedBytes<S>
+where
+    S: futures_util::Stream<Item = Result<bytes::Bytes, E>> + Unpin,
+{
+    type Item = Result<bytes::Bytes, BodyError<E>>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.get_mut();
+        // Stay tripped: once the provider is over budget there is nothing left to read
+        // that we would hand over, so stop pulling from the socket entirely.
+        if this.tripped {
+            return Poll::Ready(Some(Err(BodyError::TooLarge)));
+        }
+        match Pin::new(&mut this.inner).poll_next(cx) {
+            Poll::Ready(Some(Ok(chunk))) => {
+                this.seen = this.seen.saturating_add(chunk.len());
+                if this.seen > this.limit {
+                    this.tripped = true;
+                    return Poll::Ready(Some(Err(BodyError::TooLarge)));
+                }
+                Poll::Ready(Some(Ok(chunk)))
+            }
+            Poll::Ready(Some(Err(error))) => Poll::Ready(Some(Err(BodyError::Transport(error)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// A `BodyError::TooLarge` is ours, not the transport's, so it must not go through
+/// `sanitize_ai_error` and lose the size framing.
+const TOO_LARGE_MESSAGE: &str = "AI response too large";
 
 pub async fn stream_chat(
     response: Response,
@@ -38,7 +123,13 @@ pub async fn stream_chat(
         return;
     }
 
-    let mut events = std::pin::pin!(response.bytes_stream().eventsource());
+    // The cap counts wire bytes, so it also covers SSE and JSON framing. That is the
+    // point: it is what stops the parser from buffering past the budget while it waits
+    // for an event to terminate. Budgeting bytes rather than text means the text
+    // ceiling sits below `MAX_AI_BUFFER` by the framing ratio, which stays far above
+    // what any provider will emit for one response.
+    let mut events =
+        std::pin::pin!(BoundedBytes::new(response.bytes_stream(), MAX_AI_BUFFER).eventsource());
     let mut summary = StreamSummary {
         provider: provider.clone(),
         text: String::new(),
@@ -93,12 +184,6 @@ pub async fn stream_chat(
                     break;
                 }
                 saw_event = true;
-                // The parser buffers a whole event before handing it over, so it is
-                // capped here — the guard the byte buffer used to provide.
-                if event.data.len() > MAX_AI_BUFFER {
-                    send_error(&tx, "AI response too large").await;
-                    return;
-                }
                 if let Err(error) = process_sse_data(&event.data, &mut summary, &tx).await {
                     send_error(&tx, error).await;
                     return;
@@ -111,6 +196,7 @@ pub async fn stream_chat(
                 }
             }
             Some(Err(error)) => {
+                let too_large = matches!(error, EventStreamError::Transport(BodyError::TooLarge));
                 tracing::warn!(
                     event = "ai_request_failure",
                     provider = %provider,
@@ -118,9 +204,18 @@ pub async fn stream_chat(
                     status = status.as_u16(),
                     duration_ms = started.elapsed().as_millis() as u64,
                     body_bytes = summary.text.len(),
-                    error_category = "stream_read"
+                    error_category = if too_large {
+                        "response_too_large"
+                    } else {
+                        "stream_read"
+                    }
                 );
-                send_error(&tx, sanitize_ai_error(&error.to_string())).await;
+                let message = if too_large {
+                    TOO_LARGE_MESSAGE.to_string()
+                } else {
+                    sanitize_ai_error(&error.to_string())
+                };
+                send_error(&tx, message).await;
                 return;
             }
             None if !saw_event => {
@@ -523,6 +618,67 @@ mod tests {
             rx.recv().await,
             Some(Err("AI provider returned an empty response".into()))
         );
+        assert!(rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn oversized_body_is_rejected_before_the_event_completes() {
+        use tokio::io::AsyncWriteExt;
+
+        // Comment lines are ignored by the SSE parser and never reach the text
+        // accumulator, so a body made only of comments isolates the byte cap: the
+        // event-level text limit in `process_sse_data` cannot be the thing that trips.
+        //
+        // A single 8 MiB line would exercise the same cap, but the parser rescans its
+        // pending line on every poll, which is quadratic and far too slow to assert on.
+        //
+        // `sse_body_in_parts` is not reused here: it paces writes 20ms apart to force
+        // chunk splits, and the ~1000 parts needed to pass 8 MiB would take 20 seconds.
+        let comment = format!(": {}\n", "x".repeat(8 * 1024));
+        let parts = MAX_AI_BUFFER.div_ceil(comment.len()) + 2;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let (mut reader, mut writer) = socket.into_split();
+            // Drain the request in the background so the reply never stalls on a full
+            // receive window while we stream padding at the client.
+            tokio::spawn(async move {
+                let mut discard = [0_u8; 4096];
+                loop {
+                    // Reading until EOF is the point: the request bytes must leave the
+                    // socket or our writes below would stall behind them.
+                    let read = tokio::io::AsyncReadExt::read(&mut reader, &mut discard).await;
+                    if !matches!(read, Ok(n) if n > 0) {
+                        break;
+                    }
+                }
+            });
+            let _ = writer
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                )
+                .await;
+            for _ in 0..parts {
+                if writer.write_all(comment.as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        let response = get_sse(format!("http://{addr}/chat")).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        stream_chat(
+            response,
+            "test".into(),
+            "test".into(),
+            Arc::new(AtomicBool::new(false)),
+            Instant::now(),
+            tx,
+        )
+        .await;
+
+        assert_eq!(rx.recv().await, Some(Err("AI response too large".into())));
         assert!(rx.recv().await.is_none());
     }
 }
