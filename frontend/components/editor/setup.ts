@@ -126,19 +126,48 @@ const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
   toExternalHTML: (props) => createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef })),
 })
 
-/** Keys and clicks inside the header belong to the field, not the document:
- *  ProseMirror's keymap sits on an ancestor of this node view, so without
- *  stopping propagation here the code block's own Tab/Enter/Delete commands
- *  fire while the user types a title (inserting spaces or splitting the block
- *  into the code). Bound once per node — the callback identity changes every
- *  render, so re-binding is guarded by a data flag rather than a ref. */
+/** Clicks and shortcut keys inside the header belong to the field, not the
+ *  document: ProseMirror moves its own selection on mousedown and reads the
+ *  global keymap, so without stopping those here a click on the title or the
+ *  picker would reselect the code block, and ⌘K / ⌘⇧E would fire while a title
+ *  is being typed.
+ *
+ *  PLAIN keys are deliberately left alone: the language picker is driven by
+ *  React handlers (ArrowUp/Down, Enter, Escape) and ProseMirror skips those keys
+ *  itself (see codeBlockShortcuts), so stopping them here would starve the
+ *  picker's keyboard controls. Bound once per node — the callback identity
+ *  changes every render, so re-binding is guarded by a data flag rather than a
+ *  ref. */
 const keepEventsLocal = (node: HTMLElement | null) => {
   if (!node || node.dataset.boundEvents === '1') return
   node.dataset.boundEvents = '1'
-  for (const type of ['keydown', 'keyup', 'mousedown', 'click'] as const) {
+  for (const type of ['mousedown', 'click'] as const) {
     node.addEventListener(type, (event) => event.stopPropagation())
   }
+  node.addEventListener('keydown', (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) event.stopPropagation()
+  })
 }
+
+/** True when a DOM event started inside one of the header's own fields — the
+ *  title input or the language picker's input. */
+export const isCodeBlockHeaderField = (target: unknown) =>
+  !!(target as HTMLElement | null)?.closest?.('.code-block-header')
+
+/** Claims the keys typed into those fields, so ProseMirror's keymap (which sits
+ *  on an ancestor of the node view) does not run the code block's own Tab/Enter/
+ *  Delete commands — inserting spaces or splitting the block while a title is
+ *  being written. Claiming them as a DOM handler rather than stopping their
+ *  propagation keeps the default action: the field still receives the character,
+ *  and the event keeps bubbling, so React sees it and the picker's keyboard
+ *  controls work. */
+const headerFieldKeys = new Plugin({
+  props: {
+    handleDOMEvents: {
+      keydown: (_view, event) => isCodeBlockHeaderField(event.target),
+    },
+  },
+})
 
 /** The header's language control: a closed choice over the grammars Shiki can
  *  actually load (see codeLanguages.ts) — unlike the title, which stays free
@@ -252,8 +281,11 @@ export const StableCodeBlockPreview = createStablePreview(
   (p: any) => p.block?.props?.language ?? '',
 )
 
-const codeBlockShortcuts = createExtension({
+/** Exported for the header-key test (the guard is what keeps ProseMirror's
+ *  commands out of the header's fields). */
+export const codeBlockShortcuts = createExtension({
   key: 'codeBlockKeyboardShortcuts',
+  prosemirrorPlugins: [headerFieldKeys],
   keyboardShortcuts: {
     Delete: ({ editor }: any) => {
       return editor.transact((tr: any) => {

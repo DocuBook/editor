@@ -52,14 +52,14 @@ let container: HTMLDivElement
 let root: Root
 let updateBlock: ReturnType<typeof vi.fn>
 
-const renderBlock = async (Source: any, info: string) => {
+const renderBlock = async (Source: any, info: string, editorOverrides: Record<string, unknown> = {}) => {
   await act(async () => {
     root.render(
       <MantineProvider>
         <Source
           {...({
             block: { id: 'block-1', props: { language: info } },
-            editor: { isEditable: true, updateBlock },
+            editor: { isEditable: true, updateBlock, ...editorOverrides },
             contentRef: () => {},
           } as any)}
         />
@@ -184,6 +184,34 @@ describe('codeBlock source view', () => {
 
     await typeSearch('jsonc')
     expect(optionLabels()).toContain('JSON with Comments')
+  })
+
+  /** The guard that keeps the code block's Tab/Enter/Delete commands out of the
+   *  header must not starve the picker: Mantine drives the list from the
+   *  input's own key events (ArrowUp/Down, Enter, Escape). */
+  it('drives the dropdown from the keyboard', async () => {
+    await renderSource('js')
+    await openLanguageMenu()
+    await typeSearch('pyth')
+    const key = (code: string) => new KeyboardEvent('keydown', { code, key: code, bubbles: true })
+
+    await act(async () => { languageInput().dispatchEvent(key('ArrowDown')) })
+    await act(async () => { languageInput().dispatchEvent(key('Enter')) })
+
+    expect(updateBlock).toHaveBeenCalledWith('block-1', { props: { language: 'python' } })
+  })
+
+  it('closes the dropdown on Escape', async () => {
+    await renderSource('js')
+    await openLanguageMenu()
+    expect(languageInput().getAttribute('aria-expanded')).toBe('true')
+
+    await act(async () => {
+      languageInput().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+
+    // Mantine keeps the options mounted, so the combobox state is the signal.
+    expect(languageInput().getAttribute('aria-expanded')).toBe('false')
   })
 })
 

@@ -28,7 +28,7 @@ import { followAiWritingCursorInRoot } from '../../utils/aiFollowScroll'
 import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../utils/markdownCursor'
 import { serializeMarkdown } from '../../utils/markdownSerialization'
 import { refreshCodeHighlighting } from '../../utils/codeHighlighting'
-import { setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
+import { isCodeBlockHeaderField, setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
 // Memoization for the global renderers (Mermaid, KaTeX) must be installed before
@@ -49,6 +49,10 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   useEffect(() => {
     const preserveMermaidIndent = (event: KeyboardEvent) => {
       if (!["Enter", "Tab"].includes(event.key) || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || (event.key === "Enter" && event.shiftKey)) return
+      /** Keys typed into a code block header field belong to that field (the
+       *  header no longer stops their propagation — see setup.ts) — never to
+       *  the diagram source, even while its popup is open. */
+      if (isCodeBlockHeaderField(event.target)) return
       const view = (editor as any).prosemirrorView
       if (!view) return
       const target = event.target
@@ -124,6 +128,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     /** `keyCode` is deliberate: it is the only signal some soft keyboards give
      *  when `key` arrives as `'Unidentified'` for the physical Enter. */
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isCodeBlockHeaderField(event.target)) return
       if (event.key === 'Enter' || event.code === 'Enter' || event.keyCode === 13) confirmSelectedItem(event)
     }
     document.addEventListener('beforeinput', onBeforeInput, true)
