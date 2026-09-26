@@ -197,6 +197,13 @@ function CodeBlockLanguage({ editor, block, info, language }: any) {
       .map((option: any) => ({ value: option.id, label: option.name })),
   ]
 
+  // BlockNote's own popup container, which sits inside the `bn-mantine` wrapper
+  // that carries `data-mantine-color-scheme`. Portaling to document.body (the
+  // default) put the list outside that scope, where Mantine's variables fall
+  // back to the light defaults — a white dropdown inside a dark editor. The
+  // getter is absent outside a mounted editor (tests), hence the fallback.
+  const portalTarget = editor?.portalElement
+
   return createElement(Select<string>, {
     className: 'code-block-language',
     classNames: { input: 'code-block-language-input' },
@@ -209,6 +216,7 @@ function CodeBlockLanguage({ editor, block, info, language }: any) {
     // The list scrolls inside the dropdown instead of running past the window;
     // the popover's default flip/shift middlewares keep it in the viewport.
     maxDropdownHeight: 280,
+    comboboxProps: portalTarget ? { portalProps: { target: portalTarget } } : undefined,
     disabled: !editor.isEditable,
     'aria-label': 'Code block language',
     nothingFoundMessage: 'No language found',

@@ -213,6 +213,21 @@ describe('codeBlock source view', () => {
     // Mantine keeps the options mounted, so the combobox state is the signal.
     expect(languageInput().getAttribute('aria-expanded')).toBe('false')
   })
+
+  /** Portaling to document.body put the list outside the `bn-mantine` wrapper
+   *  that carries `data-mantine-color-scheme`, so it always rendered light.
+   *  BlockNote's own popup container lives inside it. */
+  it('renders the dropdown inside the editor popup container', async () => {
+    const popupContainer = document.createElement('div')
+    popupContainer.setAttribute('data-mantine-color-scheme', 'dark')
+    document.body.appendChild(popupContainer)
+
+    await renderBlock(CodeBlockSource, 'js', { portalElement: popupContainer })
+    await openLanguageMenu()
+
+    expect(popupContainer.querySelector('[role="option"]')).not.toBeNull()
+    popupContainer.remove()
+  })
 })
 
 describe('codeBlock language catalogue', () => {
