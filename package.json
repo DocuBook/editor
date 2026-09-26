@@ -48,7 +48,7 @@
     "@tiptap/pm": "^3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/starter-kit": "^3.31.3",
-    "katex": "^0.16.11",
+    "katex": "^0.18.7",
     "lucide-react": "^1.27.0",
     "mdast-util-from-markdown": "2.0.2",
     "mdast-util-gfm-table": "2.0.0",
