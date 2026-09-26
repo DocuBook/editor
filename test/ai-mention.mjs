@@ -35,7 +35,9 @@ await runSuite('ai-mention', {
     await mockAskAi(page, (request) => {
       askAiBodies.push(request)
       return [
-        ['ai:token', { token: 'Rewritten paragraph.' }],
+        // Text mode only writes a delimited payload, and this suite drives the
+        // review UI — without the tags no suggestion renders.
+        ['ai:token', { token: '<content>Rewritten paragraph.</content>' }],
         ['ai:tools_done', {}],
         ['ai:done', { provider: 'mock', truncated: false }],
       ]
