@@ -455,6 +455,11 @@ body .mobile-sidebar-drawer-body > aside {
        block and its `pre` shared a background. With a tinted header it becomes a
        3px band of block background above it, reading as stray margin. */
     padding: 0;
+    /* Zeroing that padding is also what left this frame flush against its
+       neighbours — every other block still carries its 3px. Give the frame the
+       same 12px rhythm as `.ProseMirror pre`, so the tinted border never reads
+       as colliding with the paragraph above or below it. */
+    margin: 12px 0;
     color: var(--color-foreground);
     background-color: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -497,9 +502,26 @@ body .mobile-sidebar-drawer-body > aside {
     font-size: 0.72em;
     line-height: 1.6;
 }
+/* The language control is Mantine's Select (see setup.ts): the root keeps it a
+   compact flex item, so a long language name ellipsizes instead of pushing the
+   header — and with it the block — wider than the pane. */
 .ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-language {
+    flex: none;
+    max-width: 18ch;
+}
+.ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-language-input {
+    height: auto;
+    min-height: 0;
+    padding: 0;
+    font: inherit;
     color: var(--color-foreground-subtle);
-    text-transform: lowercase;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-language-input:hover {
+    color: var(--color-foreground-secondary);
 }
 .ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-title {
     flex: 1;

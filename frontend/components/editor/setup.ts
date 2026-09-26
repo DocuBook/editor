@@ -1,4 +1,5 @@
-import { createElement, Fragment, useRef, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useRef, useState, useSyncExternalStore } from 'react'
+import { Select } from '@mantine/core'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
 import { createCodeBlockConfig, parsePreCode, parsePreCodeContent } from '@blocknote/core/blocks'
 import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
@@ -21,7 +22,8 @@ import { CachedDiagramPreviewWithPopup } from './CachedDiagramPreview'
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
-import { parseCodeBlockInfo, withCodeBlockTitle } from '../../utils/codeBlockInfo'
+import { parseCodeBlockInfo, withCodeBlockLanguage, withCodeBlockTitle } from '../../utils/codeBlockInfo'
+import { loadCodeLanguages } from '../../utils/codeLanguages'
 
 let _previewRenderingPaused = false
 const _previewRenderingListeners = new Set<() => void>()
@@ -124,18 +126,115 @@ const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
   toExternalHTML: (props) => createElement('pre', null, createElement('code', { className: 'language-mermaid', 'data-language': 'mermaid', ref: props.contentRef })),
 })
 
-/** Keys and clicks inside the header belong to the field, not the document:
- *  ProseMirror's keymap sits on an ancestor of this node view, so without
- *  stopping propagation here the code block's own Tab/Enter/Delete commands
- *  fire while the user types a title (inserting spaces or splitting the block
- *  into the code). Bound once per node — the callback identity changes every
- *  render, so re-binding is guarded by a data flag rather than a ref. */
+/** Clicks and shortcut keys inside the header belong to the field, not the
+ *  document: ProseMirror moves its own selection on mousedown and reads the
+ *  global keymap, so without stopping those here a click on the title or the
+ *  picker would reselect the code block, and ⌘K / ⌘⇧E would fire while a title
+ *  is being typed.
+ *
+ *  PLAIN keys are deliberately left alone: the language picker is driven by
+ *  React handlers (ArrowUp/Down, Enter, Escape) and ProseMirror skips those keys
+ *  itself (see codeBlockShortcuts), so stopping them here would starve the
+ *  picker's keyboard controls. Bound once per node — the callback identity
+ *  changes every render, so re-binding is guarded by a data flag rather than a
+ *  ref. */
 const keepEventsLocal = (node: HTMLElement | null) => {
   if (!node || node.dataset.boundEvents === '1') return
   node.dataset.boundEvents = '1'
-  for (const type of ['keydown', 'keyup', 'mousedown', 'click'] as const) {
+  for (const type of ['mousedown', 'click'] as const) {
     node.addEventListener(type, (event) => event.stopPropagation())
   }
+  node.addEventListener('keydown', (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey) event.stopPropagation()
+  })
+}
+
+/** True when a DOM event started inside one of the header's own fields — the
+ *  title input or the language picker's input. */
+export const isCodeBlockHeaderField = (target: unknown) =>
+  !!(target as HTMLElement | null)?.closest?.('.code-block-header')
+
+/** Claims the keys typed into those fields, so ProseMirror's keymap (which sits
+ *  on an ancestor of the node view) does not run the code block's own Tab/Enter/
+ *  Delete commands — inserting spaces or splitting the block while a title is
+ *  being written. Claiming them as a DOM handler rather than stopping their
+ *  propagation keeps the default action: the field still receives the character,
+ *  and the event keeps bubbling, so React sees it and the picker's keyboard
+ *  controls work. */
+const headerFieldKeys = new Plugin({
+  props: {
+    handleDOMEvents: {
+      keydown: (_view, event) => isCodeBlockHeaderField(event.target),
+    },
+  },
+})
+
+/** The header's language control: a closed choice over the grammars Shiki can
+ *  actually load (see codeLanguages.ts) — unlike the title, which stays free
+ *  text. Mantine's Select keeps the list inside the app window (a portaled,
+ *  scrollable popover that flips and shifts against the viewport), whereas a
+ *  native `<select>` hands all 243 options to an OS menu, which macOS draws
+ *  past the window bounds. BlockNote's own picker (`createLanguageSelect`) is a
+ *  native `<select>` as well, and on top of that it throws for a value that is
+ *  not exactly one of its `supportedLanguages` keys and writes the bare
+ *  language into the prop — dropping the `title="…"` this header keeps in the
+ *  same info string. */
+function CodeBlockLanguage({ editor, block, info, language }: any) {
+  const [languages, setLanguages] = useState<any>(null)
+
+  // The control shows and writes the fence token AS-IS: no catalogue lookup, no
+  // alias mapping. Rendering therefore never waits on an async import, which
+  // matters on a raw markdown → WYSIWYG switch: every code block mounts at
+  // once, and each one waiting on the same chunk raced the block swap. The
+  // list only fills the dropdown, so it loads on first open.
+  const token: string = language || 'text'
+  const terms = new Map<string, string>()
+  for (const option of languages ?? []) terms.set(option.id, option.searchTerms)
+  const data = [
+    { value: token, label: token },
+    ...(languages ?? [])
+      .filter((option: any) => option.id !== token)
+      .map((option: any) => ({ value: option.id, label: option.name })),
+  ]
+
+  // BlockNote's own popup container, which sits inside the `bn-mantine` wrapper
+  // that carries `data-mantine-color-scheme`. Portaling to document.body (the
+  // default) put the list outside that scope, where Mantine's variables fall
+  // back to the light defaults — a white dropdown inside a dark editor. The
+  // getter is absent outside a mounted editor (tests), hence the fallback.
+  const portalTarget = editor?.portalElement
+
+  return createElement(Select<string>, {
+    className: 'code-block-language',
+    classNames: { input: 'code-block-language-input' },
+    variant: 'unstyled',
+    size: 'xs',
+    value: token,
+    data,
+    searchable: true,
+    allowDeselect: false,
+    // The list scrolls inside the dropdown instead of running past the window;
+    // the popover's default flip/shift middlewares keep it in the viewport.
+    maxDropdownHeight: 280,
+    comboboxProps: portalTarget ? { portalProps: { target: portalTarget } } : undefined,
+    disabled: !editor.isEditable,
+    'aria-label': 'Code block language',
+    nothingFoundMessage: 'No language found',
+    onDropdownOpen: () => { if (!languages) loadCodeLanguages().then(setLanguages) },
+    // Matches the fence-facing tokens too: `js`, `ts` and `jsonc` are ids or
+    // Shiki aliases, not the labels ("JavaScript", "TypeScript",
+    // "JSON with Comments") the default label-only filter would search.
+    filter: ({ options, search, limit }: any) => {
+      const query = search.trim().toLowerCase()
+      if (!query) return options
+      return options
+        .filter((option: any) => (terms.get(option?.value) ?? String(option?.label ?? '')).toLowerCase().includes(query))
+        .slice(0, limit)
+    },
+    onChange: (value: string | null) => {
+      if (value) editor.updateBlock(block.id, { props: { language: withCodeBlockLanguage(info, value) } })
+    },
+  })
 }
 
 /** The block header: the fence language Shiki highlights as, plus the optional
@@ -144,7 +243,7 @@ const keepEventsLocal = (node: HTMLElement | null) => {
  *  the fence round-trips as typed. */
 function CodeBlockHeader({ editor, block, info, language, title }: any) {
   return createElement('div', { className: 'code-block-header', contentEditable: false, ref: keepEventsLocal }, [
-    createElement('span', { key: 'language', className: 'code-block-language' }, language || 'text'),
+    createElement(CodeBlockLanguage, { key: 'language', editor, block, info, language }),
     createElement('input', {
       key: 'title',
       className: 'code-block-title',
@@ -160,8 +259,8 @@ function CodeBlockHeader({ editor, block, info, language, title }: any) {
 }
 
 /** Code block source view: pre > code, same shape as vanilla renderer, with the
- *  block header on top. */
-function CodeBlockSource(props: any) {
+ *  block header on top. Exported for the header's DOM-contract test. */
+export function CodeBlockSource(props: any) {
   const info: string = props.block?.props?.language ?? ''
   const { language, title } = parseCodeBlockInfo(info)
   return createElement(Fragment, null,
@@ -181,15 +280,20 @@ function CodeBlockSource(props: any) {
   )
 }
 
-const StableCodeBlockPreview = createStablePreview(
+/** Frozen wrapper (see StableSourcePreview) around the code block source view —
+ *  exported so the AI-writing freeze behaviour is testable. */
+export const StableCodeBlockPreview = createStablePreview(
   CodeBlockSource,
   (p: any) => parseCodeBlockInfo(p.block?.props?.language ?? '').language,
   'block',
   (p: any) => p.block?.props?.language ?? '',
 )
 
-const codeBlockShortcuts = createExtension({
+/** Exported for the header-key test (the guard is what keeps ProseMirror's
+ *  commands out of the header's fields). */
+export const codeBlockShortcuts = createExtension({
   key: 'codeBlockKeyboardShortcuts',
+  prosemirrorPlugins: [headerFieldKeys],
   keyboardShortcuts: {
     Delete: ({ editor }: any) => {
       return editor.transact((tr: any) => {
@@ -254,11 +358,24 @@ const codeBlockShortcuts = createExtension({
   ],
 })
 
+/** The language handed to Shiki for a code block.
+ *
+ *  While the AI writes, the fence is still streaming (` ```py ` → ` ```pyth ` …),
+ *  so the block falls back to plain text: Shiki is not asked to load a
+ *  half-typed language (which would fetch the wrong grammar and record it as
+ *  permanently unsupported — see shikiHighlighter.ts). The language is parsed
+ *  again as soon as the block itself changes: picking one in the header writes
+ *  the prop, and either that or an edit invalidates the highlighter's cache for
+ *  the node. */
+const codeBlockHighlightLanguage = (block: any) => _previewRenderingPaused
+  ? ''
+  : parseCodeBlockInfo(block.props.language).language
+
 /** React codeBlock spec — same node type, parse, serialize, and shortcuts as
  *  the default vanilla spec, but with the AI-writing freeze applied (see
  *  StableCodeBlockPreview). */
 const codeBlockSpec = createReactBlockSpec(createCodeBlockConfig, {
-  meta: { code: true, defining: true, isolating: false, highlight: (block: any) => parseCodeBlockInfo(block.props.language).language },
+  meta: { code: true, defining: true, isolating: false, highlight: codeBlockHighlightLanguage },
   parse: parsePreCode,
   parseContent: (opts: any) => parsePreCodeContent(opts, 'codeBlock'),
   render: StableCodeBlockPreview,
@@ -299,7 +416,7 @@ export const getSchema = () => {
  *  The full-doc regex scan runs on EVERY transaction — during AI typing that
  *  is one O(document) scan per 50ms batch. WysiwygEditor pauses it while the
  *  AI writes (setWikilinkStylerPaused); the underline returns on unpause via
- *  the empty-transaction nudge (decorations only recompute on state change). */
+ *  the unpause transaction (decorations only recompute on state change). */
 let _decosPaused = false
 export const setWikilinkStylerPaused = (paused: boolean) => { _decosPaused = paused }
 export const wikilinkStyler = createExtension({
