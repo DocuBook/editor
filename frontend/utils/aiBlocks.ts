@@ -677,6 +677,43 @@ export function latestUserText(messages: any[]): string {
   return "";
 }
 
+/** Literal delimiters stated to the model in the text-only (Path B) prompt. */
+export const AI_CONTENT_OPEN = "<content>";
+export const AI_CONTENT_CLOSE = "</content>";
+
+/** Matchers are kept separate from the constants above so a casing or spacing
+ *  variant the model invents still resolves, instead of silently failing the
+ *  reply into the no-write path. A test pins the two together. */
+const CONTENT_OPEN = /<content\s*>/i;
+const CONTENT_CLOSE = /<\/content\s*>/gi;
+
+/**
+ * Pull the document payload out of a text-only (Path B) reply.
+ *
+ * Text mode has no schema to lean on, so a reply on its own cannot say whether
+ * it is content or commentary *about* content. The delimiter is what makes that
+ * verifiable: without it the reply is an answer, an apology, or an echo of the
+ * prompt — and writing it would overwrite the selection, or append after the
+ * cursor, with the model's prose.
+ *
+ * Preamble and trailing notes are tolerated because the tags bound the payload,
+ * so "Here is the content:" still maps. Returns null when there is no complete,
+ * non-empty payload — callers must treat that as "nothing to write".
+ */
+export function extractDelimitedContent(text: unknown): string | null {
+  if (typeof text !== "string") return null;
+  const open = CONTENT_OPEN.exec(text);
+  if (!open) return null;
+  const rest = text.slice(open.index + open[0].length);
+  // The LAST closing tag wins: that keeps the whole payload when the content
+  // itself contains the literal tag, rather than truncating mid-document.
+  const closes = [...rest.matchAll(CONTENT_CLOSE)];
+  const close = closes[closes.length - 1];
+  if (!close || close.index === undefined) return null;
+  const content = rest.slice(0, close.index).trim();
+  return content.length ? content : null;
+}
+
 /**
  * Build an applyDocumentOperations input from the AI text output.
  * Follows rust-ai's operation schema (html format, idsSuffixed):

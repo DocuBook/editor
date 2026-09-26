@@ -295,7 +295,7 @@ describe('createAiTransport tools-to-text fallback', () => {
           ]
         : [
             'event: ai:token\n',
-            `data: {"requestId":"${id}","token":"## Summary\\n\\nAll good."}\n\n`,
+            `data: {"requestId":"${id}","token":"<content>## Summary\\n\\nAll good.</content>"}\n\n`,
             'event: ai:done\n',
             `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
           ]
@@ -316,6 +316,63 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(parts.some(p => p.type === 'text-delta')).toBe(true)
     // The tool-mode prose is never promoted into the document.
     expect(JSON.stringify(parts)).not.toContain('I cannot edit this document')
+  })
+
+  it('never writes a text-mode reply that carries no delimited payload', async () => {
+    // Regression: Path B treated every reply as document content, so a model
+    // that answered instead of editing ("No spelling errors in document…") had
+    // its prose mapped to operations — replacing the selection, or landing
+    // after the cursor. Commentary must leave the document untouched.
+    usePathA()
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      'event: ai:token\n',
+      `data: {"requestId":"${id}","token":"No spelling errors in document. Checked heading, prose, code comments. All correct."}\n\n`,
+      'event: ai:done\n',
+      `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+    ]))
+    const doc = [{ id: 'b1', type: 'paragraph', content: 'teh quick brown fox' }]
+    const edited = { ...editor(), document: doc }
+
+    const { parts, error } = await drain(createAiTransport({ getEditor: () => edited }))
+
+    // The consumer writes to the editor only for a `tool-input-available` part
+    // (`readPart` → `applyOperations`), so its absence is exactly "the document was
+    // left alone". Without the payload gate this part carried the prose.
+    expect(parts.filter(p => p.type === 'tool-input-available').length).toBe(0)
+    // It surfaces through the existing no-change surface instead of succeeding.
+    expect(String(error)).toContain('no document changes')
+  })
+
+  it('maps a delimited payload even when the model wraps it in explanation', async () => {
+    usePathA()
+    let calls = 0
+    vi.stubGlobal('fetch', sseResponder((id) => {
+      calls++
+      return calls === 1
+        ? [
+            'event: ai:token\n',
+            `data: {"requestId":"${id}","token":"I cannot call tools."}\n\n`,
+            'event: ai:done\n',
+            `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+          ]
+        : [
+            'event: ai:token\n',
+            `data: {"requestId":"${id}","token":"Sure, here it is:\\n<content>## Summary\\n\\nAll good.</content>\\nHope that helps."}\n\n`,
+            'event: ai:done\n',
+            `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+          ]
+    }))
+
+    const { parts, error } = await drain(createAiTransport({ getEditor: editor }))
+
+    expect(error).toBeNull()
+    const toolParts = parts.filter(p => p.type === 'tool-input-available')
+    expect(toolParts.length).toBe(1)
+    // Only the payload is written — the preamble and the sign-off are not.
+    const written = JSON.stringify(toolParts[0].input)
+    expect(written).toContain('All good.')
+    expect(written).not.toContain('Sure, here it is')
+    expect(written).not.toContain('Hope that helps')
   })
 
   it('never loops: a second prose answer ends the turn after the one fallback', async () => {

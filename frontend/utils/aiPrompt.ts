@@ -1,6 +1,6 @@
 import { injectDocumentStateMessages, injectMentionContextMessages } from './aiPromptState';
 
-import { CURSOR_MARKER } from "./aiBlocks";
+import { AI_CONTENT_CLOSE, AI_CONTENT_OPEN, CURSOR_MARKER } from "./aiBlocks";
 
 export type AiPromptMode = "tool" | "text";
 
@@ -25,7 +25,7 @@ export type CompiledAiPrompt = {
   messages: PromptMessage[];
 };
 
-export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), inline math ($LaTeX$), block math ($$LaTeX$$ on its own line), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary.`;
+export const AI_MARKDOWN_INSTRUCTION = `Respond with the requested content using BlockNote-compatible Markdown. You may use: headings (## … ######), bold (**bold**), italic (*italic*), strikethrough (~~text~~), inline code (\`code\`), links ([text](url)), images (![alt](url)), inline math ($LaTeX$), block math ($$LaTeX$$ on its own line), code blocks (\`\`\`), bullet lists (-), numbered lists (1.), checklists (- [ ] / - [x]), blockquotes (>), dividers (---), tables (| a | b | with a | - | - | separator row). No commentary inside the content.`;
 
 const COMMON_SYSTEM_POLICY = `You are DocuBook's document editing assistant. Follow the user's request, preserve document meaning and structure unless asked otherwise, and never expose internal implementation details.`;
 
@@ -38,6 +38,7 @@ const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 
 ${AI_MARKDOWN_INSTRUCTION}
 The document context may contain the marker ${CURSOR_MARKER}, which shows where the user's caret currently is. Never output that marker. When asked to continue or insert, resume at the marker: match the surrounding content and continue in the same voice, tense, and block style. When asked to change text without a selection, treat the block at the marker as the target. Do not repeat content that already appears before the marker.
+Wrap document content in ${AI_CONTENT_OPEN} and ${AI_CONTENT_CLOSE}. What sits inside those tags is written into the document; what sits outside is shown to the user and never written. Put the requested content inside them and nothing else. If the request needs no document change — there is nothing to fix, or you are answering a question rather than editing — reply with a short explanation and no ${AI_CONTENT_OPEN} block at all.
 Output only requested document content. Do not output metadata, internal identifiers, the user's prompt, commentary, or a preamble. Preserve selected block types and formatting when editing. Never fabricate source facts; state when required information is missing.`;
 
 function messageContent(message: any): string {

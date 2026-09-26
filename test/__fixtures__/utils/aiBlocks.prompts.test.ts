@@ -3,7 +3,7 @@ import {
   AI_MARKDOWN_INSTRUCTION,
   buildAiPrompt,
 } from "../../../frontend/utils/aiPrompt";
-import { buildTaskFormattingRules } from "../../../frontend/utils/aiBlocks";
+import { buildTaskFormattingRules, extractDelimitedContent, AI_CONTENT_OPEN, AI_CONTENT_CLOSE } from "../../../frontend/utils/aiBlocks";
 
 describe("buildAiPrompt", () => {
   const documentState = {
@@ -143,5 +143,43 @@ describe("AI_MARKDOWN_INSTRUCTION", () => {
     expect(AI_MARKDOWN_INSTRUCTION).toContain("No commentary");
     expect(AI_MARKDOWN_INSTRUCTION).toContain("inline math ($LaTeX$)");
     expect(AI_MARKDOWN_INSTRUCTION).toContain("block math ($$LaTeX$$");
+  });
+});
+
+describe("text-mode content contract", () => {
+  /** The transport writes a text-mode reply ONLY when it carries the delimiters,
+   *  and the model only emits them because this prompt asks for them. Both halves
+   *  have to hold: dropping either silently stops text mode from ever writing. */
+  it("asks the model to delimit content, and pins the tags the transport reads", () => {
+    const { messages } = buildAiPrompt({
+      mode: "text",
+      messages: [{ role: "user", content: "summarize" }],
+      documentMarkdown: "body",
+      selectedMarkdown: "",
+      userText: "summarize",
+      taskRules: "",
+    });
+    const system = messages[0].content;
+    expect(system).toContain(AI_CONTENT_OPEN);
+    expect(system).toContain(AI_CONTENT_CLOSE);
+    // The no-change escape hatch has to be stated, or a model with nothing to
+    // edit will invent content to fill the tags.
+    expect(system).toContain("no document change");
+    // And the stated tags must be the ones extractDelimitedContent resolves.
+    expect(extractDelimitedContent(`${AI_CONTENT_OPEN}payload${AI_CONTENT_CLOSE}`)).toBe(
+      "payload",
+    );
+  });
+
+  it("leaves tool mode without the delimiters", () => {
+    const { messages } = buildAiPrompt({
+      mode: "tool",
+      messages: [{ role: "user", content: "edit" }],
+      documentMarkdown: "body",
+      selectedMarkdown: "",
+      userText: "edit",
+      taskRules: "",
+    });
+    expect(messages[0].content).not.toContain(AI_CONTENT_OPEN);
   });
 });

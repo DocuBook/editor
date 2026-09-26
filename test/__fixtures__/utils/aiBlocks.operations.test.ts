@@ -3,12 +3,60 @@ import {
   filterMeaningfulOperations,
   inheritFormatOnReplace,
   buildApplyDocumentInput,
+  extractDelimitedContent,
   validateOperationsSemantics,
   isMeaningfulOps,
   isDocumentOperationToolCall,
   suffixOperationIds,
   latestUserText,
 } from "../../../frontend/utils/aiBlocks";
+
+describe("extractDelimitedContent", () => {
+  it("pulls the payload out and ignores surrounding explanation", () => {
+    expect(
+      extractDelimitedContent(
+        "Here is the content:\n<content>## Title\n\nBody</content>\nLet me know if you want changes.",
+      ),
+    ).toBe("## Title\n\nBody");
+  });
+
+  it("returns null for commentary with no payload", () => {
+    // The reported regression: a "fix spelling" run on clean text answers with
+    // prose. Writing it would have replaced the selection with the model's reply.
+    expect(
+      extractDelimitedContent(
+        "No spelling errors in document. Checked heading, prose, code comments. All correct.",
+      ),
+    ).toBeNull();
+  });
+
+  it("returns null for an empty payload", () => {
+    expect(extractDelimitedContent("<content></content>")).toBeNull();
+    expect(extractDelimitedContent("<content>   \n </content>")).toBeNull();
+  });
+
+  it("returns null when the closing tag never arrived", () => {
+    // A truncated stream must not be written as a partial document.
+    expect(extractDelimitedContent("<content>## Half a doc")).toBeNull();
+  });
+
+  it("returns null for non-strings", () => {
+    expect(extractDelimitedContent(undefined)).toBeNull();
+    expect(extractDelimitedContent(null)).toBeNull();
+    expect(extractDelimitedContent(42)).toBeNull();
+  });
+
+  it("keeps the whole payload when the content contains the literal tag", () => {
+    expect(
+      extractDelimitedContent("<content>a </content> b</content>"),
+    ).toBe("a </content> b");
+  });
+
+  it("tolerates casing and spacing variants of the tags", () => {
+    expect(extractDelimitedContent("<Content>hi</Content>")).toBe("hi");
+    expect(extractDelimitedContent("<content >hi</content >")).toBe("hi");
+  });
+});
 
 describe("latestUserText", () => {
   it("uses the latest user prompt across follow-up messages", () => {
