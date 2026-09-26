@@ -1,4 +1,5 @@
-import { createElement, Fragment, useRef, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useRef, useState, useSyncExternalStore } from 'react'
+import { Select } from '@mantine/core'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
 import { createCodeBlockConfig, parsePreCode, parsePreCodeContent } from '@blocknote/core/blocks'
 import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
@@ -21,7 +22,8 @@ import { CachedDiagramPreviewWithPopup } from './CachedDiagramPreview'
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
-import { parseCodeBlockInfo, withCodeBlockTitle } from '../../utils/codeBlockInfo'
+import { parseCodeBlockInfo, withCodeBlockLanguage, withCodeBlockTitle } from '../../utils/codeBlockInfo'
+import { loadCodeLanguages } from '../../utils/codeLanguages'
 
 let _previewRenderingPaused = false
 const _previewRenderingListeners = new Set<() => void>()
@@ -138,13 +140,73 @@ const keepEventsLocal = (node: HTMLElement | null) => {
   }
 }
 
+/** The header's language control: a closed choice over the grammars Shiki can
+ *  actually load (see codeLanguages.ts) — unlike the title, which stays free
+ *  text. Mantine's Select keeps the list inside the app window (a portaled,
+ *  scrollable popover that flips and shifts against the viewport), whereas a
+ *  native `<select>` hands all 243 options to an OS menu, which macOS draws
+ *  past the window bounds. BlockNote's own picker (`createLanguageSelect`) is a
+ *  native `<select>` as well, and on top of that it throws for a value that is
+ *  not exactly one of its `supportedLanguages` keys and writes the bare
+ *  language into the prop — dropping the `title="…"` this header keeps in the
+ *  same info string. */
+function CodeBlockLanguage({ editor, block, info, language }: any) {
+  const [languages, setLanguages] = useState<any>(null)
+
+  // The control shows and writes the fence token AS-IS: no catalogue lookup, no
+  // alias mapping. Rendering therefore never waits on an async import, which
+  // matters on a raw markdown → WYSIWYG switch: every code block mounts at
+  // once, and each one waiting on the same chunk raced the block swap. The
+  // list only fills the dropdown, so it loads on first open.
+  const token: string = language || 'text'
+  const terms = new Map<string, string>()
+  for (const option of languages ?? []) terms.set(option.id, option.searchTerms)
+  const data = [
+    { value: token, label: token },
+    ...(languages ?? [])
+      .filter((option: any) => option.id !== token)
+      .map((option: any) => ({ value: option.id, label: option.name })),
+  ]
+
+  return createElement(Select<string>, {
+    className: 'code-block-language',
+    classNames: { input: 'code-block-language-input' },
+    variant: 'unstyled',
+    size: 'xs',
+    value: token,
+    data,
+    searchable: true,
+    allowDeselect: false,
+    // The list scrolls inside the dropdown instead of running past the window;
+    // the popover's default flip/shift middlewares keep it in the viewport.
+    maxDropdownHeight: 280,
+    disabled: !editor.isEditable,
+    'aria-label': 'Code block language',
+    nothingFoundMessage: 'No language found',
+    onDropdownOpen: () => { if (!languages) loadCodeLanguages().then(setLanguages) },
+    // Matches the fence-facing tokens too: `js`, `ts` and `jsonc` are ids or
+    // Shiki aliases, not the labels ("JavaScript", "TypeScript",
+    // "JSON with Comments") the default label-only filter would search.
+    filter: ({ options, search, limit }: any) => {
+      const query = search.trim().toLowerCase()
+      if (!query) return options
+      return options
+        .filter((option: any) => (terms.get(option?.value) ?? String(option?.label ?? '')).toLowerCase().includes(query))
+        .slice(0, limit)
+    },
+    onChange: (value: string | null) => {
+      if (value) editor.updateBlock(block.id, { props: { language: withCodeBlockLanguage(info, value) } })
+    },
+  })
+}
+
 /** The block header: the fence language Shiki highlights as, plus the optional
  *  `title="…"` from the fence info string. Chrome, not content — both live in
  *  the block's `language` prop, so renaming a block never touches its code and
  *  the fence round-trips as typed. */
 function CodeBlockHeader({ editor, block, info, language, title }: any) {
   return createElement('div', { className: 'code-block-header', contentEditable: false, ref: keepEventsLocal }, [
-    createElement('span', { key: 'language', className: 'code-block-language' }, language || 'text'),
+    createElement(CodeBlockLanguage, { key: 'language', editor, block, info, language }),
     createElement('input', {
       key: 'title',
       className: 'code-block-title',
@@ -160,8 +222,8 @@ function CodeBlockHeader({ editor, block, info, language, title }: any) {
 }
 
 /** Code block source view: pre > code, same shape as vanilla renderer, with the
- *  block header on top. */
-function CodeBlockSource(props: any) {
+ *  block header on top. Exported for the header's DOM-contract test. */
+export function CodeBlockSource(props: any) {
   const info: string = props.block?.props?.language ?? ''
   const { language, title } = parseCodeBlockInfo(info)
   return createElement(Fragment, null,
@@ -181,7 +243,9 @@ function CodeBlockSource(props: any) {
   )
 }
 
-const StableCodeBlockPreview = createStablePreview(
+/** Frozen wrapper (see StableSourcePreview) around the code block source view —
+ *  exported so the AI-writing freeze behaviour is testable. */
+export const StableCodeBlockPreview = createStablePreview(
   CodeBlockSource,
   (p: any) => parseCodeBlockInfo(p.block?.props?.language ?? '').language,
   'block',

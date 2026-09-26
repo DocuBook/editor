@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseCodeBlockInfo, withCodeBlockTitle } from '../../../frontend/utils/codeBlockInfo'
+import { parseCodeBlockInfo, withCodeBlockLanguage, withCodeBlockTitle } from '../../../frontend/utils/codeBlockInfo'
 
 /** The code block stores the whole fence info string in its `language` prop
  *  (that is what makes markdown round-trip), so these two helpers are the only
@@ -57,5 +57,35 @@ describe('withCodeBlockTitle', () => {
     const info = withCodeBlockTitle('ts', 'file.ts')
 
     expect(parseCodeBlockInfo(info)).toEqual({ language: 'ts', title: 'file.ts' })
+  })
+})
+
+describe('withCodeBlockLanguage', () => {
+  it('replaces the language and keeps the title', () => {
+    expect(withCodeBlockLanguage('ts title="file.ts"', 'python')).toBe('python title="file.ts"')
+  })
+
+  it('puts the language in front of a metadata-only info string', () => {
+    expect(withCodeBlockLanguage('title="file.ts"', 'js')).toBe('js title="file.ts"')
+  })
+
+  it('keeps the other info-string tokens', () => {
+    expect(withCodeBlockLanguage('js showLineNumbers title="app.js"', 'ts')).toBe('ts showLineNumbers title="app.js"')
+  })
+
+  it('drops the language when it is cleared', () => {
+    expect(withCodeBlockLanguage('ts title="file.ts"', '')).toBe('title="file.ts"')
+    expect(withCodeBlockLanguage('ts', '  ')).toBe('')
+  })
+
+  it('strips characters that would split or retype the token', () => {
+    expect(withCodeBlockLanguage('ts', ' py"thon\n')).toBe('python')
+    expect(withCodeBlockLanguage('ts', 'js=1')).toBe('js1')
+  })
+
+  it('round-trips what parseCodeBlockInfo reads', () => {
+    const info = withCodeBlockLanguage('ts title="file.ts"', 'javascript')
+
+    expect(parseCodeBlockInfo(info)).toEqual({ language: 'javascript', title: 'file.ts' })
   })
 })

@@ -59,3 +59,23 @@ export const withCodeBlockTitle = (info: string, title: string): string => {
 
   return [language, rest, value ? `title="${value}"` : ''].filter(Boolean).join(' ')
 }
+
+/** The info string with its LANGUAGE set to `language` (removed when empty).
+ *
+ *  The mirror of withCodeBlockTitle: only the first token is replaced, so the
+ *  title and any other info the user typed (` ```js showLineNumbers `) survive
+ *  in place, and the language always stays first, which is what Markdown and
+ *  Shiki expect. */
+export const withCodeBlockLanguage = (info: string, language: string): string => {
+  const source = (info ?? '').trim()
+  const { language: current } = parseCodeBlockInfo(source)
+  const rest = (current ? source.slice(current.length) : source)
+    .replace(/\s+/g, ' ')
+    .trim()
+  // A language is a bare word: whitespace or a quote would split the info
+  // string, and a `key=value` token would be read back as metadata rather than
+  // a language (see the parse rule above).
+  const value = (language ?? '').replace(/["'\s\r\n=]+/g, '')
+
+  return [value, rest].filter(Boolean).join(' ')
+}
