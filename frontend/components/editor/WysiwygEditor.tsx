@@ -27,6 +27,7 @@ import { installRenderCaches } from '../../utils/renderCacheInstall'
 import { followAiWritingCursorInRoot } from '../../utils/aiFollowScroll'
 import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../utils/markdownCursor'
 import { serializeMarkdown } from '../../utils/markdownSerialization'
+import { refreshCodeHighlighting } from '../../utils/codeHighlighting'
 import { setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import type { CachedEditor } from '../../utils/editorFactory'
@@ -201,15 +202,16 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   const isAiWriting = !!aiMenu && aiMenu !== 'closed' && aiMenu.status === 'ai-writing'
   /** Pause the full-doc wikilink decoration scan while AI streams (it runs on
    *  every transaction = one O(document) regex scan per 50ms batch otherwise).
-   *  On unpause, nudge an empty transaction so decorations rescan immediately
-   *  (they only recompute on state change). */
+   *  On unpause, one transaction does both nudges: decorations rescan
+   *  immediately (they only recompute on state change) and the code blocks
+   *  Shiki skipped mid-stream parse again. */
   useEffect(() => {
     setWikilinkStylerPaused(isAiWriting)
     setPreviewRenderingPaused(isAiWriting)
     /** Autosave gate (store-level): never persist while AI streams. Dirty is
      *  re-set when writing ends → a fresh autosave writes the full result. */
     useEditorStore.getState().setAiWriting(isAiWriting)
-    if (!isAiWriting) (editor as any).prosemirrorView?.dispatch((editor as any).prosemirrorView.state.tr)
+    if (!isAiWriting) refreshCodeHighlighting((editor as any).prosemirrorView)
     return () => { setWikilinkStylerPaused(false); setPreviewRenderingPaused(false); useEditorStore.getState().setAiWriting(false) }
   }, [isAiWriting, editor])
   const followRef = useRef(true)

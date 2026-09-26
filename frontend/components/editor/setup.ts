@@ -318,11 +318,24 @@ const codeBlockShortcuts = createExtension({
   ],
 })
 
+/** The language handed to Shiki for a code block.
+ *
+ *  While the AI writes, the fence is still streaming (` ```py ` → ` ```pyth ` …),
+ *  so the block falls back to plain text: Shiki is not asked to load a
+ *  half-typed language (which would fetch the wrong grammar and record it as
+ *  permanently unsupported — see shikiHighlighter.ts). The language is parsed
+ *  again as soon as the block itself changes: picking one in the header writes
+ *  the prop, and either that or an edit invalidates the highlighter's cache for
+ *  the node. */
+const codeBlockHighlightLanguage = (block: any) => _previewRenderingPaused
+  ? ''
+  : parseCodeBlockInfo(block.props.language).language
+
 /** React codeBlock spec — same node type, parse, serialize, and shortcuts as
  *  the default vanilla spec, but with the AI-writing freeze applied (see
  *  StableCodeBlockPreview). */
 const codeBlockSpec = createReactBlockSpec(createCodeBlockConfig, {
-  meta: { code: true, defining: true, isolating: false, highlight: (block: any) => parseCodeBlockInfo(block.props.language).language },
+  meta: { code: true, defining: true, isolating: false, highlight: codeBlockHighlightLanguage },
   parse: parsePreCode,
   parseContent: (opts: any) => parsePreCodeContent(opts, 'codeBlock'),
   render: StableCodeBlockPreview,
@@ -363,7 +376,7 @@ export const getSchema = () => {
  *  The full-doc regex scan runs on EVERY transaction — during AI typing that
  *  is one O(document) scan per 50ms batch. WysiwygEditor pauses it while the
  *  AI writes (setWikilinkStylerPaused); the underline returns on unpause via
- *  the empty-transaction nudge (decorations only recompute on state change). */
+ *  the unpause transaction (decorations only recompute on state change). */
 let _decosPaused = false
 export const setWikilinkStylerPaused = (paused: boolean) => { _decosPaused = paused }
 export const wikilinkStyler = createExtension({

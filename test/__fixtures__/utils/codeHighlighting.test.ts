@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { syntaxHighlighting } from '../../../frontend/utils/codeHighlighting'
+import { refreshCodeHighlighting, syntaxHighlighting } from '../../../frontend/utils/codeHighlighting'
 import { createEditorHighlighter } from '../../../frontend/utils/shikiHighlighter'
 
 /** Wiring check only: the Shiki highlighter is created lazily on the first
@@ -80,5 +80,62 @@ describe('createEditorHighlighter', () => {
 
     expect(styles.length).toBeGreaterThan(0)
     expect(styles.every((style) => '--shiki-light' in style! && '--shiki-dark' in style!)).toBe(true)
+  })
+})
+
+/** The unpause nudge. While the AI writes, setup.ts hands the extension no
+ *  language, so prosemirror-highlight caches an EMPTY decoration set for every
+ *  block parsed mid-stream — and its cache is keyed by the node, so those
+ *  entries have to go before a block can be parsed with the language it
+ *  actually ended up with. */
+describe('refreshCodeHighlighting', () => {
+  const fakeView = ({ entries = [], plugin = true, destroyed = false }: { entries?: Array<[number, unknown[]]>; plugin?: boolean; destroyed?: boolean } = {}) => {
+    const removed: number[] = []
+    const cache = new Map(entries)
+    const dispatched: unknown[] = []
+
+    return {
+      removed,
+      dispatched,
+      view: {
+        isDestroyed: destroyed,
+        state: {
+          plugins: plugin
+            ? [{
+                key: 'prosemirror$3$prosemirror-highlight',
+                getState: () => ({
+                  cache: {
+                    cache,
+                    remove: (position: number) => { removed.push(position); cache.delete(position) },
+                  },
+                }),
+              }]
+            : [],
+          tr: { setMeta: (meta: string) => ({ meta }) },
+        },
+        dispatch: (tr: unknown) => { dispatched.push(tr) },
+      },
+    }
+  }
+
+  it('drops only the decoration-less entries and asks the plugin to re-parse', () => {
+    const { view, removed, dispatched } = fakeView({ entries: [[3, [{}, []]], [9, [{}, [{}, {}]]]] })
+
+    refreshCodeHighlighting(view)
+
+    expect(removed).toEqual([3])
+    expect(dispatched).toEqual([{ meta: 'prosemirror-highlight-refresh' }])
+  })
+
+  it('still nudges the view when the plugin is absent, and does nothing without a view', () => {
+    const withoutPlugin = fakeView({ plugin: false })
+    refreshCodeHighlighting(withoutPlugin.view)
+    expect(withoutPlugin.dispatched).toHaveLength(1)
+
+    const destroyed = fakeView({ destroyed: true })
+    refreshCodeHighlighting(destroyed.view)
+    expect(destroyed.dispatched).toHaveLength(0)
+
+    expect(() => refreshCodeHighlighting(undefined)).not.toThrow()
   })
 })
