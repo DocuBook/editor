@@ -19,6 +19,7 @@ import { useAiSettings } from "../stores/aiSettings";
 
 import {
   buildApplyDocumentInput,
+  extractDelimitedContent,
   MAX_AI_ATTEMPTS,
   validateOperationsSemantics,
   buildTaskFormattingRules,
@@ -456,8 +457,14 @@ async function runSendMessages(
           }
           if (emitText && editor) {
             /** Path B (no tools, or the tools fallback above): map the model's
-             *  Markdown into operations so rust-ai renders a suggestion. */
-            const input = await buildApplyDocumentInput(editor, emitText);
+             *  Markdown into operations so rust-ai renders a suggestion. Only a
+             *  delimited payload counts as content — anything else is the model
+             *  talking about the document, and writing it would replace the
+             *  selection (or append after the cursor) with prose. */
+            const payload = extractDelimitedContent(emitText);
+            const input = payload
+              ? await buildApplyDocumentInput(editor, payload)
+              : null;
             const meaningfulInput = input
               ? filterMeaningfulOperations(editor, { input })?.input
               : null;
@@ -470,16 +477,19 @@ async function runSendMessages(
                 input: meaningfulInput,
               });
               controller.enqueue({ type: "text-end", id });
-            } else if (input) {
-              /** Parsed text mapped only to no-op operations. Fail so rust-ai does
-               *  not turn successful completion into user-reviewing. */
+            } else if (!payload || input) {
+              /** No payload at all — the model answered instead of editing, which
+               *  is the correct reply to "fix spelling" on clean text — or a
+               *  payload that parsed to nothing but no-ops. Both mean no change:
+               *  fail so rust-ai does not turn successful completion into
+               *  user-reviewing. */
               toast.info(
                 "AI made no document changes — retry with a different prompt or cancel",
               );
               closed = true;
               controller.error(new Error("AI made no document changes"));
             } else {
-              /** Text that cannot be mapped to blocks remains a normal text result. */
+              /** Delimited, but it cannot be mapped to blocks: remains a normal text result. */
               controller.enqueue({ type: "text-end", id });
             }
             closed = true;

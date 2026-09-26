@@ -33,8 +33,10 @@ await runSuite('ai-debug', {
       const useTools = typeof request?.tools === 'string' && request.tools.length > 0
       const noOp = messages.toLowerCase().includes('leave unchanged')
       if (!useTools) {
+        /** Path B content rides inside the delimiters the text-mode prompt asks
+         *  for — the transport only writes a delimited payload. */
         return [
-          ['ai:token', { token: '## Summary\n\n- point one\n- point two\n- point three' }],
+          ['ai:token', { token: '<content>## Summary\n\n- point one\n- point two\n- point three</content>' }],
           ['ai:tools_done', {}],
           ['ai:done', { provider: 'mock', truncated: false }],
         ]
