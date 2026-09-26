@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@blocknote/core": "0.54.2",
-    "@blocknote/diagram-block": "0.54.2",
+    "@blocknote/diagram-block": "0.55.0",
     "@blocknote/mantine": "0.54.2",
     "@blocknote/math-block": "0.54.2",
     "@blocknote/react": "0.54.2",
