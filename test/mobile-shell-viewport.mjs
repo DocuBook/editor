@@ -20,7 +20,9 @@
 import { runSuite, mockAiSettings, stubBackend, openNote, PORTS } from './lib.mjs'
 
 const NOTE = 'alpha bravo charlie delta'
-const NOTE_TEXT = `# Notes\n\n${NOTE}\n`
+/** Long enough that `.editor-content` has real scroll range: step 4 needs a
+ *  position past the composer's top band (64px) for a scroll to mean anything. */
+const NOTE_TEXT = `# Notes\n\n${NOTE}\n\n${Array.from({ length: 60 }, (_, i) => `Filler paragraph ${i} keeps the note scrollable.`).join('\n\n')}\n`
 
 await runSuite('mobile-shell-viewport', {
   port: PORTS.mobileShell,
@@ -130,4 +132,46 @@ await runSuite('mobile-shell-viewport', {
   ok('phone: focusing the composer scrolls nothing',
     focused && focused.scrollY === 0 && Math.abs(focused.barTop) < 0.5,
     focused ? `scrollY=${focused.scrollY} tabBar.top=${focused.barTop}` : 'no composer')
+
+  // ── 4. Only a user gesture may hide the composer ──
+  /* Opening the soft keyboard resizes the layout viewport
+     (`interactive-widget=resizes-content`), so the browser reveals the caret by
+     scrolling `.editor-content` itself. Headless engines cannot open a real
+     keyboard, so that reveal is reproduced as a scripted scroll: it must leave
+     the composer alone. A real wheel gesture must still drive visibility, and
+     this pins both halves of the contract — not just the suppression. */
+  const hidden = () => page.locator('.editor-ai-floating').getAttribute('data-ai-chat-hidden')
+
+  /* An in-use composer is never hidden by design (focus and a draft are guards),
+     so reset the one step 2 left behind: a focused textarea with 14 lines. */
+  await page.locator('.editor-ai-floating textarea').fill('')
+  await page.evaluate(() => { if (document.activeElement instanceof HTMLElement) document.activeElement.blur() })
+  await page.waitForTimeout(200)
+
+  await page.evaluate(() => {
+    const content = document.querySelector('.editor-content')
+    if (content) content.scrollTop = Math.round(content.scrollHeight / 2)
+  })
+  await page.waitForTimeout(300)
+  /* Premise of the assertion below: a note too short to scroll would make the
+     suppression hold vacuously, so the jump itself is measured, not assumed. */
+  const jumped = await page.evaluate(() => document.querySelector('.editor-content')?.scrollTop ?? 0)
+  ok('phone: the scripted reveal scrolls past the composer top band',
+    jumped > 64, `scrollTop=${jumped}`)
+  const afterReveal = await hidden()
+  ok('phone: the keyboard/caret reveal scroll does not hide the composer',
+    afterReveal === 'false', `hidden=${afterReveal} scrollTop=${jumped}`)
+
+  await page.mouse.move(195, 300)
+  await page.mouse.wheel(0, 500)
+  await page.waitForTimeout(300)
+  const afterDown = await hidden()
+  ok('phone: a wheel scroll down still hides the composer',
+    afterDown === 'true', `hidden=${afterDown}`)
+
+  await page.mouse.wheel(0, -500)
+  await page.waitForTimeout(300)
+  const afterUp = await hidden()
+  ok('phone: a wheel scroll up reveals the composer again',
+    afterUp === 'false', `hidden=${afterUp}`)
 })

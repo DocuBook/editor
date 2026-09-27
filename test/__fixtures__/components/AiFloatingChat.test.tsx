@@ -250,6 +250,80 @@ describe('AI floating composer', () => {
     expect(document.body.textContent).not.toContain('Continue Writing')
   })
 
+  it('leaves Escape to the IME while it composes', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    expect(useAiChat.getState().expanded).toBe(true)
+
+    // Escape while the IME composes cancels the candidate strip, not this UI.
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true })))
+    expect(ai.closeAIMenu).not.toHaveBeenCalled()
+    expect(useAiChat.getState().expanded).toBe(true)
+
+    // Once the composition is over the same key dismisses as usual.
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    expect(useAiChat.getState().expanded).toBe(false)
+  })
+
+  it('leaves a post-composition Escape to the IME', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    const textarea = document.querySelector('textarea')!
+
+    act(() => {
+      textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    expect(ai.closeAIMenu).not.toHaveBeenCalled()
+    expect(useAiChat.getState().expanded).toBe(true)
+  })
+
+  it('does not send on the Enter that commits an IME composition', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    const textarea = document.querySelector('textarea')!
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Tighten this paragraph')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    // The Enter that commits a candidate belongs to the IME: the prompt has to
+    // stay in the box instead of being sent mid-composition.
+    act(() => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })))
+    expect(ai.invokeAI).not.toHaveBeenCalled()
+    expect(textarea.value).toBe('Tighten this paragraph')
+
+    // A plain Enter still sends, so the guard cannot swallow the real key.
+    act(() => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Tighten this paragraph', useSelection: false })
+  })
+
   it('keeps the FAB prompt list out of selection mode', () => {
     const ai = makeAi()
     useEditorStore.setState({
@@ -340,7 +414,9 @@ describe('AI floating composer', () => {
 describe('scroll-direction reveal', () => {
   /** Scroll container with a controllable scrollTop (jsdom has no layout, so
    *  the property is defined by hand). Returns the ref the composer watches
-   *  and a helper that moves the scroll position and fires the scroll event. */
+   *  plus two ways to move it: `scrollTo` rides the wheel gesture every user
+   *  scroll has, `forcedScrollTo` is the browser moving the container itself —
+   *  the caret reveal when the soft keyboard opens, a `scrollIntoView` restore. */
   function makeScrollContainer() {
     const container = document.createElement('div')
     document.body.appendChild(container)
@@ -350,7 +426,7 @@ describe('scroll-direction reveal', () => {
       set: (value: number) => { top = value },
       configurable: true,
     })
-    const scrollTo = (value: number) => {
+    const settle = (value: number) => {
       act(() => {
         top = value
         container.dispatchEvent(new Event('scroll'))
@@ -358,7 +434,12 @@ describe('scroll-direction reveal', () => {
         vi.advanceTimersByTime(16)
       })
     }
-    return { container, scrollTo }
+    const scrollTo = (value: number) => {
+      act(() => container.dispatchEvent(new Event('wheel')))
+      settle(value)
+    }
+    const forcedScrollTo = (value: number) => settle(value)
+    return { container, scrollTo, forcedScrollTo }
   }
 
   /** rAF must resolve inside the act() window even if the environment does not
@@ -383,11 +464,11 @@ describe('scroll-direction reveal', () => {
         getSelection: vi.fn(() => undefined),
       },
     })
-    const { container, scrollTo } = makeScrollContainer()
+    const { container, scrollTo, forcedScrollTo } = makeScrollContainer()
     act(() => root!.render(<AiFloatingChat scrollContainer={container} obscured={obscured} />))
     const floating = () => document.querySelector('.editor-ai-floating')!
     const visible = () => floating().getAttribute('data-ai-chat-hidden') !== 'true'
-    return { ai, scrollTo, floating, visible }
+    return { ai, scrollTo, forcedScrollTo, floating, visible }
   }
 
   function typeInto(textarea: HTMLTextAreaElement, value: string) {
@@ -405,6 +486,38 @@ describe('scroll-direction reveal', () => {
     // Scrolling down inside the first 64px must not blink the composer.
     scrollTo(40)
     expect(visible()).toBe(true)
+  })
+
+  it('ignores scrolls no gesture produced, like the keyboard caret reveal', () => {
+    /** The gesture window is wall-clock, so this test owns the clock: `tick`
+     *  moves past it deterministically instead of sleeping for real. */
+    let now = performance.now()
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const tick = (ms: number) => { now += ms }
+    try {
+      const { forcedScrollTo, scrollTo, visible } = renderComposer()
+
+      // Opening the soft keyboard makes the browser reveal the caret by
+      // scrolling this container. The user is not scrolling, so the composer
+      // must not react — reported from a phone, where this hid the composer
+      // under the keyboard.
+      forcedScrollTo(300)
+      expect(visible()).toBe(true)
+
+      scrollTo(400)
+      expect(visible()).toBe(false)
+
+      // ...and the reveal that follows the keyboard closing is not a scroll-up
+      // gesture either: the composer stays where the last real one left it.
+      tick(500)
+      forcedScrollTo(250)
+      expect(visible()).toBe(false)
+
+      scrollTo(150)
+      expect(visible()).toBe(true)
+    } finally {
+      clock.mockRestore()
+    }
   })
 
   it('hides when scrolling past the top band and fades back in on scroll-up', () => {

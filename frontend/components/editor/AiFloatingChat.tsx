@@ -27,6 +27,16 @@ const TOP_SHOW_THRESHOLD = 64
 /** Minimum px per animation frame before a scroll direction counts — absorbs
  *  trackpad jitter and the tiny deltas of an inertial scroll winding down. */
 const SCROLL_DIRECTION_TOLERANCE = 3
+/** How recently a wheel/touch gesture must have reached the container for a
+ *  scroll to count as the user's. Scroll position alone cannot say who scrolled:
+ *  the browser scrolls the container on its own to reveal the caret when the
+ *  soft keyboard opens (the shell is `dvh` behind `interactive-widget=resizes-content`)
+ *  and while an IME composition advances — reported from a phone, where that
+ *  reveal hid the composer with the user's hands off the screen. Long enough
+ *  that a gesture's own scroll event (rAF-batched) still lands inside it, far
+ *  shorter than a reveal that starts from a tap. Keyboard scrolling is
+ *  deliberately not a gesture: caret-following scrolls are the same shape. */
+const USER_SCROLL_WINDOW = 300
 /** Concurrent list_tree calls. Serial recursion made the dropdown wait for the
  *  whole vault; unbounded fan-out would flood the IPC. */
 const MENTION_LIST_CONCURRENCY = 6
@@ -219,13 +229,25 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   useEffect(() => {
     if (!expanded && !isOpen && !picker) return
+    let compositionEndedAt = -Infinity
+    const rememberCompositionEnd = (event: CompositionEvent) => {
+      if (event.target === inputRef.current) compositionEndedAt = performance.now()
+    }
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
+      /** Escape is the IME's own cancel while it composes. This listener sits on
+       *  window capture, in front of every element handler, so without the guard
+       *  canceling a candidate strip would also dismiss the picker/composer. */
+      if (event.isComposing || performance.now() - compositionEndedAt < 250) return
       if (picker) { event.preventDefault(); event.stopPropagation(); setPicker(null); return }
       event.preventDefault(); close()
     }
+    window.addEventListener('compositionend', rememberCompositionEnd, true)
     window.addEventListener('keydown', dismissOnEscape, true)
-    return () => window.removeEventListener('keydown', dismissOnEscape, true)
+    return () => {
+      window.removeEventListener('compositionend', rememberCompositionEnd, true)
+      window.removeEventListener('keydown', dismissOnEscape, true)
+    }
   }, [expanded, isOpen, close, picker])
 
   /** Grow the prompt textarea with its content (multi-line prompts must stay
@@ -249,16 +271,23 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  vault showed "No matching files or folders" for seconds while the user
    *  typed. Filtering is now pure in-memory. */
   /** Scroll-direction visibility: scrolling down hides the composer so it stops
-   *  covering the document, scrolling up fades it back in. It never hides while
-   *  it is in use (focus, input, picker/prompt menus, an active AI run) or when
-   *  the document is near its top. The listener mounts once per container — the
-   *  guards are read through a ref so per-keystroke re-renders cannot go stale. */
+   *  covering the document, scrolling up fades it back in. Only a wheel/touch
+   *  gesture can change it (see USER_SCROLL_WINDOW) — the browser's own caret
+   *  reveals are not the user scrolling. It never hides while it is in use
+   *  (focus, input, picker/prompt menus, an active AI run) or when the document
+   *  is near its top. The listener mounts once per container — the guards are
+   *  read through a ref so per-keystroke re-renders cannot go stale. */
   useEffect(() => {
     const container = scrollContainer
     const root = rootRef.current
     if (!container) return
     let lastY = container.scrollTop
     let frame = 0
+    /** When the last wheel/touch gesture reached the container. A scroll after
+     *  one is the user's; every other scroll (caret reveal, IME advances,
+     *  `scrollIntoView` restores) merely re-syncs `lastY`. */
+    let gestureAt = -Infinity
+    const markGesture = () => { gestureAt = performance.now() }
     const reveal = () => setHideOnScroll(false)
     const update = () => {
       frame = 0
@@ -268,17 +297,22 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
       if (inUse || document.activeElement === inputRef.current || y <= TOP_SHOW_THRESHOLD) { lastY = y; reveal(); return }
       const delta = y - lastY
       lastY = y
+      if (performance.now() - gestureAt > USER_SCROLL_WINDOW) return
       if (delta > SCROLL_DIRECTION_TOLERANCE) setHideOnScroll(true)
       else if (delta < -SCROLL_DIRECTION_TOLERANCE) reveal()
     }
     const onScroll = () => { if (!frame) frame = requestAnimationFrame(update) }
     container.addEventListener('scroll', onScroll, { passive: true })
+    container.addEventListener('wheel', markGesture, { passive: true })
+    container.addEventListener('touchmove', markGesture, { passive: true })
     container.addEventListener('focusin', reveal)
     root?.addEventListener('focusin', reveal)
     update()
     return () => {
       if (frame) cancelAnimationFrame(frame)
       container.removeEventListener('scroll', onScroll)
+      container.removeEventListener('wheel', markGesture)
+      container.removeEventListener('touchmove', markGesture)
       container.removeEventListener('focusin', reveal)
       root?.removeEventListener('focusin', reveal)
     }
@@ -452,6 +486,11 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
         }) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
       <div className="flex w-full min-w-0 items-end gap-2 p-2">
         <textarea ref={inputRef} value={input} onChange={(event) => onInputChange(event.target.value, event.target.selectionStart)} onKeyDown={(event) => {
+          /** While an IME composes (candidate strip open), its keys belong to it:
+           *  the Enter that commits a candidate would otherwise send the prompt,
+           *  and the candidate arrows would walk the mention picker instead.
+           *  Same guard as the markdown editor's Enter and the link toolbar. */
+          if (event.nativeEvent.isComposing) return
           if (picker && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) { event.preventDefault(); setActiveOption((current) => (current + (event.key === 'ArrowDown' ? 1 : -1) + visibleEntries.length) % Math.max(visibleEntries.length, 1)); return }
           if (picker && event.key === 'Enter' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
           if (picker && event.key === 'Tab' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
