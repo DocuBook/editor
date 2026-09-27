@@ -472,3 +472,69 @@ describe('scroll-direction reveal', () => {
     expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('draft kept')
   })
 })
+
+describe("AI floating composer over BlockNote's mobile formatting toolbar", () => {
+  /** rAF must resolve inside the act() window — see the scroll suite above. */
+  beforeEach(() => {
+    vi.stubGlobal('visualViewport', new EventTarget())
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  /** jsdom lays both boxes out at 0, so the geometry is stubbed: the composer's
+   *  positioning box stands in for the shell's bottom edge. */
+  const rect = (top: number, bottom: number) => ({ top, bottom }) as DOMRect
+
+  /** BlockNote mounts this into a body-level portal, above the keyboard. */
+  function mountToolbar(box: () => DOMRect) {
+    const strip = document.createElement('div')
+    strip.className = 'bn-mobile-formatting-toolbar'
+    strip.getBoundingClientRect = box
+    document.body.appendChild(strip)
+    return strip
+  }
+
+  function renderComposer() {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+    document.getElementById('root')!.getBoundingClientRect = () => rect(600, 700)
+    act(() => root!.render(<AiFloatingChat />))
+    return document.querySelector<HTMLElement>('.editor-ai-floating')!
+  }
+
+  /** One animation frame inside act — the measurement is deferred to a frame. */
+  const frame = () => act(async () => { await vi.advanceTimersByTimeAsync(16) })
+
+  it('lifts the composer above the strip, follows it, and drops it back', async () => {
+    const composer = renderComposer()
+    // Resting offset is the `bottom-5` class while no strip is up.
+    expect(composer.style.marginBottom).toBe('')
+
+    let box = rect(652, 700)
+    const strip = mountToolbar(() => box)
+    await frame()
+    expect(composer.style.marginBottom).toBe('48px')
+
+    // Regression: a taller keyboard, or iOS panning the viewport, moves the
+    // strip with no `window` resize at all — the lift has to follow it.
+    box = rect(600, 648)
+    window.visualViewport!.dispatchEvent(new Event('scroll'))
+    await frame()
+    expect(composer.style.marginBottom).toBe('100px')
+
+    strip.remove()
+    await frame()
+    expect(composer.style.marginBottom).toBe('')
+  })
+})

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 
 import { Maximize2, ArrowUp, Check, RotateCcw, Loader2, X, FileText, Folder, ChevronsUpDown } from 'lucide-react'
 import type { AiMenuState } from '../../utils/aiExtension'
@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
 import { parseMentions } from '../../utils/aiMentions'
+import { observeMobileToolbarInset } from '../../utils/mobileToolbarInset'
 import { fetchProviderModels, type DiscoveredModel } from '../../utils/modelDiscovery'
 import { PROVIDERS } from '../../data/providers'
 import { CUSTOM_PROVIDER_ID } from '../../stores/aiSettings'
@@ -113,6 +114,19 @@ async function listVaultEntries(): Promise<{ entries: TreeEntry[]; unreadable: n
   return { entries, unreadable }
 }
 
+/** Lift the composer clear of BlockNote's mobile formatting toolbar (0.55)
+ *  while that strip holds the same bottom edge — see utils/mobileToolbarInset.
+ *  The anchor is read once, after mount: the composer never changes parent. */
+function useMobileToolbarInset(composer: RefObject<HTMLDivElement | null>): number {
+  const [inset, setInset] = useState(0)
+  useEffect(() => {
+    /** The composer's positioning box: `bottom-5` measures from its bottom edge. */
+    const anchor = composer.current?.parentElement ?? null
+    return observeMobileToolbarInset(() => anchor, setInset)
+  }, [composer])
+  return inset
+}
+
 export default function AiFloatingChat({ scrollContainer, obscured = false }: { scrollContainer?: HTMLDivElement | null; obscured?: boolean }) {
   const editor = useEditorStore((s) => s.blockEditor)
   const vaultPath = useVaultStore((s) => s.vaultPath)
@@ -140,6 +154,9 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const activeOptionRef = useRef<HTMLButtonElement>(null)
   const pickerOpen = picker !== null
   const rootRef = useRef<HTMLDivElement>(null)
+  /** 0 unless BlockNote's mobile formatting toolbar is up; while it is, the
+   *  composer is lifted above it with a margin below its own bottom offset. */
+  const toolbarInset = useMobileToolbarInset(rootRef)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const ai = editor?.getExtension?.('ai') ?? null
 
@@ -456,7 +473,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   const statusBar = status === 'thinking' || status === 'ai-writing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><Loader2 size={13} className="animate-spin text-accent" /><span className="text-xs text-foreground-secondary">{status === 'thinking' ? 'Thinking…' : 'Writing…'}</span><button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className="ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Stop</button></div> : status === 'user-reviewing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><span className="text-xs text-foreground-secondary">Review the changes</span><div className="ml-auto flex items-center gap-2"><button onClick={revert} onMouseDown={(event) => event.preventDefault()} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Revert</button><button onClick={accept} onMouseDown={(event) => event.preventDefault()} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover"><Check size={11} />Accept</button></div></div> : status === 'error' ? <div className="ai-chat-status border-b border-border-subtle px-3 py-2"><div className="wrap-break-word text-[11px] text-danger">{typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}</div>{outOfRetries && <div className="mt-1 text-[10px] text-muted">Retry limit reached — rephrase the prompt or cancel.</div>}<div className="mt-2 flex justify-end gap-2"><button onClick={() => { setExpanded(false); ai.rejectChanges() }} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Cancel</button><button disabled={outOfRetries} onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35"><RotateCcw size={11} />Retry</button></div></div> : null
 
-  return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
+  return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} style={toolbarInset ? { marginBottom: `${toolbarInset}px` } : undefined} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
     {aiConfigured && !selectionPromptOpen && status === 'user-input' && expanded && !hasInput && items.length > 0 && <div className="relative z-30 flex max-w-full flex-col items-end gap-2 overflow-x-hidden">{items.map((item) => <button key={item.key} onClick={item.onItemClick} onMouseDown={(event) => event.preventDefault()} className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer"><span className="flex w-5 shrink-0 items-center justify-center text-accent">{item.icon}</span>{item.title}</button>)}</div>}
     <div className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{statusBar}{promptInput}</div>
   </div>

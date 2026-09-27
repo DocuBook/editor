@@ -55,6 +55,18 @@ await runSuite('ai-mention', {
   await openNote(page)
 
   const prompt = page.locator('textarea[aria-label="AI prompt"]')
+
+  /** Reset the composer by hand. Every pick/commit schedules a frame that puts
+   *  focus and the caret at the end of the insertion; overwriting the field
+   *  before it lands lets that callback collapse the selection under us, so the
+   *  next typing appends instead of replacing — how this suite flaked on CI.
+   *  Frames run in registration order, so a frame awaited here runs after it. */
+  const retype = async (value, delay = 25) => {
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await page.keyboard.press('Meta+a')
+    await page.keyboard.type(value, { delay })
+  }
+
   await prompt.click()
 
   // --- partial mention typing surfaces the vault file -----------------------
@@ -65,15 +77,13 @@ await runSuite('ai-mention', {
 
   // --- folders stay selectable, so a folder mention can recurse -------------
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.type('summarise @doc', { delay: 25 })
+  await retype('summarise @doc')
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
   const folderOption = await page.locator('[role="listbox"]').innerText()
   ok('folder row is offered', folderOption.includes('docs'), folderOption.replace(/\n/g, ' | '))
 
   await page.keyboard.press('Escape')
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.type('summarise @change', { delay: 25 })
+  await retype('summarise @change')
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
 
   // --- a pointer pick completes (touch devices have no Tab) -----------------
@@ -96,8 +106,7 @@ await runSuite('ai-mention', {
   ok('the mention tag carries a tinted background', tagStyle.bg !== 'rgba(0, 0, 0, 0)' && tagStyle.bg !== 'transparent', tagStyle.bg)
   ok('the mention tag does not share the prompt text colour', tagStyle.fg !== promptStyle.fg, `${tagStyle.fg} vs ${promptStyle.fg}`)
 
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.type('summarise @change', { delay: 25 })
+  await retype('summarise @change')
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
 
   // --- the armed row is visible, and ArrowDown moves the highlight ----------
@@ -128,8 +137,7 @@ await runSuite('ai-mention', {
   const moved = await prompt.inputValue()
   ok('Enter commits the highlighted row, not the first row', moved === 'summarise @docs/CHANGELOG-old.md ', JSON.stringify(moved))
 
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.type('summarise @change', { delay: 25 })
+  await retype('summarise @change')
   await page.waitForSelector('[role="listbox"] [role="option"]', { timeout: 15000 })
   await page.keyboard.press('Enter')
   const inserted = await prompt.inputValue()
@@ -152,8 +160,7 @@ await runSuite('ai-mention', {
   const revert = page.getByText('Revert', { exact: true })
   if (await revert.isVisible().catch(() => false)) await revert.click()
   await prompt.click()
-  await page.keyboard.press('Meta+a')
-  await page.keyboard.type('plain question with no mention', { delay: 15 })
+  await retype('plain question with no mention', 15)
   await page.keyboard.press('Enter')
   for (let i = 0; i < 60 && askAiBodies.length < 2; i++) await page.waitForTimeout(100)
 
