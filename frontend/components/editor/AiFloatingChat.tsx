@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react'
 
 import { Maximize2, ArrowUp, Check, RotateCcw, Loader2, X, FileText, Folder, ChevronsUpDown } from 'lucide-react'
 import type { AiMenuState } from '../../utils/aiExtension'
@@ -11,7 +11,7 @@ import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { invoke } from '../../lib/ipc'
 import { parseMentions } from '../../utils/aiMentions'
-import { measureMobileToolbarInset, observeMobileToolbarInset } from '../../utils/mobileToolbarInset'
+import { observeMobileToolbarInset } from '../../utils/mobileToolbarInset'
 import { fetchProviderModels, type DiscoveredModel } from '../../utils/modelDiscovery'
 import { PROVIDERS } from '../../data/providers'
 import { CUSTOM_PROVIDER_ID } from '../../stores/aiSettings'
@@ -115,9 +115,16 @@ async function listVaultEntries(): Promise<{ entries: TreeEntry[]; unreadable: n
 }
 
 /** Lift the composer clear of BlockNote's mobile formatting toolbar (0.55)
- *  while that strip holds the same bottom edge — see utils/mobileToolbarInset. */
-function useMobileToolbarInset(): number {
-  return useSyncExternalStore(observeMobileToolbarInset, measureMobileToolbarInset, () => 0)
+ *  while that strip holds the same bottom edge — see utils/mobileToolbarInset.
+ *  The anchor is read once, after mount: the composer never changes parent. */
+function useMobileToolbarInset(composer: RefObject<HTMLDivElement | null>): number {
+  const [inset, setInset] = useState(0)
+  useEffect(() => {
+    /** The composer's positioning box: `bottom-5` measures from its bottom edge. */
+    const anchor = composer.current?.parentElement ?? null
+    return observeMobileToolbarInset(() => anchor, setInset)
+  }, [composer])
+  return inset
 }
 
 export default function AiFloatingChat({ scrollContainer, obscured = false }: { scrollContainer?: HTMLDivElement | null; obscured?: boolean }) {
@@ -146,10 +153,10 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const indexRequest = useRef(0)
   const activeOptionRef = useRef<HTMLButtonElement>(null)
   const pickerOpen = picker !== null
+  const rootRef = useRef<HTMLDivElement>(null)
   /** 0 unless BlockNote's mobile formatting toolbar is up; while it is, the
    *  composer is lifted above it with a margin below its own bottom offset. */
-  const toolbarInset = useMobileToolbarInset()
-  const rootRef = useRef<HTMLDivElement>(null)
+  const toolbarInset = useMobileToolbarInset(rootRef)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const ai = editor?.getExtension?.('ai') ?? null
 
