@@ -229,17 +229,25 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   useEffect(() => {
     if (!expanded && !isOpen && !picker) return
+    let compositionEndedAt = -Infinity
+    const rememberCompositionEnd = (event: CompositionEvent) => {
+      if (event.target === inputRef.current) compositionEndedAt = performance.now()
+    }
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       /** Escape is the IME's own cancel while it composes. This listener sits on
        *  window capture, in front of every element handler, so without the guard
        *  canceling a candidate strip would also dismiss the picker/composer. */
-      if (event.isComposing) return
+      if (event.isComposing || performance.now() - compositionEndedAt < 250) return
       if (picker) { event.preventDefault(); event.stopPropagation(); setPicker(null); return }
       event.preventDefault(); close()
     }
+    window.addEventListener('compositionend', rememberCompositionEnd, true)
     window.addEventListener('keydown', dismissOnEscape, true)
-    return () => window.removeEventListener('keydown', dismissOnEscape, true)
+    return () => {
+      window.removeEventListener('compositionend', rememberCompositionEnd, true)
+      window.removeEventListener('keydown', dismissOnEscape, true)
+    }
   }, [expanded, isOpen, close, picker])
 
   /** Grow the prompt textarea with its content (multi-line prompts must stay

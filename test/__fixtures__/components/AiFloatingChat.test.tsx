@@ -274,6 +274,28 @@ describe('AI floating composer', () => {
     expect(useAiChat.getState().expanded).toBe(false)
   })
 
+  it('leaves a post-composition Escape to the IME', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    const textarea = document.querySelector('textarea')!
+
+    act(() => {
+      textarea.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    })
+    expect(ai.closeAIMenu).not.toHaveBeenCalled()
+    expect(useAiChat.getState().expanded).toBe(true)
+  })
+
   it('does not send on the Enter that commits an IME composition', () => {
     const ai = makeAi()
     useEditorStore.setState({
