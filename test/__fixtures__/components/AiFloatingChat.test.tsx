@@ -472,3 +472,49 @@ describe('scroll-direction reveal', () => {
     expect((document.querySelector('textarea') as HTMLTextAreaElement).value).toBe('draft kept')
   })
 })
+
+describe("AI floating composer over BlockNote's mobile formatting toolbar", () => {
+  /** rAF must resolve inside the act() window — see the scroll suite above. */
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => setTimeout(() => cb(Date.now()), 16))
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => clearTimeout(id))
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  /** BlockNote mounts this into a body-level portal; jsdom lays it out at 0px. */
+  function mountToolbar(height: number) {
+    const strip = document.createElement('div')
+    strip.className = 'bn-mobile-formatting-toolbar'
+    strip.getBoundingClientRect = () => ({ height }) as DOMRect
+    document.body.appendChild(strip)
+    return strip
+  }
+
+  it('lifts the composer above the strip, and drops it back when the toolbar goes', async () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    const composer = document.querySelector<HTMLElement>('.editor-ai-floating')!
+    // Resting offset is the `bottom-5` class while no strip is up.
+    expect(composer.style.marginBottom).toBe('')
+
+    const strip = mountToolbar(48)
+    await act(async () => { await vi.advanceTimersByTimeAsync(16) })
+    expect(composer.style.marginBottom).toBe('48px')
+
+    strip.remove()
+    await act(async () => { await vi.advanceTimersByTimeAsync(16) })
+    expect(composer.style.marginBottom).toBe('')
+  })
+})
