@@ -6,17 +6,20 @@
  *  behind one trigger removes the width problem instead of fighting it.
  *
  *  Mirrors `CreateLinkButtonPreserveUrl` in linkToolbar.tsx: a controlled
- *  popover with the toggle in the trigger's `onClick` and no `portalRoot`, so
- *  Mantine owns positioning and the portal. `position="top"` is a preference —
- *  flip moves the panel below when it does not fit above, shift keeps it on
- *  screen. Native macOS never renders this: `compact` comes from the same
- *  `isDesktop` media query as the rest of the shell, so no breakpoint is added. */
+ *  popover with the toggle in the trigger's `onClick`, portalled through the
+ *  editor's themed portal element (0.55 takes it as an explicit prop) so the
+ *  panel keeps the editor's styling and escapes scroll-container clipping.
+ *  `position="top"` is a preference — flip moves the panel below when it does
+ *  not fit above, shift keeps it on screen. Native macOS never renders this:
+ *  `compact` comes from the same `isDesktop` media query as the rest of the
+ *  shell, so no breakpoint is added. */
 import { useEffect, useRef, useState, type ComponentProps, type ComponentType, type ReactNode, type Ref } from 'react'
-import { useComponentsContext } from '@blocknote/react'
+import { useComponentsContext, usePortalElement } from '@blocknote/react'
 import { Ellipsis } from 'lucide-react'
 
 export function FormattingToolbarPopover({ label, children }: { label: string; children: ReactNode }) {
   const Components = useComponentsContext()!
+  const portalElement = usePortalElement()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   /** `ToolbarButtonType` omits `ref`, but the Mantine button is a forwardRef and
@@ -41,7 +44,7 @@ export function FormattingToolbarPopover({ label, children }: { label: string; c
   }, [open])
 
   return (
-    <Components.Generic.Popover.Root open={open} onOpenChange={setOpen} position="top">
+    <Components.Generic.Popover.Root open={open} onOpenChange={setOpen} position="top" portalElement={portalElement}>
       <Components.Generic.Popover.Trigger>
         {/** Generic.Toolbar (not FormattingToolbar) so the trigger is not
          *  re-styled by `.bn-mantine .bn-toolbar .mantine-Button-root`. */}

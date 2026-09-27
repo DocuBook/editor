@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, TextAlignButton, NestBlockButton, UnnestBlockButton, type LinkToolbarProps } from '@blocknote/react'
+import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, TextAlignButton, NestBlockButton, UnnestBlockButton, ScreenReaderOnlySubmit, usePortalElement, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
 import { getDefaultAIMenuItems, getAIDictionary } from '../../utils/aiMenu'
 import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
@@ -47,18 +47,17 @@ function LinkUrlForm({ url, text, range, onSubmitted }: {
     editLink(currentUrl.trim(), currentText, range.from)
     onSubmitted()
   }
+  /* 0.55 commits popover forms through the form's native submit instead of an
+     Enter key handler — IMEs commit through submit without dispatching a key
+     event. */
   return (
-    <Components.Generic.Form.Root>
+    <Components.Generic.Form.Root onSubmit={submit} submitButton={<ScreenReaderOnlySubmit />}>
       <Components.Generic.Form.TextInput className="bn-text-input" name="url" icon={<Link2 size={14} />} autoFocus
         placeholder="Paste URL or vault path…" value={currentUrl}
-        onChange={e => setCurrentUrl(e.currentTarget.value)}
-        onSubmit={submit}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
+        onChange={e => setCurrentUrl(e.currentTarget.value)} />
       <Components.Generic.Form.TextInput className="bn-text-input" name="title" icon={<Type size={14} />}
         placeholder="Text" value={currentText}
-        onChange={e => setCurrentText(e.currentTarget.value)}
-        onSubmit={submit}
-        onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
+        onChange={e => setCurrentText(e.currentTarget.value)} />
     </Components.Generic.Form.Root>
   )
 }
@@ -66,8 +65,9 @@ function LinkUrlForm({ url, text, range, onSubmitted }: {
 /** LinkToolbar "Edit" — preserves the URL as-typed (vault-relative links). */
 function EditLinkButtonPreserveUrl({ url, text, range, setToolbarOpen, setToolbarPositionFrozen }: Pick<LinkToolbarProps, 'url' | 'text' | 'range' | 'setToolbarOpen' | 'setToolbarPositionFrozen'>) {
   const Components = useComponentsContext()!
+  const portalElement = usePortalElement()
   return (
-    <Components.Generic.Popover.Root onOpenChange={setToolbarPositionFrozen}>
+    <Components.Generic.Popover.Root onOpenChange={setToolbarPositionFrozen} portalElement={portalElement}>
       <Components.Generic.Popover.Trigger>
         <Components.LinkToolbar.Button className="bn-button" mainTooltip="Edit link" isSelected={false}>
           Edit
@@ -87,6 +87,7 @@ function EditLinkButtonPreserveUrl({ url, text, range, setToolbarOpen, setToolba
 function CreateLinkButtonPreserveUrl() {
   const editor = useBlockNoteEditor<any, any, any>()
   const Components = useComponentsContext()!
+  const portalElement = usePortalElement()
   const formattingToolbar = useExtension(FormattingToolbarExtension)
   const { showSelection } = useExtension(ShowSelectionExtension)
   const [showPopover, setShowPopover] = useState(false)
@@ -124,7 +125,7 @@ function CreateLinkButtonPreserveUrl() {
   }, [editor])
   if (state === undefined) return null
   return (
-    <Components.Generic.Popover.Root open={showPopover} onOpenChange={setShowPopover}>
+    <Components.Generic.Popover.Root open={showPopover} onOpenChange={setShowPopover} portalElement={portalElement}>
       <Components.Generic.Popover.Trigger>
         <Components.FormattingToolbar.Button className="bn-button" label="Link" mainTooltip="Link"
           secondaryTooltip="⌘K" icon={<Link2 size={14} />}
@@ -196,6 +197,7 @@ export function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPo
 function AIToolbarButtonSafe() {
   const editor = useBlockNoteEditor<any, any, any>()
   const Components = useComponentsContext()!
+  const portalElement = usePortalElement()
   const dict = getAIDictionary()
   const formattingToolbar = useExtension(FormattingToolbarExtension)
   const { showSelection } = useExtension(ShowSelectionExtension)
@@ -239,7 +241,7 @@ function AIToolbarButtonSafe() {
     item.onItemClick((prompt) => useAiChat.getState().focusInput(prompt))
   }
   return (
-    <Components.Generic.Popover.Root open={showPopover} onOpenChange={setShowPopover}>
+    <Components.Generic.Popover.Root open={showPopover} onOpenChange={setShowPopover} portalElement={portalElement}>
       <Components.Generic.Popover.Trigger>
         <Components.Generic.Toolbar.Button
           className="bn-button"
@@ -368,17 +370,14 @@ function LinkOrNoteForm({ url, text, range, onSubmitted, onPickWikilink }: {
     onSubmitted()
   }
   return (
-    <Components.Generic.Form.Root>
+    <Components.Generic.Form.Root onSubmit={submit} submitButton={<ScreenReaderOnlySubmit />}>
       <Components.Generic.Form.TextInput className="bn-text-input" name="url" icon={<Link2 size={14} />} autoFocus
         placeholder="Paste URL or type to suggest…" value={value}
         onChange={e => setValue(e.currentTarget.value)}
         onKeyDown={e => {
-          if (e.nativeEvent.isComposing) return
-          if (e.key === 'Enter') {
-            e.preventDefault()
-            submit()
-          }
-          if (linkTarget) return
+          /* Enter commits through the form's native submit (0.55); only the
+             suggestion list navigation stays on the key handler. */
+          if (e.nativeEvent.isComposing || linkTarget) return
           if (e.key === 'ArrowDown') { e.preventDefault(); setSelected(i => Math.min(i + 1, results.length - 1)) }
           if (e.key === 'ArrowUp') { e.preventDefault(); setSelected(i => Math.max(i - 1, 0)) }
         }} />
