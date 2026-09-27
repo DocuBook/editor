@@ -173,6 +173,23 @@ describe('composer @mention picker', () => {
     expect(textarea().value).toBe('@docs/guide.md ')
   })
 
+  it('leaves the candidate arrows to the IME while it composes', async () => {
+    render()
+    act(() => typeInto(textarea(), '@guide'))
+    await settle()
+
+    const armed = () => Array.from(document.querySelectorAll('[role="option"]')).findIndex(node => node.getAttribute('aria-selected') === 'true')
+    expect(armed()).toBe(0)
+
+    // The arrows that walk the IME's candidate strip must not walk this list.
+    act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, isComposing: true })))
+    expect(armed()).toBe(0)
+
+    // An arrow after the composition commits still navigates the picker.
+    act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+    expect(armed()).toBe(1)
+  })
+
   it('marks the row Enter would pick, so the commit is never blind', async () => {
     render()
     act(() => typeInto(textarea(), '@guide'))
