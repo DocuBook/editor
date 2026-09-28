@@ -12,22 +12,29 @@
  * final `activeElement` can show.
  *
  * Touch emulation is NOT what marks the phone: the platform is, because touch
- * availability and on-focus IME behavior are different questions. The
- * touchscreen-desktop leg is the counter-case that keeps the two apart — same
- * touch input, same drawer, same open, but no IME to raise, so the caret
- * restore must keep its focus (a pointer-media predicate fails exactly there).
+ * availability and on-focus IME behavior are different questions. Three legs
+ * keep them apart, all on the same drawer flow:
+ *   phone              Android UA + client-hint-carrying engine → no focus
+ *   android-desktop-site  Firefox's desktop-site disguise: desktop UA, no
+ *                         hints, no ARM platform → still no focus, and the
+ *                         handset-shaped touch screen is the only signal left
+ *   touch-desktop      the same touch input and drawer on a desktop-class
+ *                         SCREEN (1440×900) → caret restore keeps its focus
  *
  * Logs: test/artifacts/mobile-open-focus.{server,browser}.log
  */
 import { runSuite, mockAiSettings, stubBackend, PORTS } from './lib.mjs'
 
 const VIEWPORT = { width: 390, height: 720 }
+const DESKTOP_SCREEN = { width: 1440, height: 900 }
 const TREE = [
   { path: 'alpha.md', name: 'alpha.md', type: 'file' },
   { path: 'bravo.md', name: 'bravo.md', type: 'file' },
 ]
 const NOTE = { 'alpha.md': 'alpha note paragraph', 'bravo.md': 'bravo note paragraph' }
 const PHONE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36'
+/** Firefox for Android in desktop-site mode: a plain desktop UA, no client hints. */
+const FIREFOX_DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0'
 const DESKTOP_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
 /** Routes and storage a leg needs before its first paint. */
@@ -125,10 +132,29 @@ await runSuite('mobile-open-focus', {
     code.length > 0 && code.every(focused => !focused),
     `${code.filter(Boolean).length}/${code.length} frames focused`)
 
-  /* Counter-case (review): a touchscreen desktop has no IME to raise, so the
-     platform must be what decides — a pointer-media predicate withholds the
-     caret restore here and this leg fails. */
-  const desktopTouch = await browser.newContext({ viewport: VIEWPORT, hasTouch: true, userAgent: DESKTOP_UA })
+  /* Review hole: Firefox Android in desktop-site mode reports a plain desktop
+     UA and exposes no client hints — no token, no hint, no platform signature.
+     The handset-shaped touch screen is the signal that is left, and this leg is
+     the one a UA/platform-only predicate fails. */
+  const hiddenAndroid = await browser.newContext({ viewport: VIEWPORT, hasTouch: true, userAgent: FIREFOX_DESKTOP_UA })
+  try {
+    const androidPage = await hiddenAndroid.newPage()
+    await prepare(androidPage, 'focus-android@example.test')
+    await androidPage.goto(base, { waitUntil: 'domcontentloaded' })
+
+    const trail = await reopenAlpha(androidPage)
+    ok('android-desktop-site: opening a note never focuses the editor (no IME flash)',
+      trail.length > 0 && trail.every(focused => !focused),
+      `${trail.filter(Boolean).length}/${trail.length} frames focused`)
+  } finally {
+    await hiddenAndroid.close()
+  }
+
+  /* Counter-case (review): a touchscreen DESKTOP has no IME to raise — the
+     screen is desktop-class while the input and the drawer are the phone's, and
+     the caret restore must keep its focus. A pointer-media predicate, or a
+     handset-shape test that ignores the screen, withholds it here. */
+  const desktopTouch = await browser.newContext({ viewport: VIEWPORT, screen: DESKTOP_SCREEN, hasTouch: true, userAgent: DESKTOP_UA })
   try {
     const desktopPage = await desktopTouch.newPage()
     await prepare(desktopPage, 'focus-desktop@example.test')
