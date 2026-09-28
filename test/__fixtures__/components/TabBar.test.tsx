@@ -122,7 +122,13 @@ describe('responsive tabs', () => {
     ])
     expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
     expect(document.querySelector('[aria-label="Editor actions"]')).toBeNull()
-    expect(document.querySelector('[aria-label="Markdown mode"]')).not.toBeNull()
+    const modeToggle = document.querySelector<HTMLButtonElement>('[aria-label="Switch to Markdown mode"]')
+    expect(modeToggle).not.toBeNull()
+    // In WYSIWYG the button shows the icon of the mode a click switches TO:
+    // BsMarkdown (16px grid) — not the LuPencilRuler (24px grid) shown in source mode.
+    expect(modeToggle!.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 16 16')
+    act(() => modeToggle!.click())
+    expect(editorState.toggleEditMode).toHaveBeenCalledTimes(1)
   })
 
   it('shows editor-only Actions in compact web layout', () => {
@@ -130,11 +136,16 @@ describe('responsive tabs', () => {
 
     const actions = document.querySelector<HTMLButtonElement>('[aria-label="Editor actions"]')!
     expect(actions).not.toBeNull()
+    // Compact keeps the mode toggle inside Actions only — no inline mode button.
+    expect(document.querySelector('[aria-label="Switch to Markdown mode"]')).toBeNull()
     act(() => actions.click())
 
     expect(document.body.textContent).toContain('Undo')
     expect(document.body.textContent).toContain('Redo')
     expect(document.body.textContent).toContain('Switch to markdown')
+    // Compact uses the same mode icon as the inline toggle — shared ModeSwitchIcon.
+    const modeItem = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Switch to markdown')!
+    expect(modeItem.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 16 16')
     expect(document.body.textContent).not.toContain('Commit')
     expect(document.body.textContent).not.toContain('Push')
   })

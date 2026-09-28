@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { X, ChevronLeft, ChevronRight, PanelLeft, ChevronDown, Search } from 'lucide-react'
 import { BsMarkdown } from 'react-icons/bs'
-import { TbBlocks } from 'react-icons/tb'
-import { useEditorStore } from '../../stores/editor'
+import { LuPencilRuler } from 'react-icons/lu'
+import { useEditorStore, type EditMode } from '../../stores/editor'
 import { isMacTauri, isTauri } from '../../lib/ipc'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
+
+/** The one mode-switch icon, shared by the inline toolbar toggle and the
+ *  compact Actions item: shows the mode a click switches TO (markdown icon
+ *  while in WYSIWYG, pencil-ruler while in source). Single source, so the two
+ *  controls can never drift apart. */
+function ModeSwitchIcon({ editMode, size }: { editMode: EditMode; size: number }) {
+  return editMode === 'editor' ? <BsMarkdown size={size} /> : <LuPencilRuler size={size} />
+}
 
 export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
@@ -94,14 +102,16 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       </div>
 
       {showInlineEditing && (
-      <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background overflow-hidden">
-        <button onClick={() => { if (editMode !== 'code') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Markdown mode" title="Markdown mode"
-        className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'code' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
-        ><BsMarkdown size={15} /></button>
-        <button onClick={() => { if (editMode !== 'editor') useEditorStore.getState().toggleEditMode() }} disabled={!toggleable} aria-label="Editor (WYSIWYG) mode" title="Editor (WYSIWYG) mode"
-        className={'flex items-center justify-center min-w-10 sm:min-w-8 p-2 border-l border-border-subtle disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer ' + (editMode === 'editor' ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active')}
-        ><TbBlocks size={15} /></button>
-      </span>
+      /** One icon showing the mode a click switches to — markdown icon while
+       *  in WYSIWYG, blocks icon while in source (same rule as the menu). */
+      <button
+        onClick={() => useEditorStore.getState().toggleEditMode()}
+        disabled={!toggleable}
+        aria-label={editMode === 'editor' ? 'Switch to Markdown mode' : 'Switch to WYSIWYG mode'}
+        title={tabs.length === 0 ? 'No file to switch' : !toggleable ? 'Preview only' : editMode === 'editor' ? 'Switch to Markdown' : 'Switch to WYSIWYG'}
+        className="flex items-center justify-center shrink-0 min-w-10 sm:min-w-8 p-2 rounded-md border border-border-subtle bg-background cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed">
+        <ModeSwitchIcon editMode={editMode} size={15} />
+      </button>
       )}
 
       {compact && (
@@ -124,7 +134,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
               </button>
               <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
                 className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0">{editMode === 'editor' ? <BsMarkdown size={14} /> : <TbBlocks size={14} />}</span>
+                <span className="text-foreground-secondary shrink-0"><ModeSwitchIcon editMode={editMode} size={14} /></span>
                 <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
               </button>
             </div>
