@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, useRef, memo } from 'react'
 import { EyeOff } from 'lucide-react'
 import { fileUrl } from '../../lib/ipc'
 import { highlightMarkdown, markdownTokenClass, type MarkdownToken } from '../../utils/markdownHighlight'
+import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 
 /** ── Non-text preview fallback ── */
 
@@ -120,7 +121,11 @@ export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange
     const el = ref.current
     if (!el) return
     const offset = Math.min(initialCursorOffset.current ?? 0, el.value.length)
-    el.focus({ preventScroll: true })
+    /* Selection and scroll restore are not typing: on a device with an
+       on-screen keyboard, focusing at open would raise the IME over a note the
+       user only meant to open (and the drawer's exit handoff would drop it
+       again). The caret waits for the user's own tap. */
+    if (!softKeyboardOnFocus()) el.focus({ preventScroll: true })
     el.setSelectionRange(offset, offset)
     const scroller = el.closest('.editor-content')
     if (scroller) {

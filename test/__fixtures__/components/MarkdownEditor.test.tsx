@@ -52,6 +52,35 @@ describe('MarkdownEditor cursor synchronization', () => {
   })
 })
 
+describe('MarkdownEditor on a device with an on-screen keyboard', () => {
+  const desktopMatchMedia = window.matchMedia
+
+  beforeEach(() => {
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes('coarse'),
+      media: query,
+      onchange: null,
+      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia
+  })
+
+  afterEach(() => { window.matchMedia = desktopMatchMedia })
+
+  it('restores the caret without focusing, so opening a note raises no keyboard', () => {
+    const content = 'First\n\nSecond\n\nThird\n\nFourth paragraph'
+    const offset = content.indexOf('Fourth')
+
+    act(() => root!.render(
+      <MarkdownEditor content={content} cursorOffset={offset} onCursorOffset={() => {}} onChange={() => {}} />,
+    ))
+
+    const textarea = document.querySelector('textarea')!
+    expect(document.activeElement).not.toBe(textarea)
+    expect(textarea.selectionStart).toBe(offset)
+    expect(textarea.selectionEnd).toBe(offset)
+  })
+})
+
 /* Tokenising is a whole-document parse, so a long note must not pay for it inside
    the keystroke that changed it. Short notes are unaffected: they stay coloured
    in the same render. */

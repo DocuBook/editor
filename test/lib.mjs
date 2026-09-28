@@ -20,6 +20,7 @@ import { dirname } from 'node:path'
 
 export const PORTS = {
   mobileShell: 4182,
+  mobileOpenFocus: 4183,
   webSmoke: 4273,
   aiDebug: 4275,
   aiMention: 4290,
@@ -113,8 +114,8 @@ const RAW_RESULTS = new Set(['read_file'])
 /** JSON response in the IPC bridge's `{ result }` envelope. */
 const json = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
 
-export async function stubBackend(page, { email, noteText }) {
-  const api = { ...API_FIXTURES, setup_admin: { email }, account_get: { email }, read_file: noteText }
+export async function stubBackend(page, { email, noteText, tree = API_FIXTURES.list_tree }) {
+  const api = { ...API_FIXTURES, list_tree: tree, setup_admin: { email }, account_get: { email }, read_file: noteText }
   await page.route('**/api/**', async route => {
     const command = route.request().url().split('/api/')[1]?.split('?')[0] || ''
     const result = Object.prototype.hasOwnProperty.call(api, command) ? api[command] : {}
@@ -151,6 +152,8 @@ export function killPort(port) {
  *             browser context; defaults to true for the real server, false for
  *             'preview' (web-smoke drives the wizard itself: session: false)
  *   viewport  browser viewport (default 1280×800)
+ *   context   extra browser-context options (e.g. `hasTouch`/`isMobile` for a
+ *             phone's input, which is what makes `(pointer: coarse)` match)
  *   dataDir   reset before boot (default /tmp/docubook-e2e-<name>)
  *   vaultPath default <dataDir>/vaults/myva
  *   seed      [{ path, content }] written into the vault before boot
@@ -166,6 +169,7 @@ export async function runSuite(name, opts, body) {
     server = { binary: 'server/target/debug/docubook-server' },
     session = typeof server === 'object',
     viewport = { width: 1280, height: 800 },
+    context = {},
     dataDir = `/tmp/docubook-e2e-${name}`,
     vaultPath = `${dataDir}/vaults/myva`,
     admin = { email: `${name}@test.dev`, password: 'password1' },
@@ -227,7 +231,7 @@ export async function runSuite(name, opts, body) {
   try {
     await waitForServer(base)
     browser = await launchBrowser()
-    ctx.context = await browser.newContext({ viewport })
+    ctx.context = await browser.newContext({ viewport, ...context })
     if (session) {
       const created = await api('setup_admin', admin)
       ok('setup_admin: ok', created.status === 200, created.text.slice(0, 80))
