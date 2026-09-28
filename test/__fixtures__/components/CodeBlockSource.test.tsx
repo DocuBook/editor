@@ -10,6 +10,7 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { MantineProvider } from '@mantine/core'
+import { BlockNoteContext } from '@blocknote/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -53,17 +54,28 @@ let root: Root
 let updateBlock: ReturnType<typeof vi.fn>
 
 const renderBlock = async (Source: any, info: string, editorOverrides: Record<string, unknown> = {}) => {
+  const editor = {
+    isEditable: true,
+    updateBlock,
+    // `usePortalElement` reads `editor.domElement` through `useEditorState`,
+    // which subscribes to the tiptap editor's events — the stub satisfies the
+    // subscription without a real editor mount.
+    _tiptapEditor: { on() {}, off() {} },
+    ...editorOverrides,
+  }
   await act(async () => {
     root.render(
-      <MantineProvider>
-        <Source
-          {...({
-            block: { id: 'block-1', props: { language: info } },
-            editor: { isEditable: true, updateBlock, ...editorOverrides },
-            contentRef: () => {},
-          } as any)}
-        />
-      </MantineProvider>,
+      <BlockNoteContext.Provider value={{ editor } as any}>
+        <MantineProvider>
+          <Source
+            {...({
+              block: { id: 'block-1', props: { language: info } },
+              editor,
+              contentRef: () => {},
+            } as any)}
+          />
+        </MantineProvider>
+      </BlockNoteContext.Provider>,
     )
   })
   await act(async () => {})
@@ -84,9 +96,11 @@ const typeSearch = async (text: string) => {
   await act(async () => {})
 }
 
-const optionLabels = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent)
+const optionLabels = () => Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).map((option) => option.textContent)
 
-/** The options live in a portal on document.body, as they do in the app. */
+/** Without a mounted editor (no `domElement`) the options fall back to
+ *  Mantine's portal on document.body; in the app they land in the editor's own
+ *  popup container (see the dedicated test). */
 const openLanguageMenu = async () => {
   const input = languageInput()
   await act(async () => {
@@ -95,7 +109,7 @@ const openLanguageMenu = async () => {
     input.click()
   })
   await act(async () => {})
-  return [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
 }
 
 beforeAll(async () => {
@@ -214,17 +228,19 @@ describe('codeBlock source view', () => {
     expect(languageInput().getAttribute('aria-expanded')).toBe('false')
   })
 
-  /** Portaling to document.body put the list outside the `bn-mantine` wrapper
-   *  that carries `data-mantine-color-scheme`, so it always rendered light.
-   *  BlockNote's own popup container lives inside it. */
+  /** Portaling to document.body put the list outside the editor's popup
+   *  container — the element inside the themed `.bn-container` — where Mantine's
+   *  component CSS falls back to its light palette. BlockNote's default portal
+   *  element is the wrapper of the editor DOM, which is what the picker reads. */
   it('renders the dropdown inside the editor popup container', async () => {
     const popupContainer = document.createElement('div')
     popupContainer.setAttribute('data-mantine-color-scheme', 'dark')
     document.body.appendChild(popupContainer)
 
-    await renderBlock(CodeBlockSource, 'js', { portalElement: popupContainer })
+    await renderBlock(CodeBlockSource, 'js', { domElement: { parentElement: popupContainer } })
     await openLanguageMenu()
 
+    expect(popupContainer.querySelector('.code-block-language-dropdown')).not.toBeNull()
     expect(popupContainer.querySelector('[role="option"]')).not.toBeNull()
     popupContainer.remove()
   })
