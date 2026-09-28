@@ -96,7 +96,7 @@ const typeSearch = async (text: string) => {
   await act(async () => {})
 }
 
-const optionLabels = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent)
+const optionLabels = () => Array.from(document.querySelectorAll<HTMLElement>('[role="option"]')).map((option) => option.textContent)
 
 /** Without a mounted editor (no `domElement`) the options fall back to
  *  Mantine's portal on document.body; in the app they land in the editor's own
@@ -109,7 +109,7 @@ const openLanguageMenu = async () => {
     input.click()
   })
   await act(async () => {})
-  return [...document.querySelectorAll<HTMLElement>('[role="option"]')]
+  return Array.from(document.querySelectorAll<HTMLElement>('[role="option"]'))
 }
 
 beforeAll(async () => {
