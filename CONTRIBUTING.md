@@ -84,7 +84,7 @@ editor/
 
 1. Fork the repo and create a branch: `git checkout -b fix/your-change`
 2. Make your change. Keep commits focused, and sign off every commit (`git commit -s`) — see [Contribution licensing](#contribution-licensing).
-3. Run checks locally:
+3. Run checks locally. The pre-push hook only enforces the lockfile sync and `npx tsc -b` — the remaining checks, including `npm test`, `cd src-tauri && cargo test`, and `cd server && cargo test`, are not part of the hook and must be run manually:
    - `npx oxlint frontend/ test/__fixtures__/`
    - `npx tsc -b`
    - `node test/check-acl.mjs`
@@ -150,7 +150,7 @@ Linux server tests, Chromium/WebKit browser E2E, desktop DMGs, and Docker image
 builds. Heavy E2E, desktop, and Docker jobs may require environment approval.
 Release artifacts are published only from version tags.
 
-The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates), **fails if a lock changed**, then runs the type check, desktop Rust tests, server Rust tests, and frontend tests.
+The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates), **fails if a lock changed**, then runs the type check (`npx tsc -b`). It does **not** run any tests — desktop Rust tests, server Rust tests, and frontend tests must be run manually before pushing (see [Workflow](#workflow)); PR CI runs them regardless.
 
 ## Release workflow (custom — no semantic-release/changeset)
 

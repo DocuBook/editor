@@ -39,25 +39,4 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-echo "🔄 Running Rust tests..."
-(cd src-tauri && cargo test)
-if [ $? -ne 0 ]; then
-  echo "❌ Rust tests failed. Fix errors before pushing."
-  exit 1
-fi
-
-echo "🔄 Running server tests..."
-(cd server && cargo test)
-if [ $? -ne 0 ]; then
-  echo "❌ Server tests failed. Fix errors before pushing."
-  exit 1
-fi
-
-echo "🔄 Running frontend tests..."
-npx vitest run
-if [ $? -ne 0 ]; then
-  echo "❌ Frontend tests failed. Fix errors before pushing."
-  exit 1
-fi
-
-echo "✅ All checks passed!"
+echo "✅ Lockfile sync + type check passed! (Rust & frontend tests: run manually — see CONTRIBUTING.md)"
