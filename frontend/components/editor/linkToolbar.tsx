@@ -10,6 +10,8 @@ import { looksLikeLink, resolveLinkInput } from '../../utils/linkInput'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { FormattingToolbarPopover } from './FormattingToolbarPopover'
+import { InsertBlockButton } from './InsertBlockButton'
+import { MoveBlockDownButton, MoveBlockUpButton } from './MoveBlockButtons'
 
 /** Open an external URL: native uses the system opener (tauri-plugin-opener →
  *  macOS `open` → default browser); web falls back to window.open. Same user
@@ -283,8 +285,12 @@ const GROUPED_KEYS = [
   'unnestBlockButton',
 ] as string[]
 
-/** Formatting toolbar (bubble menu) with local AI button — shows text prompt when selected. */
-export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {}) => {
+/** Formatting toolbar (bubble menu) with local AI button — shows text prompt when selected.
+ *  `blockActions` carries the side menu's block actions for shells that have no
+ *  side menu: the cursor-anchored `+`, and move up/down. WysiwygEditor sets it
+ *  wherever `sideMenu` is off — both keyed to the same 640px `isDesktop` query,
+ *  so no shell is left without an insert or reorder affordance. */
+export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: boolean; blockActions?: boolean } = {}) => {
   const editor = useBlockNoteEditor<any, any, any>()
   const blockTypes = blockTypeSelectItems(editor.dictionary)
     .filter(item => item.type !== 'heading' || (Number(item.props?.level) <= 5 && item.props?.isToggleable !== true))
@@ -297,6 +303,7 @@ export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {})
   if (!compact) {
     return (
       <FormattingToolbar>
+        {blockActions && (<><InsertBlockButton /><MoveBlockUpButton /><MoveBlockDownButton /></>)}
         {items}
         <CreateLinkButtonPreserveUrl />
         <AIToolbarButtonSafe />
@@ -308,7 +315,10 @@ export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {})
      code, highlight, colour) and the app's own Link/AI actions on the row; move
      what otherwise gets clipped — underline, strikethrough, alignment, indent —
      into the overflow panel. Splitting on element KEYS (not on index) keeps the
-     row correct if upstream reorders or adds items. */
+     row correct if upstream reorders or adds items. The row takes no extra
+     buttons at all — the side menu's block actions (insert, move up/down) stay
+     in that panel, because a phone-width row cannot hold them without pushing
+     its tail past the viewport edge. */
   const onRow = items.filter(el => !GROUPED_KEYS.includes((el as any).key))
 
   return (
@@ -320,6 +330,8 @@ export const FormattingToolbarWithAI = ({ compact }: { compact?: boolean } = {})
         <TextAlignButton textAlignment="left" />
         <TextAlignButton textAlignment="center" />
         <TextAlignButton textAlignment="right" />
+        {blockActions && <InsertBlockButton />}
+        {blockActions && (<><MoveBlockUpButton /><MoveBlockDownButton /></>)}
         <NestBlockButton />
         <UnnestBlockButton />
       </FormattingToolbarPopover>
