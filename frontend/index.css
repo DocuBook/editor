@@ -523,6 +523,37 @@ body .mobile-sidebar-drawer-body > aside {
 .ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-language-input:hover {
     color: var(--color-foreground-secondary);
 }
+/* The picker's dropdown is Mantine's Select popover (see setup.ts): it mounts
+   outside the header, so the chrome rules above cannot reach it — and Mantine's
+   own palette follows the library's light/dark defaults, not the app theme.
+   The floating-surface contract (`ui-popover` tokens) and the row states of the
+   app's other menus are applied here instead. Scoped through body so the rules
+   out-rank Mantine's component CSS, which BlockNote lazy-loads after this
+   stylesheet (same reason as the drawer overrides above). */
+body .code-block-language-dropdown {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-popover);
+    color: var(--color-foreground-secondary);
+}
+
+@media (hover: hover) {
+    /* Only on unselected rows, or hovering would paint over the selected row's
+       highlight and hide what Enter would pick. */
+    body .code-block-language-option:hover:not([data-combobox-selected]):not([data-combobox-disabled]) {
+        background: var(--color-surface-active);
+    }
+}
+
+body .code-block-language-option[data-combobox-selected] {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+}
+
+body .code-block-language-empty {
+    color: var(--color-muted);
+}
 .ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-title {
     flex: 1;
     min-width: 0;

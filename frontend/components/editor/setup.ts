@@ -2,7 +2,7 @@ import { createElement, Fragment, useRef, useState, useSyncExternalStore } from 
 import { Select } from '@mantine/core'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
 import { createCodeBlockConfig, parsePreCode, parsePreCodeContent } from '@blocknote/core/blocks'
-import { createReactBlockSpec, createReactInlineContentSpec } from '@blocknote/react'
+import { createReactBlockSpec, createReactInlineContentSpec, usePortalElement } from '@blocknote/react'
 import {
   BlockMathMLElement,
   MathBlockInputRulesExtension,
@@ -182,6 +182,14 @@ const headerFieldKeys = new Plugin({
 function CodeBlockLanguage({ editor, block, info, language }: any) {
   const [languages, setLanguages] = useState<any>(null)
 
+  // BlockNote's own popup container: the element wrapping the editor DOM,
+  // inside the themed `.bn-container` that carries `data-mantine-color-scheme`.
+  // Mantine's Select defaults to document.body, outside that scope, where its
+  // component CSS falls back to the library's light palette — a white dropdown
+  // in the dark editor. The hook is the documented accessor; it is null until
+  // the editor mounts, and the list only opens long after that.
+  const portalElement = usePortalElement()
+
   // The control shows and writes the fence token AS-IS: no catalogue lookup, no
   // alias mapping. Rendering therefore never waits on an async import, which
   // matters on a raw markdown → WYSIWYG switch: every code block mounts at
@@ -197,16 +205,16 @@ function CodeBlockLanguage({ editor, block, info, language }: any) {
       .map((option: any) => ({ value: option.id, label: option.name })),
   ]
 
-  // BlockNote's own popup container, which sits inside the `bn-mantine` wrapper
-  // that carries `data-mantine-color-scheme`. Portaling to document.body (the
-  // default) put the list outside that scope, where Mantine's variables fall
-  // back to the light defaults — a white dropdown inside a dark editor. The
-  // getter is absent outside a mounted editor (tests), hence the fallback.
-  const portalTarget = editor?.portalElement
-
   return createElement(Select<string>, {
     className: 'code-block-language',
-    classNames: { input: 'code-block-language-input' },
+    // The dropdown and its rows are styled from the app's tokens in index.css
+    // (the header's chrome styles cannot reach a portalled popover).
+    classNames: {
+      input: 'code-block-language-input',
+      dropdown: 'code-block-language-dropdown',
+      option: 'code-block-language-option',
+      empty: 'code-block-language-empty',
+    },
     variant: 'unstyled',
     size: 'xs',
     value: token,
@@ -216,7 +224,7 @@ function CodeBlockLanguage({ editor, block, info, language }: any) {
     // The list scrolls inside the dropdown instead of running past the window;
     // the popover's default flip/shift middlewares keep it in the viewport.
     maxDropdownHeight: 280,
-    comboboxProps: portalTarget ? { portalProps: { target: portalTarget } } : undefined,
+    comboboxProps: portalElement ? { portalProps: { target: portalElement } } : undefined,
     disabled: !editor.isEditable,
     'aria-label': 'Code block language',
     nothingFoundMessage: 'No language found',
