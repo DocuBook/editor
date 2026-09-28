@@ -162,16 +162,50 @@ await runSuite('mobile-shell-viewport', {
   ok('phone: the keyboard/caret reveal scroll does not hide the composer',
     afterReveal === 'false', `hidden=${afterReveal} scrollTop=${jumped}`)
 
-  await page.mouse.move(195, 300)
-  await page.mouse.wheel(0, 500)
-  await page.waitForTimeout(300)
-  const afterDown = await hidden()
-  ok('phone: a wheel scroll down still hides the composer',
-    afterDown === 'true', `hidden=${afterDown}`)
+  /* Real wheel gestures must still drive visibility — the only way left to
+     change it. WebKit scrolls on a compositor thread: on a loaded CI runner the
+     scroll events can reach the main thread after the app's 300ms gesture
+     window has closed (that window is what keeps caret reveals from hiding the
+     composer), so one wheel + one fixed wait races frame scheduling instead of
+     testing the app. Each direction retries the real gesture, and the message
+     reports what the engine did — moved the container? changed visibility?
+     — so a red run names the cause: engine too slow (hidden flips on a retry)
+     vs the wheel never scrolling at all. */
+  const range = await page.evaluate(() => {
+    const content = document.querySelector('.editor-content')
+    return content ? content.scrollHeight - content.clientHeight : 0
+  })
+  const scrollTop = () => page.evaluate(() => document.querySelector('.editor-content')?.scrollTop ?? -1)
+  const wheelUntil = async (deltaY, expected) => {
+    const log = []
+    let moved = false
+    for (let attempt = 0; attempt < 3; attempt++) {
+      /* Re-arm the range: every attempt starts at the far end and gestures
+         across the document, so `moved` below measures THIS wheel. */
+      await page.evaluate((y) => { const c = document.querySelector('.editor-content'); if (c) c.scrollTop = y }, deltaY > 0 ? 0 : range)
+      await page.waitForTimeout(150)
+      const before = await scrollTop()
+      await page.mouse.move(195, 300)
+      await page.mouse.wheel(0, deltaY)
+      await page.waitForTimeout(300)
+      const after = await scrollTop()
+      const state = await hidden()
+      if (after !== before) moved = true
+      log.push(`#${attempt + 1} ${before}->${after} hidden=${state}`)
+      if (after !== before && state === expected) return { hit: true, log, moved }
+    }
+    return { hit: false, log, moved }
+  }
 
-  await page.mouse.wheel(0, -500)
-  await page.waitForTimeout(300)
-  const afterUp = await hidden()
+  /* Mirrors the scripted-reveal premise above: a wheel that scrolled nothing
+     would make the visibility assertion vacuous, so movement is required. */
+  const down = await wheelUntil(500, 'true')
+  ok('phone: a wheel scroll down still hides the composer',
+    down.hit, `${down.log.join(' | ')}${down.moved ? '' : ' — the wheel never scrolled the container'}`)
+
+  /* The reveal must undo a real hidden state — the assertion above is what
+     makes this one non-vacuous when the engine is healthy. */
+  const up = await wheelUntil(-500, 'false')
   ok('phone: a wheel scroll up reveals the composer again',
-    afterUp === 'false', `hidden=${afterUp}`)
+    up.hit, `${up.log.join(' | ')}${up.moved ? '' : ' — the wheel never scrolled the container'}`)
 })
