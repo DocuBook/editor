@@ -515,10 +515,12 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   const compact = !isTauri && !isDesktop
   /* FormattingToolbarController takes the toolbar as a component TYPE and
      renders it, so an inline arrow would be a new type on every editor update
-     and remount the whole toolbar (losing open popovers). */
+     and remount the whole toolbar (losing open popovers). `blockActions` mirrors
+     `sideMenu` below: the side menu owns the block actions where it exists —
+     insert and reorder — so the toolbar carries them exactly where it is off. */
   const renderFormattingToolbar = useCallback(
-    (props: FormattingToolbarProps) => <FormattingToolbarWithAI {...props} compact={compact} />,
-    [compact],
+    (props: FormattingToolbarProps) => <FormattingToolbarWithAI {...props} compact={compact} blockActions={!isDesktop} />,
+    [compact, isDesktop],
   )
 
   return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
