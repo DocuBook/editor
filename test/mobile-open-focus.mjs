@@ -136,11 +136,14 @@ await runSuite('mobile-open-focus', {
      UA and exposes no client hints — no token, no hint, no platform signature.
      The handset-shaped touch screen is the signal that is left, and this leg is
      the one a UA/platform-only predicate fails. */
-  const hiddenAndroid = await browser.newContext({ viewport: VIEWPORT, hasTouch: true, userAgent: FIREFOX_DESKTOP_UA })
+  const hiddenAndroid = await browser.newContext({ viewport: VIEWPORT, screen: VIEWPORT, hasTouch: true, userAgent: FIREFOX_DESKTOP_UA })
   try {
     const androidPage = await hiddenAndroid.newPage()
     await prepare(androidPage, 'focus-android@example.test')
     await androidPage.goto(base, { waitUntil: 'domcontentloaded' })
+    if (process.env.BROWSER === 'webkit') {
+      await androidPage.evaluate(() => Object.defineProperty(navigator, 'maxTouchPoints', { configurable: true, value: 5 }))
+    }
 
     const trail = await reopenAlpha(androidPage)
     ok('android-desktop-site: opening a note never focuses the editor (no IME flash)',
