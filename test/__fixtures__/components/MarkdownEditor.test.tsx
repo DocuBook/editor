@@ -52,19 +52,15 @@ describe('MarkdownEditor cursor synchronization', () => {
   })
 })
 
-describe('MarkdownEditor on a device with an on-screen keyboard', () => {
-  const desktopMatchMedia = window.matchMedia
-
+describe('MarkdownEditor on a device whose focus raises the IME', () => {
   beforeEach(() => {
-    window.matchMedia = ((query: string) => ({
-      matches: query.includes('coarse'),
-      media: query,
-      onchange: null,
-      addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false,
-    })) as unknown as typeof window.matchMedia
+    Object.defineProperty(window.navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36',
+      configurable: true,
+    })
   })
 
-  afterEach(() => { window.matchMedia = desktopMatchMedia })
+  afterEach(() => { Reflect.deleteProperty(window.navigator, 'userAgent') })
 
   it('restores the caret without focusing, so opening a note raises no keyboard', () => {
     const content = 'First\n\nSecond\n\nThird\n\nFourth paragraph'

@@ -121,10 +121,10 @@ export function MarkdownEditor({ content, cursorOffset, onCursorOffset, onChange
     const el = ref.current
     if (!el) return
     const offset = Math.min(initialCursorOffset.current ?? 0, el.value.length)
-    /* Selection and scroll restore are not typing: on a device with an
-       on-screen keyboard, focusing at open would raise the IME over a note the
-       user only meant to open (and the drawer's exit handoff would drop it
-       again). The caret waits for the user's own tap. */
+    /* Selection and scroll restore are not typing: on a system whose focus
+       raises an on-screen keyboard, focusing at open would raise the IME over a
+       note the user only meant to open (and the drawer's exit handoff would
+       drop it again). The caret waits for the user's own tap. */
     if (!softKeyboardOnFocus()) el.focus({ preventScroll: true })
     el.setSelectionRange(offset, offset)
     const scroller = el.closest('.editor-content')

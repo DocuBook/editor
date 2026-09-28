@@ -501,10 +501,10 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
         } else {
           view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, cursorPos)))
         }
-        /* The caret is placed either way; only a device without an on-screen
-           keyboard may claim focus for it at open. On a phone the focus would
-           raise the IME over a note the reader only meant to open, and the
-           drawer's exit handoff would then drop it again (keyboard flash). */
+        /* The caret is placed either way; only a system whose focus raises no
+           on-screen keyboard may claim focus for it at open. On a phone the
+           focus would raise the IME over a note the reader only meant to open,
+           and the drawer's exit handoff would then drop it (keyboard flash). */
         if (!softKeyboardOnFocus()) editor.focus()
         editor.domElement?.querySelector<HTMLElement>(`[data-node-type="blockContainer"][data-id="${position.block.id}"]`)?.scrollIntoView({ block: 'center' })
       } catch {}
