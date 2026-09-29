@@ -33,6 +33,7 @@
     --color-danger: #ef4444;
     --color-danger-hover: #f87171;
     --color-on-danger: #ffffff;
+    --color-danger-surface: rgb(239 68 68 / 15%);
     --color-warning: #fbbf24;
     --color-warning-surface: rgb(245 158 11 / 15%);
     --color-warning-border: rgb(245 158 11 / 30%);
@@ -78,6 +79,7 @@
     --color-danger: #dc2626;
     --color-danger-hover: #b91c1c;
     --color-on-danger: #ffffff;
+    --color-danger-surface: #fef2f2;
     --color-warning: #b45309;
     --color-warning-surface: #fffbeb;
     --color-warning-border: #f59e0b;
