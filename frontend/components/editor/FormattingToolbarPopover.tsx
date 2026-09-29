@@ -61,7 +61,7 @@ export function FormattingToolbarPopover({ label, children }: { label: string; c
       <Components.Generic.Popover.Content className="bn-popover-content bn-form-popover" variant="form-popover">
         {/** A grid, not a column: a full-height stack is taller than the space
          *  the bubble menu has above it. */}
-        <div data-testid="formatting-toolbar-more-panel" className="grid grid-cols-4 gap-0.5 p-1">
+        <div data-testid="formatting-toolbar-more-panel" className="formatting-toolbar-more-panel grid grid-cols-4 gap-0.5 p-1">
           {children}
         </div>
       </Components.Generic.Popover.Content>

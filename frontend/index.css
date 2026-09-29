@@ -149,6 +149,44 @@ html[data-toolbar-popup-open] .bn-editor {
     caret-color: transparent;
 }
 
+/* The overflow panel's buttons are portalled through its popover
+   (FormattingToolbarPopover → Generic.Popover.Content), so they land OUTSIDE
+   `.bn-toolbar` — and BlockNote scopes every toolbar-button rule to it
+   (blocknoteStyles.css). Without this re-scope they fall back to Mantine's
+   filled default: every button reads as pressed, `data-selected` paints
+   nothing (the current alignment is indistinguishable) and `data-disabled`
+   keeps Mantine's palette instead of the editor's. Same tokens as the toolbar
+   rules, scoped to this panel so the other portalled popovers are untouched. */
+.formatting-toolbar-more-panel .mantine-Button-root,
+.formatting-toolbar-more-panel .mantine-ActionIcon-root {
+    background-color: var(--bn-colors-menu-background);
+    border: none;
+    color: var(--bn-colors-menu-text);
+}
+
+@media (hover: hover) {
+    .formatting-toolbar-more-panel .mantine-Button-root:hover,
+    .formatting-toolbar-more-panel .mantine-ActionIcon-root:hover {
+        background-color: var(--bn-colors-hovered-background);
+        border: none;
+        color: var(--bn-colors-hovered-text);
+    }
+}
+
+.formatting-toolbar-more-panel .mantine-Button-root[data-selected],
+.formatting-toolbar-more-panel .mantine-ActionIcon-root[data-selected] {
+    background-color: var(--bn-colors-selected-background);
+    border: none;
+    color: var(--bn-colors-selected-text);
+}
+
+.formatting-toolbar-more-panel .mantine-Button-root[data-disabled],
+.formatting-toolbar-more-panel .mantine-ActionIcon-root[data-disabled] {
+    background-color: var(--bn-colors-disabled-background);
+    border: none;
+    color: var(--bn-colors-disabled-text);
+}
+
 #root .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {
     color: var(--color-ai-cursor-text);
 }
