@@ -1,10 +1,23 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 
-const captured = vi.hoisted(() => ({ transports: [] as any[] }))
+const captured = vi.hoisted(() => ({ transports: [] as any[], parsed: [] as string[], replaced: 0 }))
 
 // Constructing a real BlockNote editor headless (jsdom) throws — stub the whole
 // dependency surface so the factory's WIRING (not the editor) is under test.
-vi.mock('@blocknote/core', () => ({ BlockNoteEditor: { create: vi.fn(() => ({ __fakeEditor: true })) } }))
+vi.mock('@blocknote/core', () => ({
+  BlockNoteEditor: {
+    create: vi.fn(() => ({
+      __fakeEditor: true,
+      document: ['default-empty-document'],
+      tryParseMarkdownToBlocks: vi.fn((markdown: string) => {
+        captured.parsed.push(markdown)
+        return ['parsed-block']
+      }),
+      transact: vi.fn((run: any) => run({ setMeta: vi.fn() })),
+      replaceBlocks: vi.fn(() => { captured.replaced += 1 }),
+    })),
+  },
+}))
 vi.mock('@blocknote/core/locales', () => ({ en: {} }))
 vi.mock('@blocknote/math-block', () => ({ locales: { en: {} } }))
 vi.mock('@blocknote/diagram-block', () => ({ locales: { en: {} } }))
@@ -47,6 +60,33 @@ describe('createBlockEditor AI transport wiring', () => {
     expect(captured.transports[0].filePath).toBe('notes/a.md')
     // getEditor resolves the SAME instance returned to the tab cache.
     expect(captured.transports[0].getEditor()).toBe(cached.editor)
+  })
+})
+
+describe('createBlockEditor seeding', () => {
+  beforeEach(() => {
+    captured.parsed.length = 0
+    captured.replaced = 0
+  })
+
+  /** The instance is created WITH its markdown so its first render is the note:
+   *  an instance painted in BlockNote's default document shows its placeholder
+   *  until the parse lands (see WysiwygEditorHost). */
+  it('parses the markdown into a created instance and marks it loaded', () => {
+    const cached = createBlockEditor('/vault', 'notes/a.md', '# Title')
+
+    expect(captured.parsed).toEqual(['# Title'])
+    expect(captured.replaced).toBe(1)
+    expect(cached.loaded).toBe(true)
+    expect(cached.loadedMarkdown).toBe('# Title')
+  })
+
+  it('leaves an instance unseeded when the caller has no markdown', () => {
+    const cached = createBlockEditor('/vault', 'notes/a.md')
+
+    expect(captured.parsed).toEqual([])
+    expect(cached.loaded).toBe(false)
+    expect(cached.loadedMarkdown).toBe(null)
   })
 })
 
