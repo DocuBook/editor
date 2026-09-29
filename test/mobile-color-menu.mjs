@@ -43,6 +43,22 @@ async function scenario(page, ok, base, model) {
   }
   await page.waitForTimeout(200)
   await page.locator('.bn-editor').first().click()
+  /* WebKit does not always move focus into the contenteditable on a synthetic
+     click; the strip needs the editor focused, so claim it if the click did
+     not (the reader's tap does exactly this on a device). */
+  const focused = await page.evaluate(() => {
+    const el = document.querySelector('.bn-editor')
+    if (!el) return false
+    if (document.activeElement !== el && !el.contains(document.activeElement)) el.focus()
+    return document.activeElement === el || el.contains(document.activeElement)
+  })
+  const premise = await page.evaluate(() => ({
+    coarse: window.matchMedia('(pointer: coarse)').matches,
+    touchPoints: navigator.maxTouchPoints,
+    fakeVp: window.__fakeVp === true,
+  }))
+  ok(`${model}: touch shell is active (coarse pointer, touch points, IME viewport)`,
+    focused && premise.coarse && premise.touchPoints > 0 && premise.fakeVp, JSON.stringify({ focused, ...premise }))
   await page.waitForTimeout(600)
   ok(`${model}: IME toolbar is up`, await page.locator(strip).count() > 0)
 
@@ -116,6 +132,26 @@ await runSuite('mobile-color-menu', {
       version: 0,
     }))
     localStorage.setItem('docubook-onboarding-done', 'true')
+    /* Touch capability. BlockNote's mobile toolbar keys off
+       `isTouchDevice()` = maxTouchPoints > 0 AND `(pointer: coarse)`, and
+       Playwright's WebKit does not report coarse for `hasTouch` — without the
+       stub the desktop bubble menu is chosen instead of the IME strip. Other
+       queries (the app's own breakpoints) delegate to the real matcher. */
+    const originalMatchMedia = window.matchMedia.bind(window)
+    window.matchMedia = (query) => query.includes('pointer: coarse')
+      ? {
+        matches: true,
+        media: query,
+        onchange: null,
+        addEventListener() {},
+        removeEventListener() {},
+        addListener() {},
+        removeListener() {},
+        dispatchEvent: () => false,
+      }
+      : originalMatchMedia(query)
+    Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 1, configurable: true })
+
     /* The keyboard, as every consumer of it sees it: BlockNote's
        useVirtualKeyboard compares the current height against the tallest seen
        (this starts at the full 720 here), and floating-ui clips to what it
@@ -123,6 +159,7 @@ await runSuite('mobile-color-menu', {
     const vp = new EventTarget()
     Object.assign(vp, { width: 390, height: window.innerHeight, scale: 1, offsetTop: 0, offsetLeft: 0 })
     Object.defineProperty(window, 'visualViewport', { value: vp, configurable: true })
+    window.__fakeVp = true
     window.__vvHeight = window.innerHeight
     window.__setKeyboard = (height) => {
       vp.height = height
