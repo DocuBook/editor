@@ -20,7 +20,9 @@ export function observeMobileToolbar(onChange: (up: boolean) => void): () => voi
 
   const observer = new MutationObserver((records) => {
     const touchesToolbar = records.some((record) =>
-      [...record.addedNodes, ...record.removedNodes].some(
+      /* Array.from: NodeList is only iterable in lib.dom.iterable, which this
+         project's lib set does not include — and spreading it needs one. */
+      [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)].some(
         (node) =>
           node instanceof Element &&
           (node.matches(MOBILE_TOOLBAR_SELECTOR) || node.querySelector(MOBILE_TOOLBAR_SELECTOR) !== null),
