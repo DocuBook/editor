@@ -21,7 +21,6 @@ import { dirname } from 'node:path'
 export const PORTS = {
   mobileShell: 4182,
   mobileOpenFocus: 4183,
-  mobileColorMenu: 4184,
   mobileMorePanel: 4185,
   mobileAiComposer: 4186,
   noteOpenFlash: 4187,
