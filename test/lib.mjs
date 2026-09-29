@@ -24,6 +24,7 @@ export const PORTS = {
   mobileColorMenu: 4184,
   mobileMorePanel: 4185,
   mobileAiComposer: 4186,
+  noteOpenFlash: 4187,
   webSmoke: 4273,
   aiDebug: 4275,
   aiMention: 4290,

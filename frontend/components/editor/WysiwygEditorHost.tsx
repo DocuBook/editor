@@ -9,7 +9,10 @@ type Entry = { vaultPath: string; filePath: string; cached: CachedEditor }
  *  A cache hit is resolved SYNCHRONOUSLY on the first render (peek): a tab
  *  switch then paints the existing instance straight away instead of showing a
  *  loading placeholder while an effect looks up what is already in memory. The
- *  effect below only runs for a genuine miss — the first open of that file. */
+ *  effect below only runs for a genuine miss — the first open of that file —
+ *  and creates the instance WITH its markdown, so that first paint is the note
+ *  itself and not BlockNote's empty document (which paints its placeholder
+ *  until the parse lands; see editorFactory.loadMarkdownIntoEditor). */
 export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, markdown, cursorOffset, onCursorOffset, onSync }: {
   vaultPath: string
   filePath: string
@@ -28,8 +31,8 @@ export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, mark
   /* oxlint-disable react/set-state-in-effect -- creates the editor for a cache miss after mount */
   useEffect(() => {
     if (ready) return
-    setEntry({ vaultPath, filePath, cached: getCachedEditor(vaultPath, filePath) })
-  }, [ready, vaultPath, filePath])
+    setEntry({ vaultPath, filePath, cached: getCachedEditor(vaultPath, filePath, markdown) })
+  }, [ready, vaultPath, filePath, markdown])
   /* oxlint-enable react/set-state-in-effect */
 
   if (!ready) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading editor...</div>

@@ -21,7 +21,6 @@ import { toast } from 'sonner'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { isTauri } from '../../lib/ipc'
 import { findActiveSuggestionItem, isEnterBeforeInput } from '../../utils/slashMenuFallback'
-import { mathDollarToMathML } from '../../utils/mathMarkdown'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
 import { installRenderCaches } from '../../utils/renderCacheInstall'
 import { followAiWritingCursorInRoot } from '../../utils/aiFollowScroll'
@@ -31,7 +30,7 @@ import { refreshCodeHighlighting } from '../../utils/codeHighlighting'
 import { isCodeBlockHeaderField, setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
-import type { CachedEditor } from '../../utils/editorFactory'
+import { loadMarkdownIntoEditor, type CachedEditor } from '../../utils/editorFactory'
 // Memoization for the global renderers (Mermaid, KaTeX) must be installed before
 // any block renders — see `installRenderCaches`.
 installRenderCaches()
@@ -439,19 +438,16 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
    *  cursor survive. */
   useEffect(() => {
     if (loadedRef.current && loadedMarkdownRef.current === markdown) return
-    cached.loaded = true
     loadedRef.current = true
-    cached.loadedMarkdown = markdown
     loadedMarkdownRef.current = markdown
     /** Re-parse must not mark the tab dirty: gate onChange until the load
      *  transaction settles (same guard as the initial mount). */
     initialLoadRef.current = true
-    try {
-      /** Math blocks export as $/$$ but blocknote's markdown parser has no
-       *  $ handling — pre-convert to <math> HTML so saved math re-renders. */
-      const blocks = editor.tryParseMarkdownToBlocks(mathDollarToMathML(markdown))
-      editor.transact(tr => { tr.setMeta('addToHistory', false); editor.replaceBlocks(editor.document, blocks) }); useEditorStore.getState().setUndoRedoState() }
-    catch (e) { console.error('BlockNote load:', e); toast.error('Failed to load editor') }
+    /** A first open resolves before this effect ever runs: the host seeds the
+     *  instance at creation, so nothing paints an empty document first. This
+     *  parse therefore only replaces a document that CHANGED under a live
+     *  instance — code-mode edits, external changes. */
+    if (loadMarkdownIntoEditor(cached, markdown)) useEditorStore.getState().setUndoRedoState()
     queueMicrotask(() => { initialLoadRef.current = false })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- guarded by loadedMarkdown comparison
   }, [editor, markdown])
