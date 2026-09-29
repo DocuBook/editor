@@ -85,6 +85,7 @@ Run every chain that applies, and never call a check passing unless you ran it. 
 - **Frontend chain:** `npx oxlint frontend/ test/__fixtures__/` · `npx tsc -b` · `npm test` · `node test/check-acl.mjs` · `node test/check-docker-paths.mjs`
 - **Rust chain** (when `src-tauri/` or `server/` is touched): `(cd src-tauri && cargo test)` · `(cd server && cargo test)` · `(cd src-tauri && cargo clippy -- -D warnings)` — without the `--`, cargo takes `-D` as its own argument and the command fails before linting anything.
 - **E2E** (only when a user-visible flow changed, and only if this environment can run Playwright): `(cd server && cargo build)`, then `npm run build`, then `npm run test:e2e` (Chromium); logs land in `test/artifacts/`. If it cannot run here, say exactly that instead of implying it passed.
+- **CI logs while a run is unfinished:** `gh run view --log` is run-level and stays blocked until every job in the run finishes — jobs parked on environment approval park it indefinitely — and after a matrix failure the sibling job reads `cancelled` (fail-fast), not failed. The failing job's log is served meanwhile: take the job id from the failing check's `details_url` in `gh pr checks` (or from `gh api repos/{owner}/{repo}/commits/<sha>/check-runs`) and run `gh api repos/{owner}/{repo}/actions/jobs/<job_id>/logs`.
 
 ### Commit & PR
 
@@ -266,9 +267,9 @@ Report per the standing **Evidence** rule.
 <!-- begin:fix-ci -->
 **Goal:** green CI by fixing the cause — never by loosening the check.
 
-1. Read the failing job's logs (`get_check_suite_logs`) and quote the first real error, not the downstream symptom.
+1. Read the failing job's logs and quote the first real error, not the downstream symptom: `get_check_suite_logs` first, then the standing **CI logs while a run is unfinished** rule when it comes back empty because the run is still going — never stop at "logs unavailable" while they are retrievable.
 2. **Classify before you touch code:** async/race → concurrency reasoning; type, null, or data-shape → data-type errors; slowdown or memory growth → profiling; timing/nondeterminism → flakiness analysis. Say which class you concluded, and why.
-3. Reproduce it locally with the same command the workflow runs in `.github/workflows/ci.yml`. For a flaky test, find the source of nondeterminism — a retry or a longer timeout is not a fix.
+3. Reproduce it locally with the same command the workflow runs in `.github/workflows/ci.yml`. For a flaky test, find the source of nondeterminism — a retry or a longer timeout is not a fix. If the failing job needs a runtime this environment lacks (the WebKit e2e is macOS-only), reproduce what this environment can and say plainly what you could not.
 4. Fix the root cause. If the failure is pre-existing on the target branch or unrelated to this PR's diff, say so and stop instead of guessing.
 5. Re-run the failing command, then the standing frontend chain (and the Rust chain when Rust is involved). Push a new commit and report the outcome per the standing **Evidence** rule.
 
