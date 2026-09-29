@@ -49,6 +49,10 @@ export default function SystemSettings() {
 
   const label = 'text-xs font-medium text-foreground mb-1.5 block'
   const input = 'w-full bg-background border border-border rounded-md px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent'
+  const btnPrimary = 'px-3 py-1.5 rounded-md bg-accent text-on-accent border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-xs whitespace-nowrap hover:bg-accent-hover transition-colors'
+  /** Quiet until hovered: sign-out is destructive, so it should not out-shout
+   *  the primary action it sits next to. */
+  const btnSignOut = 'px-3 py-1.5 rounded-md bg-transparent text-danger border border-border cursor-pointer text-xs whitespace-nowrap hover:border-danger hover:bg-danger-surface transition-colors'
   const badge = (src: string) => src === 'env'
     ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-surface text-warning border border-warning-border ml-2">from env</span>
     : <span className="text-[10px] px-1.5 py-0.5 rounded bg-success-surface text-success border border-success-border ml-2">from config</span>
@@ -81,8 +85,10 @@ export default function SystemSettings() {
               </div>
               {pwMsg && <div className="text-xs text-muted">{pwMsg}</div>}
               <div className="flex gap-2">
-                <button disabled={busy} className="px-3 py-1.5 text-xs rounded cursor-pointer bg-surface-active text-foreground border-none hover:bg-surface-hover">Update password</button>
-                <button onClick={async () => { await logout() }} className="px-3 py-1.5 text-xs rounded cursor-pointer bg-transparent text-danger border border-danger">Sign out</button>
+                <button type="submit" disabled={busy || !oldPw || !newPw || !confirmPw} className={btnPrimary}>Update password</button>
+                {/* type="button": a bare button inside the form submits it, which
+                    would run the password change on the way to logging out. */}
+                <button type="button" onClick={async () => { await logout() }} className={btnSignOut}>Sign out</button>
               </div>
             </form>
           </>

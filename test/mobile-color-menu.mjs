@@ -24,6 +24,9 @@ import { runSuite, stubBackend, PORTS, openNote } from './lib.mjs'
 
 const NOTE = 'alpha bravo charlie'
 
+/** The suite's viewport — also the simulated keyboard's "closed" baseline. */
+const VIEWPORT = { width: 390, height: 720 }
+
 async function scenario(page, ok, base, model) {
   const strip = '.bn-mobile-formatting-toolbar'
   await page.goto(base, { waitUntil: 'domcontentloaded' })
@@ -59,8 +62,12 @@ async function scenario(page, ok, base, model) {
   }))
   ok(`${model}: touch shell is active (coarse pointer, touch points, IME viewport)`,
     focused && premise.coarse && premise.touchPoints > 0 && premise.fakeVp, JSON.stringify({ focused, ...premise }))
-  await page.waitForTimeout(600)
-  ok(`${model}: IME toolbar is up`, await page.locator(strip).count() > 0)
+  /* Bounded wait, not a fixed sleep: the strip mounts once the keyboard and
+     focus gates flip, which can lag the tap on a loaded machine — the check
+     forgives the lag, never the absence. */
+  const stripUp = await page.locator(strip).first()
+    .waitFor({ state: 'attached', timeout: 5000 }).then(() => true, () => false)
+  ok(`${model}: IME toolbar is up`, stripUp)
 
   await page.locator('[data-test="colors"]').first().tap()
   await page.waitForTimeout(500)
@@ -145,11 +152,11 @@ async function scenario(page, ok, base, model) {
 await runSuite('mobile-color-menu', {
   port: PORTS.mobileColorMenu,
   server: 'preview',
-  viewport: { width: 390, height: 720 },
+  viewport: VIEWPORT,
   context: { hasTouch: true, isMobile: true, deviceScaleFactor: 2 },
 }, async ({ page, ok, base }) => {
   await stubBackend(page, { email: 'color-menu@test.dev', noteText: `# Notes\n\n${NOTE}\n` })
-  await page.addInitScript(() => {
+  await page.addInitScript(({ width, height }) => {
     localStorage.setItem('docubook:vault', JSON.stringify({
       state: { vaultPath: '/demo', expanded: {}, recent: [{ path: '/demo', name: 'demo', parent: '/' }] },
       version: 0,
@@ -176,21 +183,25 @@ await runSuite('mobile-color-menu', {
     Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 1, configurable: true })
 
     /* The keyboard, as every consumer of it sees it: BlockNote's
-       useVirtualKeyboard compares the current height against the tallest seen
-       (this starts at the full 720 here), and floating-ui clips to what it
-       reports. A real device needs no script — headless does. */
+       useVirtualKeyboard compares the current height against the tallest seen,
+       and floating-ui clips to what it reports. The baseline is the suite's
+       viewport height, NOT `window.innerHeight`: at document start that is the
+       ambient window (0, or whatever the OS/CI window happens to be), and a
+       baseline within 150px of the simulated keyboard height never registers as
+       "keyboard open" — the strip never mounts. A real device needs no
+       script — headless does. */
     const vp = new EventTarget()
-    Object.assign(vp, { width: 390, height: window.innerHeight, scale: 1, offsetTop: 0, offsetLeft: 0 })
+    Object.assign(vp, { width, height, scale: 1, offsetTop: 0, offsetLeft: 0 })
     Object.defineProperty(window, 'visualViewport', { value: vp, configurable: true })
     window.__fakeVp = true
-    window.__vvHeight = window.innerHeight
+    window.__vvHeight = height
     window.__setKeyboard = (height) => {
       vp.height = height
       window.__vvHeight = height
       vp.dispatchEvent(new Event('resize'))
       window.dispatchEvent(new Event('resize'))
     }
-  })
+  }, VIEWPORT)
 
   await scenario(page, ok, base, 'ios')
   await scenario(page, ok, base, 'android')

@@ -55,14 +55,17 @@ const readPaint = (page) => page.evaluate(() => {
   }
 })
 
+/** The suite's viewport — also the simulated keyboard's "closed" baseline. */
+const VIEWPORT = { width: 480, height: 720 }
+
 await runSuite('mobile-more-panel', {
   port: PORTS.mobileMorePanel,
   server: 'preview',
-  viewport: { width: 480, height: 720 },
+  viewport: VIEWPORT,
   context: { hasTouch: true, isMobile: true, deviceScaleFactor: 2 },
 }, async ({ page, ok, base }) => {
   await stubBackend(page, { email: 'more-panel@test.dev', noteText: `# Notes\n\n${NOTE}\n\nsecond block\n` })
-  await page.addInitScript(() => {
+  await page.addInitScript(({ width, height }) => {
     localStorage.setItem('docubook:vault', JSON.stringify({
       state: { vaultPath: '/demo', expanded: {}, recent: [{ path: '/demo', name: 'demo', parent: '/' }] },
       version: 0,
@@ -89,20 +92,25 @@ await runSuite('mobile-more-panel', {
     Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 1, configurable: true })
 
     /* The keyboard, as every consumer of it sees it: BlockNote's
-       useVirtualKeyboard compares the current height against the tallest seen
-       (this starts at the full 720 here). A real device needs no script. */
+       useVirtualKeyboard compares the current height against the tallest seen,
+       and floating-ui clips to what it reports. The baseline is the suite's
+       viewport height, NOT `window.innerHeight`: at document start that is the
+       ambient window (0, or whatever the OS/CI window happens to be), and a
+       baseline within 150px of the simulated keyboard height never registers as
+       "keyboard open" — the strip never mounts. A real device needs no
+       script — headless does. */
     const vp = new EventTarget()
-    Object.assign(vp, { width: 480, height: window.innerHeight, scale: 1, offsetTop: 0, offsetLeft: 0 })
+    Object.assign(vp, { width, height, scale: 1, offsetTop: 0, offsetLeft: 0 })
     Object.defineProperty(window, 'visualViewport', { value: vp, configurable: true })
     window.__fakeVp = true
-    window.__vvHeight = window.innerHeight
+    window.__vvHeight = height
     window.__setKeyboard = (height) => {
       vp.height = height
       window.__vvHeight = height
       vp.dispatchEvent(new Event('resize'))
       window.dispatchEvent(new Event('resize'))
     }
-  })
+  }, VIEWPORT)
 
   await page.goto(base, { waitUntil: 'domcontentloaded' })
   await page.locator('[data-testid="sidebar-toggle"]').click()
