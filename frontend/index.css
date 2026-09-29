@@ -683,11 +683,7 @@ body .code-block-language-empty {
     transform: translate(-50%, 0);
     opacity: 1;
     pointer-events: auto;
-    /* `margin-bottom` carries the lift above BlockNote's mobile formatting
-       toolbar (utils/mobileToolbarInset): the two share the strip above the
-       keyboard on a phone, and the keyboard opening moves both at once. `bottom`
-       stays the resting offset, so the lift composes with it. */
-    transition: opacity 180ms ease-out, transform 180ms ease-out, margin-bottom 180ms ease-out;
+    transition: opacity 180ms ease-out, transform 180ms ease-out;
 }
 .editor-ai-floating[data-ai-chat-hidden='true'] {
     transform: translate(-50%, 0.75rem);

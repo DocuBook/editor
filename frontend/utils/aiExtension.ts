@@ -2,6 +2,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { createAiTransport } from './aiTransport'
 import { buildHtmlDocumentState, hasAISelection, restoreAISelection } from './aiBlocks'
+import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
 export type AiMenuState =
@@ -280,7 +281,15 @@ const extensionFactory = ({ editor, options }: any) => {
     editor.getExtension('showSelection')?.showSelection?.(false, 'aiMenu')
     editor.isEditable = true
     store.setState({ aiMenuState: 'closed' })
-    editor.focus()
+    /** The caret restore waits for the user's own tap on a system whose focus
+     *  raises the IME (see utils/softKeyboard): the AI composer is still on
+     *  screen when its menu closes (collapsing the prompt panel, accepting,
+     *  Escape), and focusing the editor here raises the soft keyboard over it —
+     *  which is BlockNote's other gate for its mobile formatting toolbar
+     *  (keyboard open + editor focused). The strip then appears under the
+     *  composer, which is lifted above it mid-collapse instead of staying put.
+     *  Desktop keeps the caret restore. */
+    if (!softKeyboardOnFocus()) editor.focus()
   }
 
   const reject = () => {
