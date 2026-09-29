@@ -19,11 +19,6 @@ import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 
 export const PORTS = {
-  mobileShell: 4182,
-  mobileOpenFocus: 4183,
-  mobileMorePanel: 4185,
-  mobileAiComposer: 4186,
-  noteOpenFlash: 4187,
   webSmoke: 4273,
   aiDebug: 4275,
   aiMention: 4290,
@@ -103,28 +98,8 @@ function systemFfmpeg() {
   return undefined
 }
 
-const API_FIXTURES = {
-  setup_status: { setupRequired: false, setupToken: false },
-  list_tree: [{ path: 'notes.md', name: 'notes.md', type: 'file' }],
-  open_vault: { name: 'demo' },
-  git_status: { status: '', isRepo: false, hasRemote: false, ahead: 0, upstream: '', repoState: 'clean' },
-  list_trash: [],
-  get_backlinks: [],
-  wiki_backlinks: [],
-}
-const RAW_RESULTS = new Set(['read_file'])
-
 /** JSON response in the IPC bridge's `{ result }` envelope. */
 const json = (body) => ({ status: 200, contentType: 'application/json', body: JSON.stringify(body) })
-
-export async function stubBackend(page, { email, noteText, tree = API_FIXTURES.list_tree }) {
-  const api = { ...API_FIXTURES, list_tree: tree, setup_admin: { email }, account_get: { email }, read_file: noteText }
-  await page.route('**/api/**', async route => {
-    const command = route.request().url().split('/api/')[1]?.split('?')[0] || ''
-    const result = Object.prototype.hasOwnProperty.call(api, command) ? api[command] : {}
-    await route.fulfill(json({ result: RAW_RESULTS.has(command) ? result : JSON.stringify(result) }))
-  })
-}
 
 /** Open the seeded `notes.md` from the tree and wait for its text to render —
  *  every suite that boots the server seeds that file before boot. */

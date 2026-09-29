@@ -136,7 +136,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
             (120px) plus the prompt row, the model row and the surface border. One value
             at every width, since the composer's height does not depend on its width, and
             it keeps the document's last line readable above a long prompt instead of
-            trapped under it. test/mobile-shell-viewport.mjs re-measures this. */}
+            trapped under it. */}
         <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-50' : '')}>
           {inner}
         </div>

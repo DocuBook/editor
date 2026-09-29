@@ -130,7 +130,7 @@ jobs:
         run: cargo build --manifest-path server/Cargo.toml
       - name: Build frontend
         run: npm run build
-      - name: "E2E — all suites (smoke, trash, AI transport, mobile shell)"
+      - name: "E2E — all suites (smoke, AI transport, mentions)"
         run: npm run test:e2e
         env:
           BROWSER: ${{ matrix.browser }}
