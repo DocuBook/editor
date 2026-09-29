@@ -137,6 +137,18 @@ body {
     user-select: text;
 }
 
+/* A formatting-toolbar menu/popover opens over the line its caret sits in,
+   and the caret can end up painted above it — no z-index wins that fight: a
+   caret is drawn in the text layer, and on iOS WebKit it has been seen over
+   portalled UI (reported with the IME toolbar's color menu). While one is
+   open the toolbar sets `data-toolbar-popup-open` (linkToolbar.tsx) and the
+   editor's caret is suppressed: focus, the selection and the soft keyboard
+   are untouched, and the caret returns the moment the popup closes. Popup
+   form inputs keep their own carets — only the editor is targeted. */
+html[data-toolbar-popup-open] .bn-editor {
+    caret-color: transparent;
+}
+
 #root .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {
     color: var(--color-ai-cursor-text);
 }
