@@ -70,9 +70,25 @@ async function scenario(page, ok, base, model) {
   ok(`${model}: IME toolbar is up`, stripUp)
 
   await page.locator('[data-test="colors"]').first().tap()
-  await page.waitForTimeout(500)
+  /* Same idiom as the strip above: a bounded wait forgives a slow portal, the
+     assertion still decides — a menu that never mounts fails. */
+  await page.locator('[data-test="text-color-red"]').first()
+    .waitFor({ state: 'attached', timeout: 5000 }).catch(() => {})
   ok(`${model}: color menu opens`, await page.locator('[data-test="text-color-red"]').count() > 0)
   await page.screenshot({ path: `test/artifacts/mobile-color-menu/${model}-menu.png` })
+  /* Existence is not placement: Mantine slides the dropdown in, so let its box
+     hold still across a frame pair before measuring — the geometry below must
+     never read it mid-transition. Bounded: a menu that never settles is still
+     measured, and fails the checks on its merits. */
+  await page.waitForFunction(() => {
+    const menu = document.querySelector('[data-test="text-color-red"]')?.closest('[data-menu-dropdown]')
+    if (!menu) return false
+    const box = menu.getBoundingClientRect()
+    const key = [box.top, box.bottom, box.left, box.right].join(',')
+    const stable = window.__colorMenuBox === key
+    window.__colorMenuBox = key
+    return stable
+  }, null, { timeout: 5000 }).catch(() => {})
 
   const geometry = await page.evaluate(() => {
     const menu = document.querySelector('[data-test="text-color-red"]')?.closest('[data-menu-dropdown]')
@@ -110,7 +126,9 @@ async function scenario(page, ok, base, model) {
     caretOpen.flag && caretOpen.color === 'rgba(0, 0, 0, 0)', JSON.stringify(caretOpen))
 
   await page.locator('[data-test="text-color-red"]').first().tap()
-  await page.waitForTimeout(400)
+  /* Bounded, like the open: wait out the teardown, assert it happened. */
+  await page.locator('[data-test="text-color-red"]').first()
+    .waitFor({ state: 'detached', timeout: 5000 }).catch(() => {})
   ok(`${model}: tapping a swatch closes the menu`, await page.locator('[data-test="text-color-red"]').count() === 0)
   /* The caret's paint is CSS: with the flag gone the editor's own
      `caret-color` must be back. Read it through a short, bounded wait — in a
@@ -142,7 +160,12 @@ async function scenario(page, ok, base, model) {
   ok(`${model}: caret restored once the menu closes`,
     !caretClosed.flag && caretClosed.color !== 'rgba(0, 0, 0, 0)', JSON.stringify(caretClosed))
   await page.keyboard.type('Z')
-  await page.waitForTimeout(400)
+  /* The mark lands with the next transaction, a frame or two after the key —
+     bounded wait for it, then the same read so a failure still prints what
+     the document actually held. */
+  await page.waitForFunction(() => [...document.querySelectorAll('.bn-editor [data-style-type="textColor"]')]
+    .some(span => span.getAttribute('data-value') === 'red' && span.textContent === 'Z'),
+  null, { timeout: 5000 }).catch(() => {})
   const marks = await page.evaluate(() => [...document.querySelectorAll('.bn-editor [data-style-type="textColor"]')]
     .map(span => ({ value: span.getAttribute('data-value'), text: span.textContent })))
   ok(`${model}: the tapped color reaches the text`, marks.some(mark => mark.value === 'red' && mark.text === 'Z'), JSON.stringify(marks))
