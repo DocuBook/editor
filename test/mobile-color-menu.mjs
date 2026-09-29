@@ -105,10 +105,33 @@ async function scenario(page, ok, base, model) {
   await page.locator('[data-test="text-color-red"]').first().tap()
   await page.waitForTimeout(400)
   ok(`${model}: tapping a swatch closes the menu`, await page.locator('[data-test="text-color-red"]').count() === 0)
-  const caretClosed = await page.evaluate(() => ({
-    flag: document.documentElement.hasAttribute('data-toolbar-popup-open'),
-    color: getComputedStyle(document.querySelector('.bn-editor')).caretColor,
-  }))
+  /* The caret's paint is CSS: with the flag gone the editor's own
+     `caret-color` must be back. Read it through a short, bounded wait — in a
+     small viewport Chromium can hand back a stale computed style for an
+     off-screen subtree until it re-renders; the diagnostics below name which
+     element was read if it never comes back. */
+  const caretClosed = await page.evaluate(async () => {
+    const editors = () => [...document.querySelectorAll('.bn-editor')]
+    const rendered = (el) => el.isConnected && el.getClientRects().length > 0
+    const target = () => editors().find(rendered) ?? editors()[0]
+    const read = () => { const el = target(); return el ? getComputedStyle(el).caretColor : null }
+    let color = read()
+    const deadline = performance.now() + 2000
+    while (color === 'rgba(0, 0, 0, 0)' && performance.now() < deadline) {
+      await new Promise(resolve => requestAnimationFrame(resolve))
+      color = read()
+    }
+    return {
+      flag: document.documentElement.hasAttribute('data-toolbar-popup-open'),
+      color,
+      editors: editors().map(el => ({
+        rendered: rendered(el),
+        focused: el === document.activeElement || el.contains(document.activeElement),
+        caret: getComputedStyle(el).caretColor,
+      })),
+      matchedByRule: document.querySelectorAll('html[data-toolbar-popup-open] .bn-editor').length,
+    }
+  })
   ok(`${model}: caret restored once the menu closes`,
     !caretClosed.flag && caretClosed.color !== 'rgba(0, 0, 0, 0)', JSON.stringify(caretClosed))
   await page.keyboard.type('Z')
