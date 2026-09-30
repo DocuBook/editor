@@ -3,9 +3,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/DocuBook/editor/releases"><img alt="release" src="https://shieldcn.dev/github/DocuBook/editor/release.svg?split=true" /></a>
+  <a href="https://github.com/DocuBook/editor/releases"><img alt="release" src="https://shieldcn.dev/github/DocuBook/editor/release.svg" /></a>
   <a href="https://github.com/DocuBook/editor/actions"><img alt="CI" src="https://shieldcn.dev/github/DocuBook/editor/ci.svg?split=true" /></a>
-  <a href="https://github.com/DocuBook/editor/blob/master/LICENSE"><img alt="license" src="https://shieldcn.dev/github/DocuBook/editor/license.svg?split=true" /></a>
+  <a href="https://github.com/DocuBook/editor/blob/master/LICENSE"><img alt="license" src="https://shieldcn.dev/github/DocuBook/editor/license.svg" /></a>
+  <a href="#"><img alt="badge" src="https://shieldcn.dev/badge/Battery Include.svg?variant=branded&amp;theme=green&amp;logo=lu%3ABatteryCharging" /></a>
 </p>
 
 > Pocket notes sync across all devices. Start on phone, continue on desktop — switch anytime. Built-in real-time collaboration. WYSIWYG rich editing `/` slash command for quick block insertion.
