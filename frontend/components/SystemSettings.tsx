@@ -35,7 +35,14 @@ export default function SystemSettings() {
     try {
       await invoke('change_password', { old: oldPw, new: newPw })
       setOldPw(''); setNewPw(''); setConfirmPw('')
-      setPwMsg('✓ Password updated')
+      setPwMsg('✓ Password updated — signing you out…')
+      // The server revokes EVERY session on a password change, this one
+      // included. End the dead session now instead of leaving the UI running on
+      // a cookie the server already rejects — otherwise the sign-in screen only
+      // appears at the next request's 401, or after a manual reload. The short
+      // delay keeps the confirmation readable before Login replaces it.
+      await new Promise(resolve => setTimeout(resolve, 1200))
+      await logout()
     } catch (e) { setPwMsg(String(e)) } finally { setBusy(false) }
   }
 
