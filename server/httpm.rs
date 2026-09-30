@@ -20,6 +20,27 @@ pub(crate) async fn security_headers(req: Request, next: Next) -> Response {
     res
 }
 
+/**
+ * Cache policy for the static frontend (the fallback service):
+ * - Vite emits content-hashed files under `/assets/`, so a given URL's bytes
+ *   can never change: cache them for a year.
+ * - everything else is the app shell (`/`, deep links, index.html): revalidate
+ *   on every load, so a redeploy is picked up without a hard refresh.
+ */
+pub(crate) async fn static_cache(req: Request, next: Next) -> Response {
+    let immutable = req.uri().path().starts_with("/assets/");
+    let mut res = next.run(req).await;
+    res.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static(if immutable {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        }),
+    );
+    res
+}
+
 pub(crate) async fn health_route(state: State<AppState>) -> Response {
     Json(json!({ "result": super::cmds::health(&state) })).into_response()
 }

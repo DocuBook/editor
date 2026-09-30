@@ -261,9 +261,11 @@ fn build_router(state: AppState, www_dir: PathBuf) -> Router {
             httpm::auth_mw,
         ))
         // axum 0.8: .layer() does NOT wrap fallback_service — wrap the static
-        // service explicitly so security headers apply to / and /assets too.
+        // service explicitly so the security and cache headers apply to / and
+        // /assets too.
         .fallback_service(
             tower::ServiceBuilder::new()
+                .layer(middleware::from_fn(httpm::static_cache))
                 .layer(middleware::from_fn(httpm::security_headers))
                 .service(ServeDir::new(&www_dir).fallback(ServeFile::new(index))),
         )
