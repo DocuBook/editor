@@ -808,5 +808,12 @@ mod api_tests {
             "{body}"
         );
         assert!(body.contains("console.log"), "{body}");
+
+        // A missing asset falls through to the shell — it must revalidate, not
+        // be pinned for a year under the asset URL.
+        let (status, headers, body) = get(&app, "/assets/missing.js").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-cache", "{body}");
+        assert!(body.contains("id=root"), "{body}");
     }
 }

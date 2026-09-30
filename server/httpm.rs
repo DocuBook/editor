@@ -26,10 +26,21 @@ pub(crate) async fn security_headers(req: Request, next: Next) -> Response {
  *   can never change: cache them for a year.
  * - everything else is the app shell (`/`, deep links, index.html): revalidate
  *   on every load, so a redeploy is picked up without a hard refresh.
+ *
+ * The immutable branch is keyed on the RESPONSE, not the request path alone: a
+ * missing asset falls through the SPA fallback and answers with index.html,
+ * and pinning that shell to a year under the asset URL would recreate the
+ * stale-shell problem this policy exists to fix.
  */
 pub(crate) async fn static_cache(req: Request, next: Next) -> Response {
-    let immutable = req.uri().path().starts_with("/assets/");
+    let under_assets = req.uri().path().starts_with("/assets/");
     let mut res = next.run(req).await;
+    let html = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/html"));
+    let immutable = under_assets && res.status().is_success() && !html;
     res.headers_mut().insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static(if immutable {
