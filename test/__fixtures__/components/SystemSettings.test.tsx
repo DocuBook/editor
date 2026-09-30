@@ -77,18 +77,32 @@ describe('SystemSettings — change password', () => {
     expect(button.disabled).toBe(false)
   })
 
-  it('submits the typed passwords and returns to the disabled state after a change', async () => {
-    render()
-    await flush()
-    fillAllPasswords()
+  it('submits the typed passwords, then signs out once the confirmation has shown', async () => {
+    vi.useFakeTimers()
+    try {
+      render()
+      await flush()
+      fillAllPasswords()
 
-    const button = buttonByText('Update password')
-    act(() => button.click())
-    await flush()
+      const button = buttonByText('Update password')
+      act(() => button.click())
+      await flush()
 
-    expect(invoke).toHaveBeenCalledWith('change_password', { old: 'old-secret', new: 'new-secret-1' })
-    expect(passwordFields().every(input => input.value === '')).toBe(true)
-    expect(button.disabled).toBe(true)
+      expect(invoke).toHaveBeenCalledWith('change_password', { old: 'old-secret', new: 'new-secret-1' })
+      expect(passwordFields().every(input => input.value === '')).toBe(true)
+      expect(document.body.textContent).toContain('Password updated')
+      // Inside the hand-off delay: the button stays disabled (no double submit)
+      // and the confirmation is still on screen.
+      expect(button.disabled).toBe(true)
+      expect(invoke.mock.calls.map(c => c[0])).not.toContain('logout')
+
+      // The server revoked every session, this one included — the form hands
+      // off to the sign-in screen instead of sitting on a dead cookie.
+      await act(async () => { await vi.advanceTimersByTimeAsync(1200) })
+      expect(invoke).toHaveBeenCalledWith('logout')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

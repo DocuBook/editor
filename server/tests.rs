@@ -777,4 +777,43 @@ mod api_tests {
         assert_eq!(s, StatusCode::OK, "{b}");
         assert!(b.contains("null"), "{b}");
     }
+
+    /** The app shell must revalidate — with a cacheable index.html the browser
+     *  keeps serving the previous build and a redeploy needs a hard refresh —
+     *  while Vite's content-hashed assets are immutable. */
+    #[tokio::test]
+    async fn static_frontend_cache_policy_splits_shell_and_assets() {
+        let state = test_state();
+        let www = state.data_dir.join("www");
+        std::fs::create_dir_all(www.join("assets")).unwrap();
+        std::fs::write(www.join("index.html"), "<!doctype html><div id=root></div>").unwrap();
+        std::fs::write(www.join("assets/app-abc123.js"), "console.log(1)").unwrap();
+        let app = build_router(state, www);
+
+        let (status, headers, body) = get(&app, "/").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-cache", "{body}");
+        assert!(body.contains("id=root"), "{body}");
+
+        // Deep link → the same shell, same policy.
+        let (status, headers, _) = get(&app, "/some/deep/link").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-cache");
+
+        let (status, headers, body) = get(&app, "/assets/app-abc123.js").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(
+            headers.get(header::CACHE_CONTROL).unwrap(),
+            "public, max-age=31536000, immutable",
+            "{body}"
+        );
+        assert!(body.contains("console.log"), "{body}");
+
+        // A missing asset falls through to the shell — it must revalidate, not
+        // be pinned for a year under the asset URL.
+        let (status, headers, body) = get(&app, "/assets/missing.js").await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-cache", "{body}");
+        assert!(body.contains("id=root"), "{body}");
+    }
 }
