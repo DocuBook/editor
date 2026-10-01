@@ -297,6 +297,62 @@ describe('SidebarContextMenu in the Sidebar', () => {
     expect(vaultState.loadTree).toHaveBeenCalled()
   })
 
+  /** A copy is not consumed by pasting it — only a cut is. */
+  it('keeps a copy available for repeated pastes', async () => {
+    vaultState.visibleItems = [
+      { path: 'notes/active.md', name: 'active.md', type: '0', depth: 0 },
+      { path: 'archive', name: 'archive', type: '1', depth: 0 },
+    ]
+    renderSidebar()
+    await flush()
+
+    openMenu()
+    act(() => menuButton('Copy')!.click())
+
+    /** Drop the mount-time trash fetch so the pastes are the first calls the
+     *  assertions below can count. */
+    ipc.invoke.mockClear()
+
+    openMenuOn('archive')
+    act(() => menuButton('Paste')!.click())
+    await flush()
+
+    openMenuOn('archive')
+    expect(menuButton('Paste')!.disabled).toBe(false)
+    act(() => menuButton('Paste')!.click())
+    await flush()
+
+    expect(ipc.invoke).toHaveBeenNthCalledWith(1, 'copy_path', { from: 'notes/active.md', toDir: 'archive' })
+    expect(ipc.invoke).toHaveBeenNthCalledWith(2, 'copy_path', { from: 'notes/active.md', toDir: 'archive' })
+  })
+
+  /** Cut moves rather than duplicates: the paste calls `move_path`, the open
+   *  tab follows the new path, and the cut is spent (Paste goes inactive). */
+  it('cuts a row, moves it on paste, and consumes the cut', async () => {
+    vaultState.visibleItems = [
+      { path: 'notes/active.md', name: 'active.md', type: '0', depth: 0 },
+      { path: 'archive', name: 'archive', type: '1', depth: 0 },
+    ]
+    renderSidebar()
+    await flush()
+
+    openMenu()
+    act(() => menuButton('Cut')!.click())
+
+    openMenuOn('archive')
+    expect(menuButton('Paste')!.disabled).toBe(false)
+    ipc.invoke.mockImplementationOnce(async () => 'archive/active.md')
+    act(() => menuButton('Paste')!.click())
+    await flush()
+
+    expect(ipc.invoke).toHaveBeenCalledWith('move_path', { from: 'notes/active.md', toDir: 'archive' })
+    expect(editorState.flushEditor).toHaveBeenCalled()
+    expect(editorState.renameTab).toHaveBeenCalledWith('notes/active.md', 'archive/active.md')
+
+    openMenuOn('archive')
+    expect(menuButton('Paste')!.disabled).toBe(true)
+  })
+
   /** The copy is scoped to its vault: after a switch the relative path would
    *  resolve against another tree, so it must not be offered here. */
   it('does not offer a copy made in another vault', async () => {

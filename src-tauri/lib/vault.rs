@@ -239,6 +239,17 @@ pub fn copy_path(from: &str, to_dir: &str, state: State<AppState>) -> Result<Str
     r
 }
 
+/** Move a file or directory into a destination folder. A name collision is
+ *  refused (the vault reports it); the returned path is where it landed. */
+#[tauri::command]
+pub fn move_path(from: &str, to_dir: &str, state: State<AppState>) -> Result<String, String> {
+    let r = match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.move_path(from, to_dir), None => Err("No vault".to_string())
+    };
+    if r.is_ok() { rescan_wiki(&state); }
+    r
+}
+
 #[tauri::command]
 pub fn delete_file(path: &str, state: State<AppState>) -> Result<(), String> {
     let r = match state.vault.lock().expect("lock").as_ref() {

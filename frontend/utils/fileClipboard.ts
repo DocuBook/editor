@@ -1,39 +1,58 @@
-/** The sidebar's file clipboard: the context menu's Copy stores a tree row
+/** The sidebar's file clipboard: the context menu's Copy/Cut stores a tree row
  *  here and Paste reads it back.
  *
  *  Deliberately separate from `utils/clipboard` (the editor's TEXT clipboard)
  *  and, like it, in-app only — the OS clipboard is never touched, so file
- *  paste behaves identically on desktop and web. Copy itself does no
- *  filesystem work; only Paste does, through the `copy_path` command.
+ *  paste behaves identically on desktop and web. Copy/Cut themselves do no
+ *  filesystem work; only Paste does, through `copy_path` / `move_path`.
  *
- *  The copy is scoped to the vault it came from: a path is relative, so after
+ *  The entry is scoped to the vault it came from: a path is relative, so after
  *  switching vaults the same string would resolve against a different tree and
- *  Paste would copy whatever happens to sit there. A copy from another vault is
- *  therefore not pastable at all. */
+ *  Paste would act on whatever happens to sit there. An entry from another
+ *  vault is therefore not pastable at all. */
 
 import type { FileInfo } from '../stores/vault'
 
-export interface CopiedItem {
+/** `copy` duplicates the row and stays available for repeated pastes; `cut`
+ *  moves it and is consumed by that one paste. */
+export type ClipboardMode = 'copy' | 'cut'
+
+export interface ClipboardItem {
   path: string
   name: string
   type: string
-  /** Vault the row was copied from — the copy is meaningless outside it. */
+  mode: ClipboardMode
+  /** Vault the row was taken from — the entry is meaningless outside it. */
   vaultPath: string
 }
 
-let copied: CopiedItem | null = null
+let item: ClipboardItem | null = null
 
-/** Remember a row for a later Paste, scoped to the vault it belongs to. */
-export function copyItem(item: FileInfo, vaultPath: string): void {
-  copied = { path: item.path, name: item.name, type: item.type, vaultPath }
+function put(row: FileInfo, vaultPath: string, mode: ClipboardMode): void {
+  item = { path: row.path, name: row.name, type: row.type, mode, vaultPath }
 }
 
-/** The Paste item's enabled state: has a row been copied from THIS vault? */
-export function hasCopiedItem(vaultPath: string): boolean {
-  return copied !== null && copied.vaultPath === vaultPath
+/** Remember a row for a later Paste; it can be pasted more than once. */
+export function copyItem(row: FileInfo, vaultPath: string): void {
+  put(row, vaultPath, 'copy')
 }
 
-/** The row a menu Paste copies (null when nothing was copied from this vault). */
-export function peekCopiedItem(vaultPath: string): CopiedItem | null {
-  return copied?.vaultPath === vaultPath ? copied : null
+/** Mark a row to be MOVED by the next Paste. */
+export function cutItem(row: FileInfo, vaultPath: string): void {
+  put(row, vaultPath, 'cut')
+}
+
+/** Drop the clipboard — a cut is spent the moment it is pasted. */
+export function clearClipboardItem(): void {
+  item = null
+}
+
+/** The Paste item's enabled state: is there anything from THIS vault to paste? */
+export function hasClipboardItem(vaultPath: string): boolean {
+  return item !== null && item.vaultPath === vaultPath
+}
+
+/** The row a menu Paste acts on (null when nothing was taken from this vault). */
+export function peekClipboardItem(vaultPath: string): ClipboardItem | null {
+  return item?.vaultPath === vaultPath ? item : null
 }

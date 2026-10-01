@@ -8,7 +8,7 @@ import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { useTreeActions } from '../hooks/useTreeActions'
 import { stripMarkdownExt } from '../utils/fileKind'
-import { copyItem, hasCopiedItem, peekCopiedItem } from '../utils/fileClipboard'
+import { hasClipboardItem } from '../utils/fileClipboard'
 import SidebarFooter from './SidebarFooter'
 import SidebarPopover from './SidebarPopover'
 import SidebarContextMenu from './SidebarContextMenu'
@@ -76,7 +76,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const { name, isOpen, vaultPath, recent, visibleItems, loading, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
 
-  const openContextMenu = (item: FileInfo, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY }); setCtxCanPaste(hasCopiedItem(vaultPath)) }
+  const openContextMenu = (item: FileInfo, e: React.MouseEvent) => { setCtxItem(item); setCtxPos({x: e.clientX, y: e.clientY }); setCtxCanPaste(hasClipboardItem(vaultPath)) }
   const [trashItems, setTrashItems] = useState<TrashItem[]>([])
   const [trashLoading, setTrashLoading] = useState(false)
   const [trashError, setTrashError] = useState('')
@@ -105,27 +105,8 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     creating, newName, setNewName, newInputRef, onCreateKeyDown, startCreate,
     renaming, renameRef, onRenameKeyDown, startRename,
     currentFolder, setCurrentFolder, deleteItem,
+    copyTreeItem, cutTreeItem, pasteTreeItem,
   } = useTreeActions({ registerSearchFolder, onDeleted: loadTrash, onNavigate })
-
-  /** Copy records the row in the app's file clipboard only — nothing touches
-   *  the filesystem until it is pasted. Scoped to this vault: a relative path
-   *  is meaningless in another one. */
-  const copyTreeItem = (item: FileInfo) => copyItem(item, vaultPath)
-
-  /** Paste the copied row into the clicked row's folder (folder row = itself,
-   *  file row = its parent), the same resolution create uses. The vault
-   *  resolves a name collision with a `copy` suffix; a collapsed destination
-   *  is expanded so the copy lands in view. */
-  const pasteTreeItem = async (item: FileInfo) => {
-    const source = peekCopiedItem(vaultPath)
-    if (!source) return
-    const dest = item.type === '1' ? item.path : (item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '')
-    try {
-      await invoke<string>('copy_path', { from: source.path, toDir: dest })
-      if (item.type === '1' && !item.isExpanded) void toggleFolder(item)
-      await loadTree()
-    } catch (e) { console.error(e); toast.error('Failed to paste') }
-  }
 
   /* oxlint-disable react/set-state-in-effect -- resets the panel on vault change */
   useEffect(() => { setActivePanel('vault') }, [vaultPath, isOpen])
@@ -358,6 +339,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           canPaste={ctxCanPaste}
           onClose={closeContextMenu}
           onCopy={copyTreeItem}
+          onCut={cutTreeItem}
           onPaste={pasteTreeItem}
           onCreate={startCreate}
           onRename={startRename}

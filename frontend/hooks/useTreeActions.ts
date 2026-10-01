@@ -4,6 +4,7 @@ import { invoke } from '../lib/ipc'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore, type FileInfo } from '../stores/vault'
 import { MARKDOWN_EXTENSIONS } from '../utils/fileKind'
+import { clearClipboardItem, copyItem, cutItem, peekClipboardItem } from '../utils/fileClipboard'
 import { useClickOutside } from './useClickOutside'
 
 /** What the tree cannot know about its host: where the user should land after a
@@ -58,6 +59,20 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
   const cancelCreate = () => { setCreating(null); setNewName('') }
   useClickOutside(newInputRef, () => { if (creating) cancelCreate() })
 
+  /** The folder a row targets: the row itself when it is a folder, the folder
+   *  holding it when it is a file. */
+  const folderOf = (item: FileInfo) => item.type === '1' ? item.path : (item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : '')
+
+  /** Keep the create-here target pointing at a folder that was just moved:
+   *  create_file re-creates missing parent dirs, so a stale currentFolder would
+   *  silently recreate the old folder (A -> Z then a new file lands in A/). */
+  const remapFolder = (from: string, to: string) => setCurrentFolder(prev => {
+    if (!prev) return prev
+    if (prev === from) return to
+    if (prev.startsWith(from + '/')) return to + prev.slice(from.length)
+    return prev
+  })
+
   const handleCreate = async () => {
     if (!newName.trim() || !isOpen || loading || !creating || createBusyRef.current) return
     createBusyRef.current = true
@@ -88,7 +103,7 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
    *  place instead of leaving it inside a closed folder. */
   const startCreate = (kind: 'file' | 'folder', item?: FileInfo) => {
     if (loading) return
-    if (item) setCurrentFolder(item.type === '1' ? item.path : (item.path.includes('/') ? item.path.substring(0, item.path.lastIndexOf('/')) : ''))
+    if (item) setCurrentFolder(folderOf(item))
     setCreating(kind)
     setNewName('')
     if (item && item.type === '1' && !item.isExpanded) void toggleFolder(item)
@@ -119,12 +134,7 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
       /* Keep the create-here target in sync: create_file re-creates missing
        * parent dirs, so a stale currentFolder would silently recreate the old
        * folder (A -> Z then new file lands in A/). */
-      if (renaming.type === '1') setCurrentFolder(prev => {
-        if (!prev) return prev
-        if (prev === renaming.path) return newPath
-        if (prev.startsWith(renaming.path + '/')) return newPath + prev.slice(renaming.path.length)
-        return prev
-      })
+      if (renaming.type === '1') remapFolder(renaming.path, newPath)
       await loadTree()
     } catch(err) { console.error(err); toast.error('Failed to rename') }
     setRenaming(null)
@@ -141,6 +151,48 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
     } catch(e) { console.error(e); toast.error('Failed to delete') }
   }
 
+  /** Copy records the row in the app's file clipboard only — nothing touches
+   *  the filesystem until it is pasted. Scoped to this vault: a relative path
+   *  is meaningless in another one. */
+  const copyTreeItem = (item: FileInfo) => copyItem(item, vaultPath)
+
+  /** Cut marks the row to be MOVED by the next Paste (which consumes it). */
+  const cutTreeItem = (item: FileInfo) => cutItem(item, vaultPath)
+
+  /** Paste into the clicked row's folder (folder row = itself, file row = its
+   *  parent) — the same resolution create uses. A copy resolves a name
+   *  collision with the vault's `copy` suffix; a cut moves the row and is
+   *  refused when the name is taken. */
+  const pasteTreeItem = async (item: FileInfo) => {
+    const source = peekClipboardItem(vaultPath)
+    if (!source) return
+    const dest = folderOf(item)
+    const move = source.mode === 'cut'
+    try {
+      /** A move rewrites the row's path, so a dirty buffer has to reach disk
+       *  first — otherwise its next save resurrects the file where it was
+       *  moved from (the same reason rename flushes). */
+      if (move) await useEditorStore.getState().flushEditor()
+      const finalPath = await invoke<string>(move ? 'move_path' : 'copy_path', { from: source.path, toDir: dest })
+      if (move) {
+        // The cut is spent: one paste, one move.
+        clearClipboardItem()
+        if (finalPath !== source.path) {
+          await useEditorStore.getState().renameTab(source.path, finalPath)
+          if (source.type === '1') remapFolder(source.path, finalPath)
+        }
+      }
+      // Expanding a collapsed destination keeps the result in view.
+      if (item.type === '1' && !item.isExpanded) void toggleFolder(item)
+      await loadTree()
+    } catch (e) {
+      console.error(e)
+      /** A copy failure keeps the message it always had; a move's is the
+       *  vault's own — a taken name is exactly why nothing happened. */
+      toast.error(move ? ((e instanceof Error ? e.message : String(e)) || 'Failed to move') : 'Failed to paste')
+    }
+  }
+
   return {
     /** Inline create input — state plus its key handling. */
     creating, newName, setNewName, newInputRef, onCreateKeyDown, startCreate,
@@ -149,5 +201,6 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
     /** Create target folder, for the tree's own row clicks. */
     currentFolder, setCurrentFolder,
     deleteItem,
+    copyTreeItem, cutTreeItem, pasteTreeItem,
   }
 }
