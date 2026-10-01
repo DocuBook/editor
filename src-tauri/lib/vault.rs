@@ -228,6 +228,17 @@ pub fn create_directory(path: &str, state: State<AppState>) -> Result<(), String
     }
 }
 
+/** Copy a file or directory into a destination folder. The vault resolves name
+ *  collisions itself; the returned path is where the copy landed. */
+#[tauri::command]
+pub fn copy_path(from: &str, to_dir: &str, state: State<AppState>) -> Result<String, String> {
+    let r = match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.copy_path(from, to_dir), None => Err("No vault".to_string())
+    };
+    if r.is_ok() { rescan_wiki(&state); }
+    r
+}
+
 #[tauri::command]
 pub fn delete_file(path: &str, state: State<AppState>) -> Result<(), String> {
     let r = match state.vault.lock().expect("lock").as_ref() {

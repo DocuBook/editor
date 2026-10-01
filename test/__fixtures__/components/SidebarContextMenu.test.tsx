@@ -16,11 +16,14 @@ const menu = () => document.querySelector<HTMLElement>('[data-ctx-menu]')!
 const menuButton = (label: string) =>
   Array.from(menu().querySelectorAll<HTMLButtonElement>('button')).find(node => node.textContent === label)!
 
-function renderMenu() {
+function renderMenu(canPaste = true) {
   const props = {
     item,
     position: { x: 12, y: 34 },
+    canPaste,
     onClose: vi.fn(),
+    onCopy: vi.fn(),
+    onPaste: vi.fn(),
     onCreate: vi.fn(),
     onRename: vi.fn(),
     onDelete: vi.fn(),
@@ -45,18 +48,22 @@ describe('SidebarContextMenu', () => {
     expect(menu().style.top).toBe('34px')
     expect(menu().style.left).toBe('12px')
     expect(Array.from(menu().querySelectorAll('button')).map(node => node.textContent))
-      .toEqual(['New File', 'New Folder', 'Rename', 'Delete'])
+      .toEqual(['New File', 'New Folder', 'Copy', 'Paste', 'Rename', 'Delete'])
   })
 
   it('hands every action the row it was opened on', async () => {
     const props = renderMenu()
     await flush()
 
+    act(() => menuButton('Copy').click())
+    act(() => menuButton('Paste').click())
     act(() => menuButton('New File').click())
     act(() => menuButton('New Folder').click())
     act(() => menuButton('Rename').click())
     act(() => menuButton('Delete').click())
 
+    expect(props.onCopy).toHaveBeenCalledWith(item)
+    expect(props.onPaste).toHaveBeenCalledWith(item)
     expect(props.onCreate).toHaveBeenNthCalledWith(1, 'file', item)
     expect(props.onCreate).toHaveBeenNthCalledWith(2, 'folder', item)
     expect(props.onRename).toHaveBeenCalledWith(item)
@@ -69,9 +76,36 @@ describe('SidebarContextMenu', () => {
     const props = renderMenu()
     await flush()
 
-    act(() => menuButton('New File').click())
+    act(() => menuButton('Copy').click())
+    act(() => menuButton('Paste').click())
 
-    expect(props.onClose.mock.invocationCallOrder[0]).toBeLessThan(props.onCreate.mock.invocationCallOrder[0])
+    expect(props.onClose.mock.invocationCallOrder[0]).toBeLessThan(props.onCopy.mock.invocationCallOrder[0])
+    expect(props.onClose.mock.invocationCallOrder[1]).toBeLessThan(props.onPaste.mock.invocationCallOrder[0])
+  })
+
+  /** Paste is not always active: its enabled state is the file clipboard
+   *  (utils/fileClipboard) handed in by the sidebar. */
+  it('disables Paste when the file clipboard is empty, and enables it when filled', async () => {
+    renderMenu(false)
+    await flush()
+    expect(menuButton('Paste').disabled).toBe(true)
+
+    act(() => root!.render(
+      <SidebarContextMenu item={item} position={{ x: 1, y: 2 }} canPaste
+        onClose={vi.fn()} onCopy={vi.fn()} onPaste={vi.fn()} onCreate={vi.fn()} onRename={vi.fn()} onDelete={vi.fn()} />,
+    ))
+    await flush()
+    expect(menuButton('Paste').disabled).toBe(false)
+  })
+
+  it('runs nothing when the pointer reaches the disabled Paste row', async () => {
+    const props = renderMenu(false)
+    await flush()
+
+    act(() => menuButton('Paste').click())
+
+    expect(props.onPaste).not.toHaveBeenCalled()
+    expect(props.onClose).not.toHaveBeenCalled()
   })
 
   it('closes on a click outside', async () => {
@@ -85,14 +119,14 @@ describe('SidebarContextMenu', () => {
 
   /** The portal's trap claims `[data-autofocus]`, and the menu puts that on itself
    *  — left to the trap's fallback it would claim the first tabbable control,
-   *  pre-seating "New File" for whatever Enter comes next. */
+   *  pre-seating "Copy" for whatever Enter comes next. */
   it('focuses the menu itself rather than its first action', async () => {
     renderMenu()
     await flush()
     await tick()
 
     expect(document.activeElement).toBe(menu())
-    expect(document.activeElement).not.toBe(menuButton('New File'))
+    expect(document.activeElement).not.toBe(menuButton('Copy'))
   })
 
   it('walks the rows with the arrow keys, wrapping at both ends', async () => {
@@ -120,6 +154,28 @@ describe('SidebarContextMenu', () => {
 
     press('End')
     expect(document.activeElement).toBe(menuButton('Delete'))
+  })
+
+  /** A keyboard user must not land on an action the pointer could not pick. */
+  it('skips the disabled Paste row when walking', async () => {
+    renderMenu(false)
+    await flush()
+    await tick()
+
+    const press = (key: string) => act(() => menu().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })))
+
+    press('ArrowDown')
+    expect(document.activeElement).toBe(menuButton('New File'))
+
+    press('ArrowDown')
+    press('ArrowDown')
+    expect(document.activeElement).toBe(menuButton('Copy'))
+
+    press('ArrowDown')
+    expect(document.activeElement).toBe(menuButton('Rename'))
+
+    press('ArrowUp')
+    expect(document.activeElement).toBe(menuButton('Copy'))
   })
 
   it('closes on Escape', async () => {

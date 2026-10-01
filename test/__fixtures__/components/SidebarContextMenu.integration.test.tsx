@@ -56,6 +56,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 vi.mock('../../../frontend/components/panels/GitPanel', () => ({ default: () => null }))
 
 import Sidebar from '../../../frontend/components/Sidebar'
+import { copyItem } from '../../../frontend/utils/fileClipboard'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -101,6 +102,7 @@ const clickOutside = () => act(() => document.body.dispatchEvent(new MouseEvent(
 
 beforeEach(() => {
   vaultState.visibleItems = [{ path: 'notes/active.md', name: 'active.md', type: '0', depth: 0 }]
+  vaultState.vaultPath = '/vault'
   document.body.innerHTML = '<div id="root"></div>'
 })
 afterEach(() => { if (root) act(() => root!.unmount()); root = null; vi.clearAllMocks() })
@@ -258,5 +260,53 @@ describe('SidebarContextMenu in the Sidebar', () => {
     await flush()
 
     expect(ipc.invoke).toHaveBeenCalledWith('create_directory', { path: 'notes/drafts' })
+  })
+
+  /** Paste is not always active: it reads the app's file clipboard
+   *  (utils/fileClipboard), which is still empty until a Copy fills it. */
+  it('keeps Paste disabled until a row has been copied', async () => {
+    renderSidebar()
+    await flush()
+    openMenu()
+
+    expect(menuButton('Paste')!.disabled).toBe(true)
+  })
+
+  /** A folder row is the paste destination itself; a file row would paste beside
+   *  it. The vault resolves the name collision; the sidebar reloads and expands
+   *  the destination so the copy lands in view. */
+  it('copies a row and pastes it into the right-clicked folder, expanding it', async () => {
+    vaultState.visibleItems = [
+      { path: 'notes/active.md', name: 'active.md', type: '0', depth: 0 },
+      { path: 'archive', name: 'archive', type: '1', depth: 0 },
+    ]
+    renderSidebar()
+    await flush()
+
+    openMenu()
+    act(() => menuButton('Copy')!.click())
+    expect(menu()).toBeNull()
+
+    openMenuOn('archive')
+    expect(menuButton('Paste')!.disabled).toBe(false)
+    act(() => menuButton('Paste')!.click())
+    await flush()
+
+    expect(ipc.invoke).toHaveBeenCalledWith('copy_path', { from: 'notes/active.md', toDir: 'archive' })
+    expect(vaultState.toggleFolder).toHaveBeenCalledWith(expect.objectContaining({ path: 'archive' }))
+    expect(vaultState.loadTree).toHaveBeenCalled()
+  })
+
+  /** The copy is scoped to its vault: after a switch the relative path would
+   *  resolve against another tree, so it must not be offered here. */
+  it('does not offer a copy made in another vault', async () => {
+    copyItem({ path: 'notes/active.md', name: 'active.md', type: '0' }, '/vault')
+    vaultState.vaultPath = '/other-vault'
+    renderSidebar()
+    await flush()
+
+    openMenu()
+
+    expect(menuButton('Paste')!.disabled).toBe(true)
   })
 })

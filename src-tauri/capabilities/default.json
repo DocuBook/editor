@@ -12,6 +12,7 @@
     "allow-ask-ai",
     "allow-cancel-ai",
     "allow-close-vault",
+    "allow-copy-path",
     "allow-create-directory",
     "allow-create-file",
     "allow-create-vault",

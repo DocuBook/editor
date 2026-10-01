@@ -8,7 +8,13 @@ interface SidebarContextMenuProps {
   item: FileInfo
   /** Viewport coordinates of the right-click. */
   position: { x: number; y: number }
+  /** The file-clipboard state (utils/fileClipboard) — paste is not always active. */
+  canPaste: boolean
   onClose: () => void
+  onCopy: (item: FileInfo) => void
+  /** `item` is the DESTINATION anchor: a folder row pastes inside it, a file
+   *  row beside it — same folder resolution as create. */
+  onPaste: (item: FileInfo) => void
   /** `kind` picks the flow the caller opens; `item` is where the new entry lands. */
   onCreate: (kind: 'file' | 'folder', item: FileInfo) => void
   onRename: (item: FileInfo) => void
@@ -17,8 +23,10 @@ interface SidebarContextMenuProps {
 
 /** One menu row: theme tokens only, so it matches the sidebar in both themes.
  *  The colour is added per row — never two colours on one row, since Tailwind
- *  resolves that clash by stylesheet order, not by class order. */
-const menuItem = 'flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded w-full text-left hover:bg-surface-active'
+ *  resolves that clash by stylesheet order, not by class order. A disabled row
+ *  (Paste with an empty file clipboard) keeps the same text colour and only
+ *  steps its opacity down. */
+const menuItem = 'flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded w-full text-left hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent'
 
 /** Actions for a vault tree row, anchored at the pointer.
  *
@@ -28,8 +36,8 @@ const menuItem = 'flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13p
  *  an action for the next Enter. Adding or reordering an action touches this file
  *  plus one handler prop — never the sidebar's tree rendering. The actions
  *  themselves stay with the caller because they mutate state the sidebar owns:
- *  the inline create input, the rename input, open tabs. */
-export default function SidebarContextMenu({ item, position, onClose, onCreate, onRename, onDelete }: SidebarContextMenuProps) {
+ *  the inline create input, the rename input, open tabs, the file clipboard. */
+export default function SidebarContextMenu({ item, position, canPaste, onClose, onCopy, onPaste, onCreate, onRename, onDelete }: SidebarContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   useClickOutside(menuRef, onClose)
 
@@ -39,14 +47,16 @@ export default function SidebarContextMenu({ item, position, onClose, onCreate, 
 
   /** The menu claims focus for itself rather than for its first action — see the
    *  `data-autofocus` below — and these keys are what makes that focus useful.
-   *  Escape dismisses, arrows walk the rows and wrap at both ends, Home/End jump. */
+   *  Escape dismisses, arrows walk the rows and wrap at both ends, Home/End jump.
+   *  Disabled rows are skipped, so the keyboard path cannot land on an action
+   *  the pointer could not pick either. */
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'Escape') { e.preventDefault(); onClose(); return }
     const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
     const jump = e.key === 'Home' ? 'first' : e.key === 'End' ? 'last' : null
     if (step === 0 && jump === null) return
     e.preventDefault()
-    const rows = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+    const rows = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])
     if (rows.length === 0) return
     /** The container itself holds focus until the first arrow, so "nothing
      *  focused" enters the list from the edge that arrow points at. */
@@ -65,6 +75,8 @@ export default function SidebarContextMenu({ item, position, onClose, onCreate, 
         <button onClick={() => pick(() => onCreate('file', item))} className={menuItem + ' text-foreground-secondary'}>New File</button>
         <button onClick={() => pick(() => onCreate('folder', item))} className={menuItem + ' text-foreground-secondary'}>New Folder</button>
         <div className="border-t border-border-subtle my-1" />
+        <button onClick={() => pick(() => onCopy(item))} className={menuItem + ' text-foreground-secondary'}>Copy</button>
+        <button onClick={() => pick(() => onPaste(item))} disabled={!canPaste} className={menuItem + ' text-foreground-secondary'}>Paste</button>
         <button onClick={() => pick(() => onRename(item))} className={menuItem + ' text-foreground-secondary'}>Rename</button>
         <button onClick={() => pick(() => onDelete(item))} className={menuItem + ' text-danger'}>Delete</button>
       </div>

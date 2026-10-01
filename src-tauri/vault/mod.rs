@@ -521,6 +521,96 @@ impl Vault {
         self.invalidate_caches();
         Ok(())
     }
+
+/** Copy a file or directory into `to_dir`, resolving a name collision with a
+ *  Finder-style suffix: `note.md` → `note copy.md` → `note copy 2.md`.
+ *  Returns the vault-relative path of the copy (the name is final only after
+ *  the collision walk, so the caller cannot predict it). */
+    pub fn copy_path(&self, from: &str, to_dir: &str) -> Result<String, String> {
+        let src = self.safe_path(from)?;
+        let dst_dir = self.safe_path(to_dir)?;
+        if !src.exists() {
+            return Err(format!("Source no longer exists: {from}"));
+        }
+        let is_dir = std::fs::symlink_metadata(&src)
+            .map_err(|e| format!("Copy: {e}"))?
+            .file_type()
+            .is_dir();
+        // A folder cannot be pasted into itself or a descendant of itself:
+        // the recursion would read the subtree it is still growing.
+        if is_dir && dst_dir.starts_with(&src) {
+            return Err("Cannot paste a folder into itself".to_string());
+        }
+        let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if name.is_empty() {
+            return Err("Invalid copy source".to_string());
+        }
+        let target_name = unique_copy_name(&dst_dir, &name)?;
+        let target = dst_dir.join(&target_name);
+        if is_dir {
+            copy_dir_all(&src, &target)?;
+        } else {
+            std::fs::copy(&src, &target).map_err(|e| format!("Copy: {e}"))?;
+        }
+        self.invalidate_caches();
+        Ok(if to_dir.is_empty() { target_name } else { format!("{to_dir}/{target_name}") })
+    }
+}
+
+/** A name free for use inside `dir`: the candidate itself when nothing holds
+ *  it, otherwise the Finder-style `copy` / `copy 2` walk. Collisions are
+ *  compared case-insensitively so the result is the same on a case-sensitive
+ *  Linux server as on the case-insensitive filesystems the desktop uses — the
+ *  tree must never contain two names a user reads as one. */
+fn unique_copy_name(dir: &Path, name: &str) -> Result<String, String> {
+    let existing: Vec<String> = std::fs::read_dir(dir)
+        .map_err(|e| format!("Copy destination: {e}"))?
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().to_lowercase())
+        .collect();
+    let taken = |candidate: &str| existing.iter().any(|entry| *entry == candidate.to_lowercase());
+    if !taken(name) {
+        return Ok(name.to_string());
+    }
+    let (base, extension) = split_extension(name);
+    for n in 1u32.. {
+        let candidate = if n == 1 { format!("{base} copy{extension}") } else { format!("{base} copy {n}{extension}") };
+        if !taken(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    unreachable!("copy name search exhausted")
+}
+
+/** Split a name into (stem, extension-with-dot). A leading dot belongs to the
+ *  stem: `.env` has no extension, so its copies read `.env copy`, never
+ *  `.env.copy`. */
+fn split_extension(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(at) if at > 0 => name.split_at(at),
+        _ => (name, ""),
+    }
+}
+
+/** Recursive directory copy for vault content. Symlinks are skipped on
+ *  purpose: following one can leave the vault or loop, and the vault never
+ *  creates them itself. */
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("Copy: {e}"))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("Copy: {e}"))? {
+        let entry = entry.map_err(|e| format!("Copy: {e}"))?;
+        let kind = entry.file_type().map_err(|e| format!("Copy: {e}"))?;
+        if kind.is_symlink() {
+            continue;
+        }
+        let target = dst.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target).map_err(|e| format!("Copy: {e}"))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -565,6 +655,84 @@ mod tests {
         assert!(v.safe_path("./notes.md").is_ok());
         // filename containing ".." is not a traversal component
         assert!(v.safe_path("a..b.md").is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_into_same_folder_uses_copy_suffix() {
+        let dir = std::env::temp_dir().join(format!("docubook-copy-same-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("note.md"), "body").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.copy_path("note.md", "").unwrap(), "note copy.md");
+        // The original is untouched and the copy carries the content.
+        assert_eq!(std::fs::read_to_string(dir.join("note.md")).unwrap(), "body");
+        assert_eq!(std::fs::read_to_string(dir.join("note copy.md")).unwrap(), "body");
+        // Pasting again does not reuse the first copy's name.
+        assert_eq!(v.copy_path("note.md", "").unwrap(), "note copy 2.md");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_into_another_folder_keeps_the_name_until_it_collides() {
+        let dir = std::env::temp_dir().join(format!("docubook-copy-other-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("archive")).unwrap();
+        std::fs::write(dir.join("note.md"), "body").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.copy_path("note.md", "archive").unwrap(), "archive/note.md");
+        assert!(dir.join("archive/note.md").exists());
+        // A second paste into the same folder walks the suffix.
+        assert_eq!(v.copy_path("note.md", "archive").unwrap(), "archive/note copy.md");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /** The vault may live on a case-sensitive Linux server while the user reads
+     *  it through the desktop tree — two names that differ only in case would
+     *  render as the same row, so the collision walk catches them everywhere. */
+    #[test]
+    fn copy_compares_names_case_insensitively() {
+        let dir = std::env::temp_dir().join(format!("docubook-copy-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("archive")).unwrap();
+        std::fs::write(dir.join("note.md"), "x").unwrap();
+        std::fs::write(dir.join("archive/NOTE.MD"), "x").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.copy_path("note.md", "archive").unwrap(), "archive/note copy.md");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn copy_folder_recursively_and_never_into_itself() {
+        let dir = std::env::temp_dir().join(format!("docubook-copy-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("folder/inner")).unwrap();
+        std::fs::write(dir.join("folder/inner/a.md"), "a").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.copy_path("folder", "").unwrap(), "folder copy");
+        assert_eq!(std::fs::read_to_string(dir.join("folder copy/inner/a.md")).unwrap(), "a");
+        // A folder can never land inside itself or a descendant of itself.
+        assert!(v.copy_path("folder", "folder").is_err());
+        assert!(v.copy_path("folder", "folder/inner").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /** A leading dot belongs to the stem: `.env` copies to `.env copy`, not to
+     *  `.env.copy` (which would read as a hidden `.copy` file). */
+    #[test]
+    fn copy_keeps_dotfiles_extensionless() {
+        let dir = std::env::temp_dir().join(format!("docubook-copy-dot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(".env"), "A=1").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.copy_path(".env", "").unwrap(), ".env copy");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
