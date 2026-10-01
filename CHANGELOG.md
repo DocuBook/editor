@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.1.7 — 2026-10-01
+
+### Patch Release
+
+#### 🚀 Features
+
+- **Copy/paste in the vault tree context menu** — Right-clicking a tree row now offers Copy and Paste, backed by an in-app file clipboard kept deliberately separate from the editor's text clipboard and, like it, in-app only: the OS clipboard is never touched, so file paste behaves identically on desktop and web. Copy only records the row — nothing touches the filesystem until Paste, which runs through a new `copy_path` command. Paste targets the clicked row's folder (the row itself for a folder, its parent for a file — the same resolution New File uses) and resolves a name collision with a Finder-style suffix (`note.md` → `note copy.md` → `note copy 2.md`), comparing names case-insensitively so a case-sensitive Linux server never grows two rows a case-insensitive desktop reads as one; a leading dot stays with the stem, so `.env` copies to `.env copy`, not `.env.copy`. A folder copies its whole subtree (symlinks skipped, since following one can leave the vault or loop) and cannot be pasted into itself or a descendant. Because a path is relative, the clipboard is scoped to the vault it came from — Paste is disabled in another vault and when nothing has been copied, and the keyboard path skips the disabled row rather than landing on an action the pointer could not pick either.
+- **Cut and move in the vault tree context menu** — The row menu gains Cut beside Copy: Paste then moves the row through a new `move_path` command instead of duplicating it, and a cut is consumed by the single paste that spends it. A move keeps its name or does nothing — a taken name is refused with the vault's own message rather than silently renamed (silent renaming would make cut-and-paste a different operation than the user asked for), a move within the same folder is a no-op, and a folder cannot land inside itself or a descendant. Because a move rewrites the row's path, a dirty editor buffer is flushed first so its next save cannot resurrect the file where it was moved from; open tabs are renamed and the create-here target is remapped to follow the row. Copy, cut and paste moved out of `Sidebar.tsx` into `useTreeActions`, so all four tree mutations now live in one hook.
+
+#### 🐛 Bug Fixes
+
+- **Sign out after a password change, and a revalidating app shell** — Changing the password revokes every session server-side, this one included, but the UI kept running on a cookie the server already rejected, so the sign-in screen only appeared at the next request's 401 or after a manual reload; the settings pane now ends the dead session itself, after a short pause that keeps the confirmation readable before Login replaces it. Alongside it, the web server sets an explicit cache policy on the static frontend: content-hashed files under `/assets/` are cached for a year as `immutable`, while the app shell (`/`, deep links, `index.html`) is revalidated on every load so a redeploy is picked up without a hard refresh. The immutable branch is keyed on the response, not the request path — a missing asset falls through the SPA fallback and answers with `index.html`, and pinning that shell to a year under the asset URL would recreate the stale-shell problem the policy exists to fix.
+- **Stacked toasts, and one toast per trash batch** — Concurrent toasts now stack one above the other instead of overlapping until hovered (sonner's `expand`). Restoring or permanently deleting from the Trash reports its outcome and any refresh fallout in a single toast: previously the result was emitted before the refreshes were known, so a green “restored” could land beside a red “could not refresh” — two toasts that read as a contradiction — and a failed vault-view refresh could return before the success toast was ever shown. A batch blocked by a missing permission still goes to the permission dialog alone, with no toast repeating it.
+
 ## v0.1.6 — 2026-09-29
 
 ### Patch Release
