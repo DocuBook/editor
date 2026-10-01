@@ -146,6 +146,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "create_file" => sync(state, cmd, args),
         "create_directory" => sync(state, cmd, args),
         "copy_path" => sb(state, cmd, args).await,
+        "move_path" => sb(state, cmd, args).await,
         "delete_file" => sb(state, cmd, args).await,
         "list_trash" => sync(state, cmd, args),
         "restore_file" => sync(state, cmd, args),
@@ -304,6 +305,16 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             // thread like delete, for the same reason.
             let r = match state.vault.lock().expect("lock").as_ref() {
                 Some(v) => v.copy_path(&s("from"), &s("toDir")),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() {
+                cmds::rescan_wiki(state);
+            }
+            r
+        }
+        "move_path" => {
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.move_path(&s("from"), &s("toDir")),
                 None => Err("No vault".into()),
             };
             if r.is_ok() {

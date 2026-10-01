@@ -48,6 +48,7 @@ permissions = [
   "allow-list-tree",
   "allow-markdown-preview",
   "allow-md-to-html",
+  "allow-move-path",
   "allow-open-vault",
   "allow-open-system-settings",
   "allow-read-file",
@@ -470,6 +471,16 @@ commands.allow = ["md_to_html"]
 identifier = "deny-md-to-html"
 description = "Denies the md_to_html command."
 commands.deny = ["md_to_html"]
+
+[[permission]]
+identifier = "allow-move-path"
+description = "Enables the move_path command."
+commands.allow = ["move_path"]
+
+[[permission]]
+identifier = "deny-move-path"
+description = "Denies the move_path command."
+commands.deny = ["move_path"]
 
 [[permission]]
 identifier = "allow-open-vault"

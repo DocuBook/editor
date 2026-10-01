@@ -555,19 +555,60 @@ impl Vault {
         self.invalidate_caches();
         Ok(if to_dir.is_empty() { target_name } else { format!("{to_dir}/{target_name}") })
     }
+
+/** Move a file or directory into `to_dir`. Unlike a copy, a name collision is
+ *  refused instead of resolved: silently renaming a moved entry would break the
+ *  one thing cut-and-paste promises — it keeps its name, or nothing happens.
+ *  A move within the same folder is a no-op. Returns the vault-relative path
+ *  the entry landed at. */
+    pub fn move_path(&self, from: &str, to_dir: &str) -> Result<String, String> {
+        let src = self.safe_path(from)?;
+        let dst_dir = self.safe_path(to_dir)?;
+        if !src.exists() {
+            return Err(format!("Source no longer exists: {from}"));
+        }
+        // Already where it would land.
+        if src.parent() == Some(dst_dir.as_path()) {
+            return Ok(from.to_string());
+        }
+        let is_dir = std::fs::symlink_metadata(&src)
+            .map_err(|e| format!("Move: {e}"))?
+            .file_type()
+            .is_dir();
+        // A folder cannot be moved into itself or a descendant of itself.
+        if is_dir && dst_dir.starts_with(&src) {
+            return Err("Cannot move a folder into itself".to_string());
+        }
+        let name = src.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+        if name.is_empty() {
+            return Err("Invalid move source".to_string());
+        }
+        if dir_names(&dst_dir)?.iter().any(|entry| *entry == name.to_lowercase()) {
+            return Err(format!("{name} already exists in the destination folder"));
+        }
+        let target = dst_dir.join(&name);
+        std::fs::rename(&src, &target).map_err(|e| format!("Move: {e}"))?;
+        self.invalidate_caches();
+        Ok(if to_dir.is_empty() { name } else { format!("{to_dir}/{name}") })
+    }
+}
+
+/** Lowercased names inside `dir` — the collision set copy and move both check.
+ *  Case-insensitive because one vault is read through a case-insensitive
+ *  filesystem on the desktop and a case-sensitive one on the server: the tree
+ *  must never hold two names a user reads as one. */
+fn dir_names(dir: &Path) -> Result<Vec<String>, String> {
+    Ok(std::fs::read_dir(dir)
+        .map_err(|e| format!("Destination: {e}"))?
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().to_lowercase())
+        .collect())
 }
 
 /** A name free for use inside `dir`: the candidate itself when nothing holds
- *  it, otherwise the Finder-style `copy` / `copy 2` walk. Collisions are
- *  compared case-insensitively so the result is the same on a case-sensitive
- *  Linux server as on the case-insensitive filesystems the desktop uses — the
- *  tree must never contain two names a user reads as one. */
+ *  it, otherwise the Finder-style `copy` / `copy 2` walk. */
 fn unique_copy_name(dir: &Path, name: &str) -> Result<String, String> {
-    let existing: Vec<String> = std::fs::read_dir(dir)
-        .map_err(|e| format!("Copy destination: {e}"))?
-        .flatten()
-        .map(|entry| entry.file_name().to_string_lossy().to_lowercase())
-        .collect();
+    let existing = dir_names(dir)?;
     let taken = |candidate: &str| existing.iter().any(|entry| *entry == candidate.to_lowercase());
     if !taken(name) {
         return Ok(name.to_string());
@@ -733,6 +774,83 @@ mod tests {
 
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
         assert_eq!(v.copy_path(".env", "").unwrap(), ".env copy");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_into_another_folder_keeps_the_name_and_removes_the_source() {
+        let dir = std::env::temp_dir().join(format!("docubook-move-other-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("archive")).unwrap();
+        std::fs::write(dir.join("note.md"), "body").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.move_path("note.md", "archive").unwrap(), "archive/note.md");
+        assert!(!dir.join("note.md").exists());
+        assert_eq!(std::fs::read_to_string(dir.join("archive/note.md")).unwrap(), "body");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /** A move keeps its name or does nothing — silently renaming it would make
+     *  cut-and-paste a different operation than the user asked for. */
+    #[test]
+    fn move_refuses_a_taken_name_instead_of_renaming() {
+        let dir = std::env::temp_dir().join(format!("docubook-move-taken-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("archive")).unwrap();
+        std::fs::write(dir.join("note.md"), "mine").unwrap();
+        std::fs::write(dir.join("archive/note.md"), "theirs").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        let error = v.move_path("note.md", "archive").unwrap_err();
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+        // Nothing moved and nothing was overwritten.
+        assert_eq!(std::fs::read_to_string(dir.join("note.md")).unwrap(), "mine");
+        assert_eq!(std::fs::read_to_string(dir.join("archive/note.md")).unwrap(), "theirs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_within_the_same_folder_is_a_no_op() {
+        let dir = std::env::temp_dir().join(format!("docubook-move-same-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("note.md"), "body").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.move_path("note.md", "").unwrap(), "note.md");
+        assert_eq!(std::fs::read_to_string(dir.join("note.md")).unwrap(), "body");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_folder_and_never_into_itself() {
+        let dir = std::env::temp_dir().join(format!("docubook-move-folder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("folder/inner")).unwrap();
+        std::fs::create_dir_all(dir.join("other")).unwrap();
+        std::fs::write(dir.join("folder/inner/a.md"), "a").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert!(v.move_path("folder", "folder").is_err());
+        assert!(v.move_path("folder", "folder/inner").is_err());
+        assert_eq!(v.move_path("folder", "other").unwrap(), "other/folder");
+        assert_eq!(std::fs::read_to_string(dir.join("other/folder/inner/a.md")).unwrap(), "a");
+        assert!(!dir.join("folder").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn move_compares_names_case_insensitively() {
+        let dir = std::env::temp_dir().join(format!("docubook-move-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("archive")).unwrap();
+        std::fs::write(dir.join("note.md"), "mine").unwrap();
+        std::fs::write(dir.join("archive/NOTE.MD"), "theirs").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert!(v.move_path("note.md", "archive").is_err());
+        assert!(dir.join("note.md").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

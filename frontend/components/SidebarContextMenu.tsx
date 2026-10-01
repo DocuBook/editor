@@ -11,7 +11,10 @@ interface SidebarContextMenuProps {
   /** The file-clipboard state (utils/fileClipboard) — paste is not always active. */
   canPaste: boolean
   onClose: () => void
+  /** Copy leaves the row in place and can be pasted repeatedly. */
   onCopy: (item: FileInfo) => void
+  /** Cut marks the row to be MOVED by the next Paste (which consumes it). */
+  onCut: (item: FileInfo) => void
   /** `item` is the DESTINATION anchor: a folder row pastes inside it, a file
    *  row beside it — same folder resolution as create. */
   onPaste: (item: FileInfo) => void
@@ -37,7 +40,7 @@ const menuItem = 'flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13p
  *  plus one handler prop — never the sidebar's tree rendering. The actions
  *  themselves stay with the caller because they mutate state the sidebar owns:
  *  the inline create input, the rename input, open tabs, the file clipboard. */
-export default function SidebarContextMenu({ item, position, canPaste, onClose, onCopy, onPaste, onCreate, onRename, onDelete }: SidebarContextMenuProps) {
+export default function SidebarContextMenu({ item, position, canPaste, onClose, onCopy, onCut, onPaste, onCreate, onRename, onDelete }: SidebarContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   useClickOutside(menuRef, onClose)
 
@@ -75,6 +78,7 @@ export default function SidebarContextMenu({ item, position, canPaste, onClose, 
         <button onClick={() => pick(() => onCreate('file', item))} className={menuItem + ' text-foreground-secondary'}>New File</button>
         <button onClick={() => pick(() => onCreate('folder', item))} className={menuItem + ' text-foreground-secondary'}>New Folder</button>
         <div className="border-t border-border-subtle my-1" />
+        <button onClick={() => pick(() => onCut(item))} className={menuItem + ' text-foreground-secondary'}>Cut</button>
         <button onClick={() => pick(() => onCopy(item))} className={menuItem + ' text-foreground-secondary'}>Copy</button>
         <button onClick={() => pick(() => onPaste(item))} disabled={!canPaste} className={menuItem + ' text-foreground-secondary'}>Paste</button>
         <button onClick={() => pick(() => onRename(item))} className={menuItem + ' text-foreground-secondary'}>Rename</button>
