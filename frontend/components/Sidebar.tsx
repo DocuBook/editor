@@ -129,11 +129,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
      *  deep-links the System Settings pane. Checking the first failure is enough:
      *  a batch fails uniformly when the grant is missing. */
     const denied = failed.map(trashPermissionError).find(Boolean)
-    if (denied) {
-      setPermission(denied)
-    } else if (failed.length) {
-      toast.error(`${items.length - failed.length} completed; ${failed.length} failed: ${String(failed[0])}`)
-    }
+    if (denied) setPermission(denied)
     /** Drop the completed items before the refresh: if `list_trash` fails, the
      *  panel would otherwise keep showing deleted entries as still-ticked, and
      *  the next click would re-issue deletes against paths that are gone. */
@@ -141,21 +137,32 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       const names = new Set(items.map(item => item.name))
       setTrashItems(previous => previous.filter(item => !names.has(item.name)))
     }
-    const refreshed = await loadTrash()
-    if (!refreshed && !failed.length) toast.error('Trash action completed, but the Trash view could not be refreshed')
+    /** Refresh first and collect what broke, then emit ONE toast. Reporting the
+     *  outcome and the refresh fallout separately let a green "restored" land
+     *  beside a red "could not refresh" — two toasts that read as a contradiction. */
+    const staleViews: string[] = []
+    if (!(await loadTrash())) staleViews.push('Trash view')
+    let treeRefreshed = true
     if (command === 'restore_file' && items.length > failed.length) {
       try { await loadTree() }
-      catch (e) {
-        console.error(e)
-        toast.error(`Trash action completed, but the vault view could not be refreshed: ${String(e)}`)
-        return false
+      catch (e) { console.error(e); treeRefreshed = false; staleViews.push('vault view') }
+    }
+    const completed = items.length - failed.length
+    const noun = (count: number) => `${count} item${count === 1 ? '' : 's'}`
+    const verb = command === 'restore_file' ? 'restored' : 'deleted permanently'
+    /** The permission dialog already carries the message; a toast beside it
+     *  would only repeat it. */
+    if (!denied) {
+      const stale = staleViews.length ? `; ${staleViews.join(' and ')} could not be refreshed` : ''
+      if (failed.length) {
+        toast.error(`${completed ? `${noun(completed)} ${verb}, but ` : ''}${failed.length} failed: ${String(failed[0])}${stale}`)
+      } else if (staleViews.length) {
+        toast.warning(`${noun(items.length)} ${verb} — could not refresh the ${staleViews.join(' and ')}`)
+      } else {
+        toast.success(`${noun(items.length)} ${verb}`)
       }
     }
-    if (failed.length === 0) {
-      const completed = items.length
-      toast.success(`${completed} item${completed === 1 ? '' : 's'} ${command === 'restore_file' ? 'restored' : 'deleted permanently'}`)
-    }
-    return failed.length === 0
+    return failed.length === 0 && treeRefreshed
   }
 
   // Keyboard shortcuts
