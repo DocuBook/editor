@@ -259,4 +259,39 @@ describe('SidebarContextMenu in the Sidebar', () => {
 
     expect(ipc.invoke).toHaveBeenCalledWith('create_directory', { path: 'notes/drafts' })
   })
+
+  /** Paste is not always active: it reads the app's file clipboard
+   *  (utils/fileClipboard), which is still empty until a Copy fills it. */
+  it('keeps Paste disabled until a row has been copied', async () => {
+    renderSidebar()
+    await flush()
+    openMenu()
+
+    expect(menuButton('Paste')!.disabled).toBe(true)
+  })
+
+  /** A folder row is the paste destination itself; a file row would paste beside
+   *  it. The vault resolves the name collision; the sidebar reloads and expands
+   *  the destination so the copy lands in view. */
+  it('copies a row and pastes it into the right-clicked folder, expanding it', async () => {
+    vaultState.visibleItems = [
+      { path: 'notes/active.md', name: 'active.md', type: '0', depth: 0 },
+      { path: 'archive', name: 'archive', type: '1', depth: 0 },
+    ]
+    renderSidebar()
+    await flush()
+
+    openMenu()
+    act(() => menuButton('Copy')!.click())
+    expect(menu()).toBeNull()
+
+    openMenuOn('archive')
+    expect(menuButton('Paste')!.disabled).toBe(false)
+    act(() => menuButton('Paste')!.click())
+    await flush()
+
+    expect(ipc.invoke).toHaveBeenCalledWith('copy_path', { from: 'notes/active.md', toDir: 'archive' })
+    expect(vaultState.toggleFolder).toHaveBeenCalledWith(expect.objectContaining({ path: 'archive' }))
+    expect(vaultState.loadTree).toHaveBeenCalled()
+  })
 })

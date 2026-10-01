@@ -145,6 +145,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "write_file_checked" => sync(state, cmd, args),
         "create_file" => sync(state, cmd, args),
         "create_directory" => sync(state, cmd, args),
+        "copy_path" => sb(state, cmd, args).await,
         "delete_file" => sb(state, cmd, args).await,
         "list_trash" => sync(state, cmd, args),
         "restore_file" => sync(state, cmd, args),
@@ -298,6 +299,18 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Some(v) => v.create_directory(&s("path")).map(|_| "null".into()),
             None => Err("No vault".into()),
         },
+        "copy_path" => {
+            // Copying a folder walks the whole subtree — kept off the async
+            // thread like delete, for the same reason.
+            let r = match state.vault.lock().expect("lock").as_ref() {
+                Some(v) => v.copy_path(&s("from"), &s("toDir")),
+                None => Err("No vault".into()),
+            };
+            if r.is_ok() {
+                cmds::rescan_wiki(state);
+            }
+            r
+        }
         "delete_file" => {
             let r = match state.vault.lock().expect("lock").as_ref() {
                 Some(v) => v.delete_file(&s("path")).map(|_| "null".into()),

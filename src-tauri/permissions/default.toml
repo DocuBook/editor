@@ -11,6 +11,7 @@ permissions = [
   "allow-ai-settings",
   "allow-cancel-ai",
   "allow-close-vault",
+  "allow-copy-path",
   "allow-create-directory",
   "allow-create-file",
   "allow-create-vault",
@@ -119,6 +120,16 @@ commands.allow = ["close_vault"]
 identifier = "deny-close-vault"
 description = "Denies the close_vault command."
 commands.deny = ["close_vault"]
+
+[[permission]]
+identifier = "allow-copy-path"
+description = "Enables the copy_path command."
+commands.allow = ["copy_path"]
+
+[[permission]]
+identifier = "deny-copy-path"
+description = "Denies the copy_path command."
+commands.deny = ["copy_path"]
 
 [[permission]]
 identifier = "allow-create-directory"
