@@ -259,7 +259,9 @@ export default function App() {
           onClose={() => setDismissedConflicts(prev => ({ ...prev, [conflictIdentity(activeConflict)]: true }))}
         />
       )}
-      <Toaster position="bottom-right" theme={colorScheme} richColors offset={{ bottom: 80, right: 16 }} mobileOffset={{ bottom: 96 }} />
+      {/* `expand` keeps concurrent toasts spread out (one above the other) instead
+          of sonner's default collapsed stack, where they overlap until hovered. */}
+      <Toaster position="bottom-right" theme={colorScheme} richColors expand offset={{ bottom: 80, right: 16 }} mobileOffset={{ bottom: 96 }} />
     </div>
   )
 }
