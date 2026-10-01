@@ -37,6 +37,11 @@ const SCROLL_DIRECTION_TOLERANCE = 3
  *  shorter than a reveal that starts from a tap. Keyboard scrolling is
  *  deliberately not a gesture: caret-following scrolls are the same shape. */
 const USER_SCROLL_WINDOW = 300
+/** How long after a composition commits an Escape still counts as the IME's.
+ *  Some engines cancel a candidate strip with an Escape they emit only after
+ *  `compositionend`, so the key arrives with `isComposing` already false. Long
+ *  enough to swallow that, far shorter than the pause before a user leaves. */
+const POST_COMPOSITION_ESCAPE_MS = 250
 /** Concurrent list_tree calls. Serial recursion made the dropdown wait for the
  *  whole vault; unbounded fan-out would flood the IPC. */
 const MENTION_LIST_CONCURRENCY = 6
@@ -163,6 +168,17 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  the document, and the composer collapses below (see `covered`). */
   const imeToolbarUp = useMobileToolbar()
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  /** True between compositionstart and compositionend on the prompt box. The
+   *  IME owns every key while it is set — including the Escape that cancels a
+   *  candidate strip — however `event.isComposing` reports it: Android IMEs
+   *  routinely deliver that Escape with `isComposing: false`, so trusting the
+   *  flag alone let the window listener tear the menu down mid-composition and
+   *  wedge the keyboard (the crash reported from a phone IME). */
+  const composingRef = useRef(false)
+  /** When the last composition committed. A ref, not an effect-local: the
+   *  keydown effect re-mounts on every picker/menu change and must not forget
+   *  the commit it is still guarding. */
+  const compositionEndedAtRef = useRef(-Infinity)
   const ai = editor?.getExtension?.('ai') ?? null
 
   const aiMenu: AiMenuState = useSyncExternalStore(
@@ -216,37 +232,51 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     setExpanded(false)
   }, [ai, aiMenu, setExpanded])
 
+  const dismissable = expanded || pickerOpen || status === 'user-input'
   useEffect(() => {
-    if (!expanded) return
-    const dismissOutside = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) { setPicker(null); close() }
+    if (!dismissable) return
+    const dismissOutside = (event: Event) => {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        setPicker(null)
+        close()
+        /** Leaving the composer is the same intent as Escape: hand the caret
+         *  back so the document is editable and typing lands there, not in the
+         *  prompt box (the extension only restores focus where focusing raises
+         *  no soft keyboard). */
+        editor?.focus?.()
+      }
     }
-    window.addEventListener('mousedown', dismissOutside, true)
-    return () => window.removeEventListener('mousedown', dismissOutside, true)
-  }, [expanded, close])
+    window.addEventListener('pointerdown', dismissOutside, true)
+    return () => window.removeEventListener('pointerdown', dismissOutside, true)
+  }, [dismissable, close, editor])
 
   useEffect(() => {
     if (!expanded && !isOpen && !picker) return
-    let compositionEndedAt = -Infinity
-    const rememberCompositionEnd = (event: CompositionEvent) => {
-      if (event.target === inputRef.current) compositionEndedAt = performance.now()
-    }
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       /** Escape is the IME's own cancel while it composes. This listener sits on
        *  window capture, in front of every element handler, so without the guard
-       *  canceling a candidate strip would also dismiss the picker/composer. */
-      if (event.isComposing || performance.now() - compositionEndedAt < 250) return
+       *  canceling a candidate strip would also dismiss the picker/composer.
+       *  `composingRef` (compositionstart/end) covers engines that report
+       *  `isComposing: false` on that key; the short post-commit window covers
+       *  the ones that emit the cancel Escape only after `compositionend`. */
+      if (event.isComposing || composingRef.current) return
+      if (performance.now() - compositionEndedAtRef.current < POST_COMPOSITION_ESCAPE_MS) return
       if (picker) { event.preventDefault(); event.stopPropagation(); setPicker(null); return }
-      event.preventDefault(); close()
+      event.preventDefault()
+      /** One Escape leaves the composer *and* hands the caret back to the
+       *  document. The extension restores focus only where focusing raises no
+       *  soft keyboard (`softKeyboardOnFocus`), so on a phone the caret stayed
+       *  stuck in the prompt box until the reader tapped the page — the
+       *  reported "Escape twice to get back to the editor". An explicit Escape
+       *  is the reader asking for the document with the keyboard already up, so
+       *  the caret is returned here on every platform. */
+      close()
+      editor?.focus?.()
     }
-    window.addEventListener('compositionend', rememberCompositionEnd, true)
     window.addEventListener('keydown', dismissOnEscape, true)
-    return () => {
-      window.removeEventListener('compositionend', rememberCompositionEnd, true)
-      window.removeEventListener('keydown', dismissOnEscape, true)
-    }
-  }, [expanded, isOpen, close, picker])
+    return () => window.removeEventListener('keydown', dismissOnEscape, true)
+  }, [expanded, isOpen, close, picker, editor])
 
   /** Grow the prompt textarea with its content (multi-line prompts must stay
    *  readable) and shrink back when cleared. CSS max-h caps the growth; longer
@@ -483,7 +513,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
           return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={mentionRowClass(selected)}>{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}</button>
         }) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
       <div className="flex w-full min-w-0 items-end gap-2 p-2">
-        <textarea ref={inputRef} value={input} onChange={(event) => onInputChange(event.target.value, event.target.selectionStart)} onKeyDown={(event) => {
+        <textarea ref={inputRef} value={input} onChange={(event) => onInputChange(event.target.value, event.target.selectionStart)} onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false; compositionEndedAtRef.current = performance.now() }} onKeyDown={(event) => {
           /** While an IME composes (candidate strip open), its keys belong to it:
            *  the Enter that commits a candidate would otherwise send the prompt,
            *  and the candidate arrows would walk the mention picker instead.

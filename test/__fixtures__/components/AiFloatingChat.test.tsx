@@ -242,7 +242,7 @@ describe('AI floating composer', () => {
 
     act(() => {
       if (dismissal === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-      else document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+      else document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
     })
 
     expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
@@ -294,6 +294,85 @@ describe('AI floating composer', () => {
     })
     expect(ai.closeAIMenu).not.toHaveBeenCalled()
     expect(useAiChat.getState().expanded).toBe(true)
+  })
+
+  it('leaves an Escape to the IME while a composition is open, even when the engine hides isComposing', () => {
+    const ai = makeAi()
+    const editor = {
+      getExtension: vi.fn(() => ai),
+      getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+      getSelection: vi.fn(() => undefined),
+      focus: vi.fn(),
+    }
+    useEditorStore.setState({ blockEditor: editor })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    const textarea = document.querySelector('textarea')!
+    // Opening anchors the menu, which focuses the editor on the way in.
+    editor.focus.mockClear()
+
+    // Android IMEs deliver the strip-cancel Escape with isComposing: false, so
+    // the open composition — not the flag — is what must hold the key back.
+    act(() => textarea.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+
+    expect(ai.closeAIMenu).not.toHaveBeenCalled()
+    expect(useAiChat.getState().expanded).toBe(true)
+    expect(editor.focus).not.toHaveBeenCalled()
+  })
+
+  it('hands the caret back to the editor on the Escape that dismisses the composer', () => {
+    const ai = makeAi()
+    const editor = {
+      getExtension: vi.fn(() => ai),
+      getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+      getSelection: vi.fn(() => undefined),
+      focus: vi.fn(),
+    }
+    useEditorStore.setState({ blockEditor: editor })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    // The prompt action the report names: fill the box and focus the textarea.
+    act(() => useAiChat.getState().focusInput('Write about '))
+    expect(document.activeElement).toBe(document.querySelector('textarea'))
+    // Opening anchored the menu and focused the editor on the way in; measure
+    // only what the Escape itself does.
+    editor.focus.mockClear()
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+
+    // One Escape, not two: the caret is handed back without a second press.
+    expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
+    expect(useAiChat.getState().expanded).toBe(false)
+    expect(editor.focus).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves the prompt flow on a tap outside, for a phone with no Escape key', () => {
+    const ai = makeAi()
+    const editor = {
+      getExtension: vi.fn(() => ai),
+      getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+      getSelection: vi.fn(() => undefined),
+      focus: vi.fn(),
+    }
+    useEditorStore.setState({ blockEditor: editor })
+
+    act(() => root!.render(<AiFloatingChat />))
+    act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
+    // The flow the report names: a prompt action fills the box and focuses the
+    // textarea, collapsing the prompt list (`expanded` false) while the AI menu
+    // stays open — exactly the state the old outside-dismiss (gated on
+    // `expanded`) never armed, so a tap on the page did nothing.
+    act(() => useAiChat.getState().focusInput('Write about '))
+    expect(useAiChat.getState().expanded).toBe(false)
+    editor.focus.mockClear()
+
+    act(() => document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true })))
+
+    expect(ai.closeAIMenu).toHaveBeenCalledTimes(1)
+    expect(editor.focus).toHaveBeenCalledTimes(1)
   })
 
   it('does not send on the Enter that commits an IME composition', () => {
