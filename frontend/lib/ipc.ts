@@ -68,28 +68,55 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
   }
   if (cmd === 'ask_ai') {
     const requestId = String((args as { requestId?: unknown })?.requestId ?? '')
+    const key = askAiKey(requestId)
     const controller = new AbortController()
-    activeAskAi = { requestId, controller }
+    let controllers = activeAskAi.get(key)
+    if (!controllers) {
+      controllers = new Set<AbortController>()
+      activeAskAi.set(key, controllers)
+    }
+    controllers.add(controller)
     try {
       await streamAskAi(args ?? {}, controller.signal)
     } finally {
-      if (activeAskAi?.controller === controller) activeAskAi = null
+      // Drop only this turn's slot: a turn that finishes must not clear the slot
+      // of a concurrent turn that reused the same id.
+      controllers.delete(controller)
+      if (controllers.size === 0 && activeAskAi.get(key) === controllers) activeAskAi.delete(key)
     }
     return undefined as T
   }
   // Cancel by request id: the AI menu can abandon a turn and immediately start a
-  // new one, and a late Stop for the old turn must not abort the new stream.
+  // new one, and a commit-message turn can run alongside it — so a late Stop must
+  // target exactly one stream, and no id cancels every in-flight stream.
   if (cmd === 'cancel_ai') {
     const requestId = String((args as { requestId?: unknown })?.requestId ?? '')
-    const active = activeAskAi
-    if (active && (!requestId || active.requestId === requestId)) active.controller.abort()
+    if (!requestId) {
+      for (const controllers of activeAskAi.values()) {
+        for (const controller of controllers) controller.abort()
+      }
+      activeAskAi.clear()
+    } else {
+      for (const controller of activeAskAi.get(requestId) ?? []) controller.abort()
+      activeAskAi.delete(requestId)
+    }
   }
   const data = await post(cmd, args ?? {})
   return data as T
 }
 
-/** The one in-flight ask_ai stream: its id lets Stop target the right request. */
-let activeAskAi: { requestId: string; controller: AbortController } | null = null
+/** In-flight ask_ai streams, grouped by request id. Concurrent turns (an AI
+ *  panel edit next to a commit-message summary) must each own their cancellation
+ *  handle: a late Stop targets one id, and a turn that finishes must not clear
+ *  another turn's slot. Duplicate ids are retained as a group rather than
+ *  overwriting a live controller; cancelling that id aborts every matching turn.
+ *  Id-less callers get an isolated slot too, so they cannot clobber each other;
+ *  `cancel_ai` with no id aborts all of them. */
+const activeAskAi = new Map<string, Set<AbortController>>()
+let anonymousAskAi = 0
+function askAiKey(requestId: string): string {
+  return requestId || `anon-${++anonymousAskAi}`
+}
 
 async function post(cmd: string, args: Record<string, unknown>): Promise<unknown> {
   const controller = new AbortController()
