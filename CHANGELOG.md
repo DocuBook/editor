@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.1.8 — 2026-10-03
+
+### Patch Release
+
+#### 🐛 Bug Fixes
+
+- **Leaving the AI composer in one press or tap, and returning the caret** — Tapping or clicking outside the composer now dismisses it in a single interaction, and Escape does the same, both handing the caret back to the document. The outside-click listener previously ran only while the panel was expanded, so a collapsed composer with an open picker or a prompt awaiting input could not be left by clicking away, and it listened for `mousedown` — a touch or pen tap never fired it. It now tracks `pointerdown`, covering mouse, touch and pen alike, and is armed whenever the composer is expanded, a picker is open, or the turn is awaiting user input. Escape also calls `editor.focus()` on every platform: the AI extension restores focus only where focusing raises no soft keyboard, so on a phone the caret stayed stuck in the prompt box until the reader tapped the page — the reported “Escape twice to get back to the editor”. A composition guard was added too: a `compositionstart`/`compositionend` ref means the IME owns every key while it composes, including the cancel Escape some Android IMEs deliver with `isComposing` already false, so that key no longer tears the menu down mid-composition and wedges the keyboard. The commit timestamp lives in a ref rather than the effect-local variable, because the keydown effect re-mounts on every picker/menu change and used to forget the commit it was still guarding.
+- **Per-request AI cancellation and live text streaming on web** — Web cancel state moved from a single in-flight slot to a map of `Set<AbortController>` keyed by request id, so concurrent turns — an AI panel edit next to a commit-message summary — each own their handle: a late Stop targets exactly one id, a turn that finishes no longer clears another turn's slot, duplicate ids are retained as a group so cancelling one aborts every matching turn, and id-less callers get an isolated `anon-N` slot, with a no-id `cancel_ai` aborting them all. On the transport side, `bufferText` is now driven by `useTools`: the tool-capable path still buffers and lets a meaningful tool op win, while the text-only fallback streams live again — restoring the reply as it types instead of flushing the whole thing once at the end.
+
 ## v0.1.7 — 2026-10-01
 
 ### Patch Release
