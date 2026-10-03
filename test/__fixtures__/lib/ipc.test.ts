@@ -183,4 +183,64 @@ describe('web IPC bridge', () => {
     await invoke('cancel_ai', { requestId: 'turn-2' })
     await expect(settled).resolves.toBe('aborted')
   })
+
+  it('keeps a slot per concurrent request so Stop hits only its own stream', async () => {
+    // Regression: a single shared slot meant a commit-message turn starting next
+    // to an AI-panel turn overwrote the panel's cancellation handle — a later
+    // Stop then aborted the wrong stream, and the turn that finished first cleared
+    // the other's slot, leaving it uncancellable.
+    const aborted = new Set<string>()
+    vi.stubGlobal('fetch', vi.fn((url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { requestId?: string }
+      if (!String(url).includes('ask_ai')) {
+        return Promise.resolve(new Response(JSON.stringify({ result: null }), { status: 200 }))
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener?.('abort', () => {
+          aborted.add(String(body.requestId))
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+        // Never resolves: each stream stays open until cancelled.
+      })
+    }))
+
+    const panel = invoke('ask_ai', { messages: '[]', requestId: 'panel' }).catch(() => 'aborted')
+    const commit = invoke('ask_ai', { messages: '[]', requestId: 'commit' }).catch(() => 'aborted')
+    // Let both `invoke` calls register their slots before Stop arrives.
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    // Stop the panel turn: the concurrent commit turn must keep running.
+    await invoke('cancel_ai', { requestId: 'panel' })
+    await expect(panel).resolves.toBe('aborted')
+    expect(aborted.has('commit')).toBe(false)
+
+    // The panel turn finishing must not have cleared the commit turn's slot.
+    await invoke('cancel_ai', { requestId: 'commit' })
+    await expect(commit).resolves.toBe('aborted')
+  })
+
+  it('aborts every in-flight stream when cancel_ai carries no id', async () => {
+    const aborted = new Set<string>()
+    vi.stubGlobal('fetch', vi.fn((url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as { requestId?: string }
+      if (!String(url).includes('ask_ai')) {
+        return Promise.resolve(new Response(JSON.stringify({ result: null }), { status: 200 }))
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener?.('abort', () => {
+          aborted.add(String(body.requestId))
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+    }))
+
+    const first = invoke('ask_ai', { messages: '[]', requestId: 'a' }).catch(() => 'aborted')
+    const second = invoke('ask_ai', { messages: '[]', requestId: 'b' }).catch(() => 'aborted')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await invoke('cancel_ai', {})
+    await expect(first).resolves.toBe('aborted')
+    await expect(second).resolves.toBe('aborted')
+    expect(aborted).toEqual(new Set(['a', 'b']))
+  })
 })

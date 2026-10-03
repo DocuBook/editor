@@ -240,6 +240,14 @@ describe('createAiTransport tools-to-text fallback', () => {
       probeTools: { deepseek: { 'deepseek-v4-flash': true } },
     })
   }
+  /** Text-only provider (probe false) → Path B from the start, no fallback. */
+  const useTextOnly = () => {
+    useAiSettings.setState({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      probeTools: { deepseek: { 'deepseek-v4-flash': false } },
+    })
+  }
   /** Minimal BlockNote-ish editor. A document with one real block + cursor is
    *  required: Path B anchors its `add` op on the cursor block, and a missing
    *  block would yield an `undefined$` referenceId that is filtered out as a
@@ -316,6 +324,51 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(parts.some(p => p.type === 'text-delta')).toBe(true)
     // The tool-mode prose is never promoted into the document.
     expect(JSON.stringify(parts)).not.toContain('I cannot edit this document')
+  })
+
+  it('streams a text-only reply live instead of buffering it until the end', async () => {
+    // Regression: the refactor dropped `bufferText = useTools`, so a provider that
+    // is text-only from the start (Path B, no fallback) buffered the whole reply
+    // and flushed it once at the end — the "Path B streams live" contract was
+    // lost. A token that arrives while the provider stream is still open must be
+    // observable as a text-delta before the provider finishes.
+    useTextOnly()
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const id = String((JSON.parse(String(init?.body ?? '{}')) as { requestId?: string }).requestId ?? '')
+      const encoder = new TextEncoder()
+      return new Response(new ReadableStream<Uint8Array>({
+        async start(controller) {
+          controller.enqueue(encoder.encode(`event: ai:token\ndata: {"requestId":"${id}","token":"<content>Hello</content>"}\n\n`))
+          await gate // keep the provider stream open: a buffered turn emits nothing yet
+          controller.enqueue(encoder.encode(`event: ai:done\ndata: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`))
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+
+    const stream = await createAiTransport({ getEditor: editor }).sendMessages({
+      messages: [{ role: 'user', content: 'write something' }],
+      body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit doc', inputSchema: {} } } },
+    })
+    const reader = stream.getReader()
+    const parts: any[] = []
+    const deadline = Date.now() + 500
+    while (Date.now() < deadline && !parts.some(p => p.type === 'text-delta')) {
+      const r: any = await Promise.race([
+        reader.read(),
+        new Promise(resolve => setTimeout(() => resolve({ timeout: true }), deadline - Date.now())),
+      ])
+      if (r.timeout || r.done) break
+      parts.push(r.value)
+    }
+    expect(parts.some(p => p.type === 'text-delta')).toBe(true)
+    release()
+    for (;;) {
+      const r = await reader.read()
+      if (r.done) break
+    }
   })
 
   it('never writes a text-mode reply that carries no delimited payload', async () => {

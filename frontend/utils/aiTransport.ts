@@ -212,6 +212,10 @@ async function runSendMessages(
         /** Mutable: flipped to false once a text fallback turn is warranted. The
          *  prompt, capabilities and streaming behaviour all derive from it. */
         let useTools = supportsTools && !!tools;
+        /** Path A buffers text and decides at the end (meaningful tool ops win, so
+         *  live typing is skipped); Path B streams live. Without this a text-only
+         *  turn buffered the whole reply and flushed it once at the end. */
+        bufferText = useTools;
         /** Text-mode context (full markdown + selection) is only needed on Path B,
          *  but a Path A turn may fall back into it. Building it up front (instead of
          *  at the fallback site) keeps the selection read at its earliest, focused
