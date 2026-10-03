@@ -243,4 +243,28 @@ describe('web IPC bridge', () => {
     await expect(second).resolves.toBe('aborted')
     expect(aborted).toEqual(new Set(['a', 'b']))
   })
+
+  it('retains duplicate request ids so neither stream becomes uncancellable', async () => {
+    let abortCount = 0
+    vi.stubGlobal('fetch', vi.fn((url: string, init: any) => {
+      if (!String(url).includes('ask_ai')) {
+        return Promise.resolve(new Response(JSON.stringify({ result: null }), { status: 200 }))
+      }
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener?.('abort', () => {
+          abortCount++
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+    }))
+
+    const first = invoke('ask_ai', { messages: '[]', requestId: 'duplicate' }).catch(() => 'aborted')
+    const second = invoke('ask_ai', { messages: '[]', requestId: 'duplicate' }).catch(() => 'aborted')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await invoke('cancel_ai', { requestId: 'duplicate' })
+    await expect(first).resolves.toBe('aborted')
+    await expect(second).resolves.toBe('aborted')
+    expect(abortCount).toBe(2)
+  })
 })
