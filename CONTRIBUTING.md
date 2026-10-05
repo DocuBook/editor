@@ -5,7 +5,7 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 ## Prerequisites
 
 - **macOS** — desktop development only. CI uses macos-14 for lint/test/build; the WebKit E2E job requires macos-15 (the pinned Playwright WebKit build needs macOS 15+)
-- **Node.js** 22 — the version CI pins (`NODE_VERSION: "22"`); `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint
+- **Node.js** 22.12 or newer — CI pins `22.12.0` to satisfy Vitest's engine requirement; `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint
 - **npm**
 - **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically; includes `clippy` and `rustfmt`)
 - **Tauri v2 system dependencies** — see https://v2.tauri.app/start/prerequisites/
