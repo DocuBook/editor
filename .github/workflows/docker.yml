@@ -15,7 +15,7 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/docubook/editor
-  NODE_VERSION: "22"
+  NODE_VERSION: "22.12.0"
 
 permissions:
   contents: read
