@@ -7,6 +7,13 @@ use serde::{Deserialize, Serialize};
 
 pub mod mentions;
 
+/// Largest file the vault will read into memory in one call. One source of
+/// truth shared by the desktop IPC and the web API (`httpm::MAX_FILE_BYTES`
+/// aliases it) so the same vault cannot open a file in one runtime and reject
+/// it in the other. Kept modest because both paths materialize the whole file:
+/// desktop inlines it as a base64 data URL, web sends it as one response body.
+pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
     pub path: String,
@@ -270,12 +277,12 @@ impl Vault {
         Ok(data)
     }
 
-/** Read file content as UTF-8 string for desktop IPC callers. */
+/** Read file content as UTF-8 string for desktop IPC callers. Bounded by
+ *  `MAX_FILE_BYTES`, the same cap the web API enforces, so a huge note fails
+ *  the same way on both runtimes instead of freezing the desktop webview. */
     #[allow(dead_code)] // unused by the web server crate, retained for desktop IPC
     pub fn read_file(&self, path: &str) -> Result<String, String> {
-        let target = self.resolve_target(path).ok_or_else(|| format!("Read: not found: {path}"))?;
-        let data = std::fs::read(self.safe_path(&target)?).map_err(|e| format!("Read: {e}"))?;
-        Ok(String::from_utf8_lossy(&data).to_string())
+        self.read_bounded(path, MAX_FILE_BYTES)
     }
 
 /** Read UTF-8 content with a bounded allocation for web/API callers. */
@@ -296,7 +303,9 @@ impl Vault {
     pub fn read_file_binary(&self, path: &str) -> Result<String, String> {
         use base64::Engine;
         let f = self.safe_path(path)?;
-        let data = std::fs::read(&f).map_err(|e| format!("Read: {}", e))?;
+        // Same cap as text reads: a pathological image must not become a
+        // multi-hundred-MB base64 string pinned in the webview's DOM.
+        let data = Self::read_limited(&f, MAX_FILE_BYTES)?;
         Ok(base64::engine::general_purpose::STANDARD.encode(data))
     }
 /** Write content to a file, creating parent directories if needed. */
@@ -1068,6 +1077,20 @@ mod tests {
         assert!(v.read_file("roadmap.md").unwrap().contains("Roadmap"));
         // non-.md file without extension is NOT rewritten as .md
         assert!(v.read_file("plan").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_commands_enforce_the_shared_byte_cap() {
+        let dir = std::env::temp_dir().join(format!("vault-test-read-cap-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("big.bin"), vec![b'x'; (MAX_FILE_BYTES + 1) as usize]).unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        // Both desktop reads must reject exactly what the web API rejects,
+        // instead of allocating the whole oversized file unbounded.
+        assert!(v.read_file("big.bin").is_err());
+        assert!(v.read_file_binary("big.bin").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

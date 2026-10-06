@@ -265,12 +265,51 @@ export function isSafeImageUrl(url: string): boolean {
  * - Web:   `/api/file?path=…` (server endpoint, behind the same auth gate).
  */
 export async function fileUrl(vaultPath: string, relPath: string): Promise<string> {
-  const abs = `${vaultPath}/${relPath}`
   if (isTauri) {
     const b64 = await invoke<string>('read_file_binary', { path: relPath })
     return `data:${mimeFromPath(relPath)};base64,${b64}`
   }
-  return `/api/file?path=${encodeURIComponent(abs)}`
+  return webFileUrl(vaultPath, relPath)
+}
+
+/** The web counterpart of `read_file_binary`: a same-origin URL the browser
+ *  fetches itself, behind the shared auth gate. */
+function webFileUrl(vaultPath: string, relPath: string): string {
+  return `/api/file?path=${encodeURIComponent(`${vaultPath}/${relPath}`)}`
+}
+
+/** Mirrors `vault::MAX_FILE_BYTES` on the server (16 MiB). Kept as a literal so
+ *  the message reads naturally; the server remains the actual enforcer. */
+const MEDIA_TOO_LARGE = 'File too large to preview (16 MB limit)'
+
+/** Map a failed media read to a human reason.
+ *  Desktop: `read_file_binary` rejects with the backend's message (the size cap
+ *  included), so translate that. Web has no error here — fileUrl only builds a
+ *  URL — and is handled by `mediaFailureReason` when the <img> fails. */
+export function mediaErrorMessage(error: unknown): string {
+  return /too large/i.test(String(error)) ? MEDIA_TOO_LARGE : 'Could not load preview'
+}
+
+/** Reason a media preview failed on web, where the browser reports a bare
+ *  <img> error with no status. One HEAD request, issued only from the failure
+ *  path, distinguishes missing / outside-vault / oversized instead of leaving a
+ *  generic placeholder that hides which one it was. */
+export async function mediaFailureReason(vaultPath: string, relPath: string): Promise<string> {
+  if (isTauri) return 'Could not load preview'
+  try {
+    const res = await fetch(webFileUrl(vaultPath, relPath), {
+      method: 'HEAD',
+      credentials: 'same-origin',
+    })
+    if (res.ok) return 'Could not load preview'
+    if (res.status === 413) return MEDIA_TOO_LARGE
+    if (res.status === 403) return 'File is outside the active vault'
+    if (res.status === 404) return 'File not found'
+    if (res.status === 401) return 'Session expired — sign in again'
+    return `Could not load preview (HTTP ${res.status})`
+  } catch {
+    return 'Cannot reach server'
+  }
 }
 
 /** macOS privacy panes the app can deep-link to. Kept in one place so both the

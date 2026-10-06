@@ -689,6 +689,83 @@ mod api_tests {
         assert_eq!(body, "file too large");
     }
 
+    /// A vault file is served with an ETag (its content hash) and revalidates to
+    /// 304, so an image is downloaded once and only re-confirmed afterwards.
+    #[tokio::test]
+    async fn file_route_revalidates_with_etag() {
+        let (app, data_dir) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "password1"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let vault = data_dir.join("vaults/media");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(vault.join("image.png"), b"png-data").unwrap();
+        let (status, _, body) = post_with(
+            &app,
+            "/api/open_vault",
+            json!({"path": vault.to_string_lossy()}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let url = format!(
+            "/api/file?path={}",
+            vault.join("image.png").to_string_lossy()
+        );
+
+        let (status, headers, _) = get_with(&app, &url, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+        let etag = headers
+            .get(header::ETAG)
+            .expect("etag")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "private, no-cache");
+
+        // HEAD is what the frontend's media-failure probe uses: axum serves it
+        // from this GET route with the body stripped, so the probe learns the
+        // status without downloading bytes.
+        let layered = app
+            .clone()
+            .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+        let head = layered
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("HEAD")
+                    .uri(&url)
+                    .header(header::COOKIE, &cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(head.status(), StatusCode::OK);
+        assert!(
+            axum::body::to_bytes(head.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        // Same content hash → 304 with no body: the browser keeps its copy.
+        let req = Request::builder()
+            .method("GET")
+            .uri(&url)
+            .header(header::COOKIE, &cookie)
+            .header(header::IF_NONE_MATCH, &etag)
+            .body(Body::empty())
+            .unwrap();
+        let resp = layered.oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(resp.headers().get(header::ETAG).unwrap(), etag.as_str());
+    }
+
     #[tokio::test]
     async fn path_allowlist_blocks_escape_via_api() {
         let (app, data_dir) = router();
