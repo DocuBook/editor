@@ -68,6 +68,26 @@ export function hasTextSelection(editor: any): boolean {
   }
 }
 
+/** Drop the AI session's remembered selection and collapse the live range it
+ *  left behind.
+ *
+ *  Accept/reject rewrites the blocks the request was about, so the old range is
+ *  stale — and BlockNote keys its formatting toolbar on any non-empty
+ *  selection. Left in place, that selection re-arms the toolbar (the
+ *  text-selection popover) the moment the AI menu closes and the caret returns
+ *  to the editor. Collapsing hands the caret back to the document without
+ *  re-showing the toolbar. */
+export function releaseAISelection(editor: any): void {
+  if (editor && typeof editor === "object") aiSelectionSnapshots.delete(editor);
+  try {
+    const blocks = editor?.getSelection?.()?.blocks;
+    const blockId = blocks?.[blocks.length - 1]?.id;
+    if (blockId) editor.setTextCursorPosition?.(blockId, "end");
+  } catch {
+    /* the range can be gone after a rejected document replace */
+  }
+}
+
 /** Restore exact text offsets; BlockNote.setSelection selects whole blocks and
  * throws for the common single-block selection case. */
 export function restoreAISelection(editor: any): boolean {

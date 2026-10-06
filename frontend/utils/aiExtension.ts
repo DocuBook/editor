@@ -1,7 +1,7 @@
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { createAiTransport } from './aiTransport'
-import { buildHtmlDocumentState, hasAISelection, restoreAISelection } from './aiBlocks'
+import { buildHtmlDocumentState, hasAISelection, releaseAISelection, restoreAISelection } from './aiBlocks'
 import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
@@ -274,13 +274,20 @@ const extensionFactory = ({ editor, options }: any) => {
     store.setState({ aiMenuState: next })
   }
 
-  const close = () => {
+  const close = (collapseSelection = false) => {
     session = undefined
     cancelReveal()
     clearWritingCursor()
     editor.getExtension('showSelection')?.showSelection?.(false, 'aiMenu')
     editor.isEditable = true
     store.setState({ aiMenuState: 'closed' })
+    /** Accept/reject leaves the request's text selection live, and BlockNote
+     *  re-shows its formatting toolbar for any focused non-empty selection — so
+     *  the toolbar (the text-selection popover) popped back up right after the
+     *  result was accepted or reverted. Collapsing the stale range first keeps
+     *  the caret while the toolbar stays down. A plain dismiss (Escape, a tap
+     *  away) keeps the reader's selection for a retry. */
+    if (collapseSelection) releaseAISelection(editor)
     /** The caret restore waits for the user's own tap on a system whose focus
      *  raises the IME (see utils/softKeyboard): the AI composer is still on
      *  screen when its menu closes (collapsing the prompt panel, accepting,
@@ -294,7 +301,7 @@ const extensionFactory = ({ editor, options }: any) => {
 
   const reject = () => {
     if (session?.before) editor.replaceBlocks(editor.document.map((block: any) => block.id), session.before)
-    close()
+    close(true)
   }
 
   return {
@@ -328,8 +335,8 @@ const extensionFactory = ({ editor, options }: any) => {
       editor.isEditable = false
       store.setState({ aiMenuState: { blockId, status: 'user-input' } })
     },
-    closeAIMenu: close,
-    acceptChanges: close,
+    closeAIMenu: () => close(),
+    acceptChanges: () => close(true),
     rejectChanges: reject,
     async abort(reason?: any) {
       if (!session) return

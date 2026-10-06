@@ -379,6 +379,12 @@ export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: b
      would leave the caret suppressed (see ToolbarComponents). */
   useEffect(() => clearToolbarPopups, [])
 
+  /* A locked (read-only) editor has no formatting to offer, and the AI locks it
+     while its menu is open. Upstream's block controls already render nothing in
+     that state (see InsertBlockButton); gating the whole row keeps the bubble
+     from re-appearing over the document mid-run, before the AI menu closes. */
+  if (!editor.isEditable) return null
+
   // Both branches keep the upstream array order — only the split point moves.
   if (!compact) {
     return (
