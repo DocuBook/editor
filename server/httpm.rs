@@ -2,7 +2,14 @@
 use super::*;
 use tokio::io::AsyncReadExt;
 
-pub(crate) const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
+/// Shared with the desktop IPC path — see `vault::MAX_FILE_BYTES` for why one
+/// number governs both runtimes.
+pub(crate) const MAX_FILE_BYTES: u64 = crate::vault::MAX_FILE_BYTES;
+
+/// Vault files are session-gated (`private`) and may change on disk at any
+/// time, so they revalidate every request (`no-cache`) against the `ETag`
+/// below instead of being cached blindly.
+const FILE_CACHE_CONTROL: &str = "private, no-cache";
 
 pub(crate) async fn security_headers(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
@@ -65,6 +72,7 @@ pub(crate) async fn health_route(state: State<AppState>) -> Response {
 pub(crate) async fn file_route(
     state: State<AppState>,
     Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
 ) -> Response {
     let Some(path) = params.get("path") else {
         return (StatusCode::BAD_REQUEST, "missing path").into_response();
@@ -100,9 +108,36 @@ pub(crate) async fn file_route(
         return (StatusCode::PAYLOAD_TOO_LARGE, "file too large").into_response();
     }
     let mime = mime_guess::from_path(&abs).first_or_octet_stream();
+    // Content hash doubles as the validator: the same token the editor uses for
+    // optimistic writes, so a renamed-in-place file revalidates to 304 and the
+    // browser skips re-downloading bytes it already has.
+    let etag = format!("\"{}\"", crate::vault::content_version(&bytes));
+    let fresh = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            value
+                .split(',')
+                .any(|tag| tag.trim().trim_start_matches("W/") == etag)
+        });
+    if fresh {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, FILE_CACHE_CONTROL),
+            ],
+            (),
+        )
+            .into_response();
+    }
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, mime.as_ref())],
+        [
+            (header::CONTENT_TYPE, mime.as_ref()),
+            (header::ETAG, etag.as_str()),
+            (header::CACHE_CONTROL, FILE_CACHE_CONTROL),
+        ],
         bytes,
     )
         .into_response()

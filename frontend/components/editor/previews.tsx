@@ -1,7 +1,7 @@
 /** Non-editor file previews — binary (image → inline) and plain text. */
 import { useEffect, useMemo, useState, useRef, memo } from 'react'
 import { EyeOff } from 'lucide-react'
-import { fileUrl } from '../../lib/ipc'
+import { fileUrl, mediaErrorMessage, mediaFailureReason } from '../../lib/ipc'
 import { highlightMarkdown, markdownTokenClass, type MarkdownToken } from '../../utils/markdownHighlight'
 import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 
@@ -9,28 +9,38 @@ import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 
 /** Image file preview — render the image inline instead of the EyeOff placeholder. */
 export function ImagePreview({ fileName, vaultPath, relPath }: { fileName: string; vaultPath: string; relPath: string }) {
-  const [src, setSrc] = useState<string | null>(null)
-  const [failed, setFailed] = useState(false)
+  const target = JSON.stringify([vaultPath, relPath])
+  const [preview, setPreview] = useState<{ target: string; src: string | null; error: string | null } | null>(null)
   useEffect(() => {
     let alive = true
-    fileUrl(vaultPath, relPath).then(u => { if (alive) setSrc(u) }).catch(() => { if (alive) setFailed(true) })
+    fileUrl(vaultPath, relPath)
+      .then(src => { if (alive) setPreview({ target, src, error: null }) })
+      .catch(e => { if (alive) setPreview({ target, src: null, error: mediaErrorMessage(e) }) })
     return () => { alive = false }
-  }, [vaultPath, relPath])
-  if (failed) return <PreviewFallback fileName={fileName} />
-  if (!src) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
+  }, [target, vaultPath, relPath])
+  const currentPreview = preview?.target === target ? preview : null
+  if (currentPreview?.error) return <PreviewFallback fileName={fileName} message={currentPreview.error} />
+  if (!currentPreview?.src) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
   return (
     <div className="h-full w-full flex items-center justify-center p-6 overflow-auto">
-      <img src={src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => setFailed(true)} />
+      {/* Desktop inlines bytes, so a render error here is already recovered by
+          fileUrl; on web the <img> fetch is where a 404/403/413 surfaces, and
+          this turns the bare error into the real reason. */}
+      <img src={currentPreview.src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => {
+        void mediaFailureReason(vaultPath, relPath).then(message => {
+          setPreview(prev => prev?.target === target ? { ...prev, error: message } : prev)
+        })
+      }} />
     </div>
   )
 }
 
-/** Fallback UI for binary file types that can't be previewed as text. */
-function PreviewFallback({ fileName }: { fileName: string }) {
+/** Fallback UI for files that can't be previewed, naming the reason when known. */
+function PreviewFallback({ fileName, message }: { fileName: string; message: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-foreground-subtle gap-3">
       <EyeOff size={32} strokeWidth={1.5} />
-      <span className="text-sm"><span className="text-foreground-subtle">{fileName}</span> — preview only</span>
+      <span className="text-sm"><span className="text-foreground-subtle">{fileName}</span> — {message}</span>
     </div>
   )
 }

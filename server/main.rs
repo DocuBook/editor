@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex};
 
 use axum::extract::Request;
 use axum::extract::{ConnectInfo, Path as AxPath, Query, State};
-use axum::http::{header, HeaderName, HeaderValue, StatusCode};
+use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
