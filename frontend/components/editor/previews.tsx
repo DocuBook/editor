@@ -9,23 +9,28 @@ import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 
 /** Image file preview — render the image inline instead of the EyeOff placeholder. */
 export function ImagePreview({ fileName, vaultPath, relPath }: { fileName: string; vaultPath: string; relPath: string }) {
-  const [src, setSrc] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const target = JSON.stringify([vaultPath, relPath])
+  const [preview, setPreview] = useState<{ target: string; src: string | null; error: string | null } | null>(null)
   useEffect(() => {
     let alive = true
     fileUrl(vaultPath, relPath)
-      .then(u => { if (alive) setSrc(u) })
-      .catch(e => { if (alive) setError(mediaErrorMessage(e)) })
+      .then(src => { if (alive) setPreview({ target, src, error: null }) })
+      .catch(e => { if (alive) setPreview({ target, src: null, error: mediaErrorMessage(e) }) })
     return () => { alive = false }
-  }, [vaultPath, relPath])
-  if (error) return <PreviewFallback fileName={fileName} message={error} />
-  if (!src) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
+  }, [target, vaultPath, relPath])
+  const currentPreview = preview?.target === target ? preview : null
+  if (currentPreview?.error) return <PreviewFallback fileName={fileName} message={currentPreview.error} />
+  if (!currentPreview?.src) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
   return (
     <div className="h-full w-full flex items-center justify-center p-6 overflow-auto">
       {/* Desktop inlines bytes, so a render error here is already recovered by
           fileUrl; on web the <img> fetch is where a 404/403/413 surfaces, and
           this turns the bare error into the real reason. */}
-      <img src={src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => { void mediaFailureReason(vaultPath, relPath).then(setError) }} />
+      <img src={currentPreview.src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => {
+        void mediaFailureReason(vaultPath, relPath).then(message => {
+          setPreview(prev => prev?.target === target ? { ...prev, error: message } : prev)
+        })
+      }} />
     </div>
   )
 }
