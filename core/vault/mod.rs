@@ -19,6 +19,7 @@ pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const SNAPSHOT_ROOT: &str = ".docubook";
 /// Directory (under [`SNAPSHOT_ROOT`]) holding one JSON snapshot per document.
 const SNAPSHOT_DIR: &str = ".docubook/wysiwyg";
+const MAX_SNAPSHOT_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
@@ -103,6 +104,7 @@ pub struct Vault {
     /// the difference between a few ms and a few hundred on a large vault.
     markdown: RefCell<Option<Arc<Vec<String>>>>,
     checked_write_lock: Mutex<()>,
+    snapshot_lock: Mutex<()>,
 }
 
 impl Vault {
@@ -110,7 +112,7 @@ impl Vault {
     pub fn new(path: &str) -> Result<Self, String> {
         let root = PathBuf::from(path);
         if !root.is_dir() { return Err(format!("Not a directory: {}", path)); }
-        Ok(Self { root, renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()) })
+        Ok(Self { root, renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()), snapshot_lock: Mutex::new(()) })
     }
 /** Get the vault root path. Used by both crates: file serving and the wiki
      *  index reads. */
@@ -409,11 +411,13 @@ impl Vault {
     /// or unreadable snapshot therefore degrades to "no formatting", never to an
     /// error the editor has to surface.
     pub fn read_snapshot(&self, doc_path: &str) -> Result<Option<String>, String> {
+        let _guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         let f = self.safe_path(&Self::snapshot_path(doc_path))?;
-        match std::fs::read(&f) {
+        match Self::read_limited(&f, MAX_SNAPSHOT_BYTES) {
             Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).to_string())),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(format!("Read: {e}")),
+            Err(e) if e == "Read: file too large" => Ok(None),
+            Err(_) if !f.exists() => Ok(None),
+            Err(e) => Err(e),
         }
     }
 
@@ -421,6 +425,7 @@ impl Vault {
     /// tree/search caches: [`SNAPSHOT_ROOT`] is an ignored entry, so nothing those
     /// caches read can change — and this runs on every autosave.
     pub fn write_snapshot(&self, doc_path: &str, content: &str) -> Result<(), String> {
+        let _guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         let f = self.safe_path(&Self::snapshot_path(doc_path))?;
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         std::fs::write(&f, content).map_err(|e| e.to_string())?;
@@ -521,6 +526,7 @@ impl Vault {
 /** Move to trash. macOS uses Finder's system Trash; web/Docker and other
  *  platforms use `.trash/` inside the vault so list/restore remain available. */
     pub fn delete_file(&self, path: &str) -> Result<(), String> {
+        let _snapshot_guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         if path.is_empty() || path == "." || path == ".trash" || path.starts_with(".trash/") {
             return Err("Invalid trash target".to_string());
         }
@@ -637,6 +643,7 @@ impl Vault {
 
 /** Rename/move a file or directory. */
     pub fn rename_file(&self, from: &str, to: &str) -> Result<(), String> {
+        let _snapshot_guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         let src = self.safe_path(from)?;
         let dst = self.safe_path(to)?;
         let is_dir = std::fs::symlink_metadata(&src).map(|m| m.file_type().is_dir()).unwrap_or(false);
@@ -652,6 +659,7 @@ impl Vault {
  *  Returns the vault-relative path of the copy (the name is final only after
  *  the collision walk, so the caller cannot predict it). */
     pub fn copy_path(&self, from: &str, to_dir: &str) -> Result<String, String> {
+        let _snapshot_guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         let src = self.safe_path(from)?;
         let dst_dir = self.safe_path(to_dir)?;
         if !src.exists() {
@@ -689,6 +697,7 @@ impl Vault {
  *  A move within the same folder is a no-op. Returns the vault-relative path
  *  the entry landed at. */
     pub fn move_path(&self, from: &str, to_dir: &str) -> Result<String, String> {
+        let _snapshot_guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         let src = self.safe_path(from)?;
         let dst_dir = self.safe_path(to_dir)?;
         if !src.exists() {
@@ -789,14 +798,14 @@ mod tests {
 
     #[test]
     fn vault_name_from_directory() {
-        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()) };
+        let v = Vault { root: PathBuf::from("/some/path/my-vault"), renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()), snapshot_lock: Mutex::new(()) };
         assert_eq!(v.name(), "my-vault");
     }
 
     #[test]
     fn vault_name_root() {
         // root's file_name is None on some platforms, empty on others
-        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()) };
+        let v = Vault { root: PathBuf::from("/"), renderable: RefCell::new(None), markdown: RefCell::new(None), checked_write_lock: Mutex::new(()), snapshot_lock: Mutex::new(()) };
         assert_eq!(v.name(), "");
     }
 
@@ -1330,6 +1339,8 @@ mod tests {
         let payload = r##"{"markdown":"# A\n","blocks":[]}"##;
         v.write_snapshot("notes/a.md", payload).unwrap();
         assert_eq!(v.read_snapshot("notes/a.md").unwrap().as_deref(), Some(payload));
+        std::fs::write(dir.join(".docubook/wysiwyg/notes/large.md.json"), vec![b'x'; MAX_SNAPSHOT_BYTES as usize + 1]).unwrap();
+        assert!(v.read_snapshot("notes/large.md").unwrap().is_none());
         // Nested parent directories are created for the snapshot path.
         assert!(dir.join(".docubook/wysiwyg/notes/a.md.json").exists());
 
