@@ -54,6 +54,7 @@ permissions = [
   "allow-read-file",
   "allow-file-version",
   "allow-read-file-binary",
+  "allow-read-wysiwyg-snapshot",
   "allow-rename-file",
   "allow-resolve-mentions",
   "allow-restore-file",
@@ -68,7 +69,8 @@ permissions = [
   "allow-wiki-resolve",
   "allow-wiki-suggest",
   "allow-write-file",
-  "allow-write-file-checked"
+  "allow-write-file-checked",
+  "allow-write-wysiwyg-snapshot"
 ]
 
 
@@ -721,4 +723,3 @@ commands.allow = ["wiki_resolve"]
 identifier = "deny-wiki-resolve"
 description = "Denies the wiki_resolve command."
 commands.deny = ["wiki_resolve"]
-
