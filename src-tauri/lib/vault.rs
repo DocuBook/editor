@@ -212,6 +212,28 @@ pub fn write_file_checked(
     serde_json::to_string(&outcome).map_err(|e| e.to_string())
 }
 
+/// Read the WYSIWYG-only snapshot for `path` (empty string when absent). A
+/// disposable cache: the editor applies it only while its stored Markdown still
+/// matches the file, so a missing/stale snapshot just means "no formatting".
+#[tauri::command]
+pub fn read_wysiwyg_snapshot(path: &str, state: State<AppState>) -> Result<String, String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => Ok(v.read_snapshot(path)?.unwrap_or_default()),
+        None => Ok(String::new()),
+    }
+}
+
+/// Write the WYSIWYG-only snapshot for `path`. Never rescans the wiki and never
+/// invalidates the tree/search caches — the snapshot directory is an ignored
+/// entry and this is not a Markdown file.
+#[tauri::command]
+pub fn write_wysiwyg_snapshot(path: &str, content: &str, state: State<AppState>) -> Result<(), String> {
+    match state.vault.lock().expect("lock").as_ref() {
+        Some(v) => v.write_snapshot(path, content),
+        None => Err("No vault".to_string()),
+    }
+}
+
 #[tauri::command]
 pub fn create_file(path: &str, state: State<AppState>) -> Result<String, String> {
     let r = match state.vault.lock().expect("lock").as_ref() {

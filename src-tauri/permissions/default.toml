@@ -533,6 +533,16 @@ description = "Denies the read_file_binary command."
 commands.deny = ["read_file_binary"]
 
 [[permission]]
+identifier = "allow-read-wysiwyg-snapshot"
+description = "Enables the read_wysiwyg_snapshot command (WYSIWYG-only formatting cache)."
+commands.allow = ["read_wysiwyg_snapshot"]
+
+[[permission]]
+identifier = "deny-read-wysiwyg-snapshot"
+description = "Denies the read_wysiwyg_snapshot command."
+commands.deny = ["read_wysiwyg_snapshot"]
+
+[[permission]]
 identifier = "allow-rename-file"
 description = "Enables the rename_file command."
 commands.allow = ["rename_file"]
@@ -681,6 +691,16 @@ commands.allow = ["write_file_checked"]
 identifier = "deny-write-file-checked"
 description = "Denies the write_file_checked command."
 commands.deny = ["write_file_checked"]
+
+[[permission]]
+identifier = "allow-write-wysiwyg-snapshot"
+description = "Enables the write_wysiwyg_snapshot command (WYSIWYG-only formatting cache)."
+commands.allow = ["write_wysiwyg_snapshot"]
+
+[[permission]]
+identifier = "deny-write-wysiwyg-snapshot"
+description = "Denies the write_wysiwyg_snapshot command."
+commands.deny = ["write_wysiwyg_snapshot"]
 
 [[permission]]
 identifier = "allow-custom-ai-config"
