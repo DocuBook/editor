@@ -36,7 +36,8 @@ vi.mock('../../../frontend/utils/aiTransport', () => ({
   }),
 }))
 
-import { KeepAliveCache, createBlockEditor } from '../../../frontend/utils/editorFactory'
+import { KeepAliveCache, createBlockEditor, getCachedEditor } from '../../../frontend/utils/editorFactory'
+import { clearEditorCache } from '../../../frontend/utils/editorCache'
 
 /** The keep-alive cache is the pure, testable core of tab switching: one
  *  entry per path, created lazily, reused on every later lookup. The BlockNote
@@ -87,6 +88,40 @@ describe('createBlockEditor seeding', () => {
     expect(captured.parsed).toEqual([])
     expect(cached.loaded).toBe(false)
     expect(cached.loadedMarkdown).toBe(null)
+  })
+})
+
+/** Regression: the per-vault cache keeps its `create` closure for the vault's
+ *  whole lifetime, so a markdown captured there seeded EVERY later file with
+ *  the first-opened note. The new tab painted the previous document and then
+ *  re-parsed to its own — and that `replaceBlocks` rebuilds the math / code /
+ *  mermaid blocks, flashing their raw source. Seeding now happens per lookup. */
+describe('getCachedEditor seeding (per file)', () => {
+  beforeEach(() => {
+    clearEditorCache()
+    captured.parsed.length = 0
+    captured.replaced = 0
+  })
+
+  it('seeds each new file with its OWN markdown, never the first opened', () => {
+    const a = getCachedEditor('/vault', 'notes/a.md', '# A')
+    const b = getCachedEditor('/vault', 'notes/b.md', '# B')
+
+    expect(a.loadedMarkdown).toBe('# A')
+    expect(b.loadedMarkdown).toBe('# B')
+    expect(captured.parsed).toEqual(['# A', '# B'])
+  })
+
+  it('does not re-seed (re-parse) an already-loaded hit on a tab switch', () => {
+    const a = getCachedEditor('/vault', 'notes/a.md', '# A')
+    getCachedEditor('/vault', 'notes/b.md', '# B')
+    captured.parsed.length = 0
+
+    const again = getCachedEditor('/vault', 'notes/a.md', '# A (ignored)')
+
+    expect(again).toBe(a)
+    expect(again.loadedMarkdown).toBe('# A')
+    expect(captured.parsed).toEqual([])
   })
 })
 
