@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useVaultStore, type FileInfo } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
+import { pollGitStatus } from '../stores/gitStatus'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
 import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
@@ -118,6 +119,10 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     closeContextMenu()
     setActivePanel(panel)
     if (panel === 'trash') await loadTrash()
+    // Changes reads the shared git-status store, which only refreshes on actions,
+    // focus, and vault changes. Entering the tab re-probes so an external commit or
+    // a terminal `git init` is reflected without waiting for the next focus event.
+    else if (panel === 'git') await pollGitStatus(true)
   }
   const runTrashAction = async (command: 'restore_file' | 'delete_trash_item', items: TrashItem[]) => {
     const failed: unknown[] = []
