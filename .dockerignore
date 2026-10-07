@@ -2,6 +2,7 @@
 node_modules
 src-tauri/target
 server/target
+core/target
 dist
 data
 *.log

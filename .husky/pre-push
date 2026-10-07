@@ -18,17 +18,37 @@ sync_cargo_root_version() {  # $1 = crate dir, $2 = crate name
   ' "$lock" > "$lock.tmp" && mv "$lock.tmp" "$lock"
 }
 
-echo "🔄 Syncing lockfiles (package-lock.json, Cargo.lock ×2)..."
+# Rewrite one dependency's version inside a consumer lock (used for the shared
+# `core` crate, which is a path dependency of both consumers).
+sync_dependency_version() {  # $1 = lock file, $2 = crate name, $3 = version
+  awk -v target="$2" -v ver="$3" '
+    /^\[\[package\]\]/ { in_target = 0 }
+    /^name = "/ {
+      n = $0; sub(/^name = "/, "", n); sub(/".*/, "", n)
+      in_target = (n == target) ? 1 : 0
+    }
+    in_target && /^version = / { sub(/version = ".*"/, "version = \"" ver "\"") }
+    { print }
+  ' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
+}
+
+echo "🔄 Syncing lockfiles (package-lock.json, Cargo.lock ×3)..."
 npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1
+sync_cargo_root_version core docubook-core
 sync_cargo_root_version src-tauri docubook-desktop
 sync_cargo_root_version server docubook-server
+# core is a path dependency of both consumers, so its version also appears in
+# their locks — keep those entries aligned with core/Cargo.toml.
+core_v=$(grep '^version' core/Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+sync_dependency_version src-tauri/Cargo.lock docubook-core "$core_v"
+sync_dependency_version server/Cargo.lock docubook-core "$core_v"
 
 # Fail on drift: if a sync changed any lock, the push would ship a stale lock
 # and CI's audit gate would reject it. Require the author to commit the sync.
-if ! git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock; then
+if ! git diff --exit-code --quiet -- package-lock.json core/Cargo.lock src-tauri/Cargo.lock server/Cargo.lock; then
   echo "❌ Lockfiles were out of sync with manifests — synced (root version only)."
   echo "   Commit these changes and re-push:"
-  git diff --stat -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock
+  git diff --stat -- package-lock.json core/Cargo.lock src-tauri/Cargo.lock server/Cargo.lock
   exit 1
 fi
 

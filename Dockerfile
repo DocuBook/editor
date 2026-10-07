@@ -27,20 +27,18 @@ FROM rust:1.97-alpine AS server
 RUN apk add --no-cache musl-dev build-base cmake clang git perl
 WORKDIR /src
 # Compile dependencies before application sources so ordinary source changes reuse
-# the expensive release dependency layer.
+# the expensive release dependency layer. The shared `core` crate is a path
+# dependency, so its manifest must exist for this resolve step; a stub lib.rs
+# keeps the cache layer independent of core's sources.
+COPY core/Cargo.toml ./core/
+RUN printf '' > core/lib.rs
 COPY server/Cargo.toml server/Cargo.lock ./server/
 RUN printf 'fn main() {}\n' > server/main.rs \
     && cd server \
     && cargo build --release --locked \
     && rm main.rs
-# Reuse the desktop app's pure modules — the web crate includes them via #[path].
-COPY src-tauri/vault ./src-tauri/vault
-COPY src-tauri/git ./src-tauri/git
-COPY src-tauri/wiki ./src-tauri/wiki
-COPY src-tauri/search ./src-tauri/search
-COPY src-tauri/agent ./src-tauri/agent
-COPY src-tauri/rust-ai ./src-tauri/rust-ai
-COPY src-tauri/markdown.rs ./src-tauri/markdown.rs
+# Real sources: the shared engine (core) and the web server.
+COPY core ./core
 COPY server ./server
 RUN touch server/main.rs && cd server && cargo build --release --locked
 

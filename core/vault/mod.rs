@@ -218,7 +218,7 @@ impl Vault {
     /** Cached markdown file list (same order as `walk("", Markdown)`). Shared
      *  through `Arc` so callers — search per keystroke, the wiki index at open —
      *  never copy it or re-walk the vault. */
-    pub(crate) fn markdown_files(&self) -> Arc<Vec<String>> {
+    pub fn markdown_files(&self) -> Arc<Vec<String>> {
         if let Some(cached) = self.markdown.borrow().as_ref() { return cached.clone(); }
         let files = Arc::new(self.walk("", WalkKind::Markdown));
         *self.markdown.borrow_mut() = Some(files.clone());

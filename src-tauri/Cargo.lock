@@ -927,12 +927,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "docubook-core"
+version = "0.1.8"
+dependencies = [
+ "ammonia",
+ "base64 0.23.1",
+ "bytes",
+ "eventsource-stream",
+ "futures-util",
+ "git2",
+ "pulldown-cmark",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "trash",
+]
+
+[[package]]
 name = "docubook-desktop"
 version = "0.1.8"
 dependencies = [
  "ammonia",
  "base64 0.23.1",
  "bytes",
+ "docubook-core",
  "eventsource-stream",
  "futures-util",
  "git2",

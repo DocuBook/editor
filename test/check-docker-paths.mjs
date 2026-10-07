@@ -2,16 +2,13 @@
 /**
  * Container packaging guard.
  *
- * The web server reuses the desktop app's pure modules through
- * `#[path = "../src-tauri/…"]` includes, but the Dockerfile copies only the
- * paths it knows about. A new include therefore breaks `docker build` with
- * "couldn't read ../src-tauri/…" while every local cargo command still passes.
- *
- * Both directions are checked, so the copy list can neither miss an include nor
- * keep a stale one:
- *
- *   server/**\/*.rs  #[path = "../src-tauri/<p>"]  →  Dockerfile COPY src-tauri/<p>
- *   Dockerfile COPY src-tauri/<p>                  →  some #[path] include
+ * The web server no longer reaches into the desktop app through
+ * `#[path = "../src-tauri/…"]` includes: the shared engine lives in the `core/`
+ * crate, which both runtimes depend on by path. Because the Dockerfile copies
+ * only what it knows about, a server that silently re-introduced such an include
+ * — or a Dockerfile that forgot to package `core/` — would break `docker build`
+ * while every local cargo command still passes. Both failure modes are checked,
+ * so the image can never drift from the crate layout.
  *
  * Run: node test/check-docker-paths.mjs
  */
@@ -28,42 +25,30 @@ const sources = readdirSync(serverDir)
   .map((name) => readFileSync(join(serverDir, name), "utf8"))
   .join("\n");
 
-/** `../src-tauri/git/mod.rs` → `src-tauri/git` (the directory holding the module). */
-const included = new Set();
-for (const match of sources.matchAll(/#\[path = "\.\.\/(src-tauri\/[^"]+)"\]/g)) {
-  const parts = match[1].split("/");
-  // A `mod.rs` (or a bare file like markdown.rs) is addressed by its parent path.
-  const path = parts[parts.length - 1] === "mod.rs"
-    ? parts.slice(0, -1).join("/")
-    : parts.join("/");
-  included.add(path);
-}
-
-const copied = new Set(
-  [...dockerfile.matchAll(/^COPY\s+(src-tauri\/\S+)/gm)].map((m) => m[1]),
-);
-
 const failures = [];
-for (const path of included) {
-  if (!copied.has(path)) {
-    failures.push(`Dockerfile: no "COPY ${path}" for the #[path] include in server/`);
-  }
+
+// Shared modules must stay in the `core` crate. A `../src-tauri/…` include would
+// escape this package (breaking rust-analyzer) and silently re-tie the image to
+// a hand-maintained COPY list.
+for (const match of sources.matchAll(/#\[path = "\.\.\/src-tauri\/[^"]+"\]/g)) {
+  failures.push(
+    `server/: ${match[0]} reaches into src-tauri — move the module into core/ and depend on it`,
+  );
 }
-for (const path of copied) {
-  if (!included.has(path)) {
-    failures.push(`Dockerfile: "COPY ${path}" is stale — no server #[path] include uses it`);
+
+// The image must package the shared crate: its manifest for the dependency-cache
+// resolve step, and its sources for the final build.
+for (const required of ["core/Cargo.toml", "core "]) {
+  if (!dockerfile.includes(`COPY ${required}`)) {
+    failures.push(`Dockerfile: missing "COPY ${required.trim()}" for the core crate`);
   }
 }
 
 if (failures.length) {
   console.error(`Container packaging failed (${failures.length}):`);
   for (const failure of failures) console.error(`  - ${failure}`);
-  console.error(
-    "Fix: keep the Dockerfile src-tauri COPY lines and the #[path] includes in " +
-      "server/ in sync.",
-  );
   process.exit(1);
 }
 console.log(
-  `Docker paths OK — ${included.size} shared src-tauri paths copied and used`,
+  "Docker paths OK — core crate is packaged and no server source escapes into src-tauri",
 );

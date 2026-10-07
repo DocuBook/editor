@@ -32,7 +32,7 @@ jobs:
         run: npx tsc -b
       - name: ACL guard (every Tauri command has an allow entry)
         run: node test/check-acl.mjs
-      - name: Docker path guard (shared src-tauri modules are copied)
+      - name: Docker path guard (shared core crate is packaged)
         run: node test/check-docker-paths.mjs
       - name: Frontend tests
         run: npm test
@@ -70,6 +70,7 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            core/target
             src-tauri/target
             server/target
           key: cargo-macos14-test-${{ hashFiles('**/Cargo.lock') }}
@@ -77,10 +78,14 @@ jobs:
             cargo-macos14-test-
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Shared engine test (core)
+        run: cargo test --manifest-path core/Cargo.toml
       - name: Web server test (server)
         run: cargo test --manifest-path server/Cargo.toml
       - name: Cargo clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+      - name: Cargo clippy (shared engine)
+        run: cargo clippy --manifest-path core/Cargo.toml -- -D warnings
   e2e:
     # macOS 15 required: the standard Playwright WebKit build (1.62+) needs
     # macOS 15+ — older runners can only run an older WebKit that rejects the
@@ -156,12 +161,15 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
+            core/target
             server/target
           key: cargo-ubuntu-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-ubuntu-test-
       - name: Cargo test (web server, Linux)
         run: cargo test --manifest-path server/Cargo.toml
+      - name: Cargo test (shared engine, Linux)
+        run: cargo test --manifest-path core/Cargo.toml
 
   security:
     runs-on: ubuntu-22.04
@@ -181,6 +189,7 @@ jobs:
           cargo install cargo-audit --locked
           cd src-tauri && cargo audit
           cd ../server && cargo audit
+          cd ../core && cargo audit
 
   build:
     # Run on PRs too — build is a required branch-protection check, and this

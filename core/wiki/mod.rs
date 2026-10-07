@@ -29,6 +29,7 @@ pub struct Suggestion { pub path: String, pub title: String }
 /// user input.
 /// The link graph is built on first use (`ensure_links`), because extracting it
 /// reads every markdown file — see the note on `links`.
+#[derive(Default)]
 pub struct WikiIndex {
     /// rel path -> normalized link targets
     links: RefCell<HashMap<String, Vec<String>>>,
@@ -49,14 +50,7 @@ pub struct WikiIndex {
 impl WikiIndex {
 /** Create an empty wiki index. Call `scan()` to populate. */
     pub fn new() -> Self {
-        Self {
-            links: RefCell::new(HashMap::new()),
-            links_built: Cell::new(false),
-            files: Arc::new(Vec::new()),
-            name_to_path: HashMap::new(),
-            suffix_keys: RefCell::new(HashMap::new()),
-            suffixes_built: Cell::new(false),
-        }
+        Self::default()
     }
 /** Index the markdown file list (name→path resolution + the list itself) with
  *  no file reads.

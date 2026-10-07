@@ -4,16 +4,14 @@
 //! each with its own unit tests); this file only owns shared state and the
 //! app bootstrap (`run`).
 
-// Backing logic modules (file system, git, wiki index, search, agent, ...).
-mod vault;
-mod wiki;
-mod git;
-mod search;
-mod agent;
+// Shared pure modules (file system, git, wiki index, search, agent, markdown)
+// now live in the `docubook-core` crate, which the web server also depends on.
+// Re-export them at the crate root so the command layer keeps addressing them
+// as `crate::vault`, `crate::git`, … with no path changes.
+pub(crate) use docubook_core::{agent, git, markdown, rust_ai, search, vault, wiki};
+
+// Desktop-only: OS keychain access (never compiled into the web server).
 mod keychain;
-mod markdown;
-#[path = "rust-ai/mod.rs"]
-pub(crate) mod rust_ai;
 
 // Command layer — one module per responsibility. Files live in `lib/`;
 // the module is named `commands` because `lib` collides with the crate root
