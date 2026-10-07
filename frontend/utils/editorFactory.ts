@@ -117,9 +117,18 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
  *
  *  `markdown` seeds a MISS (see createBlockEditor). A hit is already loaded,
  *  so it is ignored: re-parsing on every lookup would throw away undo history
- *  and the in-flight edit state the cache exists to keep. */
+ *  and the in-flight edit state the cache exists to keep.
+ *
+ *  Seeding happens HERE, not inside the cache's `create`. That factory is fixed
+ *  for the whole vault, so closing over `markdown` made whichever file opened
+ *  first seed every later file: the new tab painted the PREVIOUS note and then
+ *  re-parsed to its own — and that `replaceBlocks` rebuilds the math / code /
+ *  mermaid blocks, flashing their raw source until each one re-renders. */
 export function getCachedEditor(vaultPath: string, filePath: string, markdown?: string): CachedEditor {
-  return getEditorCache<CachedEditor>(vaultPath, path => createBlockEditor(vaultPath, path, markdown)).get(filePath);
+  const cached = getEditorCache<CachedEditor>(vaultPath, path => createBlockEditor(vaultPath, path)).get(filePath)
+  // A hit is already loaded; only a fresh entry is seeded, with its OWN markdown.
+  if (markdown !== undefined && !cached.loaded) loadMarkdownIntoEditor(cached, markdown)
+  return cached
 }
 
 /** Same cache, read-only: returns an already-created instance or null. Lets a
