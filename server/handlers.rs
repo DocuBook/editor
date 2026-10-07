@@ -143,6 +143,8 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "file_version" => sync(state, cmd, args),
         "write_file" => sync(state, cmd, args),
         "write_file_checked" => sync(state, cmd, args),
+        "read_wysiwyg_snapshot" => sync(state, cmd, args),
+        "write_wysiwyg_snapshot" => sync(state, cmd, args),
         "create_file" => sync(state, cmd, args),
         "create_directory" => sync(state, cmd, args),
         "copy_path" => sb(state, cmd, args).await,
@@ -286,6 +288,18 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
             r
         }
+        // WYSIWYG-only snapshot cache: never rescans the wiki (not Markdown) and
+        // never invalidates the tree/search caches (the dir is an ignored entry).
+        "read_wysiwyg_snapshot" => match state.vault.lock().expect("lock").as_ref() {
+            Some(v) => v.read_snapshot(&s("path")).map(|o| o.unwrap_or_default()),
+            None => Ok(String::new()),
+        },
+        "write_wysiwyg_snapshot" => match state.vault.lock().expect("lock").as_ref() {
+            Some(v) => v
+                .write_snapshot(&s("path"), &s("content"))
+                .map(|_| "null".into()),
+            None => Err("No vault".into()),
+        },
         "create_file" => {
             let r = match state.vault.lock().expect("lock").as_ref() {
                 Some(v) => v.create_file(&s("path")),

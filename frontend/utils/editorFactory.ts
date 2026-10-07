@@ -27,6 +27,7 @@ import { syntaxHighlighting } from './codeHighlighting'
 import { createAiTransport } from './aiTransport'
 import { createSelectionAwareDocumentStateBuilder } from './aiBlocks'
 import { getEditorCache, peekEditorCache } from './editorCache'
+import type { WysiwygSnapshot } from './wysiwygSnapshot'
 
 export interface CachedEditor {
   editor: BlockNoteEditor<any, any, any>
@@ -71,6 +72,38 @@ export function loadMarkdownIntoEditor(cached: CachedEditor, markdown: string): 
   }
 }
 
+/** Restore a document from a WYSIWYG snapshot — the same load contract as
+ *  `loadMarkdownIntoEditor` (seed the baseline before the parse, one no-history
+ *  transaction), but the blocks come from the snapshot cache instead of Markdown,
+ *  so formatting Markdown cannot represent (colour/alignment/indent) survives.
+ *
+ *  Callers MUST have validated `snapshot.markdown === markdown` first: the
+ *  snapshot is only trustworthy while it still describes the file. A failure here
+ *  returns `false` so the caller falls back to parsing the Markdown. */
+export function loadSnapshotIntoEditor(cached: CachedEditor, markdown: string, blocks: unknown[]): boolean {
+  const { editor } = cached
+  cached.loaded = true
+  cached.loadedMarkdown = markdown
+  try {
+    editor.transact((tr: any) => { tr.setMeta('addToHistory', false); editor.replaceBlocks(editor.document, blocks as any) })
+    return true
+  } catch (e) {
+    console.error('BlockNote snapshot load:', e)
+    return false
+  }
+}
+
+/** Seed a freshly-created instance: restore from the WYSIWYG snapshot when it
+ *  still describes `markdown`, otherwise parse the markdown. Returns whether the
+ *  snapshot was used. The snapshot is applied only while it matches AND carries
+ *  blocks; anything else (stale, absent, empty, unreadable) falls back to parsing. */
+export function seedCachedEditor(cached: CachedEditor, markdown: string, snapshot?: WysiwygSnapshot | null): boolean {
+  const restored = !!snapshot && snapshot.markdown === markdown && snapshot.blocks.length > 0
+    && loadSnapshotIntoEditor(cached, markdown, snapshot.blocks)
+  if (!restored) return loadMarkdownIntoEditor(cached, markdown)
+  return true
+}
+
 /** Create a fresh editor instance bound to the vault + file path.
  *  The AI transport closes over THIS instance. Active streams are settled by
  *  WysiwygEditor's exit hook before a tab switch detaches its view.
@@ -79,8 +112,12 @@ export function loadMarkdownIntoEditor(cached: CachedEditor, markdown: string): 
  *
  *  `markdown` is the instance's content, parsed here so the instance's FIRST
  *  render is the note itself (see loadMarkdownIntoEditor). Omitted only by
- *  callers with nothing to seed (unit tests). */
-export function createBlockEditor(vaultPath: string, filePath: string, markdown?: string): CachedEditor {
+ *  callers with nothing to seed (unit tests).
+ *
+ *  `snapshot` is the WYSIWYG-only cache for this file: when it still matches
+ *  `markdown` it is seeded INSTEAD of parsing, so the first paint already carries
+ *  formatting Markdown drops. It is otherwise ignored (see `loadSnapshotIntoEditor`). */
+export function createBlockEditor(vaultPath: string, filePath: string, markdown?: string, snapshot?: WysiwygSnapshot | null): CachedEditor {
   let editor!: BlockNoteEditor<any, any, any>
   editor = BlockNoteEditor.create({
     schema: getSchema(),
@@ -103,7 +140,7 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
     ],
   })
   const cached: CachedEditor = { editor, loaded: false, loadedMarkdown: null };
-  if (markdown !== undefined) loadMarkdownIntoEditor(cached, markdown)
+  if (markdown !== undefined) seedCachedEditor(cached, markdown, snapshot)
   return cached;
 }
 
@@ -119,15 +156,20 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
  *  so it is ignored: re-parsing on every lookup would throw away undo history
  *  and the in-flight edit state the cache exists to keep.
  *
+ *  `snapshot` is the file's WYSIWYG-only cache; a miss is seeded from it when it
+ *  still matches `markdown`, so the first paint already carries formatting
+ *  Markdown drops (see seedCachedEditor).
+ *
  *  Seeding happens HERE, not inside the cache's `create`. That factory is fixed
  *  for the whole vault, so closing over `markdown` made whichever file opened
  *  first seed every later file: the new tab painted the PREVIOUS note and then
  *  re-parsed to its own — and that `replaceBlocks` rebuilds the math / code /
  *  mermaid blocks, flashing their raw source until each one re-renders. */
-export function getCachedEditor(vaultPath: string, filePath: string, markdown?: string): CachedEditor {
+export function getCachedEditor(vaultPath: string, filePath: string, markdown?: string, snapshot?: WysiwygSnapshot | null): CachedEditor {
   const cached = getEditorCache<CachedEditor>(vaultPath, path => createBlockEditor(vaultPath, path)).get(filePath)
-  // A hit is already loaded; only a fresh entry is seeded, with its OWN markdown.
-  if (markdown !== undefined && !cached.loaded) loadMarkdownIntoEditor(cached, markdown)
+  // A hit is already loaded; only a fresh entry is seeded, with its OWN markdown
+  // (or its WYSIWYG snapshot when that still matches the markdown).
+  if (markdown !== undefined && !cached.loaded) seedCachedEditor(cached, markdown, snapshot)
   return cached
 }
 

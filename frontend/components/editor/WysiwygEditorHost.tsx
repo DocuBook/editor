@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { WysiwygEditor } from './WysiwygEditor'
 import { getCachedEditor, peekCachedEditor, type CachedEditor } from '../../utils/editorFactory'
+import { readWysiwygSnapshot } from '../../utils/wysiwygSnapshot'
 
 type Entry = { vaultPath: string; filePath: string; cached: CachedEditor }
 
@@ -31,7 +32,16 @@ export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, mark
   /* oxlint-disable react/set-state-in-effect -- creates the editor for a cache miss after mount */
   useEffect(() => {
     if (ready) return
-    setEntry({ vaultPath, filePath, cached: getCachedEditor(vaultPath, filePath, markdown) })
+    let cancelled = false
+    /* Read the WYSIWYG-only snapshot BEFORE creating the instance, so the first
+     * paint already carries the formatting Markdown drops. A miss — or a read
+     * that outlives this mount — falls back to the plain markdown seed. */
+    void (async () => {
+      const snapshot = await readWysiwygSnapshot(filePath)
+      if (cancelled) return
+      setEntry({ vaultPath, filePath, cached: getCachedEditor(vaultPath, filePath, markdown, snapshot) })
+    })()
+    return () => { cancelled = true }
   }, [ready, vaultPath, filePath, markdown])
   /* oxlint-enable react/set-state-in-effect */
 

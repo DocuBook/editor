@@ -26,6 +26,7 @@ import { installRenderCaches } from '../../utils/renderCacheInstall'
 import { followAiWritingCursorInRoot } from '../../utils/aiFollowScroll'
 import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../utils/markdownCursor'
 import { serializeMarkdown } from '../../utils/markdownSerialization'
+import { writeWysiwygSnapshot } from '../../utils/wysiwygSnapshot'
 import { refreshCodeHighlighting } from '../../utils/codeHighlighting'
 import { isCodeBlockHeaderField, setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { softKeyboardOnFocus } from '../../utils/softKeyboard'
@@ -414,6 +415,12 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
         onSyncRef.current(serialized)
         useEditorStore.getState().setTabDirty(filePath, true)
         dirtyRef.current = false
+        /** Persist the WYSIWYG-only snapshot alongside the markdown. A
+         *  formatting-only edit leaves the serialized markdown unchanged (so the
+         *  file write is a no-op) — which is exactly why this lives here and not in
+         *  the save path: it must still capture the new formatting. Fire-and-forget;
+         *  markdown stays the source of truth. */
+        writeWysiwygSnapshot(filePath, serialized, editor.document)
       }
       try {
         const cursor = cursorSnapshotRef.current

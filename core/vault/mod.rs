@@ -14,6 +14,12 @@ pub mod mentions;
 /// desktop inlines it as a base64 data URL, web sends it as one response body.
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
+/// Vault-relative root of the WYSIWYG snapshot cache. Ignored by tree/walk/
+/// search, and kept out of git by a self-ignoring `.gitignore` written inside it.
+const SNAPSHOT_ROOT: &str = ".docubook";
+/// Directory (under [`SNAPSHOT_ROOT`]) holding one JSON snapshot per document.
+const SNAPSHOT_DIR: &str = ".docubook/wysiwyg";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct FileInfo {
     pub path: String,
@@ -23,7 +29,7 @@ pub struct FileInfo {
 }
 
 pub(crate) fn is_ignored_entry(name: &str) -> bool {
-    matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash")
+    matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash" | SNAPSHOT_ROOT)
 }
 
 /// Content version of a file: the FNV-1a 64-bit hash of its exact bytes.
@@ -390,6 +396,112 @@ impl Vault {
         self.write_file(path, content)?;
         Ok(WriteOutcome::Written { version: content_version(content.as_bytes()) })
     }
+
+/// Vault-relative path of a document's WYSIWYG snapshot.
+    fn snapshot_path(doc_path: &str) -> String {
+        format!("{SNAPSHOT_DIR}/{doc_path}.json")
+    }
+
+/// Read a document's WYSIWYG snapshot, or `None` when it has never been written.
+    ///
+    /// The snapshot is a DISPOSABLE cache, never a source of truth: callers apply
+    /// it only while its stored Markdown still matches the file on disk. A missing
+    /// or unreadable snapshot therefore degrades to "no formatting", never to an
+    /// error the editor has to surface.
+    pub fn read_snapshot(&self, doc_path: &str) -> Result<Option<String>, String> {
+        let f = self.safe_path(&Self::snapshot_path(doc_path))?;
+        match std::fs::read(&f) {
+            Ok(bytes) => Ok(Some(String::from_utf8_lossy(&bytes).to_string())),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(format!("Read: {e}")),
+        }
+    }
+
+/// Write a document's WYSIWYG snapshot. Deliberately does NOT invalidate the
+    /// tree/search caches: [`SNAPSHOT_ROOT`] is an ignored entry, so nothing those
+    /// caches read can change — and this runs on every autosave.
+    pub fn write_snapshot(&self, doc_path: &str, content: &str) -> Result<(), String> {
+        let f = self.safe_path(&Self::snapshot_path(doc_path))?;
+        if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
+        std::fs::write(&f, content).map_err(|e| e.to_string())?;
+        self.ensure_snapshot_gitignore()
+    }
+
+/// Keep [`SNAPSHOT_ROOT`] out of git without touching the user's root
+    /// `.gitignore`: a `.gitignore` containing `*` ignores every sibling —
+    /// including itself — so the whole directory stays untracked.
+    fn ensure_snapshot_gitignore(&self) -> Result<(), String> {
+        let f = self.safe_path(".docubook/.gitignore")?;
+        if !f.exists() {
+            if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
+            std::fs::write(&f, "*\n").map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+/// Snapshot file path for a document (file) entry.
+    fn snapshot_file_path(doc_path: &str) -> String {
+        format!("{SNAPSHOT_DIR}/{doc_path}.json")
+    }
+
+/// Snapshot directory for a vault directory entry: its documents' snapshots
+    /// live under `SNAPSHOT_DIR/<dir>/…`, so a folder rename/move maps 1:1.
+    fn snapshot_dir_path(dir_path: &str) -> String {
+        format!("{SNAPSHOT_DIR}/{dir_path}")
+    }
+
+/// Drop the snapshot(s) for a deleted entry. Best-effort: the cache is
+    /// disposable, so a failure here must never fail the delete itself.
+    pub fn remove_snapshot(&self, rel: &str, is_dir: bool) {
+        let mapped = if is_dir { Self::snapshot_dir_path(rel) } else { Self::snapshot_file_path(rel) };
+        if let Ok(p) = self.safe_path(&mapped) {
+            if p.is_dir() { let _ = std::fs::remove_dir_all(&p); } else { let _ = std::fs::remove_file(&p); }
+        }
+        self.prune_empty_snapshot_dirs(rel);
+    }
+
+/// Move the snapshot(s) with a renamed/moved entry. Best-effort (see
+    /// `remove_snapshot`); a missing source snapshot is a no-op.
+    pub fn move_snapshot(&self, from: &str, to: &str, is_dir: bool) {
+        let (src_rel, dst_rel) = if is_dir {
+            (Self::snapshot_dir_path(from), Self::snapshot_dir_path(to))
+        } else {
+            (Self::snapshot_file_path(from), Self::snapshot_file_path(to))
+        };
+        let (Ok(src), Ok(dst)) = (self.safe_path(&src_rel), self.safe_path(&dst_rel)) else { return };
+        if !src.exists() { return; }
+        if let Some(p) = dst.parent() { let _ = std::fs::create_dir_all(p); }
+        let _ = std::fs::rename(&src, &dst);
+        self.prune_empty_snapshot_dirs(from);
+    }
+
+/// Copy the snapshot(s) with a copied entry, so a pasted document keeps the
+    /// formatting Markdown drops. Best-effort (see `remove_snapshot`).
+    pub fn copy_snapshot(&self, from: &str, to: &str, is_dir: bool) {
+        let (src_rel, dst_rel) = if is_dir {
+            (Self::snapshot_dir_path(from), Self::snapshot_dir_path(to))
+        } else {
+            (Self::snapshot_file_path(from), Self::snapshot_file_path(to))
+        };
+        let (Ok(src), Ok(dst)) = (self.safe_path(&src_rel), self.safe_path(&dst_rel)) else { return };
+        if !src.exists() { return; }
+        if let Some(p) = dst.parent() { let _ = std::fs::create_dir_all(p); }
+        if is_dir { let _ = copy_dir_all(&src, &dst); } else { let _ = std::fs::copy(&src, &dst); }
+    }
+
+/// Remove snapshot directories left empty by a delete/move, stopping at the
+    /// first non-empty one (or the snapshot root). Keeps the cache from filling
+    /// with empty folders.
+    fn prune_empty_snapshot_dirs(&self, rel: &str) {
+        let Ok(root) = self.safe_path(SNAPSHOT_DIR) else { return };
+        let Some(parent) = Path::new(rel).parent() else { return };
+        let mut current = self.safe_path(&format!("{SNAPSHOT_DIR}/{}", parent.to_string_lossy())).ok();
+        while let Some(dir) = current {
+            if dir == root || !dir.starts_with(&root) { break; }
+            if std::fs::remove_dir(&dir).is_err() { break; } // non-empty (or gone) → stop
+            current = dir.parent().map(Path::to_path_buf);
+        }
+    }
 /** Create an empty file, creating parent directories if needed. */
     pub fn create_file(&self, path: &str) -> Result<String, String> {
         let f = self.safe_path(path)?;
@@ -413,6 +525,7 @@ impl Vault {
             return Err("Invalid trash target".to_string());
         }
         let f = self.safe_path(path)?;
+        let is_dir = std::fs::symlink_metadata(&f).map(|m| m.file_type().is_dir()).unwrap_or(false);
         #[cfg(not(target_os = "macos"))]
         {
             let trash_dir = self.safe_path(".trash")?;
@@ -438,6 +551,7 @@ impl Vault {
         {
             trash::delete(&f).map_err(|e| format!("Trash: {}", e))?;
         }
+        self.remove_snapshot(path, is_dir);
         self.invalidate_caches();
         Ok(())
     }
@@ -525,8 +639,10 @@ impl Vault {
     pub fn rename_file(&self, from: &str, to: &str) -> Result<(), String> {
         let src = self.safe_path(from)?;
         let dst = self.safe_path(to)?;
+        let is_dir = std::fs::symlink_metadata(&src).map(|m| m.file_type().is_dir()).unwrap_or(false);
         if let Some(p) = dst.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         std::fs::rename(&src, &dst).map_err(|e| format!("Rename: {}", e))?;
+        self.move_snapshot(from, to, is_dir);
         self.invalidate_caches();
         Ok(())
     }
@@ -561,8 +677,10 @@ impl Vault {
         } else {
             std::fs::copy(&src, &target).map_err(|e| format!("Copy: {e}"))?;
         }
+        let landed = if to_dir.is_empty() { target_name } else { format!("{to_dir}/{target_name}") };
+        self.copy_snapshot(from, &landed, is_dir);
         self.invalidate_caches();
-        Ok(if to_dir.is_empty() { target_name } else { format!("{to_dir}/{target_name}") })
+        Ok(landed)
     }
 
 /** Move a file or directory into `to_dir`. Unlike a copy, a name collision is
@@ -597,8 +715,10 @@ impl Vault {
         }
         let target = dst_dir.join(&name);
         std::fs::rename(&src, &target).map_err(|e| format!("Move: {e}"))?;
+        let landed = if to_dir.is_empty() { name } else { format!("{to_dir}/{name}") };
+        self.move_snapshot(from, &landed, is_dir);
         self.invalidate_caches();
-        Ok(if to_dir.is_empty() { name } else { format!("{to_dir}/{name}") })
+        Ok(landed)
     }
 }
 
@@ -1194,6 +1314,73 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
         assert!(v.version_of("nope.md").unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_round_trips_is_gitignored_and_hidden_from_walks() {
+        let dir = std::env::temp_dir().join(format!("vault-test-snapshot-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+
+        // Absent until written — a cache miss, not an error.
+        assert!(v.read_snapshot("notes/a.md").unwrap().is_none());
+
+        let payload = r##"{"markdown":"# A\n","blocks":[]}"##;
+        v.write_snapshot("notes/a.md", payload).unwrap();
+        assert_eq!(v.read_snapshot("notes/a.md").unwrap().as_deref(), Some(payload));
+        // Nested parent directories are created for the snapshot path.
+        assert!(dir.join(".docubook/wysiwyg/notes/a.md.json").exists());
+
+        // Self-ignoring so the user's root .gitignore is untouched.
+        assert_eq!(std::fs::read_to_string(dir.join(".docubook/.gitignore")).unwrap(), "*\n");
+
+        // The cache directory never leaks into a tree or walk.
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        std::fs::write(dir.join("notes/a.md"), "# A\n").unwrap();
+        assert!(v.tree("").iter().all(|e| e.name != ".docubook"));
+        assert!(v.walk("", WalkKind::All).iter().all(|p| !p.starts_with(".docubook")));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshot_follows_rename_move_copy_and_delete() {
+        let dir = std::env::temp_dir().join(format!("vault-test-snapshot-lifecycle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        std::fs::write(dir.join("notes/a.md"), "# A\n").unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        v.write_snapshot("notes/a.md", "SNAP-A").unwrap();
+
+        // rename: the snapshot follows the file, the old path is cleared.
+        v.rename_file("notes/a.md", "notes/b.md").unwrap();
+        assert!(v.read_snapshot("notes/a.md").unwrap().is_none());
+        assert_eq!(v.read_snapshot("notes/b.md").unwrap().as_deref(), Some("SNAP-A"));
+
+        // move into another folder: still follows, and the emptied snapshot
+        // folder is pruned.
+        std::fs::create_dir_all(dir.join("archive")).unwrap();
+        v.move_path("notes/b.md", "archive").unwrap();
+        assert_eq!(v.read_snapshot("archive/b.md").unwrap().as_deref(), Some("SNAP-A"));
+        assert!(!dir.join(".docubook/wysiwyg/notes").exists());
+
+        // copy: the copy carries the snapshot too.
+        v.copy_path("archive/b.md", "notes").unwrap();
+        assert_eq!(v.read_snapshot("notes/b.md").unwrap().as_deref(), Some("SNAP-A"));
+
+        // delete: the snapshot is dropped.
+        v.delete_file("notes/b.md").unwrap();
+        assert!(v.read_snapshot("notes/b.md").unwrap().is_none());
+
+        // a folder rename moves the whole snapshot subtree.
+        std::fs::create_dir_all(dir.join("book")).unwrap();
+        std::fs::write(dir.join("book/c.md"), "# C\n").unwrap();
+        v.write_snapshot("book/c.md", "SNAP-C").unwrap();
+        v.rename_file("book", "tome").unwrap();
+        assert_eq!(v.read_snapshot("tome/c.md").unwrap().as_deref(), Some("SNAP-C"));
+
         let _ = std::fs::remove_dir_all(&dir);
     }
 

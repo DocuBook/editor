@@ -1,6 +1,6 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 
-const captured = vi.hoisted(() => ({ transports: [] as any[], parsed: [] as string[], replaced: 0 }))
+const captured = vi.hoisted(() => ({ transports: [] as any[], parsed: [] as string[], replaced: 0, replacedWith: [] as any[] }))
 
 // Constructing a real BlockNote editor headless (jsdom) throws — stub the whole
 // dependency surface so the factory's WIRING (not the editor) is under test.
@@ -14,7 +14,7 @@ vi.mock('@blocknote/core', () => ({
         return ['parsed-block']
       }),
       transact: vi.fn((run: any) => run({ setMeta: vi.fn() })),
-      replaceBlocks: vi.fn(() => { captured.replaced += 1 }),
+      replaceBlocks: vi.fn((_document: any, blocks: any) => { captured.replaced += 1; captured.replacedWith.push(blocks) }),
     })),
   },
 }))
@@ -122,6 +122,60 @@ describe('getCachedEditor seeding (per file)', () => {
     expect(again).toBe(a)
     expect(again.loadedMarkdown).toBe('# A')
     expect(captured.parsed).toEqual([])
+  })
+})
+
+/** The WYSIWYG-only snapshot restores formatting Markdown cannot represent
+ *  (colour/alignment/indent). It is applied ONLY while its stored markdown still
+ *  matches the file; anything else falls back to the plain markdown parse. */
+describe('createBlockEditor snapshot seeding', () => {
+  const blocks = [{ id: 'b1', type: 'paragraph', props: { textColor: 'yellow' }, content: [], children: [] }]
+
+  beforeEach(() => {
+    captured.parsed.length = 0
+    captured.replaced = 0
+    captured.replacedWith.length = 0
+  })
+
+  it('restores from a matching snapshot instead of parsing markdown', () => {
+    const cached = createBlockEditor('/vault', 'notes/a.md', '# Title', { markdown: '# Title', blocks })
+
+    expect(captured.parsed).toEqual([])
+    expect(captured.replacedWith).toEqual([blocks])
+    expect(cached.loaded).toBe(true)
+    expect(cached.loadedMarkdown).toBe('# Title')
+  })
+
+  it('ignores a snapshot whose markdown no longer matches the file', () => {
+    const cached = createBlockEditor('/vault', 'notes/a.md', '# Title', { markdown: '# OLD', blocks })
+
+    expect(captured.parsed).toEqual(['# Title'])
+    expect(captured.replacedWith).toEqual([['parsed-block']])
+    expect(cached.loadedMarkdown).toBe('# Title')
+  })
+
+  it('falls back to parsing when the snapshot carries no blocks', () => {
+    createBlockEditor('/vault', 'notes/a.md', '# Title', { markdown: '# Title', blocks: [] })
+
+    expect(captured.parsed).toEqual(['# Title'])
+  })
+})
+
+describe('getCachedEditor snapshot pass-through', () => {
+  beforeEach(() => {
+    clearEditorCache()
+    captured.parsed.length = 0
+    captured.replaced = 0
+    captured.replacedWith.length = 0
+  })
+
+  it('seeds a cache miss from its snapshot', () => {
+    const blocks = [{ id: 'b1', type: 'paragraph', props: { textColor: 'yellow' }, content: [], children: [] }]
+    const a = getCachedEditor('/vault', 'notes/a.md', '# A', { markdown: '# A', blocks })
+
+    expect(a.loadedMarkdown).toBe('# A')
+    expect(captured.parsed).toEqual([])
+    expect(captured.replacedWith).toEqual([blocks])
   })
 })
 

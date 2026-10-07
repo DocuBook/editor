@@ -71,6 +71,8 @@
     "allow-wiki-suggest",
     "allow-write-file",
     "allow-write-file-checked",
+    "allow-read-wysiwyg-snapshot",
+    "allow-write-wysiwyg-snapshot",
     "opener:default",
     "core:window:allow-set-theme",
     "core:window:allow-start-dragging"
