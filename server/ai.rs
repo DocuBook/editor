@@ -1,6 +1,7 @@
 //! Axum AI adapter. Shared request assembly, SSE parsing, limits, errors, and
-//! event semantics live in `src-tauri/rust-ai`; this file owns web-only auth
-//! state, rate limiting, provider credential resolution, and SSE presentation.
+//! event semantics live in the `core` crate (`core/rust-ai`); this file owns
+//! web-only auth state, rate limiting, provider credential resolution, and SSE
+//! presentation.
 
 use super::*;
 use crate::rust_ai::{events::AiEvent, request::AiRequest, sse::stream_chat};

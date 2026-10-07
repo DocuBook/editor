@@ -64,6 +64,7 @@ Keep the repo checkout around: `--file -` reads the prompt from stdin, and `pull
 DocuBook Editor — one repo, three targets:
 
 - `frontend/` — shared React 19 + TipTap UI used by desktop and web; no runtime-specific code.
+- `core/` — shared pure-Rust engine (`vault`, `wiki`, `git`, `search`, `agent`, AI transport) used by both runtimes.
 - `src-tauri/` — Tauri v2 desktop runtime, native commands, capabilities/permissions.
 - `server/` — Axum web runtime: auth, HTTP API, persistence.
 - `test/` — vitest unit tests, ACL/Docker guards, Playwright E2E harness.
@@ -71,9 +72,9 @@ DocuBook Editor — one repo, three targets:
 ### Invariants — apply in every mode
 
 - **Trust boundary:** the Rust backend is trusted, `frontend/` is not. File paths resolve against the canonicalized vault root; outbound AI base URLs pass SSRF validation; stored API keys never reach the frontend and never come from it.
-- **Shared modules are edited once.** `server/` includes the desktop app's pure modules (`vault`, `wiki`, `git`, `search`, `agent`, `rust-ai`) via `#[path]`. Never patch one copy only.
+- **Shared modules are edited once.** The pure modules (`vault`, `wiki`, `git`, `search`, `agent`, `rust-ai`, `markdown`) live in the `core/` crate (`docubook-core`): the desktop app re-exports them, the web server depends on the crate by path. Never patch one copy only.
 - **The command surface moves as one change:** `generate_handler!` (`src-tauri/lib.rs`) + `src-tauri/capabilities/default.json` + `src-tauri/permissions/default.toml` + the `server/handlers.rs` dispatch.
-- **Never touch lockfiles or version fields** (`package-lock.json`, `Cargo.lock`, `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) — releases own those.
+- **Never touch lockfiles or version fields** (`package-lock.json`, `Cargo.lock`, `package.json`, `core/Cargo.toml`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) — releases own those.
 - No secrets, no `dist/`, no generated output in a diff. Licensed AGPL-3.0, and every commit is signed off — see **Commit & PR** below.
 - Smallest change that satisfies the task. Unrelated cleanup becomes a follow-up issue, not part of the diff.
 - Blocked or unsure — missing info, secrets, access, product decision? Comment exactly what you need and stop. Guessing and going silent are both failures.
@@ -83,7 +84,7 @@ DocuBook Editor — one repo, three targets:
 Run every chain that applies, and never call a check passing unless you ran it. Report each failure with its first real error line.
 
 - **Frontend chain:** `npx oxlint frontend/ test/__fixtures__/` · `npx tsc -b` · `npm test` · `node test/check-acl.mjs` · `node test/check-docker-paths.mjs`
-- **Rust chain** (when `src-tauri/` or `server/` is touched): `(cd src-tauri && cargo test)` · `(cd server && cargo test)` · `(cd src-tauri && cargo clippy -- -D warnings)` — without the `--`, cargo takes `-D` as its own argument and the command fails before linting anything.
+- **Rust chain** (when `core/`, `src-tauri/`, or `server/` is touched): `(cd core && cargo test)` · `(cd src-tauri && cargo test)` · `(cd server && cargo test)` · `(cd core && cargo clippy -- -D warnings)` · `(cd src-tauri && cargo clippy -- -D warnings)` — without the `--`, cargo takes `-D` as its own argument and the command fails before linting anything.
 - **E2E** (only when a user-visible flow changed, and only if this environment can run Playwright): `(cd server && cargo build)`, then `npm run build`, then `npm run test:e2e` (Chromium); logs land in `test/artifacts/`. If it cannot run here, say exactly that instead of implying it passed.
 - **CI logs while a run is unfinished:** `gh run view --log` is run-level and stays blocked until every job in the run finishes — jobs parked on environment approval park it indefinitely — and after a matrix failure the sibling job reads `cancelled` (fail-fast), not failed. The failing job's log is served meanwhile: take the job id from the failing check's `details_url` in `gh pr checks` (or from `gh api repos/{owner}/{repo}/commits/<sha>/check-runs`) and run `gh api repos/{owner}/{repo}/actions/jobs/<job_id>/logs`.
 
@@ -111,7 +112,7 @@ Run `npx oxlint frontend/ test/__fixtures__/`, `npx tsc -b`, `npm test`, `node t
 ### `--checks-rust`
 
 ```text
-Run `(cd src-tauri && cargo test)`, `(cd server && cargo test)`, and `(cd src-tauri && cargo clippy -- -D warnings)`. Report each failure with its first real error line.
+Run `(cd core && cargo test)`, `(cd src-tauri && cargo test)`, `(cd server && cargo test)`, `(cd core && cargo clippy -- -D warnings)`, and `(cd src-tauri && cargo clippy -- -D warnings)`. Report each failure with its first real error line.
 ```
 
 ### `--checks-e2e`
@@ -186,7 +187,7 @@ Treat this as a security audit, not a code review. Map the attack surface the ch
 2. **Verify against the code.** Walk the path the report describes and cite `path:line` for what you find. For a bug, name the likely root-cause area — not a fix, and no stepping on Plan mode's job.
 3. **Completeness.** Bug reports are expected to carry repro steps, expected vs actual, DocuBook version, macOS version, and vault type (git / plain folder). Ask for exactly the fields that are missing: one comment, a short bullet list, nothing else.
 4. **Duplicates.** Search the existing issues and link the closest match. Never close or label on similarity alone — that call belongs to a maintainer.
-5. **Shape the work.** Proposed acceptance criteria as a checklist; in scope vs out of scope; affected areas (`frontend/`, `src-tauri/`, `server/`, `test/`); risks and unknowns. Keep the whole comment under ~200 words and skimmable.
+5. **Shape the work.** Proposed acceptance criteria as a checklist; in scope vs out of scope; affected areas (`frontend/`, `core/`, `src-tauri/`, `server/`, `test/`); risks and unknowns. Keep the whole comment under ~200 words and skimmable.
 6. **End with exactly one of:** `Ready for plan` (say whether the recommendation is plan or build) or `Needs info:` plus the open questions.
 
 **Labels:** at most 3 labels from the repo's existing set, applied only when confident; prefer specific over generic.
@@ -230,7 +231,7 @@ Treat this as a security audit, not a code review. Map the attack surface the ch
 2. Implement. Handle failure modes, keep errors typed, leave no placeholders, TODOs, or dead code. Comment only non-obvious intent, constraints, or tradeoffs — never restate what the code does. If you find an unrelated bug, open a follow-up issue instead of fixing it inline.
 3. **Tests:** add or extend a test that fails without your change — vitest for pure frontend logic, `cargo test` for the Rust side. Never weaken, skip, or delete an existing test to go green.
 4. Keep the invariants: the command-surface trio in one change, shared modules edited once, guards updated when the surface changes, docs updated when behavior or config changes.
-5. Verify with the standing **Verify before claiming done** chains: the frontend chain always; add the Rust chain when `src-tauri/` or `server/` is touched; E2E only for user-visible flow changes on an environment that can run it.
+5. Verify with the standing **Verify before claiming done** chains: the frontend chain always; add the Rust chain when `core/`, `src-tauri/`, or `server/` is touched; E2E only for user-visible flow changes on an environment that can run it.
 6. Commit and open the PR per the standing **Commit & PR** rules, linking the issue. In the PR body, list what you verified and what you could not run.
 
 **Never:** bump versions or lockfiles, edit `dist/`, add a dependency without justifying it in the PR body, include secrets or keys, or fold unrelated refactors into this diff. If the plan turns out to be wrong, say so in the PR and adjust — don't silently re-plan.
@@ -251,7 +252,7 @@ Report per the standing **Evidence** rule.
 2. Classify each item: change request · question · nit · already addressed · disagree. Apply change requests; answer questions in-thread; take a nit when it is cheap and local; for already-addressed items, point at the commit that fixed it.
 3. **Fix the cause, not the symptom.** If the feedback points at a symptom, follow it to the root cause and say what you actually changed.
 4. Keep the diff minimal and behavior-preserving for refactors: no unrelated cleanup, no API change wider than what was asked.
-5. Verify the same way Build does — the standing frontend chain, plus the Rust chain when `src-tauri/` or `server/` is touched. Re-run the specific test or command the feedback was about.
+5. Verify the same way Build does — the standing frontend chain, plus the Rust chain when `core/`, `src-tauri/`, or `server/` is touched. Re-run the specific test or command the feedback was about.
 6. Push new commits — never force-push or amend published commits. Then reply in each thread with what changed (`path:line`, commit sha) and resolve **only** the threads you actually addressed.
 7. Disagreeing is allowed and expected: reply with the reasoning, leave the thread open, let a human decide. Silently dropping feedback is not allowed.
 

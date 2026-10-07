@@ -10,7 +10,7 @@
  * entry needed.
  *
  * Keep this list small, first-party and audited: every host must be in the
- * backend SSRF allowlist (src-tauri/agent/mod.rs ALLOWED_API_HOSTS) or requests fail.
+ * backend SSRF allowlist (core/agent/mod.rs ALLOWED_API_HOSTS) or requests fail.
  */
 export interface ProviderInfo {
   id: string

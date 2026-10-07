@@ -99,7 +99,7 @@ impl Git {
     /// True only when HEAD resolves to a commit. A fresh repository has an
     /// unborn HEAD reference that exists but points at nothing — that reports
     /// `false`, otherwise the UI would offer a push with nothing to push.
-    pub(crate) fn has_commits(&self) -> bool {
+    pub fn has_commits(&self) -> bool {
         self.repository()
             .and_then(|repo| {
                 repo.head()

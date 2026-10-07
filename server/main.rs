@@ -1,35 +1,27 @@
 //! DocuBook web server — the same codebase, served over HTTP.
 //!
-//! Reuses the pure-Rust modules from the desktop app (vault, wiki, git,
-//! search, agent) via `#[path]` includes — zero logic duplication. Exposes
-//! the same command surface as the Tauri IPC (`POST /api/<cmd>`), streams AI
-//! over SSE, and serves the built frontend (`dist/`) with SPA fallback.
+//! Shares the pure-Rust engine with the desktop app through the `docubook-core`
+//! crate (vault, wiki, git, search, agent, markdown, AI transport) — zero logic
+//! duplication, no `#[path]` includes. Exposes the same command surface as the
+//! Tauri IPC (`POST /api/<cmd>`), streams AI over SSE, and serves the built
+//! frontend (`dist/`) with SPA fallback.
 //!
 //! Run: `WWW_DIR=dist DATA_DIR=./data cargo run --release` (after `npm run build`).
 //! Docker: see ../Dockerfile (multi-stage, single binary, non-root).
-#[path = "../src-tauri/agent/mod.rs"]
-mod agent;
+// Shared pure modules come from the `docubook-core` crate — the same source the
+// desktop app uses, wired in as a plain path dependency rather than reaching
+// into src-tauri through `#[path]` includes.
+use docubook_core::{agent, git, markdown, rust_ai, search, vault, wiki};
+
 mod ai;
 mod auth;
 mod auth_routes;
 mod cmds;
 mod config;
-#[path = "../src-tauri/git/mod.rs"]
-mod git;
 mod handlers;
 mod httpm;
 mod keys;
-#[path = "../src-tauri/markdown.rs"]
-mod markdown;
 mod probe;
-#[path = "../src-tauri/rust-ai/mod.rs"]
-mod rust_ai;
-#[path = "../src-tauri/search/mod.rs"]
-mod search;
-#[path = "../src-tauri/vault/mod.rs"]
-mod vault;
-#[path = "../src-tauri/wiki/mod.rs"]
-mod wiki;
 
 use config::AuthState;
 

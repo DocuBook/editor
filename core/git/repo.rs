@@ -145,7 +145,7 @@ const FALLBACK_INITIAL_BRANCH: &str = "master";
 
 /** Configured initial branch (`init.defaultBranch`), else `master` — the UI uses
  *  this as the default value of its initial-branch field. */
-pub(crate) fn configured_initial_branch() -> String {
+pub fn configured_initial_branch() -> String {
     let config = Config::open_default().ok();
     initial_branch_from(config.as_ref())
 }

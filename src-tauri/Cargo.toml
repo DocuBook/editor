@@ -17,6 +17,7 @@ path = "main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+docubook-core = { path = "../core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2.7.2"
 trash = "5"

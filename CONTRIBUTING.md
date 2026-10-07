@@ -37,7 +37,7 @@ npm run tauri build -- --target aarch64-apple-darwin
 
 ### Web server (self-host / Docker)
 
-The web distribution is a standalone Rust server (`server`) that serves the same frontend and reuses the desktop app's pure modules — no Tauri, no Docker required for local dev:
+The web distribution is a standalone Rust server (`server`) that serves the same frontend and shares the desktop app's pure modules through the `core` crate (`docubook-core`) — no Tauri, no Docker required for local dev:
 
 ```text
 npm run build                                  # frontend → dist/
@@ -62,6 +62,7 @@ Only stable root responsibilities are documented here; inspect each directory fo
 ```text
 editor/
 ├── frontend/      Shared React UI for desktop and web
+├── core/          Shared pure-Rust engine (vault, wiki, git, search, agent, AI)
 ├── src-tauri/     Tauri desktop runtime, native commands, and permissions
 ├── server/        Axum web runtime, HTTP API, auth, and persistence
 ├── test/          Frontend unit tests, shared fixtures, and web E2E harness
@@ -74,25 +75,27 @@ editor/
 ## Architecture Notes
 
 - **Trust boundary:** the Rust backend (desktop `src-tauri` / web `server`) is trusted; the frontend is not. File paths are canonicalized against the vault root, and AI base URLs pass SSRF validation before requests are sent.
-- **Two runtimes, one frontend:** `frontend/lib/ipc.ts` abstracts Tauri IPC and HTTP/SSE behind one `invoke`/`listen` API, so components are runtime-agnostic. The web server reuses the desktop app's pure modules (`vault`, `wiki`, `git`, `search`, `agent`, `rust-ai`) via `#[path]` includes — never edit them in one place only. The image copies exactly those paths, and `node test/check-docker-paths.mjs` (CI lint job) fails when a new include is added without the matching Dockerfile `COPY`.
+- **Two runtimes, one frontend:** `frontend/lib/ipc.ts` abstracts Tauri IPC and HTTP/SSE behind one `invoke`/`listen` API, so components are runtime-agnostic. Both runtimes share the pure modules (`vault`, `wiki`, `git`, `search`, `agent`, `rust-ai`, `markdown`) through the `core` crate (`docubook-core`): the desktop app re-exports them, the web server depends on the crate by path — never edit them in one place only. `node test/check-docker-paths.mjs` (CI lint job) fails if a server source reaches back into `src-tauri` via a `#[path]` include, or if the Dockerfile stops packaging `core/`.
 - **Web auth:** first run requires an admin account (Argon2id); setup cannot be skipped and login remains required. Sessions are httpOnly cookies (rate-limited login) persisted in `sessions.json` (SHA-256 hashed tokens — they survive server restarts, so redeploys don't log users out). `DB_SETUP_TOKEN` protects account creation. Env vars win over Settings → System overrides.
 - **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web, optionally AES-256-GCM encrypted at rest via `DB_KEYS_PASSPHRASE` (Argon2id-derived key). Stored keys are not returned to or persisted by the frontend; `ask_ai` resolves them backend-side and ignores a key supplied in that request.
 - **Permissions (desktop) and web IPC:** `generate_handler!` in `src-tauri/lib.rs` is the single source of truth for the command surface. Adding or removing a command means updating `src-tauri/capabilities/default.json`, `src-tauri/permissions/default.toml`, and the `server/handlers.rs` dispatch in the same change; `node test/check-acl.mjs` (CI lint job) fails when any of them drifts, including a stale desktop-only/web-only exception.
-- **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles.
+- **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles. The internal `core` crate is versioned independently (the pre-push hook still syncs its `Cargo.lock` and the `docubook-core` entry in the consumer locks).
 
 ## Workflow
 
 1. Fork the repo and create a branch: `git checkout -b fix/your-change`
 2. Make your change. Keep commits focused, and sign off every commit (`git commit -s`) — see [Contribution licensing](#contribution-licensing).
-3. Run checks locally. The pre-push hook only enforces the lockfile sync and `npx tsc -b` — the remaining checks, including `npm test`, `cd src-tauri && cargo test`, and `cd server && cargo test`, are not part of the hook and must be run manually:
+3. Run checks locally. The pre-push hook only enforces the lockfile sync and `npx tsc -b` — the remaining checks, including `npm test`, `cd core && cargo test`, `cd src-tauri && cargo test`, and `cd server && cargo test`, are not part of the hook and must be run manually:
    - `npx oxlint frontend/ test/__fixtures__/`
    - `npx tsc -b`
    - `node test/check-acl.mjs`
    - `node test/check-docker-paths.mjs`
    - `npm test`
    - `npm run build`
+   - `cd core && cargo test`
    - `cd src-tauri && cargo test`
    - `cd server && cargo test`
+   - `cargo clippy --manifest-path core/Cargo.toml -- -D warnings`
    - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
    - Build the web server + frontend, then the Playwright suites
      (run logs land in `test/artifacts/` — server stdout/stderr,
@@ -150,7 +153,7 @@ Linux server tests, Chromium/WebKit browser E2E, desktop DMGs, and Docker image
 builds. Heavy E2E, desktop, and Docker jobs may require environment approval.
 Release artifacts are published only from version tags.
 
-The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates), **fails if a lock changed**, then runs the type check (`npx tsc -b`). It does **not** run any tests — desktop Rust tests, server Rust tests, and frontend tests must be run manually before pushing (see [Workflow](#workflow)); PR CI runs them regardless.
+The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates across the three crates), **fails if a lock changed**, then runs the type check (`npx tsc -b`). It does **not** run any tests — desktop, shared-engine (`core`), and server Rust tests plus frontend tests must be run manually before pushing (see [Workflow](#workflow)); PR CI runs them regardless.
 
 ## Release workflow (custom — no semantic-release/changeset)
 
@@ -159,7 +162,7 @@ PR (conventional commit) → merge to master → CI audit → tag on master → 
 ```
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
-2. **Version bump + changelog** in the release commit: bump the **manifests only** (`package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections). **Never bump `*.lock` by hand** — the pre-push hook syncs `package-lock.json` (npm `--package-lock-only`) and both `Cargo.lock` files (root version only, deps untouched) from the manifests, and **rejects the push** if a lock had to change so the sync lands in its own commit before re-pushing.
+2. **Version bump + changelog** in the release commit: bump the **manifests only** (`package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections). **Never bump `*.lock` by hand** — the pre-push hook syncs `package-lock.json` (npm `--package-lock-only`) and all three `Cargo.lock` files (root versions only, deps untouched — plus the `docubook-core` entry in the two consumer locks) from the manifests, and **rejects the push** if a lock had to change so the sync lands in its own commit before re-pushing.
 3. **Audit gate — enforced by CI, not a local script.** The version-consistency check in `ci.yml` (runs on master after merge) fails the build if: any of the **four manifests + three locks** drift, or `CHANGELOG.md` is missing the `## vX.Y.Z —` section for the current version. Master must be green before tagging.
 4. **Tag on master — immutable, annotated:**
    ```sh

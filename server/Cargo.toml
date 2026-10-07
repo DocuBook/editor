@@ -12,6 +12,7 @@ license = "AGPL-3.0-only"
 # No tauri dependency — builds as a plain Linux binary (musl-friendly).
 
 [dependencies]
+docubook-core = { path = "../core" }
 axum = "0.8"
 tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "net", "sync", "time", "fs", "io-util"] }
 mime_guess = "2"
