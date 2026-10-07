@@ -40,7 +40,7 @@ RUN printf 'fn main() {}\n' > server/main.rs \
 # Real sources: the shared engine (core) and the web server.
 COPY core ./core
 COPY server ./server
-RUN touch server/main.rs && cd server && cargo build --release --locked
+RUN touch core/lib.rs server/main.rs && cd server && cargo build --release --locked
 
 # ---- runtime ----
 FROM alpine:3.21
