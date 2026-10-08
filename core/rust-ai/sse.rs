@@ -233,14 +233,13 @@ pub async fn stream_chat(
         return;
     }
 
-    for tool_call in &summary.tool_calls {
+    for (index, tool_call) in summary.tool_calls.iter().enumerate() {
         if !tool_call.provider_id.is_empty() && !tool_call.name.is_empty() {
             let input = serde_json::from_str(&tool_call.arguments).unwrap_or(Value::Null);
             if tx
                 .send(Ok(AiEvent::ToolCall {
-                    // The follow-up OpenAI-compatible request must echo the
-                    // provider-issued id, not a local index.
-                    tool_call_id: tool_call.provider_id.clone(),
+                    tool_call_id: super::events::local_tool_call_id(index),
+                    provider_tool_call_id: tool_call.provider_id.clone(),
                     tool_name: tool_call.name.clone(),
                     input,
                 }))
