@@ -3,6 +3,7 @@ import { invoke } from '../lib/ipc'
 import { Search, X, FileText } from 'lucide-react'
 import { useEditorStore } from '../stores/editor'
 import { stripMarkdownExt } from '../utils/fileKind'
+import FileMetaLabel from './FileMetaLabel'
 
 /** Search modal overlay — command-palette style search. */
 export default function SearchModal({ onClose, onSelect }: { onClose: () => void; onSelect: (path: string) => void }) {
@@ -70,8 +71,12 @@ export default function SearchModal({ onClose, onSelect }: { onClose: () => void
               openFile(item.path, item.name); onClose() }}
               className={'flex items-center gap-3 px-3 py-2 cursor-pointer text-sm rounded ' + (i === selectedIdx ? 'bg-accent text-on-accent' : 'text-foreground-secondary')}>
               <FileText size={14} className={'shrink-0 ' + (i === selectedIdx ? 'text-on-accent' : 'text-muted')} />
-              <span className="overflow-hidden text-ellipsis whitespace-nowrap">{stripMarkdownExt(item.name)}</span>
-              <span className={'text-xs overflow-hidden text-ellipsis whitespace-nowrap ml-auto ' + (i === selectedIdx ? 'text-on-accent opacity-80' : 'text-muted')}>{item.path}</span>
+              <FileMetaLabel
+                name={stripMarkdownExt(item.name)}
+                meta={item.path}
+                nameClassName="overflow-hidden text-ellipsis whitespace-nowrap"
+                metaClassName={'text-xs overflow-hidden text-ellipsis whitespace-nowrap ml-auto ' + (i === selectedIdx ? 'text-on-accent opacity-80' : 'text-muted')}
+              />
             </div>
           ))}
           {!query && <div className="py-6 px-3 text-sm text-muted text-center">Type to search files...</div>}
