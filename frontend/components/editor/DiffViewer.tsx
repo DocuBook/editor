@@ -80,6 +80,8 @@ export function DiffViewer({ path, name, staged }: { path: string; name: string;
                   key={index}
                   className={'flex border-l-2 ' + ROW_CLASS[row.type]}
                 >
+                  {row.type === 'add' && <span className="sr-only">Added </span>}
+                  {row.type === 'del' && <span className="sr-only">Removed </span>}
                   <span
                     className={'flex w-6 shrink-0 items-center justify-center ' + ROW_RAIL[row.type]}
                     aria-hidden="true"

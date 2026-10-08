@@ -33,8 +33,8 @@ describe('DiffViewer', () => {
 
     expect(invoke).toHaveBeenCalledWith('git_diff_file', { path: 'notes/a.md', staged: false })
     expect(rowTexts()).toContain('one')
-    expect(rowTexts()).toContain('two')
-    expect(rowTexts()).toContain('TWO')
+    expect(rowTexts().some(text => text?.includes('two'))).toBe(true)
+    expect(rowTexts().some(text => text?.includes('TWO'))).toBe(true)
   })
 
   it('paints each change as a coloured callout with a +/- icon', async () => {
@@ -42,8 +42,8 @@ describe('DiffViewer', () => {
     await renderDiff()
 
     const rows = Array.from(body()!.children) as HTMLElement[]
-    const delRow = rows.find(row => row.textContent === 'two')!
-    const addRow = rows.find(row => row.textContent === 'TWO')!
+    const delRow = rows.find(row => row.textContent?.includes('two'))!
+    const addRow = rows.find(row => row.textContent?.includes('TWO'))!
     const contextRow = rows.find(row => row.textContent === 'one')!
 
     // Red for a deletion, green for an insertion — text and surface together.
@@ -65,9 +65,12 @@ describe('DiffViewer', () => {
 
     // The sign rail is solid and flush against the rule, so border and icon
     // read as one block instead of a bar next to a floating glyph.
-    const rail = (row: HTMLElement) => row.querySelector('span')!
+    const rail = (row: HTMLElement) => row.querySelector('[aria-hidden="true"]')!
     expect(rail(delRow).className).toContain('bg-danger')
     expect(rail(addRow).className).toContain('bg-success')
+
+    expect(delRow.querySelector('.sr-only')?.textContent).toBe('Removed ')
+    expect(addRow.querySelector('.sr-only')?.textContent).toBe('Added ')
   })
 
   it('labels a staged range and reports a clean diff', async () => {
