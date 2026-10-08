@@ -31,6 +31,7 @@ pub enum AiEvent {
     Generating,
     ToolCall {
         tool_call_id: String,
+        provider_tool_call_id: String,
         tool_name: String,
         input: Value,
     },
@@ -58,6 +59,7 @@ impl AiEvent {
             ),
             AiEvent::ToolCall {
                 tool_call_id,
+                provider_tool_call_id,
                 tool_name,
                 input,
             } => (
@@ -65,6 +67,7 @@ impl AiEvent {
                 serde_json::json!({
                     "requestId": request_id,
                     "toolCallId": tool_call_id,
+                    "providerToolCallId": provider_tool_call_id,
                     "toolName": tool_name,
                     "input": input,
                 }),
@@ -115,7 +118,8 @@ mod wire_tests {
             AiEvent::Token("hi".into()),
             AiEvent::Generating,
             AiEvent::ToolCall {
-                tool_call_id: "call-1".into(),
+                tool_call_id: "tool-0".into(),
+                provider_tool_call_id: "call-1".into(),
                 tool_name: "applyDocumentOperations".into(),
                 input: serde_json::json!({ "operations": [] }),
             },
@@ -129,6 +133,9 @@ mod wire_tests {
             let (name, payload) = event.to_wire("req-1");
             assert!(!name.is_empty());
             assert_eq!(payload["requestId"], "req-1");
+            if let AiEvent::ToolCall { .. } = event {
+                assert_eq!(payload["providerToolCallId"], "call-1");
+            }
         }
     }
 
