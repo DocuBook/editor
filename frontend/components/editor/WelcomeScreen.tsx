@@ -60,7 +60,7 @@ export function WelcomeScreen() {
       <div className="w-full max-w-[384px] text-center">
         <div className="text-xl font-semibold text-foreground">DocuBook Editor</div>
         <div className="text-xs text-muted mt-1 mb-8 leading-relaxed">
-          Pocket notes sync all devices. Start phone, continue desktop. Switch devices anytime, no loss. Realtime collaboration enabled. WYSIWYG rich text editor included. Slash command / like Notion.
+          Pocket notes sync all devices. Built-in real-time collaboration. WYSIWYG rich editing `/` slash command for quick block insertion.
         </div>
         <div className="flex flex-col gap-2">
           <button disabled={loading} onClick={openVault} className={btnPrimary}>
