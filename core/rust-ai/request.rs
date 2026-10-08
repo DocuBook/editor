@@ -29,8 +29,21 @@ impl AiRequest {
             "stream": true,
         });
         if let Some(tools) = &self.tools {
-            if tools.as_array().is_some_and(|items| !items.is_empty()) {
-                body["tools"] = json!([tool_schema::openai_document_operation_tool()]);
+            if let Some(items) = tools.as_array().filter(|items| !items.is_empty()) {
+                let mut definitions = vec![tool_schema::openai_document_operation_tool()];
+                definitions.extend(
+                    items
+                        .iter()
+                        .filter(|tool| {
+                            tool["type"] == "function"
+                                && tool["function"]["name"].as_str().is_some_and(|name| {
+                                    name != tool_schema::DOCUMENT_OPERATION_TOOL
+                                })
+                                && tool["function"]["parameters"].is_object()
+                        })
+                        .cloned(),
+                );
+                body["tools"] = json!(definitions);
                 debug_assert_eq!(
                     tool_schema::DOCUMENT_OPERATION_TOOL,
                     "applyDocumentOperations"
@@ -96,6 +109,46 @@ mod tests {
         assert_eq!(request.url(), "https://example.test/v1/chat/completions");
         assert_eq!(request.body()["stream"], true);
         assert_eq!(request.body()["tool_choice"], json!("auto"));
+    }
+
+    #[test]
+    fn preserves_model_tool_call_and_result_messages() {
+        let request = AiRequest::from_json(
+            "model",
+            "key",
+            "https://example.test/v1",
+            r#"[{"role":"assistant","content":null,"tool_calls":[{"id":"provider-call-1","type":"function","function":{"name":"lookup_context","arguments":"{\"query\":\"rates\"}"}}]},{"role":"tool","tool_call_id":"provider-call-1","content":"reference result"}]"#,
+            None,
+        )
+        .unwrap();
+        let messages = request.body()["messages"].as_array().unwrap().clone();
+        let assistant = messages
+            .iter()
+            .find(|message| message["role"] == "assistant")
+            .unwrap();
+        let tool = messages
+            .iter()
+            .find(|message| message["role"] == "tool")
+            .unwrap();
+        assert_eq!(assistant["tool_calls"][0]["id"], "provider-call-1");
+        assert_eq!(tool["tool_call_id"], "provider-call-1");
+        assert_eq!(tool["content"], "reference result");
+    }
+
+    #[test]
+    fn preserves_context_tool_schemas_alongside_canonical_document_tool() {
+        let request = AiRequest::from_json(
+            "model",
+            "key",
+            "https://example.test/v1",
+            "[]",
+            Some(r#"[{"type":"function","function":{"name":"lookup_context","description":"Look up context","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}]"#),
+        )
+        .unwrap();
+        let tools = request.body()["tools"].as_array().unwrap().clone();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["function"]["name"], "applyDocumentOperations");
+        assert_eq!(tools[1]["function"]["name"], "lookup_context");
     }
 
     #[test]

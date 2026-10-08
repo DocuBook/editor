@@ -239,6 +239,7 @@ pub async fn stream_chat(
             if tx
                 .send(Ok(AiEvent::ToolCall {
                     tool_call_id: super::events::local_tool_call_id(index),
+                    provider_tool_call_id: tool_call.provider_id.clone(),
                     tool_name: tool_call.name.clone(),
                     input,
                 }))
