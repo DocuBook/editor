@@ -296,9 +296,16 @@ export const useEditorStore = create<EditorState>()(
         }
       }
     }
-    const tabs = get().tabs.filter(t => t.path !== path)
+    const currentTabs = get().tabs
+    const closingIndex = currentTabs.findIndex(t => t.path === path)
+    const tabs = currentTabs.filter(t => t.path !== path)
     let activeTab = get().activeTab
-    if (activeTab === path) activeTab = tabs.length > 0 ? tabs[tabs.length - 1].path : null
+    if (activeTab === path) {
+      // Editor-style close: activate the tab that slides into the closed slot
+      // (the neighbour to its right), NOT the most recently opened tab. Closing
+      // the last tab has no right neighbour, so fall back to the new last one.
+      activeTab = (tabs[closingIndex] ?? tabs[tabs.length - 1])?.path ?? null
+    }
     set({ tabs, activeTab })
   },
 

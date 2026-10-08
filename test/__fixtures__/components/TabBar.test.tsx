@@ -86,6 +86,7 @@ describe('responsive tabs', () => {
     const activeTab = document.querySelector<HTMLElement>('[data-tab-path]')!
     expect(label?.classList.contains('truncate')).toBe(true)
     expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="Close active-document-with-a-long-name.md"]')!.style.pointerEvents).toBe('auto')
     // Tab boundaries come from the strip (adjacent-sibling rule), so no tab ever
     // carries a border of its own — that is what left a dangling edge before.
     expect(document.querySelector('.tab-strip')).not.toBeNull()
@@ -148,5 +149,19 @@ describe('responsive tabs', () => {
     expect(modeItem.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 16 16')
     expect(document.body.textContent).not.toContain('Commit')
     expect(document.body.textContent).not.toContain('Push')
+  })
+
+  it('reveals a close button on every tab and closes the hovered inactive tab', () => {
+    renderTabBar(true)
+
+    // Every tab — not just the active one — carries its own close affordance.
+    const close = document.querySelector<HTMLButtonElement>('[aria-label="Close first.md"]')
+    expect(close).not.toBeNull()
+    expect(document.querySelector('[aria-label="Close last.md"]')).not.toBeNull()
+
+    act(() => close!.click())
+    expect(editorState.closeTab).toHaveBeenCalledWith('notes/first.md')
+    // stopPropagation: closing an inactive tab must not also switch to it.
+    expect(editorState.switchTab).not.toHaveBeenCalled()
   })
 })
