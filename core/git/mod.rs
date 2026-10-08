@@ -6,6 +6,7 @@
 
 pub mod branches;
 pub mod commit;
+pub mod diff;
 pub mod fetch;
 pub mod identity;
 pub mod merge;

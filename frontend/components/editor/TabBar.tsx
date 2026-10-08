@@ -29,8 +29,8 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   const showInlineEditing = !compact
   const visibleTabs = compact ? tabs.filter(tab => tab.path === activeTab) : tabs
   const closeActions = () => setActionsOpen(false)
-  /** Only .md files can toggle Editor ↔ Code; others are preview. */
-  const toggleable = file ? editorFileKind(file.path) === 'wysiwyg' : false
+  /** Only .md files can toggle Editor ↔ Code; a read-only diff tab cannot. */
+  const toggleable = file ? editorFileKind(file.path) === 'wysiwyg' && file.view !== 'diff' : false
 
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)

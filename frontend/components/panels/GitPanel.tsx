@@ -49,14 +49,14 @@ const conflictOf = (entry: GitEntry) =>
   (entry.x === entry.y && (entry.x === 'A' || entry.x === 'D'))
 
 function ChangeRow({ entry, staged }: { entry: GitEntry; staged: boolean }) {
-  const openFile = useEditorStore(state => state.openFile)
+  const openDiff = useEditorStore(state => state.openDiff)
   const name = entry.path.split('/').pop() || entry.path
   const folder = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : ''
 
   return (
     <button
       type="button"
-      onClick={() => void openFile(entry.path, name)}
+      onClick={() => void openDiff(entry.path, name, staged)}
       title={entry.path}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left cursor-pointer hover:bg-surface-active"
     >
@@ -74,9 +74,9 @@ function ChangeRow({ entry, staged }: { entry: GitEntry; staged: boolean }) {
 }
 
 /** A conflicted path stays unstaged until git is told the resolution is final
- *  — the row keeps the file-open behaviour and adds an explicit Stage action. */
+ *  — the row opens the worktree-vs-index diff and adds an explicit Stage action. */
 function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (path: string) => void; disabled: boolean }) {
-  const openFile = useEditorStore(state => state.openFile)
+  const openDiff = useEditorStore(state => state.openDiff)
   const name = entry.path.split('/').pop() || entry.path
   const folder = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : ''
 
@@ -84,7 +84,7 @@ function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (
     <div className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-active">
       <button
         type="button"
-        onClick={() => void openFile(entry.path, name)}
+        onClick={() => void openDiff(entry.path, name, false)}
         title={entry.path}
         className="flex min-w-0 flex-1 items-center gap-2 bg-transparent border-none p-0 text-left cursor-pointer text-foreground-secondary hover:text-foreground"
       >
