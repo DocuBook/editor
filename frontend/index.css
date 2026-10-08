@@ -208,13 +208,15 @@ html[data-toolbar-popup-open] .bn-editor {
 /* Writing-column gutter — single source for both editor modes. BlockNote
    reserves 54px inline for the plus/drag side menu it shows on hover; the raw
    markdown textarea carries the same gutter, otherwise the text column jumps
-   54px sideways when Editor/Code is toggled. Phones drop it so the column uses
-   the full screen width. */
+   54px sideways when Editor/Code is toggled. The read-only diff joins the same
+   column so its callouts line up with the text of a toggled editor. Phones drop
+   it so the column uses the full screen width. */
 #root .editor-content {
     --editor-gutter: 54px;
 }
 #root .bn-editor,
-#root .editor-raw-markdown {
+#root .editor-raw-markdown,
+#root .diff-writing-column {
     padding-inline: var(--editor-gutter, 54px);
 }
 
