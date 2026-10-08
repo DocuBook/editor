@@ -148,6 +148,26 @@ describe('editor store tab persistence', () => {
     expect(invoke).not.toHaveBeenCalledWith('write_file', expect.anything())
   })
 
+  /** Closing the active tab should feel like the strip collapsing in place:
+   *  the tab to its right takes over, not the most recently opened tab. */
+  it('activates the right neighbour of the closed active tab, not the last tab', async () => {
+    const tab = (n: string) => ({ path: `${n}.md`, name: `${n}.md`, content: '', frontmatter: '', editedContent: null, dirty: false, deleted: false })
+    useEditorStore.setState({ tabs: ['a', 'b', 'c', 'd'].map(tab), activeTab: 'b.md' })
+
+    await useEditorStore.getState().closeTab('b.md')
+
+    expect(useEditorStore.getState().activeTab).toBe('c.md')
+  })
+
+  it('falls back to the previous tab when the last active tab is closed', async () => {
+    const tab = (n: string) => ({ path: `${n}.md`, name: `${n}.md`, content: '', frontmatter: '', editedContent: null, dirty: false, deleted: false })
+    useEditorStore.setState({ tabs: ['a', 'b', 'c'].map(tab), activeTab: 'c.md' })
+
+    await useEditorStore.getState().closeTab('c.md')
+
+    expect(useEditorStore.getState().activeTab).toBe('b.md')
+  })
+
   it('autosaves a dirty tab 2s after the last change (debounce, editable in both modes)', async () => {
     vi.useFakeTimers()
     try {
