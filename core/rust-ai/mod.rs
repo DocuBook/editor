@@ -5,6 +5,7 @@
 //! provider-safe errors, limits, and stable AI events.
 
 pub mod error;
+pub mod context;
 pub mod events;
 pub mod prompt;
 pub mod provider;

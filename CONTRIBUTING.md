@@ -11,6 +11,21 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 - **Tauri v2 system dependencies** — see https://v2.tauri.app/start/prerequisites/
 - **Docker** — only needed to build/test the web image (`docker build`); local server development needs no Docker
 
+## AI Context Sources
+
+AI context sources are backend configuration, not frontend settings. Production
+MCP servers must use Streamable HTTP over HTTPS; desktop stdio is not supported
+in the first iteration. The backend dynamically discovers tools, keeps server
+credentials private, and sends only normalized tool metadata to the provider.
+
+Configured read-only tools may be auto-allowed. Any tool outside the explicit
+read-only allow-list requires host confirmation and must be refused when no
+confirmation UI is available. Provider-native search is exposed only when the
+provider explicitly confirms support; otherwise use an MCP search tool. Results
+are bounded and framed as untrusted reference material. Never add a context
+tool named `applyDocumentOperations`, which remains the only terminal document
+edit path.
+
 ## Build from Source
 
 ### Desktop (Tauri)

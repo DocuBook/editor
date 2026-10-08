@@ -1,5 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAiTransport } from '../../../frontend/utils/aiTransport'
+import {
+  boundContextResult,
+  contextCallNeedsConfirmation,
+  contextToolDefinitions,
+} from '../../../frontend/utils/aiContext'
+
+describe('AI context policy', () => {
+  const lookup = {
+    name: 'search',
+    description: 'Search',
+    inputSchema: { type: 'object' },
+    serverId: 'mcp-1',
+    readOnly: true,
+  }
+  it('exposes only non-edit context schemas', () => {
+    expect(
+      contextToolDefinitions([lookup, { ...lookup, name: 'applyDocumentOperations' }]),
+    ).toHaveLength(1)
+  })
+  it('auto-allows only configured read-only tools', () => {
+    expect(contextCallNeedsConfirmation(lookup, ['search'])).toBe(false)
+    expect(contextCallNeedsConfirmation(lookup, [])).toBe(true)
+    expect(contextCallNeedsConfirmation({ ...lookup, readOnly: false }, ['search'])).toBe(true)
+  })
+  it('bounds and labels context results as untrusted', () => {
+    expect(boundContextResult({ answer: 42 })).toContain('UNTRUSTED REFERENCE MATERIAL')
+    expect(boundContextResult('x'.repeat(256 * 1024 + 1))).toBeNull()
+  })
+})
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
 
 function sseStream(chunks: string[]) {

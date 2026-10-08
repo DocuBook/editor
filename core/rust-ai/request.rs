@@ -30,7 +30,21 @@ impl AiRequest {
         });
         if let Some(tools) = &self.tools {
             if tools.as_array().is_some_and(|items| !items.is_empty()) {
-                body["tools"] = json!([tool_schema::openai_document_operation_tool()]);
+                let mut definitions = vec![tool_schema::openai_document_operation_tool()];
+                if let Some(supplied) = tools.as_array() {
+                    definitions.extend(
+                        supplied
+                            .iter()
+                            .filter(|tool| {
+                                let name = tool.pointer("/function/name").and_then(Value::as_str);
+                                name.is_some_and(|name| {
+                                    name != tool_schema::DOCUMENT_OPERATION_TOOL
+                                })
+                            })
+                            .cloned(),
+                    );
+                }
+                body["tools"] = Value::Array(definitions);
                 debug_assert_eq!(
                     tool_schema::DOCUMENT_OPERATION_TOOL,
                     "applyDocumentOperations"
@@ -90,12 +104,30 @@ mod tests {
             "key",
             "https://example.test/v1",
             "[{\"role\":\"user\",\"content\":\"hi\"}]",
-            Some("[{\"type\":\"function\"}]"),
+            Some(r#"[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]"#),
         )
         .unwrap();
         assert_eq!(request.url(), "https://example.test/v1/chat/completions");
         assert_eq!(request.body()["stream"], true);
         assert_eq!(request.body()["tool_choice"], json!("auto"));
+        assert_eq!(request.body()["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            request.body()["tools"][0]["function"]["name"],
+            "applyDocumentOperations"
+        );
+    }
+
+    #[test]
+    fn canonical_document_tool_wins_over_supplied_collision() {
+        let request = AiRequest::from_json(
+            "model", "key", "https://example.test/v1", "[]",
+            Some(r#"[{"type":"function","function":{"name":"applyDocumentOperations","parameters":{}}},{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}]"#),
+        ).unwrap();
+        let body = request.body();
+        let tools = body["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["function"]["name"], "applyDocumentOperations");
+        assert_eq!(tools[1]["function"]["name"], "lookup");
     }
 
     #[test]

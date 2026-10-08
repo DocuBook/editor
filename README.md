@@ -38,6 +38,22 @@ For production, pin an image tag, place the container behind HTTPS, set `DB_SECU
 | `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset        | Provisions a custom OpenAI-compatible provider                          |
 | `RUST_LOG`                                                                        | app defaults | Controls server log filtering                                           |
 
+### AI Context Tools
+
+Context sources are configured and executed by the backend. Provider-native web
+search is advertised only when the configured provider explicitly reports that
+capability; otherwise search must be supplied by a configured MCP server using
+Streamable HTTP. Desktop stdio MCP is intentionally not supported yet.
+
+Discovered MCP tools are normalized before they are sent to the provider. Only
+configured read-only tools are eligible for automatic invocation. Other context
+calls require host confirmation and are refused when no confirmation surface is
+available. MCP endpoints must use HTTPS without embedded credentials and are
+subject to request timeouts, tool-count limits, and a 256 KiB response limit.
+Returned context is labeled as untrusted reference material. It cannot become a
+document edit directly: `applyDocumentOperations` remains the only terminal edit
+ tool, and `@mention` retrieval is unchanged.
+
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
 
 ```yaml

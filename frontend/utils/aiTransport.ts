@@ -34,6 +34,7 @@ import { buildAiPrompt } from "./aiPrompt";
 import { parseMentions } from "./aiMentions";
 import { isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
+import { contextToolDefinitions } from "./aiContext";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
  *  document writes while the AI types (smooth instead of janky streaming). */
@@ -117,6 +118,9 @@ async function runSendMessages(
           },
         }))
       : undefined;
+  const contextTools = supportsTools
+    ? contextToolDefinitions((body as any)?.contextTools)
+    : [];
   const editor = deps.getEditor();
   /** Path A → Path B fallback budget: a tool-capable provider that answers with
    *  prose gets exactly ONE re-ask against the text-only prompt. Not part of the
@@ -306,7 +310,9 @@ async function runSendMessages(
             currentRequestId = uuid();
             await invoke("ask_ai", {
               messages: JSON.stringify(msgs),
-              ...(useTools ? { tools: JSON.stringify(tools) } : {}),
+              ...(useTools
+                ? { tools: JSON.stringify([...(tools ?? []), ...contextTools]) }
+                : {}),
               provider,
               model,
               baseUrl: providerInfo?.api || config.baseUrl,
