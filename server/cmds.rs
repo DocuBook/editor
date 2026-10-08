@@ -76,6 +76,13 @@ pub(crate) fn git_diff_summary(state: &AppState) -> Result<String, String> {
     }
 }
 
+pub(crate) fn git_diff_file(state: &AppState, path: &str, staged: bool) -> Result<String, String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) if g.is_repo() => g.diff_file(path, staged),
+        _ => Ok(r#"{"old":"","new":""}"#.to_string()),
+    }
+}
+
 pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, String> {
     let repo_path = match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.repo_path.clone(),

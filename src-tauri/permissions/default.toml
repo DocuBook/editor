@@ -25,6 +25,7 @@ permissions = [
   "allow-git-create-branch",
   "allow-git-clone",
   "allow-git-commit",
+  "allow-git-diff-file",
   "allow-git-diff-summary",
   "allow-git-fetch",
   "allow-git-pull",
@@ -253,6 +254,16 @@ commands.allow = ["git_commit"]
 identifier = "deny-git-commit"
 description = "Denies the git_commit command."
 commands.deny = ["git_commit"]
+
+[[permission]]
+identifier = "allow-git-diff-file"
+description = "Enables the git_diff_file command."
+commands.allow = ["git_diff_file"]
+
+[[permission]]
+identifier = "deny-git-diff-file"
+description = "Denies the git_diff_file command."
+commands.deny = ["git_diff_file"]
 
 [[permission]]
 identifier = "allow-git-diff-summary"

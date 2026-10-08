@@ -24,6 +24,7 @@ const editorState = vi.hoisted(() => ({
   activeTab: 'notes/active.md' as string | null,
   tabs: [{ path: 'notes/active.md', name: 'active.md', dirty: false }],
   openFile: vi.fn(async () => {}),
+  openDiff: vi.fn(async () => {}),
 }))
 const vaultTree = vi.hoisted(() => ({ loadTree: vi.fn(async () => {}) }))
 const invoke = vi.hoisted(() => vi.fn(async (_command?: string, _args?: unknown) => ''))
@@ -232,7 +233,7 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openFile).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md')
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false)
   })
 
   it('leaves an ordinary conflict-free merge conflict row unstaged', () => {
@@ -252,7 +253,7 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openFile).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md')
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false)
   })
 
   it('uses the Sync menu instead of a standalone refresh action', () => {

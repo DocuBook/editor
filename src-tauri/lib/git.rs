@@ -221,6 +221,23 @@ pub async fn git_diff_summary(state: State<'_, AppState>) -> Result<String, Stri
 }
 
 #[tauri::command]
+pub async fn git_diff_file(
+    path: String,
+    staged: bool,
+    state: State<'_, AppState>,
+) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Ok(r#"{"old":"","new":""}"#.to_string()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::git::Git::open(&repo_path).diff_file(&path, staged)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub fn git_stage(path: Option<String>, state: State<AppState>) -> Result<(), String> {
     let guard = state.git.lock().expect("lock");
     match guard.as_ref() {

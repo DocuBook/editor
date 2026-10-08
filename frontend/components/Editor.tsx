@@ -8,6 +8,7 @@ import { editorFileKind } from '../utils/fileKind'
 import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
+import { DiffViewer } from './editor/DiffViewer'
 import { clearEditorCache } from '../utils/editorCache'
 import { clearDiagramSVG } from '../utils/mermaidRenderCache'
 import { useAiChat } from '../stores/aiChat'
@@ -83,13 +84,17 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   }
 
   const kind = editorFileKind(file.path)
+  /** A diff tab renders read-only, in the same surface as the other previews. */
+  const diffView = file.view === 'diff'
   /* oxlint-disable react/refs -- non-reactive per-path cursor cache; promoting it to state adds renders per keystroke */
   const cursorOffset = cursorOffsets.current.get(file.path)
   /* oxlint-enable react/refs */
 
   /** Shared scroll container — all modes use the same container. */
   let inner: ReactNode
-  if (kind === 'binary') {
+  if (diffView) {
+    inner = <DiffViewer key={file.path} path={file.path} name={file.name} staged={!!file.diffStaged} />
+  } else if (kind === 'binary') {
     inner = <ImagePreview fileName={file.name} vaultPath={vaultPath} relPath={file.path} />
   } else if (file.content == null) {
     inner = <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading...</div>
@@ -137,10 +142,10 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
             at every width, since the composer's height does not depend on its width, and
             it keeps the document's last line readable above a long prompt instead of
             trapped under it. */}
-        <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' ? 'pb-50' : '')}>
+        <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' && !diffView ? 'pb-50' : '')}>
           {inner}
         </div>
-        {kind === 'wysiwyg' && editMode === 'editor' && (
+        {kind === 'wysiwyg' && editMode === 'editor' && !diffView && (
           /** Kept mounted while the mobile drawer covers it (state must survive:
            *  unmounting would wipe draft input on every drawer toggle) — the
            *  composer suppresses itself instead via `obscured`. */

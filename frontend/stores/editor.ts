@@ -25,6 +25,13 @@ export interface Tab {
    *  write whose baseline no longer matches disk, which is what makes an edit
    *  safe against an external change instead of a blind overwrite. */
   baseVersion?: string | null
+  /** Read-only presentation for this tab: `'diff'` renders the Changes panel's
+   *  inline diff in the editor surface instead of the WYSIWYG/source editor.
+   *  Undefined is the normal editor. Set by openDiff, cleared by openFile so the
+   *  same path always reopens as an editable tab. */
+  view?: 'diff'
+  /** Whether the diff compares against HEAD (staged) — `'diff'` view only. */
+  diffStaged?: boolean
 }
 
 export type EditMode = 'editor' | 'code'
@@ -46,6 +53,9 @@ interface EditorState {
   redo: () => void
   /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it. */
   openFile: (path: string, name: string, createIfMissing?: boolean) => Promise<void>
+  /** Open a file as a read-only diff in the editor surface (Changes panel).
+   *  `staged` picks the range: index-vs-HEAD when true, worktree-vs-index when false. */
+  openDiff: (path: string, name: string, staged: boolean) => Promise<void>
   switchTab: (path: string) => Promise<void>
   /** Rename an open file: remaps the tab's path+name so saves, git status and
    *  wiki backlinks keep targeting the NEW path. Flushes first so in-flight WYSIWYG
@@ -196,7 +206,7 @@ export const useEditorStore = create<EditorState>()(
         return
       }
     }
-    if (get().tabs.find(t => t.path === path)) { set({ activeTab: path }); return }
+    if (get().tabs.find(t => t.path === path)) { set({ activeTab: path, tabs: get().tabs.map(t => t.path === path ? { ...t, view: undefined, diffStaged: undefined } : t) }); return }
     set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false, baseVersion: null }], activeTab: path })
     // Binary/image files are previewed via asset URL, never read as UTF-8 text.
     if (isBinaryPath(path)) return
@@ -227,6 +237,13 @@ export const useEditorStore = create<EditorState>()(
       set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: null } : t) })
       toast.error(notFound ? 'File not found' : 'Failed to open file')
     }
+  },
+
+  openDiff: async (path, name, staged) => {
+    // Reuse the normal open path so tab identity, flushing, and the loaded
+    // content all match a regular open — then flag this tab as a diff view.
+    await get().openFile(path, name)
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, view: 'diff', diffStaged: staged } : t) })
   },
 
   switchTab: async (path) => {
