@@ -86,6 +86,7 @@ describe('responsive tabs', () => {
     const activeTab = document.querySelector<HTMLElement>('[data-tab-path]')!
     expect(label?.classList.contains('truncate')).toBe(true)
     expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="Close active-document-with-a-long-name.md"]')!.style.pointerEvents).toBe('auto')
     // Tab boundaries come from the strip (adjacent-sibling rule), so no tab ever
     // carries a border of its own — that is what left a dangling edge before.
     expect(document.querySelector('.tab-strip')).not.toBeNull()
