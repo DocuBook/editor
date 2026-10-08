@@ -5,7 +5,7 @@
 //! rendered patch — computing the line diff itself keeps the view dependency-free.
 
 use git2::Repository;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use super::{git_error, Git};
 
@@ -17,6 +17,14 @@ impl Git {
     /// A side that does not exist — a newly added or deleted file — is an empty
     /// string, so the frontend renders it as a full insertion or deletion.
     pub fn diff_file(&self, path: &str, staged: bool) -> Result<String, String> {
+        let relative = Path::new(path);
+        if relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err("Diff path must be repository-relative".to_string());
+        }
         let repo = self.repository()?;
         let head = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
         let index = repo.index().map_err(git_error)?;
@@ -58,9 +66,16 @@ fn index_content(repo: &Repository, index: &git2::Index, path: &str) -> String {
 
 /// Working-tree content for `path`, empty when the file is gone or unreadable.
 fn worktree_content(repo: &Repository, path: &str) -> String {
-    repo.workdir()
-        .map(|dir| dir.join(path))
-        .and_then(|full| std::fs::read(full).ok())
+    let workdir = match repo.workdir().and_then(|dir| dir.canonicalize().ok()) {
+        Some(workdir) => workdir,
+        None => return String::new(),
+    };
+    let full = workdir.join(path);
+    let full = match full.canonicalize() {
+        Ok(full) if full.starts_with(&workdir) => full,
+        _ => return String::new(),
+    };
+    std::fs::read(full)
         .map(|bytes| String::from_utf8_lossy(&bytes).to_string())
         .unwrap_or_default()
 }
@@ -112,6 +127,23 @@ mod tests {
         assert_eq!(side(&clean, "old"), "same\n");
         assert_eq!(side(&clean, "new"), "same\n");
 
+        cleanup(&[&dir]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn diff_file_does_not_read_outside_the_worktree() {
+        let (dir, g) = local_repo("diff-file-path-safety");
+        commit_file(&g, &dir, "a.md", "inside\n", "first");
+        let outside = dir.parent().unwrap().join("diff-file-outside.md");
+        std::fs::write(&outside, "secret\n").unwrap();
+        std::os::unix::fs::symlink(&outside, dir.join("escape.md")).unwrap();
+
+        assert!(g.diff_file("../diff-file-outside.md", false).is_err());
+        let symlink = g.diff_file("escape.md", false).unwrap();
+        assert_eq!(side(&symlink, "new"), "");
+
+        let _ = std::fs::remove_file(&outside);
         cleanup(&[&dir]);
     }
 }
