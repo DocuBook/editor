@@ -149,4 +149,18 @@ describe('responsive tabs', () => {
     expect(document.body.textContent).not.toContain('Commit')
     expect(document.body.textContent).not.toContain('Push')
   })
+
+  it('reveals a close button on every tab and closes the hovered inactive tab', () => {
+    renderTabBar(true)
+
+    // Every tab — not just the active one — carries its own close affordance.
+    const close = document.querySelector<HTMLButtonElement>('[aria-label="Close first.md"]')
+    expect(close).not.toBeNull()
+    expect(document.querySelector('[aria-label="Close last.md"]')).not.toBeNull()
+
+    act(() => close!.click())
+    expect(editorState.closeTab).toHaveBeenCalledWith('notes/first.md')
+    // stopPropagation: closing an inactive tab must not also switch to it.
+    expect(editorState.switchTab).not.toHaveBeenCalled()
+  })
 })

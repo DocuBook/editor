@@ -94,9 +94,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
             className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-6 pr-8 ' : 'whitespace-nowrap shrink-0 px-8 ') + (activeTab === tab.path ? 'tab-active bg-background text-foreground' : 'tab-inactive text-foreground-subtle')}>
             {activeTab === tab.path && <span data-testid="active-tab-indicator" aria-hidden="true" className={'absolute size-1.5 rounded-full bg-accent ' + (compact ? 'left-2' : 'left-3')} />}
             <span title={compact ? tab.name : undefined} className={(compact ? 'min-w-0 truncate ' : '') + (tab.deleted ? 'line-through opacity-50' : '')}>{tab.name}</span>
-            {activeTab === tab.path && (
-              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} style={compact ? { opacity: 1 } : undefined} className="tab-close-btn absolute right-1 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
-            )}
+            <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} aria-label={'Close ' + tab.name} style={compact ? { opacity: 1 } : undefined} className="tab-close-btn absolute right-1 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
           </div>
         ))}
       </div>

@@ -796,9 +796,11 @@ body .code-block-language-empty {
 }
 .tab-close-btn {
   opacity: 0;
+  pointer-events: none;
 }
-.tab-active:hover .tab-close-btn {
+.tab-item:hover .tab-close-btn {
   opacity: 1;
+  pointer-events: auto;
 }
 .tab-close-btn:hover {
   background: var(--color-surface-active);
