@@ -87,6 +87,8 @@ export interface AiTransportDeps {
   getEditor: () => any | null;
   /** Vault-relative file bound to this keep-alive editor instance. */
   filePath?: string
+  /** Enable backend-owned MCP discovery for the normal editor runtime. */
+  discoverContextTools?: boolean
   /** Host-owned, read-only context tool executor. Not supplied until a runtime
    *  registers trusted tools; document operations stay on the existing path. */
   executeContextTool?: (name: string, input: unknown, signal?: AbortSignal) => Promise<string>
@@ -125,6 +127,7 @@ async function runSendMessages(
   const supportsTools = !isTextOnly(provider, model, st.probeTools);
   const suppliedToolDefs = (body as any)?.toolDefinitions as
     Record<string, { description: string; inputSchema: any }> | undefined;
+  const toolDefs = Object.fromEntries(Object.entries(suppliedToolDefs ?? {}).filter(([name]) => name === "applyDocumentOperations")) as Record<string, { description: string; inputSchema: any }>;
   const contextTools: any[] = [];
   if (supportsTools && deps.executeContextTool) {
     const trustedTools = new Set(deps.trustedContextTools ?? deps.contextToolAllowlist ?? []);
@@ -138,13 +141,14 @@ async function runSendMessages(
         });
       }
     }
-  } else if (supportsTools && Object.keys(suppliedToolDefs ?? {}).some((name) => name !== "applyDocumentOperations")) {
-    const discovered = await invoke<any>("context_tools", {}).then((value) => {
+  } else if (supportsTools && deps.discoverContextTools) {
+    const discovered = await invoke<any>("context_tools", {}, abortSignal).then((value) => {
       try { return typeof value === "string" ? JSON.parse(value) : value } catch { return [] }
     }).catch(() => []);
+    if (abortSignal?.aborted) return new ReadableStream();
     if (Array.isArray(discovered)) contextTools.push(...discovered);
+    else if (Array.isArray(discovered?.result)) contextTools.push(...discovered.result);
   }
-  const toolDefs = Object.fromEntries(Object.entries(suppliedToolDefs ?? {}).filter(([name]) => name === "applyDocumentOperations")) as Record<string, { description: string; inputSchema: any }>;
   for (const tool of Array.isArray(contextTools) ? contextTools : []) {
     if (tool?.read_only === true && typeof tool.name === "string" && tool.name !== "applyDocumentOperations" && tool.input_schema && typeof tool.input_schema === "object") {
       toolDefs[tool.name] = { description: String(tool.description ?? "Read-only context lookup"), inputSchema: tool.input_schema };

@@ -129,7 +129,7 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
     },
     extensions: [
       AIExtension({
-        transport: createAiTransport({ getEditor: () => editor, filePath }),
+        transport: createAiTransport({ getEditor: () => editor, filePath, discoverContextTools: true }),
         documentStateBuilder: createSelectionAwareDocumentStateBuilder(async (request: any) =>
           (await import('./aiBlocks')).buildHtmlDocumentState(request.editor, !!request.selectedBlocks?.length),
         ),

@@ -93,6 +93,14 @@ fn validate_server(server: &ContextServer) -> Result<(), String> {
     crate::rust_ai::provider::validated_custom_addrs(&server.url, false).map(|_| ())
 }
 
+fn validate_server_ids(servers: &[ContextServer]) -> Result<(), String> {
+    let mut ids = std::collections::HashSet::new();
+    if servers.iter().any(|server| !ids.insert(server.id.as_str())) {
+        return Err("MCP server IDs must be unique".into());
+    }
+    Ok(())
+}
+
 fn client(server: &ContextServer) -> Result<reqwest::Client, String> {
     let (_, addrs) = crate::rust_ai::provider::validated_custom_addrs(&server.url, false)?;
     let host = reqwest::Url::parse(&server.url)
@@ -277,6 +285,7 @@ fn server_config() -> Result<Vec<ContextServer>, String> {
     for server in &servers {
         validate_server(server)?;
     }
+    validate_server_ids(&servers)?;
     Ok(servers)
 }
 
@@ -435,6 +444,17 @@ mod tests {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'));
         assert!(name.len() <= 64);
+    }
+
+    #[test]
+    fn rejects_duplicate_server_ids() {
+        let server = ContextServer {
+            id: "docs".into(),
+            url: "https://example.com/mcp".into(),
+            token: None,
+            read_only_tools: Vec::new(),
+        };
+        assert!(validate_server_ids(&[server.clone(), server]).is_err());
     }
 
     #[test]
