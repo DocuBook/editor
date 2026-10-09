@@ -11,7 +11,10 @@ pub const MAX_CONTEXT_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_CONTEXT_ITEMS: usize = 64;
 pub const CONTEXT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub const UNTRUSTED_REFERENCE_TYPE: &str = "untrusted_reference_data";
-static DISCOVERY_CACHE: OnceLock<Mutex<Option<(String, Vec<ContextTool>)>>> = OnceLock::new();
+
+type DiscoveryCache = Option<(String, Vec<ContextTool>)>;
+
+static DISCOVERY_CACHE: OnceLock<Mutex<DiscoveryCache>> = OnceLock::new();
 static CONTEXT_CALLS: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
 
 fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
