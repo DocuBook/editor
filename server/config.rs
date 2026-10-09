@@ -55,8 +55,17 @@ pub struct Config {
     pub admin: Option<Admin>,
     pub session_ttl_hours: u64,
     pub ai: AiSelection,
+    pub mcp: Vec<McpServer>,
     pub setup_token: Option<String>,
     path: PathBuf,
+}
+
+#[derive(Clone, Default)]
+pub struct McpServer {
+    pub id: String,
+    pub url: String,
+    pub read_only_tools: Vec<String>,
+    pub has_token: bool,
 }
 
 impl Config {
@@ -115,6 +124,24 @@ impl Config {
             .and_then(|x| x.as_u64())
             .unwrap_or(168);
         let ai = v.get("ai").map(parse_ai).unwrap_or_default();
+        let mcp = v
+            .get("mcp")
+            .and_then(|x| x.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(parse_mcp)
+                    .map(|mut server| {
+                        server.has_token = super::keys::get_key(
+                            path.parent().unwrap_or_else(|| Path::new(".")),
+                            &format!("mcp:{}", server.id),
+                        )
+                        .is_ok();
+                        server
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         // Env-only, never persisted: optional setup guard for public deployments.
         let setup_token = std::env::var("DB_SETUP_TOKEN")
             .ok()
@@ -126,6 +153,7 @@ impl Config {
             admin,
             session_ttl_hours,
             ai,
+            mcp,
             setup_token,
             path: path.to_path_buf(),
         }
@@ -147,6 +175,7 @@ impl Config {
                     "probes": e.probes,
                 }))).collect::<serde_json::Map<_, _>>(),
             },
+            "mcp": self.mcp.iter().map(|s| serde_json::json!({"id": s.id, "url": s.url, "readOnlyTools": s.read_only_tools})).collect::<Vec<_>>(),
         });
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)
@@ -402,6 +431,7 @@ impl Config {
                 "data_dir": data_dir.to_string_lossy(),
                 "www_dir": std::env::var("WWW_DIR").unwrap_or_else(|_| "./dist".into()),
             },
+            "mcp": self.mcp.iter().map(|s| serde_json::json!({"id": s.id, "url": s.url, "readOnlyTools": s.read_only_tools, "hasToken": s.has_token})).collect::<Vec<_>>(),
         })
     }
 }
@@ -444,6 +474,29 @@ fn parse_ai(value: &serde_json::Value) -> AiSelection {
         return out;
     }
     migrate_legacy_ai(value)
+}
+
+fn parse_mcp(value: &serde_json::Value) -> Option<McpServer> {
+    let object = value.as_object()?;
+    let id = object.get("id")?.as_str()?.to_string();
+    let url = object.get("url")?.as_str()?.to_string();
+    if id.is_empty() || url.is_empty() {
+        return None;
+    }
+    Some(McpServer {
+        id,
+        url,
+        read_only_tools: object
+            .get("readOnlyTools")
+            .and_then(|x| x.as_array())
+            .map(|xs| {
+                xs.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        has_token: false,
+    })
 }
 
 /** Legacy `{provider, model, probes: {provider: {model: bool}}}` → endpoints.
@@ -582,12 +635,16 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.subsec_nanos())
             .unwrap_or_default() as u64;
-        let seed = n
-            .wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        let seed = n.wrapping_mul(0x9e37_79b9_7f4a_7c15)
             ^ nanos.rotate_left(17)
             ^ ((std::process::id() as u64) << 29);
         (0..24)
-            .map(|i| format!("{:02x}", (seed >> ((i % 8) * 8)) as u8 ^ (i as u64).wrapping_mul(31) as u8))
+            .map(|i| {
+                format!(
+                    "{:02x}",
+                    (seed >> ((i % 8) * 8)) as u8 ^ (i as u64).wrapping_mul(31) as u8
+                )
+            })
             .collect()
     }
 
@@ -625,6 +682,7 @@ mod tests {
             admin: None,
             session_ttl_hours: 24,
             ai: AiSelection::default(),
+            mcp: Vec::new(),
             setup_token: None,
             path: dir.join("c1.json"),
         };
@@ -638,6 +696,7 @@ mod tests {
             admin: None,
             session_ttl_hours: 24,
             ai: AiSelection::default(),
+            mcp: Vec::new(),
             setup_token: Some(token.clone()),
             path: dir.join("c2.json"),
         };
@@ -676,7 +735,10 @@ mod tests {
 
         let reloaded = Config::load(&dir);
         assert_eq!(reloaded.ai.active, "opencode-go");
-        assert_eq!(reloaded.ai.endpoints["opencode-go"].model, "deepseek-v4-flash");
+        assert_eq!(
+            reloaded.ai.endpoints["opencode-go"].model,
+            "deepseek-v4-flash"
+        );
         assert_eq!(
             reloaded.ai.endpoints["opencode-go"].base_url,
             "https://opencode.ai/zen/go/v1"
@@ -785,8 +847,10 @@ mod tests {
         let dir = tmp();
         let mut c = Config::load(&dir);
         assert!(c.ai.endpoints.is_empty(), "fresh config starts unprobed");
-        c.set_probe("opencode-go", "deepseek-v4-flash", true).unwrap();
-        c.set_probe("opencode-go", "deepseek-v4-chat", false).unwrap();
+        c.set_probe("opencode-go", "deepseek-v4-flash", true)
+            .unwrap();
+        c.set_probe("opencode-go", "deepseek-v4-chat", false)
+            .unwrap();
 
         let reloaded = Config::load(&dir);
         assert!(reloaded.ai.endpoints["opencode-go"].probes["deepseek-v4-flash"]);
@@ -795,7 +859,8 @@ mod tests {
         // Merging: a later probe must not drop the other models, and writing an
         // endpoint must not drop the probes either.
         let mut c2 = Config::load(&dir);
-        c2.set_probe("opencode-go", "deepseek-v4-reasoner", true).unwrap();
+        c2.set_probe("opencode-go", "deepseek-v4-reasoner", true)
+            .unwrap();
         c2.set_endpoint("openai-compatible", "local-1", "https://local.example/v1")
             .unwrap();
         let c3 = Config::load(&dir);

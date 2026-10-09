@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { invoke, isTauri } from '../lib/ipc'
 import { toast } from 'sonner'
@@ -64,6 +64,51 @@ const lockedEndpoint = (cfg: BackendAiSettings | null, provider: string, isCusto
 
 const isCustomProvider = (provider: string) => provider === CUSTOM_PROVIDER_ID
 
+function McpSettings({ servers, envManaged, ready, loading, error, retry }: { servers: Array<{id:string;url:string;readOnlyTools:string[];hasToken:boolean;token?:string}>; envManaged: boolean; ready: boolean; loading: boolean; error: string | null; retry: () => Promise<void> }) {
+  const [draft, setDraft] = useState<{id:string;url:string;readOnlyTools:string;token:string}>({id:'',url:'',readOnlyTools:'',token:''})
+  const [saving, setSaving] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [editDraft, setEditDraft] = useState<{id:string;url:string;readOnlyTools:string;token:string;removeToken:boolean}>({id:'',url:'',readOnlyTools:'',token:'',removeToken:false})
+  const disabled = !ready || envManaged || saving
+  const save = async (next: any[]) => {
+    if (!ready || envManaged || saving) return
+    setSaving(true)
+    try {
+      const command = isTauri ? 'set_mcp_settings' : 'config_set'
+      const args = isTauri ? { servers: next } : { key: 'mcp', value: next }
+      await invoke(command, args)
+      await retry()
+      setDraft({id:'',url:'',readOnlyTools:'',token:''})
+      setEditing(null)
+      toast.success('MCP server settings saved')
+    } catch (error) { toast.error(String(error)) }
+    setSaving(false)
+  }
+  return <div className="space-y-3">
+    <p className="text-xs text-muted leading-relaxed">MCP tools are exposed to AI only when their fully qualified name is explicitly listed as read-only. Credentials stay in the backend key store and are never returned here.</p>
+    {envManaged && <p className="text-xs text-warning">MCP servers are controlled by DOCUBOOK_MCP_SERVERS.</p>}
+    {loading ? <p role="status" className="text-xs text-muted">Loading MCP server settings…</p> : error && <div role="alert" className="flex items-center gap-2 text-xs text-danger"><span>Could not load MCP server settings: {error}</span><button onClick={() => { void retry().catch(() => {}) }} className="text-xs">Retry</button></div>}
+    {servers.map(server => <div key={server.id} className="rounded border border-border-subtle p-3 space-y-2">
+      {editing === server.id ? <>
+        <label className="block text-xs font-medium">HTTPS endpoint</label><input disabled={disabled} value={editDraft.url} onChange={e=>setEditDraft({...editDraft,url:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
+        <label className="block text-xs font-medium">Read-only tool names (one per line)</label><textarea disabled={disabled} value={editDraft.readOnlyTools} onChange={e=>setEditDraft({...editDraft,readOnlyTools:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" rows={3} />
+        <label className="block text-xs font-medium">Replace bearer token (optional)</label><input disabled={disabled} type="password" autoComplete="new-password" value={editDraft.token} onChange={e=>setEditDraft({...editDraft,token:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
+        {server.hasToken && <label className="flex items-center gap-2 text-xs"><input disabled={disabled} type="checkbox" checked={editDraft.removeToken} onChange={e=>setEditDraft({...editDraft,removeToken:e.target.checked,token:''})} />Remove saved token</label>}
+        <div className="flex gap-2"><button disabled={disabled} onClick={() => void save(servers.map(item => item.id === server.id ? {...item,url:editDraft.url,readOnlyTools:editDraft.readOnlyTools.split('\n').map(x=>x.trim()).filter(Boolean),...(editDraft.removeToken ? {token:'',removeToken:true} : editDraft.token ? {token:editDraft.token} : {})} : item))} className="text-xs">Save</button><button disabled={disabled} onClick={() => setEditing(null)} className="text-xs">Cancel</button></div>
+      </> : <>
+        <div className="flex items-center justify-between"><strong className="text-xs">{server.id}</strong><div className="flex gap-2"><button disabled={disabled} onClick={() => {setEditDraft({id:server.id,url:server.url,readOnlyTools:server.readOnlyTools.join('\n'),token:'',removeToken:false});setEditing(server.id)}} className="text-xs bg-transparent border-0 cursor-pointer disabled:opacity-40">Edit</button><button disabled={disabled} onClick={() => void save(servers.filter(item => item.id !== server.id))} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove</button></div></div>
+        <div className="text-[10px] text-muted break-all">{server.url}</div>
+        <div className="text-[10px] text-muted">Read-only tools: {server.readOnlyTools.join(', ') || 'none'} · {server.hasToken ? 'credential saved' : 'no credential'}</div>
+      </>}
+    </div>)}
+    <label className="block text-xs font-medium">Server ID</label><input disabled={disabled} value={draft.id} onChange={e=>setDraft({...draft,id:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs" placeholder="docs" />
+    <label className="block text-xs font-medium">HTTPS endpoint</label><input disabled={disabled} value={draft.url} onChange={e=>setDraft({...draft,url:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" placeholder="https://mcp.example.com/mcp" />
+    <label className="block text-xs font-medium">Read-only tool names (one per line, serverId:toolName)</label><textarea disabled={disabled} value={draft.readOnlyTools} onChange={e=>setDraft({...draft,readOnlyTools:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" rows={3} />
+    <label className="block text-xs font-medium">Bearer token (optional)</label><input disabled={disabled} type="password" autoComplete="new-password" value={draft.token} onChange={e=>setDraft({...draft,token:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
+    <button disabled={disabled || !draft.id || !draft.url} onClick={() => void save([...servers, {id:draft.id,url:draft.url,readOnlyTools:draft.readOnlyTools.split('\n').map(x=>x.trim()).filter(Boolean),token:draft.token}])} className="px-3 py-2 rounded bg-accent text-on-accent border-0 text-xs cursor-pointer disabled:opacity-40">{saving ? 'Saving…' : 'Add server'}</button>
+  </div>
+}
+
 /** Store a probe result in the UI state AND on the backend. The write is explicit:
  *  the implicit mirror the store used to run is gone, and a probe is worth
  *  keeping server-side because re-measuring costs a round-trip while an unmeasured
@@ -76,7 +121,7 @@ async function storeProbe(provider: string, model: string, tools: boolean): Prom
 }
 
 export default function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [section, setSection] = useState<'ai' | 'appearance' | 'git' | 'system'>('ai')
+  const [section, setSection] = useState<'ai' | 'mcp' | 'appearance' | 'git' | 'system'>('ai')
   const { provider, model, savedProviders, probeTools,
     setProvider, setModel, clearApiKey, removeSavedProvider } = useAiSettings()
 
@@ -96,6 +141,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
    *  localStorage. This copy also drives the lock state machine below. */
   const [backendCfg, setBackendCfg] = useState<BackendAiSettings | null>(null)
   const [backendLoading, setBackendLoading] = useState(true)
+  const [mcpServers, setMcpServers] = useState<Array<{id:string;url:string;readOnlyTools:string[];hasToken:boolean;token?:string}>>([])
+  const [mcpEnvManaged, setMcpEnvManaged] = useState(false)
+  const [mcpLoading, setMcpLoading] = useState(true)
+  const [mcpError, setMcpError] = useState<string | null>(null)
   /** Custom provider config from the backend — source "env" means Docker
    *  overrides via DB_OPENAI_COMPAT_* → the UI renders read-only. */
   const [customCfg, setCustomCfg] = useState<{ source: string; baseUrl?: string; hasKey: boolean; model?: string } | null>(null)
@@ -117,8 +166,26 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
     setBackendCfg(settings)
     setSavedProviders(settings.savedProviders)
   }
+  const refreshMcpSettings = useCallback(async () => {
+    setMcpLoading(true)
+    setMcpError(null)
+    try {
+      const raw = await invoke<string>('mcp_settings')
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      const list = Array.isArray(parsed) ? parsed : parsed?.servers ?? parsed?.mcp
+      if (!Array.isArray(list)) throw new Error('Invalid MCP settings response')
+      setMcpServers(list.map((server: any) => ({ ...server, readOnlyTools: server.readOnlyTools ?? [] })))
+      setMcpEnvManaged(!!parsed?.envManaged)
+    } catch (error) {
+      setMcpError(String(error))
+      throw error
+    } finally {
+      setMcpLoading(false)
+    }
+  }, [])
   /* oxlint-disable react/set-state-in-effect -- initial async load from the backend */
   useEffect(() => { void refreshBackend() }, [])
+  useEffect(() => { void refreshMcpSettings().catch(() => {}) }, [refreshMcpSettings])
   /* oxlint-enable react/set-state-in-effect */
   const envCustom = customCfg?.source === 'env'
   const envCustomRef = useRef(envCustom)
@@ -354,10 +421,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-center gap-3">
             <h2 className="text-[13px] font-semibold text-foreground">Settings</h2>
             <div className="flex gap-1">
-              {(['ai', 'appearance', 'git', 'system'] as const).filter(s => s !== 'system' || !isTauri).map(s => (
+              {(['ai', 'mcp', 'appearance', 'git', 'system'] as const).filter(s => s !== 'system' || !isTauri).map(s => (
                 <button key={s} onClick={() => setSection(s)}
                   className={'text-xs px-2 py-1 rounded cursor-pointer bg-transparent border-none ' + (section === s ? 'bg-surface-active text-foreground' : 'text-muted hover:text-foreground-secondary')}>
-                  {s === 'ai' ? 'AI' : s === 'appearance' ? 'Appearance' : s === 'git' ? 'Git' : 'System'}
+                  {s === 'ai' ? 'AI' : s === 'mcp' ? 'MCP' : s === 'appearance' ? 'Appearance' : s === 'git' ? 'Git' : 'System'}
                 </button>
               ))}
             </div>
@@ -559,6 +626,8 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
             </>
           )}
             </>
+          ) : section === 'mcp' ? (
+            <McpSettings servers={mcpServers} envManaged={mcpEnvManaged} loading={mcpLoading} error={mcpError} retry={refreshMcpSettings} ready={!mcpLoading && !mcpError} />
           ) : section === 'appearance' ? (
             <AppearanceSettings />
           ) : section === 'system' ? (

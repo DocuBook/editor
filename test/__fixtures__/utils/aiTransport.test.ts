@@ -434,7 +434,7 @@ describe('createAiTransport tools-to-text fallback', () => {
     controller.abort()
     finishDiscovery(Response.json({ result: [] }))
     await pending
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('discovers only backend-approved read-only tools and refuses non-allow-listed calls', async () => {
