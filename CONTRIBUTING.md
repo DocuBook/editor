@@ -55,7 +55,7 @@ docker compose up --build
 
 Runtime configuration (admin seeding, setup protection, session TTL, secure cookie) is documented in [`.env.example`](./.env.example).
 
-The optional `DOCUBOOK_MCP_SERVERS` value configures backend-held MCP Streamable HTTP context sources. See the AI context tools section in [README.md](./README.md) for the HTTPS, read-only allow-list, refusal, and response-bound policies. Provider-native search must fail closed unless explicitly supported by provider capability metadata.
+The optional `DOCUBOOK_MCP_SERVERS` value configures backend-held MCP Streamable HTTP context sources. See the AI context tools section in [README.md](./README.md) for the HTTPS, dynamic read-only annotation filter, timeout, credential, and response-bound policies. Provider-native search must fail closed unless explicitly supported by provider capability metadata.
 
 ## Project Structure
 

@@ -62,8 +62,9 @@ pub struct Config {
 
 #[derive(Clone, Default)]
 pub struct McpServer {
-    pub id: String,
+    pub name: String,
     pub url: String,
+    pub timeout_seconds: Option<u64>,
     pub read_only_tools: Vec<String>,
     pub has_token: bool,
 }
@@ -134,7 +135,7 @@ impl Config {
                     .map(|mut server| {
                         server.has_token = super::keys::get_key(
                             path.parent().unwrap_or_else(|| Path::new(".")),
-                            &format!("mcp:{}", server.id),
+                            &format!("mcp:{}", server.name),
                         )
                         .is_ok();
                         server
@@ -175,7 +176,7 @@ impl Config {
                     "probes": e.probes,
                 }))).collect::<serde_json::Map<_, _>>(),
             },
-            "mcp": self.mcp.iter().map(|s| serde_json::json!({"id": s.id, "url": s.url, "readOnlyTools": s.read_only_tools})).collect::<Vec<_>>(),
+            "mcp": self.mcp.iter().map(|s| serde_json::json!({"name": s.name, "url": s.url, "timeoutSeconds": s.timeout_seconds, "readOnlyTools": s.read_only_tools})).collect::<Vec<_>>(),
         });
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)
@@ -431,7 +432,7 @@ impl Config {
                 "data_dir": data_dir.to_string_lossy(),
                 "www_dir": std::env::var("WWW_DIR").unwrap_or_else(|_| "./dist".into()),
             },
-            "mcp": self.mcp.iter().map(|s| serde_json::json!({"id": s.id, "url": s.url, "readOnlyTools": s.read_only_tools, "hasToken": s.has_token})).collect::<Vec<_>>(),
+            "mcp": self.mcp.iter().map(|s| serde_json::json!({"name": s.name, "url": s.url, "timeoutSeconds": s.timeout_seconds, "readOnlyTools": s.read_only_tools, "hasToken": s.has_token})).collect::<Vec<_>>(),
         })
     }
 }
@@ -478,20 +479,30 @@ fn parse_ai(value: &serde_json::Value) -> AiSelection {
 
 fn parse_mcp(value: &serde_json::Value) -> Option<McpServer> {
     let object = value.as_object()?;
-    let id = object.get("id")?.as_str()?.to_string();
+    let name = object
+        .get("name")
+        .or_else(|| object.get("id"))?
+        .as_str()?
+        .to_string();
     let url = object.get("url")?.as_str()?.to_string();
-    if id.is_empty() || url.is_empty() {
+    if name.is_empty() || url.is_empty() {
         return None;
     }
     Some(McpServer {
-        id,
+        name,
         url,
+        timeout_seconds: object
+            .get("timeoutSeconds")
+            .or_else(|| object.get("timeout_seconds"))
+            .and_then(serde_json::Value::as_u64),
         read_only_tools: object
             .get("readOnlyTools")
-            .and_then(|x| x.as_array())
-            .map(|xs| {
-                xs.iter()
-                    .filter_map(|x| x.as_str().map(str::to_owned))
+            .or_else(|| object.get("read_only_tools"))
+            .and_then(serde_json::Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_owned))
                     .collect()
             })
             .unwrap_or_default(),
@@ -671,6 +682,21 @@ mod tests {
             &next
         ));
         let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn mcp_config_migrates_server_id_to_name_and_reads_timeout() {
+        let server = parse_mcp(&serde_json::json!({
+            "id": "docs",
+            "url": "https://example.com/mcp",
+            "timeoutSeconds": 25,
+            "readOnlyTools": ["docs:lookup"]
+        }))
+        .unwrap();
+        assert_eq!(server.name, "docs");
+        assert_eq!(server.timeout_seconds, Some(25));
+        assert_eq!(server.read_only_tools, ["docs:lookup"]);
+        assert_eq!(server.read_only_tools, ["docs:lookup"]);
     }
 
     #[test]

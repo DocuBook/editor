@@ -237,11 +237,13 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                         .ok()
                         .and_then(|raw| serde_json::from_str(&raw).ok())
                         .unwrap_or_default();
-                view = Value::Array(configured.iter().map(|server| serde_json::json!({"id":server.id,"url":server.url,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty())})).collect());
+                view = Value::Array(configured.iter().map(|server| serde_json::json!({"name":server.name,"url":server.url,"timeoutSeconds":server.timeout_seconds,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty())})).collect());
             }
             Ok(serde_json::to_string(&serde_json::json!({
                 "servers": view,
-                "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok()
+                "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok(),
+                "defaultTimeoutSeconds": rust_ai::context::DEFAULT_CONTEXT_REQUEST_TIMEOUT_SECS,
+                "maxTimeoutSeconds": rust_ai::context::MAX_CONTEXT_REQUEST_TIMEOUT_SECS
             }))
             .map_err(|e| e.to_string())?)
         }
@@ -288,9 +290,10 @@ fn configure_mcp(state: &AppState) -> Result<(), String> {
         .iter()
         .map(|server| {
             Ok(rust_ai::context::ContextServer {
-                id: server.id.clone(),
+                name: server.name.clone(),
                 url: server.url.clone(),
-                token: keys::get_key(&state.data_dir, &format!("mcp:{}", server.id)).ok(),
+                timeout_seconds: server.timeout_seconds,
+                token: keys::get_key(&state.data_dir, &format!("mcp:{}", server.name)).ok(),
                 read_only_tools: server.read_only_tools.clone(),
             })
         })
@@ -849,22 +852,36 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 let mut out = Vec::new();
                 let mut tokens = Vec::new();
                 for server in servers {
-                    let id = server
-                        .get("id")
+                    let name = server
+                        .get("name")
+                        .or_else(|| server.get("id"))
                         .and_then(Value::as_str)
-                        .ok_or("MCP server id is required")?
+                        .ok_or("MCP server name is required")?
                         .to_string();
                     let url = server
                         .get("url")
                         .and_then(Value::as_str)
                         .ok_or("MCP server URL is required")?
                         .to_string();
-                    let read_only_tools: Vec<String> = server
+                    let timeout_seconds = match server
+                        .get("timeoutSeconds")
+                        .or_else(|| server.get("timeout_seconds"))
+                    {
+                        None | Some(Value::Null) => None,
+                        Some(value) => Some(
+                            value
+                                .as_u64()
+                                .ok_or("MCP timeout must be an integer number of seconds")?,
+                        ),
+                    };
+                    let read_only_tools = server
                         .get("readOnlyTools")
+                        .or_else(|| server.get("read_only_tools"))
                         .and_then(Value::as_array)
-                        .map(|xs| {
-                            xs.iter()
-                                .filter_map(|x| x.as_str().map(str::to_owned))
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| item.as_str().map(str::to_owned))
                                 .collect()
                         })
                         .unwrap_or_default();
@@ -878,8 +895,9 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                         .and_then(Value::as_bool)
                         .unwrap_or(false);
                     out.push(config::McpServer {
-                        id,
+                        name,
                         url,
+                        timeout_seconds,
                         read_only_tools,
                         has_token: false,
                     });
@@ -888,8 +906,9 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 let validation_servers = out
                     .iter()
                     .map(|server| rust_ai::context::ContextServer {
-                        id: server.id.clone(),
+                        name: server.name.clone(),
                         url: server.url.clone(),
+                        timeout_seconds: server.timeout_seconds,
                         token: None,
                         read_only_tools: server.read_only_tools.clone(),
                     })
@@ -898,18 +917,18 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 let mut cfg = state.auth.config.lock().expect("lock");
                 let previous_config = cfg.mcp.clone();
                 let mut previous_keys = std::collections::HashMap::new();
-                for id in previous_config
+                for name in previous_config
                     .iter()
-                    .map(|server| server.id.as_str())
-                    .chain(out.iter().map(|server| server.id.as_str()))
+                    .map(|server| server.name.as_str())
+                    .chain(out.iter().map(|server| server.name.as_str()))
                 {
-                    let key = format!("mcp:{id}");
+                    let key = format!("mcp:{name}");
                     previous_keys
                         .entry(key.clone())
                         .or_insert_with(|| keys::get_key(&state.data_dir, &key).ok());
                 }
                 for (server, (token, remove_token)) in out.iter_mut().zip(tokens.iter()) {
-                    let key_id = format!("mcp:{}", server.id);
+                    let key_id = format!("mcp:{}", server.name);
                     let key_result = if let Some(token) = token {
                         keys::set_key(&state.data_dir, &key_id, token)
                     } else if *remove_token {
@@ -926,11 +945,11 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                     server.has_token = (token.is_some() && !remove_token)
                         || keys::get_key(&state.data_dir, &key_id).is_ok();
                 }
-                let new_ids: std::collections::HashSet<String> =
-                    out.iter().map(|server| server.id.clone()).collect();
-                for old in cfg.mcp.iter().filter(|old| !new_ids.contains(&old.id)) {
+                let new_names: std::collections::HashSet<String> =
+                    out.iter().map(|server| server.name.clone()).collect();
+                for old in cfg.mcp.iter().filter(|old| !new_names.contains(&old.name)) {
                     if let Err(error) =
-                        keys::delete_key(&state.data_dir, &format!("mcp:{}", old.id))
+                        keys::delete_key(&state.data_dir, &format!("mcp:{}", old.name))
                     {
                         for (key, prior) in &previous_keys {
                             restore_key(&state.data_dir, key, prior.as_deref());

@@ -321,8 +321,8 @@ describe('SettingsModal — MCP settings loading', () => {
 
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('offline')
     expect(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')?.disabled).toBe(true)
-    expect(document.querySelector<HTMLButtonElement>('button')?.textContent).not.toBe('Add server')
-    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add server')?.disabled).toBe(true)
+    expect(document.querySelector<HTMLButtonElement>('button')?.textContent).not.toBe('Add remote')
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add remote')?.disabled).toBe(true)
     expect(invoke.mock.calls.map(call => call[0])).not.toContain('config_set')
 
     invoke.mockImplementation(async (command: string) => {
@@ -336,6 +336,47 @@ describe('SettingsModal — MCP settings loading', () => {
 
     expect(document.querySelector('[role="alert"]')).toBeNull()
     expect(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')?.disabled).toBe(false)
-    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add server')?.disabled).toBe(true)
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add remote')?.disabled).toBe(true)
+    expect(document.body.textContent).toContain('Server Name')
+    expect(document.body.textContent).toContain('default 10')
+    expect(document.body.textContent).toContain('Authorization: Bearer')
+    expect(document.body.textContent).not.toContain('Read-only tool names')
+  })
+
+  it('saves a named remote with a timeout override without a manual tool list', async () => {
+    let configuredServers: Array<Record<string, unknown>> = []
+    invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === 'mcp_settings') return JSON.stringify({
+        servers: configuredServers,
+        envManaged: false,
+        defaultTimeoutSeconds: 10,
+        maxTimeoutSeconds: 120,
+      })
+      if (command === 'ai_settings') return JSON.stringify(backend)
+      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
+      if (command === 'config_set') {
+        configuredServers = (args?.value as Array<Record<string, unknown>>) ?? []
+        return ''
+      }
+      return ''
+    })
+    await render()
+    clickText('MCP')
+    await settle()
+
+    const setValue = (input: HTMLInputElement, value: string) => act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    setValue(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')!, 'research')
+    setValue(document.querySelector<HTMLInputElement>('input[placeholder="https://mcp.example.com/mcp"]')!, 'https://mcp.example.com/mcp')
+    setValue(document.querySelector<HTMLInputElement>('input[type="number"]')!, '25')
+    clickText('Add remote')
+    await settle()
+
+    const saved = invoke.mock.calls.find(call => call[0] === 'config_set')?.[1]?.value as Array<Record<string, unknown>>
+    expect(saved[0]).toMatchObject({ name: 'research', url: 'https://mcp.example.com/mcp', timeoutSeconds: 25 })
+    expect(saved[0]).not.toHaveProperty('readOnlyTools')
   })
 })
