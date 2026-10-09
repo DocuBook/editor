@@ -370,7 +370,7 @@ async fn post_with(
         session.as_deref(),
         Some("docubook-call"),
         Some(&protocol_version),
-        cancelled.as_deref_mut(),
+        cancelled,
     )
     .await;
     let response = match response {
