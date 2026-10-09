@@ -87,9 +87,15 @@ export interface AiTransportDeps {
   getEditor: () => any | null;
   /** Vault-relative file bound to this keep-alive editor instance. */
   filePath?: string
+  /** Enable backend-owned MCP discovery for the normal editor runtime. */
+  discoverContextTools?: boolean
   /** Host-owned, read-only context tool executor. Not supplied until a runtime
    *  registers trusted tools; document operations stay on the existing path. */
   executeContextTool?: (name: string, input: unknown, signal?: AbortSignal) => Promise<string>
+  /** Tool names approved for the injected executor; schemas alone never grant access. */
+  trustedContextTools?: string[]
+  /** Short alias retained for host adapters. */
+  contextToolAllowlist?: string[]
 }
 
 /** Create the rust-ai ChatTransport. `reconnectToStream` is unsupported (the Rust
@@ -119,17 +125,44 @@ async function runSendMessages(
    *  auto-probe measures true. For env-controlled custom endpoints the probe is
    *  keyed by the env model (the one the backend actually sends). */
   const supportsTools = !isTextOnly(provider, model, st.probeTools);
-  const toolDefs = (body as any)?.toolDefinitions as
+  const suppliedToolDefs = (body as any)?.toolDefinitions as
     Record<string, { description: string; inputSchema: any }> | undefined;
-  /** Only advertise context tools when this runtime has an executor for them.
-   *  applyDocumentOperations remains the sole terminal output tool. */
+  const toolDefs = Object.fromEntries(Object.entries(suppliedToolDefs ?? {}).filter(([name]) => name === "applyDocumentOperations")) as Record<string, { description: string; inputSchema: any }>;
+  const contextTools: any[] = [];
+  if (supportsTools && deps.executeContextTool) {
+    const trustedTools = new Set(deps.trustedContextTools ?? deps.contextToolAllowlist ?? []);
+    for (const [name, definition] of Object.entries(suppliedToolDefs ?? {})) {
+      if (name !== "applyDocumentOperations" && trustedTools.has(name)) {
+        contextTools.push({
+          name,
+          description: definition.description,
+          input_schema: definition.inputSchema,
+          read_only: true,
+        });
+      }
+    }
+  } else if (supportsTools && deps.discoverContextTools) {
+    const discovered = await invoke<any>("context_tools", {}, abortSignal).then((value) => {
+      try { return typeof value === "string" ? JSON.parse(value) : value } catch { return [] }
+    }).catch(() => []);
+    if (abortSignal?.aborted) return new ReadableStream();
+    if (Array.isArray(discovered)) contextTools.push(...discovered);
+    else if (Array.isArray(discovered?.result)) contextTools.push(...discovered.result);
+  }
+  for (const tool of Array.isArray(contextTools) ? contextTools : []) {
+    if (tool?.read_only === true && typeof tool.name === "string" && tool.name !== "applyDocumentOperations" && tool.input_schema && typeof tool.input_schema === "object") {
+      toolDefs[tool.name] = { description: String(tool.description ?? "Read-only context lookup"), inputSchema: tool.input_schema };
+    }
+  }
+  /** Only configured read-only tools are exposed; applyDocumentOperations remains
+   *  the sole terminal output tool. The backend revalidates every invocation. */
   const toolEntries = Object.entries(toolDefs ?? {}).filter(
-    ([name]) => name === "applyDocumentOperations" || !!deps.executeContextTool,
+    ([name]) => name === "applyDocumentOperations" || (Array.isArray(contextTools) && contextTools.some((tool: any) => tool?.read_only === true && tool.name === name)),
   );
   const contextToolNames = new Set(
-    (supportsTools ? toolEntries : [])
-      .map(([name]) => name)
-      .filter((name) => name !== "applyDocumentOperations"),
+    (supportsTools ? contextTools : [])
+      .filter((tool: any) => tool?.read_only === true && typeof tool.name === "string")
+      .map((tool: any) => tool.name),
   );
   const tools =
     supportsTools && toolEntries.length
@@ -355,11 +388,11 @@ async function runSendMessages(
               : [];
             if (contextCalls.length) {
               contextToolRounds++;
-              contextToolCalls += toolBuffer.length;
+              contextToolCalls += contextCalls.length;
               if (contextToolRounds > MAX_CONTEXT_TOOL_ROUNDS || contextToolCalls > MAX_CONTEXT_TOOL_CALLS) {
                 throw new Error("Context tool limit exceeded");
               }
-              const providerToolCalls = toolBuffer.map((toolCall: any) => {
+              const providerToolCalls = contextCalls.map((toolCall: any) => {
                 const callId = toolCall.providerToolCallId;
                 if (typeof callId !== "string" || !callId) {
                   throw new Error("Provider omitted tool call id");
@@ -374,17 +407,18 @@ async function runSendMessages(
                 };
               });
               toolTranscript.push({ role: "assistant", content: null, tool_calls: providerToolCalls });
-              for (const toolCall of toolBuffer) {
+              for (const toolCall of contextCalls) {
+                if (abortSignal?.aborted) return;
                 let result: string;
-                if (isDocumentOperationToolCall(toolCall)) {
-                  result = "Document operations are terminal. Review the context results first, then return the final document operations.";
-                } else if (!contextToolNames.has(String(toolCall.toolName ?? ""))) {
+                if (!contextToolNames.has(String(toolCall.toolName ?? ""))) {
                   result = "Context tool is not available.";
                 } else if (contextToolChars >= MAX_CONTEXT_TOOL_TOTAL_CHARS) {
                   result = "Context result budget exhausted.";
                 } else {
                   try {
-                    result = await deps.executeContextTool!(toolCall.toolName, toolCall.input, abortSignal);
+                    result = deps.executeContextTool
+                      ? await deps.executeContextTool(toolCall.toolName, toolCall.input, abortSignal)
+                      : await invoke<string>("call_context_tool", { requestId: currentRequestId, name: toolCall.toolName, input: toolCall.input }, abortSignal);
                   } catch (error) {
                     if (abortSignal?.aborted) throw error;
                     result = "Context tool execution failed.";
@@ -400,6 +434,7 @@ async function runSendMessages(
                 });
               }
               pendingDelta = "";
+              if (abortSignal?.aborted) return;
               continue;
             }
             /** Real correctness gate: referenced ids must exist in the document (blocking).

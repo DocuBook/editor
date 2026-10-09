@@ -683,11 +683,24 @@ pub async fn ask_ai(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn context_tools() -> Result<String, String> {
+    serde_json::to_string(&crate::rust_ai::context::discover().await?).map_err(|_| "Could not encode context tools".into())
+}
+
+#[tauri::command]
+pub async fn call_context_tool(request_id: String, name: String, input: serde_json::Value) -> Result<String, String> {
+    crate::rust_ai::context::invoke(&request_id, &name, input).await
+}
+
 /// Cancel the in-flight AI request identified by `request_id`; an empty id
 /// cancels every in-flight request. Desktop-only policy; web keeps its own
 /// request lifecycle.
 #[tauri::command]
 pub fn cancel_ai(state: State<AppState>, request_id: Option<String>) {
+    if let Some(request_id) = request_id.as_deref() {
+        crate::rust_ai::context::cancel(request_id);
+    }
     state
         .ai_requests
         .cancel(request_id.as_deref().unwrap_or(""));

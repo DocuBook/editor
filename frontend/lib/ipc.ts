@@ -61,7 +61,7 @@ export async function listen<T>(event: string, cb: (e: { payload: T }) => void):
 }
 
 /** Same signature as @tauri-apps/api/core.invoke. */
-export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+export async function invoke<T>(cmd: string, args?: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   if (isTauri) {
     const { invoke } = await import('@tauri-apps/api/core')
     return invoke<T>(cmd, args)
@@ -101,7 +101,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>): Pr
       activeAskAi.delete(requestId)
     }
   }
-  const data = await post(cmd, args ?? {})
+  const data = await post(cmd, args ?? {}, signal)
   return data as T
 }
 
@@ -118,7 +118,7 @@ function askAiKey(requestId: string): string {
   return requestId || `anon-${++anonymousAskAi}`
 }
 
-async function post(cmd: string, args: Record<string, unknown>): Promise<unknown> {
+async function post(cmd: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   let res: Response
@@ -128,7 +128,7 @@ async function post(cmd: string, args: Record<string, unknown>): Promise<unknown
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       body: JSON.stringify(args),
-      signal: controller.signal,
+      signal: signal ?? controller.signal,
     })
   } catch {
     throw new Error(controller.signal.aborted ? 'Server is not responding' : 'Cannot reach server')

@@ -358,7 +358,7 @@ describe('createAiTransport tools-to-text fallback', () => {
       query: input.query,
       reference: 'Revenue increased 12 percent.',
     }).padEnd(20_000, 'x'))
-    const transport = createAiTransport({ getEditor: editor, executeContextTool })
+    const transport = createAiTransport({ getEditor: editor, executeContextTool, trustedContextTools: ['lookup_context'] })
     const stream = await transport.sendMessages({
       messages: [{ role: 'user', content: 'Use market data to update the note.' }],
       body: { toolDefinitions: {
@@ -392,6 +392,92 @@ describe('createAiTransport tools-to-text fallback', () => {
     const output = parts.find(part => part.type === 'tool-input-available')
     expect(output.toolName).toBe('applyDocumentOperations')
     expect(output.input.operations[0].block).toContain('Grounded in source data')
+  })
+
+  it('discovers MCP tools even when the editor supplies only the document tool', async () => {
+    usePathA()
+    useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
+    const requests: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      if (String(url).includes('/api/context_tools')) return Response.json({ result: [{ name: 'mcp_lookup', description: 'Lookup', input_schema: { type: 'object' }, read_only: true }] })
+      const request = JSON.parse(String(init?.body ?? '{}'))
+      requests.push({ ...request, tools: JSON.parse(request.tools) })
+      const id = String(request.requestId ?? '')
+      return new Response(sseStream([
+        'event: ai:tool_call\n', `data: {"requestId":"${id}","toolCallId":"call-1","toolName":"applyDocumentOperations","input":{"operations":[]}}\n\n`,
+        'event: ai:tools_done\n', `data: {"requestId":"${id}"}\n\n`,
+        'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    const stream = await createAiTransport({ getEditor: () => null, discoverContextTools: true }).sendMessages({
+      messages: [{ role: 'user', content: 'look up information' }],
+      body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit', inputSchema: {} } } },
+    })
+    await stream.cancel().catch(() => {})
+    expect(requests[0].tools.map((tool: any) => tool.function.name)).toEqual(['applyDocumentOperations', 'mcp_lookup'])
+  })
+
+  it('does not start a model request if stopped during MCP discovery', async () => {
+    usePathA()
+    useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
+    const controller = new AbortController()
+    let finishDiscovery!: (response: Response) => void
+    const discovery = new Promise<Response>(resolve => { finishDiscovery = resolve })
+    const fetchMock = vi.fn((url: string) => String(url).includes('/api/context_tools') ? discovery : Promise.resolve(new Response('{}')))
+    vi.stubGlobal('fetch', fetchMock)
+    const pending = createAiTransport({ getEditor: () => null, discoverContextTools: true }).sendMessages({
+      messages: [{ role: 'user', content: 'look up information' }],
+      body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit', inputSchema: {} } } },
+      abortSignal: controller.signal,
+    })
+    await Promise.resolve()
+    controller.abort()
+    finishDiscovery(Response.json({ result: [] }))
+    await pending
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('discovers only backend-approved read-only tools and refuses non-allow-listed calls', async () => {
+    usePathA()
+    const requests: any[] = []
+    const executeContextTool = vi.fn(async () => 'should not execute')
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const request = JSON.parse(String(init?.body ?? '{}'))
+      requests.push({ ...request, messages: JSON.parse(request.messages), tools: JSON.parse(request.tools) })
+      const id = String(request.requestId ?? '')
+      const toolName = requests.length === 1 ? 'mutate' : 'applyDocumentOperations'
+      const input = toolName === 'mutate' ? '{}' : '{"operations":[]}'
+      return new Response(sseStream([
+        'event: ai:tool_call\n',
+        `data: {"requestId":"${id}","toolCallId":"tool-0","providerToolCallId":"provider-call-1","toolName":"${toolName}","input":${input}}\n\n`,
+        'event: ai:tools_done\n', `data: {"requestId":"${id}"}\n\n`,
+        'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    const stream = await createAiTransport({ getEditor: editor, executeContextTool, trustedContextTools: ['lookup'] }).sendMessages({
+      messages: [{ role: 'user', content: 'Look something up' }],
+      body: { toolDefinitions: {
+        applyDocumentOperations: { description: 'Edit', inputSchema: {} },
+        lookup: { description: 'Search', inputSchema: { type: 'object' } },
+      } },
+    })
+    const reader = stream.getReader()
+    const parts: any[] = []
+    let error: unknown = null
+    for (;;) {
+      try {
+        const result = await reader.read()
+        if (result.done) break
+        parts.push(result.value)
+      } catch (caught) {
+        error = caught
+        break
+      }
+    }
+    expect(String(error)).toContain('no document changes')
+    expect(requests[0].tools.map((tool: any) => tool.function.name)).toEqual(['applyDocumentOperations', 'lookup'])
+    expect(parts.some((part) => part.type === 'tool-input-available')).toBe(false)
+    expect(executeContextTool).not.toHaveBeenCalled()
   })
 
   it('streams a text-only reply live instead of buffering it until the end', async () => {

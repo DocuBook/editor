@@ -11,6 +11,8 @@
     "allow-app-ready-to-close",
     "allow-ask-ai",
     "allow-cancel-ai",
+    "allow-context-tools",
+    "allow-call-context-tool",
     "allow-close-vault",
     "allow-copy-path",
     "allow-create-directory",
