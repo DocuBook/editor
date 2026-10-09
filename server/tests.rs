@@ -498,10 +498,11 @@ mod api_tests {
         assert_eq!(status, StatusCode::OK, "{body}");
         let config = result_json(&body);
         let config = config.as_object().expect("config object");
-        assert_eq!(config.len(), 3, "{body}");
+        assert_eq!(config.len(), 4, "{body}");
         assert!(config.contains_key("admin"), "{body}");
         assert!(config.contains_key("session_ttl_hours"), "{body}");
         assert!(config.contains_key("boot"), "{body}");
+        assert!(config.contains_key("mcp"), "{body}");
 
         let (status, _, body) = post_with(
             &app,

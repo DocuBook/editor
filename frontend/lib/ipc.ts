@@ -64,6 +64,13 @@ export async function listen<T>(event: string, cb: (e: { payload: T }) => void):
 export async function invoke<T>(cmd: string, args?: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   if (isTauri) {
     const { invoke } = await import('@tauri-apps/api/core')
+    if (cmd === 'context_tools') {
+      const requestId = String(args?.requestId ?? `mcp-discovery-${++anonymousContextRequest}`)
+      const onAbort = () => { void invoke('cancel_context_request', { requestId }) }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      try { return await invoke<T>(cmd, { ...args, requestId }) }
+      finally { signal?.removeEventListener('abort', onAbort) }
+    }
     return invoke<T>(cmd, args)
   }
   if (cmd === 'ask_ai') {
@@ -101,9 +108,18 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>, sig
       activeAskAi.delete(requestId)
     }
   }
+  if (cmd === 'context_tools') {
+    const requestId = String(args?.requestId ?? `mcp-discovery-${++anonymousContextRequest}`)
+    const onAbort = () => { void post('cancel_context_request', { requestId }).catch(() => {}) }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    try { return await post(cmd, { ...args, requestId }, signal) as T }
+    finally { signal?.removeEventListener('abort', onAbort) }
+  }
   const data = await post(cmd, args ?? {}, signal)
   return data as T
 }
+
+let anonymousContextRequest = 0
 
 /** In-flight ask_ai streams, grouped by request id. Concurrent turns (an AI
  *  panel edit next to a commit-message summary) must each own their cancellation

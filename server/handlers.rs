@@ -41,7 +41,10 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
             .map_err(|e| e.to_string())?,
         "git_diff_file" => {
             let path = s("path");
-            let staged = args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false);
+            let staged = args
+                .get("staged")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
             tokio::task::spawn_blocking(move || cmds::git_diff_file(&st, &path, staged))
                 .await
                 .map_err(|e| e.to_string())?
@@ -187,6 +190,12 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
             }
             sync(state, cmd, args)
         }
+        "cancel_context_request" => {
+            if let Some(request_id) = args.get("requestId").and_then(Value::as_str) {
+                rust_ai::context::cancel(request_id);
+            }
+            Ok("null".into())
+        }
         "set_api_key" => sync(state, cmd, args),
         "set_custom_endpoint" => sync(state, cmd, args),
         "delete_api_key" => sync(state, cmd, args),
@@ -206,12 +215,37 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "config_set" => sync(state, cmd, args),
         "health" => Ok(cmds::health(state).to_string()),
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl")).await,
-        "context_tools" => Ok(serde_json::to_string(&rust_ai::context::discover().await?).map_err(|_| "Could not encode context tools".to_string())?),
+        "context_tools" => {
+            configure_mcp(state)?;
+            Ok(
+                serde_json::to_string(&rust_ai::context::discover(&s("requestId")).await?)
+                    .map_err(|_| "Could not encode context tools".to_string())?,
+            )
+        }
+        "mcp_settings" => {
+            configure_mcp(state)?;
+            let mut view = state.auth.config.lock().expect("lock").view(&state.data_dir)["mcp"].clone();
+            if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
+                let configured: Vec<rust_ai::context::ContextServer> = std::env::var("DOCUBOOK_MCP_SERVERS").ok().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+                view = Value::Array(configured.iter().map(|server| serde_json::json!({"id":server.id,"url":server.url,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty())})).collect());
+            }
+            Ok(serde_json::to_string(&serde_json::json!({
+                "servers": view,
+                "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok()
+            })).map_err(|e| e.to_string())?)
+        }
+        "set_mcp_settings" => {
+            let servers = args.get("servers").cloned().unwrap_or(Value::Null);
+            sync(state, "config_set", serde_json::json!({"key":"mcp", "value":servers}))
+        }
         "call_context_tool" => {
+            configure_mcp(state)?;
             let request_id = s("requestId");
             let name = s("name");
             let input = args.get("input").cloned().unwrap_or(Value::Null);
-            rust_ai::context::invoke(&request_id, &name, input).await.map_err(|error| error.to_string())
+            rust_ai::context::invoke(&request_id, &name, input)
+                .await
+                .map_err(|error| error.to_string())
         }
         "test_connection" => {
             probe::test_connection(
@@ -225,6 +259,28 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         _ => Err(format!("Unknown command: {cmd}")),
     }
+}
+
+fn configure_mcp(state: &AppState) -> Result<(), String> {
+    if let Ok(raw) = std::env::var("DOCUBOOK_MCP_SERVERS") {
+        let servers: Vec<rust_ai::context::ContextServer> = serde_json::from_str(&raw)
+            .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?;
+        return rust_ai::context::set_configured_servers(servers);
+    }
+    let cfg = state.auth.config.lock().expect("lock");
+    let servers = cfg
+        .mcp
+        .iter()
+        .map(|server| {
+            Ok(rust_ai::context::ContextServer {
+                id: server.id.clone(),
+                url: server.url.clone(),
+                token: keys::get_key(&state.data_dir, &format!("mcp:{}", server.id)).ok(),
+                read_only_tools: server.read_only_tools.clone(),
+            })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    rust_ai::context::set_configured_servers(servers)
 }
 
 /** Run a cheap sync command body on the current thread. */
@@ -640,7 +696,9 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             // for the same reason). Dropping it here made ai_settings report
             // `savedProviders: []` for a working custom endpoint, which disabled
             // the composer despite endpoints.hasKey being true.
-            saved.retain(|p| agent::PROVIDER_IDS.iter().any(|id| id == p) || p == agent::CUSTOM_PROVIDER_ID);
+            saved.retain(|p| {
+                agent::PROVIDER_IDS.iter().any(|id| id == p) || p == agent::CUSTOM_PROVIDER_ID
+            });
             if env.is_some() && !saved.iter().any(|p| p == agent::CUSTOM_PROVIDER_ID) {
                 saved.push(agent::CUSTOM_PROVIDER_ID.to_string());
             }
@@ -768,13 +826,87 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         "config_set" => {
             let key = s("key");
             let value = args.get("value").cloned().unwrap_or(Value::Null);
-            state
-                .auth
-                .config
-                .lock()
-                .expect("lock")
-                .set(&key, &value)
-                .map(|_| "null".into())
+            if key == "mcp" {
+                if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
+                    return Err("MCP servers are controlled by DOCUBOOK_MCP_SERVERS".into());
+                }
+                let servers = value.as_array().ok_or("mcp must be an array")?;
+                if servers.len() > 16 {
+                    return Err("Too many MCP servers".into());
+                }
+                let mut cfg = state.auth.config.lock().expect("lock");
+                let mut out = Vec::new();
+                for server in servers {
+                    let id = server
+                        .get("id")
+                        .and_then(Value::as_str)
+                        .ok_or("MCP server id is required")?
+                        .to_string();
+                    let url = server
+                        .get("url")
+                        .and_then(Value::as_str)
+                        .ok_or("MCP server URL is required")?
+                        .to_string();
+                    let read_only_tools: Vec<String> = server
+                        .get("readOnlyTools")
+                        .and_then(Value::as_array)
+                        .map(|xs| {
+                            xs.iter()
+                                .filter_map(|x| x.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    rust_ai::context::validate_configured_server(
+                        &rust_ai::context::ContextServer {
+                            id: id.clone(),
+                            url: url.clone(),
+                            token: None,
+                            read_only_tools: read_only_tools.clone(),
+                        },
+                    )?;
+                    let token = server.get("token").and_then(Value::as_str).unwrap_or("");
+                    let key_id = format!("mcp:{id}");
+                    if !token.is_empty() {
+                        keys::set_key(&state.data_dir, &key_id, token)?;
+                    } else if server.get("token").is_some() {
+                        let _ = keys::delete_key(&state.data_dir, &key_id);
+                    }
+                    out.push(config::McpServer {
+                        id,
+                        url,
+                        read_only_tools,
+                        has_token: !token.is_empty()
+                            || keys::get_key(&state.data_dir, &key_id).is_ok(),
+                    });
+                }
+                if out
+                    .iter()
+                    .map(|server| server.id.as_str())
+                    .collect::<std::collections::HashSet<_>>()
+                    .len()
+                    != out.len()
+                {
+                    return Err("MCP server IDs must be unique".into());
+                }
+                let new_ids: std::collections::HashSet<String> =
+                    out.iter().map(|server| server.id.clone()).collect();
+                for old in cfg.mcp.iter().filter(|old| !new_ids.contains(&old.id)) {
+                    let _ = keys::delete_key(&state.data_dir, &format!("mcp:{}", old.id));
+                }
+                cfg.mcp = out;
+                cfg.save()?;
+                drop(cfg);
+                configure_mcp(state)?;
+                Ok("null".into())
+            } else {
+                state
+                    .auth
+                    .config
+                    .lock()
+                    .expect("lock")
+                    .set(&key, &value)
+                    .map(|_| "null".into())
+            }
         }
         _ => Err(format!("Unknown command: {cmd}")),
     }

@@ -20,8 +20,8 @@ mod keychain;
 #[path = "lib/mod.rs"]
 mod commands;
 
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 use tauri::{Emitter, Manager};
 
 /// Shared application state — one vault/wiki/git session at a time.
@@ -41,6 +41,7 @@ pub(crate) struct AppState {
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            let _ = commands::agent::initialize_mcp_settings(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 eprintln!("[docubook] window theme at startup: {:?}", w.theme());
             }
@@ -48,7 +49,13 @@ pub fn run() {
         })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { vault: std::sync::Arc::new(Mutex::new(None)), wiki: Mutex::new(None), git: Mutex::new(None), ai_requests: std::sync::Arc::new(rust_ai::requests::AiRequests::new()), closing: AtomicBool::new(false) })
+        .manage(AppState {
+            vault: std::sync::Arc::new(Mutex::new(None)),
+            wiki: Mutex::new(None),
+            git: Mutex::new(None),
+            ai_requests: std::sync::Arc::new(rust_ai::requests::AiRequests::new()),
+            closing: AtomicBool::new(false),
+        })
         .on_window_event(|window, event| {
             // Graceful shutdown: ask the frontend to flush & save, then confirm.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -69,13 +76,75 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            commands::vault::open_vault, commands::vault::close_vault, commands::vault::create_vault, commands::git::git_clone, commands::vault::list_tree, commands::vault::resolve_mentions, commands::vault::read_file, commands::vault::file_version, commands::vault::read_file_binary, commands::vault::write_file, commands::vault::write_file_checked, commands::vault::read_wysiwyg_snapshot, commands::vault::write_wysiwyg_snapshot, commands::vault::create_file, commands::vault::delete_file, commands::vault::list_trash, commands::vault::restore_file, commands::vault::delete_trash_item, commands::vault::rename_file, commands::vault::create_directory, commands::vault::copy_path, commands::vault::move_path,
-            commands::git::git_settings, commands::git::git_add_remote, commands::git::git_remove_remote, commands::git::git_set_identity, commands::git::git_init,
-            commands::git::git_remote_probe, commands::git::git_fetch, commands::git::git_pull, commands::git::git_remote_merge, commands::git::git_rebase, commands::git::git_rebase_continue, commands::git::git_rebase_abort, commands::git::git_merge_abort,
-            commands::wiki::wiki_backlinks, commands::wiki::wiki_suggest, commands::wiki::wiki_resolve, commands::search::search_vault, commands::git::git_diff_file, commands::git::git_diff_summary, commands::git::git_stage, commands::git::git_commit, commands::git::git_push_only, commands::git::git_branches, commands::git::git_create_branch, commands::git::git_checkout, commands::git::git_status,
-            commands::agent::custom_ai_config, commands::agent::ai_settings, commands::agent::set_ai_settings, commands::agent::set_probe,
-             commands::markdown::md_to_html, commands::agent::ask_ai, commands::agent::cancel_ai, commands::agent::set_api_key, commands::agent::set_custom_endpoint, commands::agent::delete_api_key, commands::agent::list_api_keys, commands::agent::test_connection, commands::agent::list_models, commands::agent::context_tools, commands::agent::call_context_tool,
-    commands::app::health, commands::app::app_ready_to_close, commands::vault::open_system_settings,
+            commands::vault::open_vault,
+            commands::vault::close_vault,
+            commands::vault::create_vault,
+            commands::git::git_clone,
+            commands::vault::list_tree,
+            commands::vault::resolve_mentions,
+            commands::vault::read_file,
+            commands::vault::file_version,
+            commands::vault::read_file_binary,
+            commands::vault::write_file,
+            commands::vault::write_file_checked,
+            commands::vault::read_wysiwyg_snapshot,
+            commands::vault::write_wysiwyg_snapshot,
+            commands::vault::create_file,
+            commands::vault::delete_file,
+            commands::vault::list_trash,
+            commands::vault::restore_file,
+            commands::vault::delete_trash_item,
+            commands::vault::rename_file,
+            commands::vault::create_directory,
+            commands::vault::copy_path,
+            commands::vault::move_path,
+            commands::git::git_settings,
+            commands::git::git_add_remote,
+            commands::git::git_remove_remote,
+            commands::git::git_set_identity,
+            commands::git::git_init,
+            commands::git::git_remote_probe,
+            commands::git::git_fetch,
+            commands::git::git_pull,
+            commands::git::git_remote_merge,
+            commands::git::git_rebase,
+            commands::git::git_rebase_continue,
+            commands::git::git_rebase_abort,
+            commands::git::git_merge_abort,
+            commands::wiki::wiki_backlinks,
+            commands::wiki::wiki_suggest,
+            commands::wiki::wiki_resolve,
+            commands::search::search_vault,
+            commands::git::git_diff_file,
+            commands::git::git_diff_summary,
+            commands::git::git_stage,
+            commands::git::git_commit,
+            commands::git::git_push_only,
+            commands::git::git_branches,
+            commands::git::git_create_branch,
+            commands::git::git_checkout,
+            commands::git::git_status,
+            commands::agent::custom_ai_config,
+            commands::agent::ai_settings,
+            commands::agent::set_ai_settings,
+            commands::agent::set_probe,
+            commands::markdown::md_to_html,
+            commands::agent::ask_ai,
+            commands::agent::cancel_ai,
+            commands::agent::cancel_context_request,
+            commands::agent::mcp_settings,
+            commands::agent::set_mcp_settings,
+            commands::agent::set_api_key,
+            commands::agent::set_custom_endpoint,
+            commands::agent::delete_api_key,
+            commands::agent::list_api_keys,
+            commands::agent::test_connection,
+            commands::agent::list_models,
+            commands::agent::context_tools,
+            commands::agent::call_context_tool,
+            commands::app::health,
+            commands::app::app_ready_to_close,
+            commands::vault::open_system_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

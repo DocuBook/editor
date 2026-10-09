@@ -13,9 +13,57 @@ pub const CONTEXT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 pub const UNTRUSTED_REFERENCE_TYPE: &str = "untrusted_reference_data";
 
 type DiscoveryCache = Option<(String, Vec<ContextTool>)>;
+type SessionCache = HashMap<String, (Option<String>, String)>;
 
 static DISCOVERY_CACHE: OnceLock<Mutex<DiscoveryCache>> = OnceLock::new();
 static CONTEXT_CALLS: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
+static MCP_SESSIONS: OnceLock<Mutex<SessionCache>> = OnceLock::new();
+static CONFIGURED_SERVERS: OnceLock<Mutex<Option<Vec<ContextServer>>>> = OnceLock::new();
+
+/// Set runtime-provided MCP configuration. Environment configuration remains
+/// authoritative when present; this is used by the Settings-backed runtimes.
+pub fn set_configured_servers(servers: Vec<ContextServer>) -> Result<(), String> {
+    if servers.len() > 16 {
+        return Err("Too many MCP servers".into());
+    }
+    for server in &servers {
+        validate_server(server)?;
+    }
+    validate_server_ids(&servers)?;
+    let retired = {
+        let mut sessions = MCP_SESSIONS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| "MCP session cache is unavailable".to_string())?;
+        std::mem::take(&mut *sessions)
+    };
+    *CONFIGURED_SERVERS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "MCP configuration is unavailable".to_string())? = Some(servers);
+    DISCOVERY_CACHE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "MCP discovery cache is unavailable".to_string())?
+        .take();
+    if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+        runtime.spawn(async move {
+            for (key, (session, version)) in retired {
+                let Ok(server) = serde_json::from_str::<ContextServer>(&key) else {
+                    continue;
+                };
+                if let Some(session) = session {
+                    let _ = terminate_session(&server, &session, &version).await;
+                }
+            }
+        });
+    }
+    Ok(())
+}
+
+pub fn validate_configured_server(server: &ContextServer) -> Result<(), String> {
+    validate_server(server)
+}
 
 fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
     let mut calls = CONTEXT_CALLS
@@ -117,13 +165,14 @@ fn client(server: &ContextServer) -> Result<reqwest::Client, String> {
         .map_err(|error| format!("MCP client error: {error}"))
 }
 
-async fn request(
+async fn request_cancellable(
     server: &ContextServer,
     request: Value,
     expect_response: bool,
     session: Option<&str>,
     expected_id: Option<&str>,
     protocol_version: Option<&str>,
+    mut cancelled: Option<&mut watch::Receiver<bool>>,
 ) -> Result<(Option<String>, Option<Value>), String> {
     let mut call = client(server)?.post(&server.url).json(&request);
     call = call
@@ -138,10 +187,16 @@ async fn request(
     if let Some(token) = &server.token {
         call = call.bearer_auth(token);
     }
-    let response = call
-        .send()
-        .await
-        .map_err(|_| "MCP request failed".to_string())?;
+    let response = if let Some(ref mut cancelled) = cancelled {
+        tokio::select! {
+            response = call.send() => response.map_err(|_| "MCP request failed".to_string())?,
+            _ = cancelled.changed() => return Err("Context-tool request cancelled".into()),
+        }
+    } else {
+        call.send()
+            .await
+            .map_err(|_| "MCP request failed".to_string())?
+    };
     if !response.status().is_success() {
         return Err(format!("MCP server returned HTTP {}", response.status()));
     }
@@ -165,7 +220,16 @@ async fn request(
     let mut stream = response.bytes_stream();
     let mut bytes = Vec::new();
     use futures_util::StreamExt;
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next = if let Some(cancelled) = cancelled.as_deref_mut() {
+            tokio::select! {
+                chunk = stream.next() => chunk,
+                _ = cancelled.changed() => return Err("Context-tool request cancelled".into()),
+            }
+        } else {
+            stream.next().await
+        };
+        let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|_| "MCP response could not be read".to_string())?;
         if bytes.len() + chunk.len() > MAX_CONTEXT_RESULT_BYTES {
             return Err("MCP response exceeds the context result limit".into());
@@ -197,6 +261,20 @@ async fn request(
         response_session.or_else(|| session.map(str::to_owned)),
         Some(envelope.get("result").cloned().unwrap_or(Value::Null)),
     ))
+}
+
+async fn terminate_session(server: &ContextServer, session: &str, version: &str) -> Result<(), String> {
+    let call = client(server)?
+        .delete(&server.url)
+        .header("mcp-session-id", session)
+        .header("mcp-protocol-version", version);
+    let call = if let Some(token) = &server.token { call.bearer_auth(token) } else { call };
+    let response = call.send().await.map_err(|_| "MCP session termination failed".to_string())?;
+    if response.status().is_success() || response.status().as_u16() == 404 || response.status().as_u16() == 405 {
+        Ok(())
+    } else {
+        Err(format!("MCP session termination returned HTTP {}", response.status()))
+    }
 }
 
 fn parse_envelopes(content_type: &str, bytes: &[u8]) -> Result<Vec<Value>, String> {
@@ -232,50 +310,125 @@ fn parse_envelopes(content_type: &str, bytes: &[u8]) -> Result<Vec<Value>, Strin
         .collect())
 }
 
-async fn post(server: &ContextServer, method: &str, params: Value) -> Result<Value, String> {
+async fn post_with(
+    server: &ContextServer,
+    method: &str,
+    params: Value,
+    mut cancelled: Option<&mut watch::Receiver<bool>>,
+) -> Result<Value, String> {
     let initialize = json!({
         "jsonrpc": "2.0", "id": "docubook-init", "method": "initialize",
         "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "docubook", "version": "0.1"}}
     });
-    let (session, init) =
-        request(server, initialize, true, None, Some("docubook-init"), None).await?;
-    let init = init.ok_or_else(|| "MCP initialization failed".to_string())?;
-    let protocol_version = init
-        .get("protocolVersion")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "MCP initialization omitted its protocol version".to_string())?;
-    let notification = json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}});
-    let _ = request(
-        server,
-        notification,
-        false,
-        session.as_deref(),
-        None,
-        Some(protocol_version),
-    )
-    .await?;
+    let key = serde_json::to_string(server)
+        .map_err(|_| "Invalid MCP server configuration".to_string())?;
+    let existing = MCP_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|sessions| sessions.get(&key).cloned());
+    let reused = existing.is_some();
+    let (session, protocol_version) = if let Some((session, version)) = existing {
+        (session, version)
+    } else {
+        let (session, init) = request_cancellable(
+            server,
+            initialize,
+            true,
+            None,
+            Some("docubook-init"),
+            None,
+            cancelled.as_deref_mut(),
+        )
+        .await?;
+        let init = init.ok_or_else(|| "MCP initialization failed".to_string())?;
+        let protocol_version = init
+            .get("protocolVersion")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "MCP initialization omitted its protocol version".to_string())?;
+        (session, protocol_version.to_string())
+    };
+    if !reused {
+        let notification =
+            json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}});
+        let _ = request_cancellable(
+            server,
+            notification,
+            false,
+            session.as_deref(),
+            None,
+            Some(&protocol_version),
+            cancelled.as_deref_mut(),
+        )
+        .await?;
+    }
     let call = json!({"jsonrpc":"2.0","id":"docubook-call","method":method,"params":params});
-    request(
+    let response = request_cancellable(
         server,
         call,
         true,
         session.as_deref(),
         Some("docubook-call"),
-        Some(protocol_version),
+        Some(&protocol_version),
+        cancelled.as_deref_mut(),
     )
-    .await?
-    .1
-    .ok_or_else(|| "MCP request returned no response".to_string())
+    .await;
+    let response = match response {
+        Ok(response) => response,
+        Err(error) => {
+            if reused {
+                if let Ok(mut sessions) = MCP_SESSIONS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                    sessions.remove(&key);
+                }
+            }
+            return Err(error);
+        }
+    };
+    if let Some(sid) = response.0.as_ref().or(session.as_ref()) {
+        MCP_SESSIONS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| "MCP session cache unavailable".to_string())?
+            .insert(key, (Some(sid.clone()), protocol_version));
+    }
+    response
+        .1
+        .ok_or_else(|| "MCP request returned no response".to_string())
 }
 
-pub async fn discover() -> Result<Vec<ContextTool>, String> {
-    cached_discover(server_config()?).await
+pub async fn discover(request_id: &str) -> Result<Vec<ContextTool>, String> {
+    if request_id.is_empty() {
+        return Err("Context-tool request id is required".into());
+    }
+    let (cancel, mut cancelled) = watch::channel(false);
+    register_call(request_id, cancel)?;
+    let result = async {
+        let servers = server_config()?;
+        let key = serde_json::to_string(&servers)
+            .map_err(|_| "MCP configuration is not serializable".to_string())?;
+        cached_discover(servers, &mut cancelled).await
+            .map(|tools| (key, tools))
+    }
+    .await;
+    remove_call(request_id)?;
+    match result {
+        Ok((key, tools)) => {
+            *DISCOVERY_CACHE.get_or_init(|| Mutex::new(None)).lock().map_err(|_| "MCP discovery cache is unavailable".to_string())? = Some((key, tools.clone()));
+            Ok(tools)
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn server_config() -> Result<Vec<ContextServer>, String> {
     let raw = std::env::var("DOCUBOOK_MCP_SERVERS").unwrap_or_default();
     if raw.is_empty() {
-        return Ok(Vec::new());
+        return Ok(CONFIGURED_SERVERS
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .map_err(|_| "MCP configuration is unavailable".to_string())?
+            .clone()
+            .unwrap_or_default());
     }
     let servers: Vec<ContextServer> = serde_json::from_str(&raw)
         .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?;
@@ -289,10 +442,13 @@ fn server_config() -> Result<Vec<ContextServer>, String> {
     Ok(servers)
 }
 
-async fn discover_from(servers: Vec<ContextServer>) -> Result<Vec<ContextTool>, String> {
+async fn discover_from(
+    servers: Vec<ContextServer>,
+    cancelled: &mut watch::Receiver<bool>,
+) -> Result<Vec<ContextTool>, String> {
     let mut output = Vec::new();
     for server in servers {
-        let result = post(&server, "tools/list", json!({})).await?;
+        let result = post_with(&server, "tools/list", json!({}), Some(cancelled)).await?;
         let listed: ToolListResult = serde_json::from_value(result)
             .map_err(|_| "Malformed MCP discovery response".to_string())?;
         for tool in listed.tools {
@@ -327,7 +483,10 @@ async fn discover_from(servers: Vec<ContextServer>) -> Result<Vec<ContextTool>, 
     Ok(output)
 }
 
-async fn cached_discover(servers: Vec<ContextServer>) -> Result<Vec<ContextTool>, String> {
+async fn cached_discover(
+    servers: Vec<ContextServer>,
+    cancelled: &mut watch::Receiver<bool>,
+) -> Result<Vec<ContextTool>, String> {
     let key = serde_json::to_string(&servers)
         .map_err(|_| "MCP configuration is not serializable".to_string())?;
     {
@@ -341,13 +500,7 @@ async fn cached_discover(servers: Vec<ContextServer>) -> Result<Vec<ContextTool>
             }
         }
     }
-    let tools = discover_from(servers).await?;
-    *DISCOVERY_CACHE
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "MCP discovery cache is unavailable".to_string())? =
-        Some((key, tools.clone()));
-    Ok(tools)
+    discover_from(servers, cancelled).await
 }
 
 pub fn frame_result(value: &Value) -> Result<String, String> {
@@ -376,31 +529,30 @@ pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String
     }
     let (cancel, mut cancelled) = watch::channel(false);
     register_call(request_id, cancel)?;
-    let result = tokio::select! {
-        result = async {
-            let servers = server_config()?;
-            let tools = cached_discover(servers.clone()).await?;
-            let tool = tools
-                .iter()
-                .find(|tool| tool.name == name)
-                .ok_or_else(|| "Context tool is not available".to_string())?;
-            if !tool.read_only {
-                return Err("Context tool requires user confirmation".into());
-            }
-            let server = servers
-                .into_iter()
-                .find(|server| server.id == tool.server_id)
-                .ok_or_else(|| "MCP server is not configured".to_string())?;
-            let response = post(
-                &server,
-                "tools/call",
-                json!({"name": tool.remote_name, "arguments": input}),
-            )
-            .await?;
-            frame_result(&response)
-        } => result,
-        _ = cancelled.changed() => Err("Context-tool request cancelled".into()),
-    };
+    let result = async {
+        let servers = server_config()?;
+        let tools = cached_discover(servers.clone(), &mut cancelled).await?;
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == name)
+            .ok_or_else(|| "Context tool is not available".to_string())?;
+        if !tool.read_only {
+            return Err("Context tool requires user confirmation".into());
+        }
+        let server = servers
+            .into_iter()
+            .find(|server| server.id == tool.server_id)
+            .ok_or_else(|| "MCP server is not configured".to_string())?;
+        let response = post_with(
+            &server,
+            "tools/call",
+            json!({"name": tool.remote_name, "arguments": input}),
+            Some(&mut cancelled),
+        )
+        .await?;
+        frame_result(&response)
+    }
+    .await;
     remove_call(request_id)?;
     result
 }

@@ -14,7 +14,16 @@ static KEY_SCAN_LOCK: Mutex<()> = Mutex::new(());
 /** Store an API key in the login keychain. Upserts if the entry exists. */
 pub fn set_key(provider: &str, key: &str) -> Result<(), String> {
     let out = Command::new("security")
-        .args(["add-generic-password", "-s", SERVICE, "-a", provider, "-w", key, "-U"])
+        .args([
+            "add-generic-password",
+            "-s",
+            SERVICE,
+            "-a",
+            provider,
+            "-w",
+            key,
+            "-U",
+        ])
         .output()
         .map_err(|e| format!("security add failed: {}", e))?;
     if out.status.success() {
@@ -70,7 +79,14 @@ fn base_url_account(provider: &str) -> String {
  *  truth for it. Read-only — nothing writes base URLs here any more. */
 fn legacy_base_url(provider: &str) -> Result<String, String> {
     let out = Command::new("security")
-        .args(["find-generic-password", "-s", SERVICE, "-a", &base_url_account(provider), "-w"])
+        .args([
+            "find-generic-password",
+            "-s",
+            SERVICE,
+            "-a",
+            &base_url_account(provider),
+            "-w",
+        ])
         .output()
         .map_err(|e| format!("security find failed: {}", e))?;
     if out.status.success() {
@@ -83,7 +99,13 @@ fn legacy_base_url(provider: &str) -> Result<String, String> {
 /** Drop a legacy base-URL entry. Entry-not-found is treated as success. */
 fn delete_legacy_base_url(provider: &str) -> Result<(), String> {
     let out = Command::new("security")
-        .args(["delete-generic-password", "-s", SERVICE, "-a", &base_url_account(provider)])
+        .args([
+            "delete-generic-password",
+            "-s",
+            SERVICE,
+            "-a",
+            &base_url_account(provider),
+        ])
         .output()
         .map_err(|e| format!("security delete failed: {}", e))?;
     if out.status.success() {
@@ -110,12 +132,16 @@ fn delete_legacy_base_url(provider: &str) -> Result<(), String> {
  *  later launch migrates it. Idempotent: once the entries are gone this list is
  *  empty and the caller has nothing to write. */
 pub fn migrate_base_urls(providers: &[String]) -> Vec<(String, String)> {
-    let Ok(providers) = bounded_providers(providers) else { return Vec::new() };
+    let Ok(providers) = bounded_providers(providers) else {
+        return Vec::new();
+    };
     let mut out = Vec::new();
     for provider in providers {
         // `security` errors per entry rather than all-or-nothing, so one unreadable
         // provider cannot abort the rest of the migration.
-        let Ok(url) = legacy_base_url(&provider) else { continue };
+        let Ok(url) = legacy_base_url(&provider) else {
+            continue;
+        };
         if url.is_empty() {
             continue;
         }
@@ -130,12 +156,22 @@ pub fn migrate_base_urls(providers: &[String]) -> Vec<(String, String)> {
 
 fn bounded_providers(providers: &[String]) -> Result<Vec<String>, String> {
     if providers.len() > MAX_PROVIDER_COUNT {
-        return Err(format!("Too many providers (maximum {})", MAX_PROVIDER_COUNT));
+        return Err(format!(
+            "Too many providers (maximum {})",
+            MAX_PROVIDER_COUNT
+        ));
     }
     let mut seen = HashSet::new();
-    let unique: Vec<_> = providers.iter().filter(|p| seen.insert(p.as_str())).cloned().collect();
+    let unique: Vec<_> = providers
+        .iter()
+        .filter(|p| seen.insert(p.as_str()))
+        .cloned()
+        .collect();
     if unique.iter().any(|p| p.len() > MAX_PROVIDER_ID_BYTES) {
-        return Err(format!("Provider ID is too long (maximum {} bytes)", MAX_PROVIDER_ID_BYTES));
+        return Err(format!(
+            "Provider ID is too long (maximum {} bytes)",
+            MAX_PROVIDER_ID_BYTES
+        ));
     }
     Ok(unique)
 }
@@ -149,20 +185,25 @@ pub fn list_keys(providers: &[String]) -> Result<Vec<String>, String> {
     if providers.is_empty() {
         return Ok(Vec::new());
     }
-    let _scan = KEY_SCAN_LOCK.lock().map_err(|_| "Keychain scan lock failed".to_string())?;
+    let _scan = KEY_SCAN_LOCK
+        .lock()
+        .map_err(|_| "Keychain scan lock failed".to_string())?;
     let mut found = Vec::new();
     for chunk in providers.chunks(16) {
         std::thread::scope(|s| {
-            let handles: Vec<_> = chunk.iter().map(|p| {
-                let p = p.clone();
-                s.spawn(move || {
-                    Command::new("security")
-                        .args(["find-generic-password", "-s", SERVICE, "-a", &p, "-w"])
-                        .output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false)
+            let handles: Vec<_> = chunk
+                .iter()
+                .map(|p| {
+                    let p = p.clone();
+                    s.spawn(move || {
+                        Command::new("security")
+                            .args(["find-generic-password", "-s", SERVICE, "-a", &p, "-w"])
+                            .output()
+                            .map(|o| o.status.success())
+                            .unwrap_or(false)
+                    })
                 })
-            }).collect();
+                .collect();
             for (h, p) in handles.into_iter().zip(chunk.iter()) {
                 if h.join().unwrap_or(false) {
                     found.push(p.clone());
@@ -185,13 +226,22 @@ mod tests {
 
     #[test]
     fn bounded_providers_deduplicates_in_order() {
-        let providers = vec!["opencode-go".into(), "deepseek".into(), "opencode-go".into()];
-        assert_eq!(bounded_providers(&providers).unwrap(), ["opencode-go", "deepseek"]);
+        let providers = vec![
+            "opencode-go".into(),
+            "deepseek".into(),
+            "opencode-go".into(),
+        ];
+        assert_eq!(
+            bounded_providers(&providers).unwrap(),
+            ["opencode-go", "deepseek"]
+        );
     }
 
     #[test]
     fn bounded_providers_rejects_excess_work_and_long_ids() {
-        let many: Vec<_> = (0..=MAX_PROVIDER_COUNT).map(|i| format!("provider-{i}")).collect();
+        let many: Vec<_> = (0..=MAX_PROVIDER_COUNT)
+            .map(|i| format!("provider-{i}"))
+            .collect();
         assert!(bounded_providers(&many).is_err());
         assert!(bounded_providers(&["x".repeat(MAX_PROVIDER_ID_BYTES + 1)]).is_err());
     }
@@ -200,7 +250,10 @@ mod tests {
     fn base_url_account_suffix_is_stable() {
         // The suffix encodes entries written by older builds, so it can never
         // change without orphaning every legacy base URL in the user's keychain.
-        assert_eq!(base_url_account("openai-compatible"), "openai-compatible:base_url");
+        assert_eq!(
+            base_url_account("openai-compatible"),
+            "openai-compatible:base_url"
+        );
         assert_eq!(BASE_URL_SUFFIX, ":base_url");
     }
 
@@ -209,7 +262,9 @@ mod tests {
         // No such keychain entries exist in CI, so this asserts the guard rails:
         // oversized input is rejected before any `security` subprocess spawns and
         // an absent entry yields nothing rather than an empty-URL migration.
-        let many: Vec<_> = (0..=MAX_PROVIDER_COUNT).map(|i| format!("provider-{i}")).collect();
+        let many: Vec<_> = (0..=MAX_PROVIDER_COUNT)
+            .map(|i| format!("provider-{i}"))
+            .collect();
         assert!(migrate_base_urls(&many).is_empty());
         assert!(migrate_base_urls(&["docubook-migration-test-provider".to_string()]).is_empty());
     }

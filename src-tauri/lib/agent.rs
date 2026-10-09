@@ -18,7 +18,9 @@ fn validate_probe_id(provider: &str, model: &str) -> Result<(), String> {
         return Err("Provider and model are required for a probe result".into());
     }
     if provider.len() > MAX_PROBE_ID_LEN || model.len() > MAX_PROBE_ID_LEN {
-        return Err(format!("Provider and model IDs must be at most {MAX_PROBE_ID_LEN} bytes"));
+        return Err(format!(
+            "Provider and model IDs must be at most {MAX_PROBE_ID_LEN} bytes"
+        ));
     }
     Ok(())
 }
@@ -75,7 +77,9 @@ pub fn set_api_key(
     if let Err(error) = write_selection(&app, &selection) {
         restore_key(provider, previous_key.as_deref());
         restore_selection(&app, &previous_selection);
-        return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
+        return Err(format!(
+            "API key saved, but AI selection could not be persisted: {error}"
+        ));
     }
     Ok(())
 }
@@ -128,23 +132,50 @@ fn parse_selection(raw: &str) -> AiSelection {
  *  others would claim a model they were never used with. Base URLs start empty:
  *  they lived in the keychain and are folded in by `migrate_base_urls`. */
 fn migrate_legacy_selection(value: &serde_json::Value) -> AiSelection {
-    let active = value.get("provider").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    let model = value.get("model").and_then(|x| x.as_str()).unwrap_or("").to_string();
-    let mut out = AiSelection { active: active.clone(), endpoints: std::collections::BTreeMap::new() };
+    let active = value
+        .get("provider")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = value
+        .get("model")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
+    let mut out = AiSelection {
+        active: active.clone(),
+        endpoints: std::collections::BTreeMap::new(),
+    };
     if let Some(probes) = value.get("probes").and_then(|v| v.as_object()) {
         for (provider, models) in probes {
-            let Some(models) = models.as_object() else { continue };
-            out.endpoints.insert(provider.clone(), AiEndpoint {
-                base_url: String::new(),
-                model: if *provider == active { model.clone() } else { String::new() },
-                probes: parse_probe_map(models),
-            });
+            let Some(models) = models.as_object() else {
+                continue;
+            };
+            out.endpoints.insert(
+                provider.clone(),
+                AiEndpoint {
+                    base_url: String::new(),
+                    model: if *provider == active {
+                        model.clone()
+                    } else {
+                        String::new()
+                    },
+                    probes: parse_probe_map(models),
+                },
+            );
         }
     }
     // A provider selected but never probed still has to survive the migration,
     // otherwise the UI cannot recover the selection it lost.
     if !active.is_empty() && !out.endpoints.contains_key(&active) {
-        out.endpoints.insert(active, AiEndpoint { base_url: String::new(), model, probes: Default::default() });
+        out.endpoints.insert(
+            active,
+            AiEndpoint {
+                base_url: String::new(),
+                model,
+                probes: Default::default(),
+            },
+        );
     }
     out
 }
@@ -213,7 +244,9 @@ fn save_probe(
     validate_probe_id(provider, model)?;
     let mut selection = load_selection(app);
     let endpoint = selection.endpoints.entry(provider.to_string()).or_default();
-    if !endpoint.probes.contains_key(model) && endpoint.probes.len() >= MAX_PROBE_MODELS_PER_PROVIDER {
+    if !endpoint.probes.contains_key(model)
+        && endpoint.probes.len() >= MAX_PROBE_MODELS_PER_PROVIDER
+    {
         return Err(format!(
             "At most {MAX_PROBE_MODELS_PER_PROVIDER} models per provider are supported"
         ));
@@ -227,8 +260,11 @@ fn write_selection(app: &tauri::AppHandle, s: &AiSelection) -> Result<(), String
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&path, serde_json::to_string_pretty(s).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("Cannot write {}: {e}", path.display()))
+    std::fs::write(
+        &path,
+        serde_json::to_string_pretty(s).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("Cannot write {}: {e}", path.display()))
 }
 
 /** Move legacy base URLs out of the keychain and into the selection file.
@@ -242,8 +278,10 @@ fn write_selection(app: &tauri::AppHandle, s: &AiSelection) -> Result<(), String
  *  always wins over the stale keychain entry; idempotent once the entries are gone. */
 fn migrate_base_urls(app: &tauri::AppHandle) -> Result<(), String> {
     let mut selection = load_selection(app);
-    let mut candidates: Vec<String> =
-        crate::agent::PROVIDER_IDS.iter().map(|p| p.to_string()).collect();
+    let mut candidates: Vec<String> = crate::agent::PROVIDER_IDS
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
     candidates.extend(selection.endpoints.keys().cloned());
     candidates.push(crate::agent::CUSTOM_PROVIDER_ID.to_string());
     let migrated = crate::keychain::migrate_base_urls(&candidates);
@@ -263,7 +301,11 @@ fn migrate_base_urls(app: &tauri::AppHandle) -> Result<(), String> {
  *  is authoritative and identifies the gateway the measurements belong to), then
  *  the URL the caller supplied, then the catalog default so a first save works
  *  without the UI having to know the canonical URL. */
-fn resolve_base_url(selection: &AiSelection, provider: &str, supplied: &str) -> Result<String, String> {
+fn resolve_base_url(
+    selection: &AiSelection,
+    provider: &str,
+    supplied: &str,
+) -> Result<String, String> {
     if let Some(url) = selection
         .endpoints
         .get(provider)
@@ -284,8 +326,10 @@ fn resolve_base_url(selection: &AiSelection, provider: &str, supplied: &str) -> 
  *  file (a custom endpoint is configured by its presence there, not by a catalog
  *  id). Counted without spawning one `security` process per provider. */
 fn saved_providers(selection: &AiSelection) -> Result<Vec<String>, String> {
-    let mut providers: Vec<String> =
-        crate::agent::PROVIDER_IDS.iter().map(|p| p.to_string()).collect();
+    let mut providers: Vec<String> = crate::agent::PROVIDER_IDS
+        .iter()
+        .map(|p| p.to_string())
+        .collect();
     for provider in selection.endpoints.keys() {
         if !providers.iter().any(|p| p == provider) {
             providers.push(provider.clone());
@@ -296,8 +340,12 @@ fn saved_providers(selection: &AiSelection) -> Result<Vec<String>, String> {
 
 fn restore_key(provider: &str, key: Option<&str>) {
     match key {
-        Some(key) => { let _ = crate::keychain::set_key(provider, key); }
-        None => { let _ = crate::keychain::delete_key(provider); }
+        Some(key) => {
+            let _ = crate::keychain::set_key(provider, key);
+        }
+        None => {
+            let _ = crate::keychain::delete_key(provider);
+        }
     }
 }
 
@@ -351,12 +399,15 @@ pub async fn ai_settings(app: tauri::AppHandle) -> Result<String, String> {
             .map(|(provider, endpoint)| {
                 // `hasKey` is per endpoint: a configured URL with no credential is
                 // shown as incomplete rather than ready.
-                (provider.clone(), serde_json::json!({
-                    "baseUrl": endpoint.base_url,
-                    "model": endpoint.model,
-                    "probes": endpoint.probes,
-                    "hasKey": saved.contains(provider),
-                }))
+                (
+                    provider.clone(),
+                    serde_json::json!({
+                        "baseUrl": endpoint.base_url,
+                        "model": endpoint.model,
+                        "probes": endpoint.probes,
+                        "hasKey": saved.contains(provider),
+                    }),
+                )
             })
             .collect::<serde_json::Map<_, _>>();
         Ok(serde_json::json!({
@@ -427,7 +478,9 @@ pub fn set_custom_endpoint(
     if let Err(error) = write_selection(&app, &selection) {
         restore_key(provider, previous_key.as_deref());
         restore_selection(&app, &previous_selection);
-        return Err(format!("API key saved, but AI selection could not be persisted: {error}"));
+        return Err(format!(
+            "API key saved, but AI selection could not be persisted: {error}"
+        ));
     }
     Ok(())
 }
@@ -481,8 +534,7 @@ pub async fn test_connection(
     // caller that sends nothing still probes the endpoint chat will actually use.
     let base_url = resolve_base_url(&load_selection(&app), &provider, &base_url)?;
     // OpenCode Go 400s without a session id; every other provider ignores it.
-    let session = (provider == crate::agent::SESSION_PROVIDER_ID)
-        .then(crate::agent::session_id);
+    let session = (provider == crate::agent::SESSION_PROVIDER_ID).then(crate::agent::session_id);
     let client = pin_custom_endpoint(
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -570,11 +622,7 @@ pub async fn test_connection(
         if let Some(session) = &session {
             retry = retry.header("x-opencode-session", *session);
         }
-        if let Ok(resp) = retry
-            .json(&tool_body)
-            .send()
-            .await
-        {
+        if let Ok(resp) = retry.json(&tool_body).send().await {
             if resp.status().is_success() {
                 let text = resp.text().await.map_err(|e| e.to_string())?;
                 if text.contains("tool_calls") || text.contains("test_tool") {
@@ -684,12 +732,150 @@ pub async fn ask_ai(
 }
 
 #[tauri::command]
-pub async fn context_tools() -> Result<String, String> {
-    serde_json::to_string(&crate::rust_ai::context::discover().await?).map_err(|_| "Could not encode context tools".into())
+pub async fn context_tools(request_id: String) -> Result<String, String> {
+    configure_mcp_servers()?;
+    serde_json::to_string(&crate::rust_ai::context::discover(&request_id).await?)
+        .map_err(|_| "Could not encode context tools".into())
 }
 
 #[tauri::command]
-pub async fn call_context_tool(request_id: String, name: String, input: serde_json::Value) -> Result<String, String> {
+pub fn mcp_settings(app: tauri::AppHandle) -> Result<String, String> {
+    let mut servers = load_mcp_settings(&app);
+    if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
+        servers = std::env::var("DOCUBOOK_MCP_SERVERS").ok().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+    }
+    serde_json::to_string(&serde_json::json!({
+        "servers": servers.iter().map(|server| serde_json::json!({"id":server.id,"url":server.url,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty()) || crate::keychain::get_key(&format!("mcp:{}",server.id)).is_ok()})).collect::<Vec<_>>(),
+        "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok()
+    })).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn set_mcp_settings(
+    app: tauri::AppHandle,
+    servers: Vec<crate::rust_ai::context::ContextServer>,
+) -> Result<(), String> {
+    if servers.len() > 16 {
+        return Err("Too many MCP servers".into());
+    }
+    for server in &servers {
+        crate::rust_ai::context::validate_configured_server(server)?;
+    }
+    let old = load_mcp_settings(&app);
+    let clean = servers
+        .iter()
+        .map(|server| crate::rust_ai::context::ContextServer {
+            token: None,
+            ..server.clone()
+        })
+        .collect::<Vec<_>>();
+    let path = mcp_settings_path(&app)?;
+    let previous = std::fs::read(&path).ok();
+    std::fs::write(&path, serde_json::to_vec(&clean).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let rollback_file = || match &previous {
+        Some(contents) => std::fs::write(&path, contents),
+        None => std::fs::remove_file(&path),
+    };
+    let mut changed_keys: Vec<(String, Option<String>)> = Vec::new();
+    let mut updates = Vec::new();
+    for server in &servers {
+        if let Some(token) = server.token.as_deref() {
+            updates.push((format!("mcp:{}", server.id), (!token.is_empty()).then(|| token.to_owned())));
+        }
+    }
+    for server in old.iter().filter(|old| !servers.iter().any(|server| server.id == old.id)) {
+        updates.push((format!("mcp:{}", server.id), None));
+    }
+    for (key, value) in updates {
+        let prior = crate::keychain::get_key(&key).ok();
+        let result = match value.as_deref() {
+            Some(token) => crate::keychain::set_key(&key, token),
+            None => crate::keychain::delete_key(&key),
+        };
+        if let Err(error) = result {
+            for (changed, prior) in changed_keys.into_iter().rev() {
+                match prior.as_deref() {
+                    Some(token) => { let _ = crate::keychain::set_key(&changed, token); }
+                    None => { let _ = crate::keychain::delete_key(&changed); }
+                }
+            }
+            let _ = rollback_file();
+            return Err(error);
+        }
+        changed_keys.push((key, prior));
+    }
+    let mut runtime = Vec::new();
+    for server in &servers {
+        runtime.push(crate::rust_ai::context::ContextServer {
+            token: crate::keychain::get_key(&format!("mcp:{}", server.id)).ok(),
+            ..server.clone()
+        });
+    }
+    crate::rust_ai::context::set_configured_servers(runtime)
+}
+
+fn mcp_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("mcp-settings.json"))
+}
+
+fn load_mcp_settings(app: &tauri::AppHandle) -> Vec<crate::rust_ai::context::ContextServer> {
+    mcp_settings_path(app)
+        .ok()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|raw| serde_json::from_slice(&raw).ok())
+        .unwrap_or_default()
+}
+
+fn configure_mcp_servers() -> Result<(), String> {
+    let raw = std::env::var("DOCUBOOK_MCP_SERVERS").unwrap_or_default();
+    let servers: Vec<crate::rust_ai::context::ContextServer> = if raw.is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_str(&raw)
+            .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?
+    };
+    if !raw.is_empty() {
+        return crate::rust_ai::context::set_configured_servers(servers);
+    }
+    Ok(())
+}
+
+pub fn initialize_mcp_settings(app: &tauri::AppHandle) -> Result<(), String> {
+    if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
+        return Ok(());
+    }
+    let servers = load_mcp_settings(app);
+    configure_mcp_servers_with_tokens(app, &servers)
+}
+
+fn configure_mcp_servers_with_tokens(
+    app: &tauri::AppHandle,
+    servers: &[crate::rust_ai::context::ContextServer],
+) -> Result<(), String> {
+    let runtime = servers
+        .iter()
+        .map(|server| crate::rust_ai::context::ContextServer {
+            token: crate::keychain::get_key(&format!("mcp:{}", server.id)).ok(),
+            ..server.clone()
+        })
+        .collect();
+    crate::rust_ai::context::set_configured_servers(runtime)
+}
+
+#[tauri::command]
+pub fn cancel_context_request(request_id: String) {
+    crate::rust_ai::context::cancel(&request_id);
+}
+
+#[tauri::command]
+pub async fn call_context_tool(
+    request_id: String,
+    name: String,
+    input: serde_json::Value,
+) -> Result<String, String> {
     crate::rust_ai::context::invoke(&request_id, &name, input).await
 }
 
@@ -711,7 +897,11 @@ mod tests {
     use super::*;
 
     fn endpoint(base_url: &str, model: &str) -> AiEndpoint {
-        AiEndpoint { base_url: base_url.into(), model: model.into(), probes: Default::default() }
+        AiEndpoint {
+            base_url: base_url.into(),
+            model: model.into(),
+            probes: Default::default(),
+        }
     }
 
     #[test]
@@ -733,20 +923,39 @@ mod tests {
         let raw = r#"{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{"opencode-go":{"deepseek-v4-flash":true},"deepseek":{"deepseek-chat":false,"bad":"x"}}}"#;
         let s = parse_selection(raw);
         assert_eq!(s.active, "opencode-go");
-        assert_eq!(s.endpoints.len(), 2, "every probed provider becomes an endpoint");
+        assert_eq!(
+            s.endpoints.len(),
+            2,
+            "every probed provider becomes an endpoint"
+        );
         assert_eq!(s.endpoints["opencode-go"].model, "deepseek-v4-flash");
         assert!(s.endpoints["opencode-go"].probes["deepseek-v4-flash"]);
-        assert_eq!(s.endpoints["deepseek"].model, "", "legacy model belongs to the active provider");
-        assert!(!s.endpoints["deepseek"].probes["deepseek-chat"], "probe results migrate");
-        assert_eq!(s.endpoints["deepseek"].probes.len(), 1, "non-bool entry dropped");
-        assert_eq!(s.endpoints["opencode-go"].base_url, "", "base URLs come from the keychain, not the file");
+        assert_eq!(
+            s.endpoints["deepseek"].model, "",
+            "legacy model belongs to the active provider"
+        );
+        assert!(
+            !s.endpoints["deepseek"].probes["deepseek-chat"],
+            "probe results migrate"
+        );
+        assert_eq!(
+            s.endpoints["deepseek"].probes.len(),
+            1,
+            "non-bool entry dropped"
+        );
+        assert_eq!(
+            s.endpoints["opencode-go"].base_url, "",
+            "base URLs come from the keychain, not the file"
+        );
     }
 
     #[test]
     fn selected_but_unprobed_provider_survives_migration() {
         // A provider selected but never probed still has to survive the migration,
         // or the UI cannot recover the selection it lost.
-        let s = parse_selection(r#"{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{}}"#);
+        let s = parse_selection(
+            r#"{"provider":"opencode-go","model":"deepseek-v4-flash","probes":{}}"#,
+        );
         assert_eq!(s.active, "opencode-go");
         assert_eq!(s.endpoints["opencode-go"].model, "deepseek-v4-flash");
         assert!(s.endpoints["opencode-go"].probes.is_empty());
@@ -756,19 +965,28 @@ mod tests {
     fn current_selection_round_trips_with_camel_case_base_url() {
         // The file is a contract with the web build (which writes the same shape in
         // config.json), so the wire key stays `baseUrl` and must not drift.
-        let mut s = AiSelection { active: "opencode-go".into(), endpoints: Default::default() };
+        let mut s = AiSelection {
+            active: "opencode-go".into(),
+            endpoints: Default::default(),
+        };
         let mut probes = std::collections::BTreeMap::new();
         probes.insert("deepseek-v4-flash".to_string(), true);
-        s.endpoints.insert("opencode-go".into(), AiEndpoint {
-            base_url: "https://opencode.ai/zen/go/v1".into(),
-            model: "deepseek-v4-flash".into(),
-            probes,
-        });
+        s.endpoints.insert(
+            "opencode-go".into(),
+            AiEndpoint {
+                base_url: "https://opencode.ai/zen/go/v1".into(),
+                model: "deepseek-v4-flash".into(),
+                probes,
+            },
+        );
         let raw = serde_json::to_string(&s).unwrap();
         assert!(raw.contains("\"baseUrl\""), "baseUrl is the persisted key");
         let back = parse_selection(&raw);
         assert_eq!(back.active, "opencode-go");
-        assert_eq!(back.endpoints["opencode-go"].base_url, "https://opencode.ai/zen/go/v1");
+        assert_eq!(
+            back.endpoints["opencode-go"].base_url,
+            "https://opencode.ai/zen/go/v1"
+        );
         assert!(back.endpoints["opencode-go"].probes["deepseek-v4-flash"]);
     }
 
@@ -802,7 +1020,10 @@ mod tests {
         // The saved URL identifies the gateway the stored probes were measured
         // against, so it wins over a caller-supplied guess.
         let mut s = AiSelection::default();
-        s.endpoints.insert("opencode-go".into(), endpoint("https://opencode.ai/zen/go/v1", "m"));
+        s.endpoints.insert(
+            "opencode-go".into(),
+            endpoint("https://opencode.ai/zen/go/v1", "m"),
+        );
         assert_eq!(
             resolve_base_url(&s, "opencode-go", "https://evil.example.com/v1").unwrap(),
             "https://opencode.ai/zen/go/v1"
