@@ -70,6 +70,7 @@ beforeEach(() => {
   invoke.mockImplementation(async (command: string) => {
     if (command === 'ai_settings') return JSON.stringify(backend)
     if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
+    if (command === 'mcp_settings') return JSON.stringify({ servers: [], envManaged: false })
     if (command === 'test_connection') return JSON.stringify({ status: 'ok', tools: true })
     return ''
   })
@@ -303,5 +304,38 @@ describe('SettingsModal — save', () => {
     expect(commands).toContain('set_api_key')
     expect(byLabel('Model')!.readOnly).toBe(true)
     expect(buttons()).toContain('Revoke')
+  })
+})
+
+describe('SettingsModal — MCP settings loading', () => {
+  it('blocks changes after a failed load until retry succeeds', async () => {
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'mcp_settings') throw new Error('offline')
+      if (command === 'ai_settings') return JSON.stringify(backend)
+      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
+      return ''
+    })
+    await render()
+    clickText('MCP')
+    await settle()
+
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('offline')
+    expect(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')?.disabled).toBe(true)
+    expect(document.querySelector<HTMLButtonElement>('button')?.textContent).not.toBe('Add server')
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add server')?.disabled).toBe(true)
+    expect(invoke.mock.calls.map(call => call[0])).not.toContain('config_set')
+
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'mcp_settings') return JSON.stringify({ servers: [], envManaged: false })
+      if (command === 'ai_settings') return JSON.stringify(backend)
+      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
+      return ''
+    })
+    clickText('Retry')
+    await settle()
+
+    expect(document.querySelector('[role="alert"]')).toBeNull()
+    expect(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')?.disabled).toBe(false)
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add server')?.disabled).toBe(true)
   })
 })
