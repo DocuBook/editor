@@ -1,11 +1,8 @@
 //! Backend-owned context tools. Secrets and MCP configuration stay in the host;
 //! only the normalized, policy-approved tool definitions cross the AI boundary.
 
-use futures_util::StreamExt;
-use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::net::IpAddr;
 use std::time::Duration;
 
 use super::tool_schema::DOCUMENT_OPERATION_TOOL;
@@ -93,178 +90,14 @@ pub fn bound_reference(value: Value, limits: &ContextLimits) -> Result<String, S
     if serialized.len() > limits.max_result_bytes {
         return Err("Context result is too large".into());
     }
-    if value
+    let item_count = value
         .as_array()
-        .is_some_and(|items| items.len() > limits.max_result_items)
-    {
+        .map(Vec::len)
+        .or_else(|| value.get("content").and_then(Value::as_array).map(Vec::len));
+    if item_count.is_some_and(|items| items > limits.max_result_items) {
         return Err("Context result contains too many items".into());
     }
     Ok(format!("{UNTRUSTED_REFERENCE_PREFIX}{serialized}"))
-}
-
-pub fn validate_mcp_url(raw: &str) -> Result<Url, String> {
-    let url = Url::parse(raw).map_err(|_| "MCP URL is invalid".to_string())?;
-    if url.scheme() != "https" || url.username() != "" || url.password().is_some() {
-        return Err("MCP servers must use HTTPS without embedded credentials".into());
-    }
-    let host = url
-        .host_str()
-        .ok_or_else(|| "MCP URL must include a host".to_string())?;
-    if host.parse::<IpAddr>().is_ok_and(is_blocked_ip) {
-        return Err("MCP URL resolves to a private address".into());
-    }
-    Ok(url)
-}
-
-fn is_blocked_ip(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => {
-            ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified()
-        }
-        IpAddr::V6(ip) => {
-            let first = ip.segments()[0];
-            ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_unicast_link_local()
-                || (first & 0xfe00) == 0xfc00
-        }
-    }
-}
-
-async fn resolve_mcp_url(raw: &str) -> Result<Url, String> {
-    let url = validate_mcp_url(raw)?;
-    let host = url
-        .host_str()
-        .ok_or_else(|| "MCP URL must include a host".to_string())?;
-    let port = url
-        .port_or_known_default()
-        .ok_or_else(|| "MCP URL must include a port".to_string())?;
-    let addresses = tokio::net::lookup_host((host, port))
-        .await
-        .map_err(|_| "MCP host could not be resolved".to_string())?;
-    if addresses
-        .into_iter()
-        .any(|address| is_blocked_ip(address.ip()))
-    {
-        return Err("MCP URL resolves to a private address".into());
-    }
-    Ok(url)
-}
-
-#[derive(Debug, Deserialize)]
-struct McpResponse {
-    result: Option<Value>,
-    error: Option<Value>,
-}
-
-pub async fn discover_mcp_tools(
-    client: &reqwest::Client,
-    endpoint: &str,
-    server_id: &str,
-    limits: &ContextLimits,
-) -> Result<Vec<ContextTool>, String> {
-    let url = resolve_mcp_url(endpoint).await?;
-    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}});
-    let response = tokio::time::timeout(
-        limits.timeout,
-        client
-            .post(url)
-            .header("Accept", "application/json, text/event-stream")
-            .json(&body)
-            .send(),
-    )
-    .await
-    .map_err(|_| "MCP discovery timed out".to_string())?
-    .map_err(|e| format!("MCP discovery failed: {e}"))?;
-    let bytes = bounded_response(response, limits).await?;
-    let parsed: McpResponse = serde_json::from_slice(&bytes)
-        .map_err(|_| "MCP discovery returned invalid JSON".to_string())?;
-    if parsed.error.is_some() {
-        return Err("MCP discovery returned an error".into());
-    }
-    let tools = parsed
-        .result
-        .and_then(|result| result.get("tools").cloned())
-        .and_then(|tools| tools.as_array().cloned())
-        .ok_or_else(|| "MCP discovery returned no tools".to_string())?;
-    let tools = tools
-        .into_iter()
-        .map(|tool| ContextTool {
-            name: tool
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            description: tool
-                .get("description")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            input_schema: tool
-                .get("inputSchema")
-                .cloned()
-                .unwrap_or_else(|| json!({"type":"object"})),
-            server_id: server_id.to_string(),
-            read_only: tool
-                .get("annotations")
-                .and_then(|a| a.get("readOnlyHint"))
-                .and_then(Value::as_bool)
-                .unwrap_or(false),
-        })
-        .collect();
-    validate_discovered_tools(tools, limits)
-}
-
-pub async fn invoke_mcp_tool(
-    client: &reqwest::Client,
-    endpoint: &str,
-    tool: &ContextTool,
-    arguments: Value,
-    limits: &ContextLimits,
-) -> Result<String, String> {
-    tool.validate()?;
-    let url = resolve_mcp_url(endpoint).await?;
-    let body = json!({"jsonrpc":"2.0","id":"context-call","method":"tools/call","params":{"name":tool.name,"arguments":arguments}});
-    let response = tokio::time::timeout(
-        limits.timeout,
-        client
-            .post(url)
-            .header("Accept", "application/json, text/event-stream")
-            .json(&body)
-            .send(),
-    )
-    .await
-    .map_err(|_| "MCP invocation timed out".to_string())?
-    .map_err(|e| format!("MCP invocation failed: {e}"))?;
-    let bytes = bounded_response(response, limits).await?;
-    let parsed: McpResponse = serde_json::from_slice(&bytes)
-        .map_err(|_| "MCP invocation returned invalid JSON".to_string())?;
-    if parsed.error.is_some() {
-        return Err("MCP invocation returned an error".into());
-    }
-    bound_reference(parsed.result.unwrap_or(Value::Null), limits)
-}
-
-async fn bounded_response(
-    response: reqwest::Response,
-    limits: &ContextLimits,
-) -> Result<Vec<u8>, String> {
-    if response
-        .content_length()
-        .is_some_and(|size| size as usize > limits.max_result_bytes)
-    {
-        return Err("MCP response is too large".into());
-    }
-    let mut stream = response.bytes_stream();
-    let mut bytes = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("MCP response failed: {e}"))?;
-        if bytes.len() + chunk.len() > limits.max_result_bytes {
-            return Err("MCP response is too large".into());
-        }
-        bytes.extend_from_slice(&chunk);
-    }
-    Ok(bytes)
 }
 
 #[cfg(test)]
@@ -302,9 +135,11 @@ mod tests {
         assert!(text.starts_with(UNTRUSTED_REFERENCE_PREFIX));
     }
     #[test]
-    fn rejects_insecure_mcp_urls() {
-        assert!(validate_mcp_url("http://example.test/mcp").is_err());
-        assert!(validate_mcp_url("https://127.0.0.1/mcp").is_err());
-        assert!(validate_mcp_url("https://example.test/mcp").is_ok());
+    fn bounds_nested_content_items() {
+        let limits = ContextLimits {
+            max_result_items: 1,
+            ..Default::default()
+        };
+        assert!(bound_reference(json!({"content":[{}, {}]}), &limits).is_err());
     }
 }

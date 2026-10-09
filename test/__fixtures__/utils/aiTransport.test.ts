@@ -20,9 +20,10 @@ describe('AI context policy', () => {
     ).toHaveLength(1)
   })
   it('auto-allows only configured read-only tools', () => {
-    expect(contextCallNeedsConfirmation(lookup, ['search'])).toBe(false)
+    expect(contextCallNeedsConfirmation(lookup, [{ serverId: 'mcp-1', name: 'search' }])).toBe(false)
+    expect(contextCallNeedsConfirmation(lookup, [{ serverId: 'mcp-2', name: 'search' }])).toBe(true)
     expect(contextCallNeedsConfirmation(lookup, [])).toBe(true)
-    expect(contextCallNeedsConfirmation({ ...lookup, readOnly: false }, ['search'])).toBe(true)
+    expect(contextCallNeedsConfirmation({ ...lookup, readOnly: false }, [{ serverId: 'mcp-1', name: 'search' }])).toBe(true)
   })
   it('bounds and labels context results as untrusted', () => {
     expect(boundContextResult({ answer: 42 })).toContain('UNTRUSTED REFERENCE MATERIAL')
