@@ -151,8 +151,6 @@ struct ToolListResult {
 struct ToolAnnotations {
     #[serde(default)]
     read_only_hint: bool,
-    #[serde(default)]
-    destructive_hint: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -227,7 +225,7 @@ fn tool_is_read_only(server: &ContextServer, tool: &RemoteTool) -> bool {
             .any(|allowed| allowed == &qualified);
     }
     tool.annotations.as_ref().is_some_and(|annotations| {
-        annotations.read_only_hint && annotations.destructive_hint == Some(false)
+        annotations.read_only_hint
     })
 }
 
@@ -785,10 +783,16 @@ mod tests {
             "annotations":{"readOnlyHint":true,"destructiveHint":false}
         }))
         .unwrap();
+        let read_only_without_destructive_hint: RemoteTool = serde_json::from_value(json!({
+            "name":"search",
+            "inputSchema":{"type":"object"},
+            "annotations":{"readOnlyHint":true}
+        }))
+        .unwrap();
         let destructive: RemoteTool = serde_json::from_value(json!({
             "name":"delete",
             "inputSchema":{"type":"object"},
-            "annotations":{"readOnlyHint":true,"destructiveHint":true}
+            "annotations":{"readOnlyHint":false,"destructiveHint":true}
         }))
         .unwrap();
         let unannotated: RemoteTool = serde_json::from_value(json!({
@@ -804,6 +808,7 @@ mod tests {
             read_only_tools: Vec::new(),
         };
         assert!(tool_is_read_only(&server, &safe));
+        assert!(tool_is_read_only(&server, &read_only_without_destructive_hint));
         assert!(!tool_is_read_only(&server, &destructive));
         assert!(!tool_is_read_only(&server, &unannotated));
 
