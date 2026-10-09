@@ -742,7 +742,10 @@ pub async fn context_tools(request_id: String) -> Result<String, String> {
 pub fn mcp_settings(app: tauri::AppHandle) -> Result<String, String> {
     let mut servers = load_mcp_settings(&app);
     if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
-        servers = std::env::var("DOCUBOOK_MCP_SERVERS").ok().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+        servers = std::env::var("DOCUBOOK_MCP_SERVERS")
+            .ok()
+            .and_then(|raw| serde_json::from_str(&raw).ok())
+            .unwrap_or_default();
     }
     serde_json::to_string(&serde_json::json!({
         "servers": servers.iter().map(|server| serde_json::json!({"id":server.id,"url":server.url,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty()) || crate::keychain::get_key(&format!("mcp:{}",server.id)).is_ok()})).collect::<Vec<_>>(),
@@ -755,12 +758,7 @@ pub fn set_mcp_settings(
     app: tauri::AppHandle,
     servers: Vec<crate::rust_ai::context::ContextServer>,
 ) -> Result<(), String> {
-    if servers.len() > 16 {
-        return Err("Too many MCP servers".into());
-    }
-    for server in &servers {
-        crate::rust_ai::context::validate_configured_server(server)?;
-    }
+    crate::rust_ai::context::validate_configured_servers(&servers)?;
     let old = load_mcp_settings(&app);
     let clean = servers
         .iter()
@@ -771,8 +769,11 @@ pub fn set_mcp_settings(
         .collect::<Vec<_>>();
     let path = mcp_settings_path(&app)?;
     let previous = std::fs::read(&path).ok();
-    std::fs::write(&path, serde_json::to_vec(&clean).map_err(|e| e.to_string())?)
-        .map_err(|e| e.to_string())?;
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&clean).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     let rollback_file = || match &previous {
         Some(contents) => std::fs::write(&path, contents),
         None => std::fs::remove_file(&path),
@@ -781,10 +782,16 @@ pub fn set_mcp_settings(
     let mut updates = Vec::new();
     for server in &servers {
         if let Some(token) = server.token.as_deref() {
-            updates.push((format!("mcp:{}", server.id), (!token.is_empty()).then(|| token.to_owned())));
+            updates.push((
+                format!("mcp:{}", server.id),
+                (!token.is_empty()).then(|| token.to_owned()),
+            ));
         }
     }
-    for server in old.iter().filter(|old| !servers.iter().any(|server| server.id == old.id)) {
+    for server in old
+        .iter()
+        .filter(|old| !servers.iter().any(|server| server.id == old.id))
+    {
         updates.push((format!("mcp:{}", server.id), None));
     }
     for (key, value) in updates {
@@ -796,8 +803,12 @@ pub fn set_mcp_settings(
         if let Err(error) = result {
             for (changed, prior) in changed_keys.into_iter().rev() {
                 match prior.as_deref() {
-                    Some(token) => { let _ = crate::keychain::set_key(&changed, token); }
-                    None => { let _ = crate::keychain::delete_key(&changed); }
+                    Some(token) => {
+                        let _ = crate::keychain::set_key(&changed, token);
+                    }
+                    None => {
+                        let _ = crate::keychain::delete_key(&changed);
+                    }
                 }
             }
             let _ = rollback_file();
@@ -812,7 +823,21 @@ pub fn set_mcp_settings(
             ..server.clone()
         });
     }
-    crate::rust_ai::context::set_configured_servers(runtime)
+    if let Err(error) = crate::rust_ai::context::set_configured_servers(runtime) {
+        for (changed, prior) in changed_keys.into_iter().rev() {
+            match prior.as_deref() {
+                Some(token) => {
+                    let _ = crate::keychain::set_key(&changed, token);
+                }
+                None => {
+                    let _ = crate::keychain::delete_key(&changed);
+                }
+            }
+        }
+        let _ = rollback_file();
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn mcp_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {

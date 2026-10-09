@@ -23,13 +23,14 @@ static CONFIGURED_SERVERS: OnceLock<Mutex<Option<Vec<ContextServer>>>> = OnceLoc
 /// Set runtime-provided MCP configuration. Environment configuration remains
 /// authoritative when present; this is used by the Settings-backed runtimes.
 pub fn set_configured_servers(servers: Vec<ContextServer>) -> Result<(), String> {
-    if servers.len() > 16 {
-        return Err("Too many MCP servers".into());
+    validate_configured_servers(&servers)?;
+    let mut configured = CONFIGURED_SERVERS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "MCP configuration is unavailable".to_string())?;
+    if configured.as_ref() == Some(&servers) {
+        return Ok(());
     }
-    for server in &servers {
-        validate_server(server)?;
-    }
-    validate_server_ids(&servers)?;
     let retired = {
         let mut sessions = MCP_SESSIONS
             .get_or_init(|| Mutex::new(HashMap::new()))
@@ -37,10 +38,7 @@ pub fn set_configured_servers(servers: Vec<ContextServer>) -> Result<(), String>
             .map_err(|_| "MCP session cache is unavailable".to_string())?;
         std::mem::take(&mut *sessions)
     };
-    *CONFIGURED_SERVERS
-        .get_or_init(|| Mutex::new(None))
-        .lock()
-        .map_err(|_| "MCP configuration is unavailable".to_string())? = Some(servers);
+    *configured = Some(servers);
     DISCOVERY_CACHE
         .get_or_init(|| Mutex::new(None))
         .lock()
@@ -65,6 +63,16 @@ pub fn validate_configured_server(server: &ContextServer) -> Result<(), String> 
     validate_server(server)
 }
 
+pub fn validate_configured_servers(servers: &[ContextServer]) -> Result<(), String> {
+    if servers.len() > 16 {
+        return Err("Too many MCP servers".into());
+    }
+    for server in servers {
+        validate_server(server)?;
+    }
+    validate_server_ids(servers)
+}
+
 fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
     let mut calls = CONTEXT_CALLS
         .get_or_init(|| Mutex::new(HashMap::new()))
@@ -86,13 +94,13 @@ fn remove_call(request_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ContextServer {
     pub id: String,
     pub url: String,
     #[serde(default)]
     pub token: Option<String>,
-    #[serde(default)]
+    #[serde(rename = "readOnlyTools", alias = "read_only_tools", default)]
     pub read_only_tools: Vec<String>,
 }
 
@@ -263,17 +271,34 @@ async fn request_cancellable(
     ))
 }
 
-async fn terminate_session(server: &ContextServer, session: &str, version: &str) -> Result<(), String> {
+async fn terminate_session(
+    server: &ContextServer,
+    session: &str,
+    version: &str,
+) -> Result<(), String> {
     let call = client(server)?
         .delete(&server.url)
         .header("mcp-session-id", session)
         .header("mcp-protocol-version", version);
-    let call = if let Some(token) = &server.token { call.bearer_auth(token) } else { call };
-    let response = call.send().await.map_err(|_| "MCP session termination failed".to_string())?;
-    if response.status().is_success() || response.status().as_u16() == 404 || response.status().as_u16() == 405 {
+    let call = if let Some(token) = &server.token {
+        call.bearer_auth(token)
+    } else {
+        call
+    };
+    let response = call
+        .send()
+        .await
+        .map_err(|_| "MCP session termination failed".to_string())?;
+    if response.status().is_success()
+        || response.status().as_u16() == 404
+        || response.status().as_u16() == 405
+    {
         Ok(())
     } else {
-        Err(format!("MCP session termination returned HTTP {}", response.status()))
+        Err(format!(
+            "MCP session termination returned HTTP {}",
+            response.status()
+        ))
     }
 }
 
@@ -377,7 +402,10 @@ async fn post_with(
         Ok(response) => response,
         Err(error) => {
             if reused {
-                if let Ok(mut sessions) = MCP_SESSIONS.get_or_init(|| Mutex::new(HashMap::new())).lock() {
+                if let Ok(mut sessions) = MCP_SESSIONS
+                    .get_or_init(|| Mutex::new(HashMap::new()))
+                    .lock()
+                {
                     sessions.remove(&key);
                 }
             }
@@ -406,14 +434,19 @@ pub async fn discover(request_id: &str) -> Result<Vec<ContextTool>, String> {
         let servers = server_config()?;
         let key = serde_json::to_string(&servers)
             .map_err(|_| "MCP configuration is not serializable".to_string())?;
-        cached_discover(servers, &mut cancelled).await
+        cached_discover(servers, &mut cancelled)
+            .await
             .map(|tools| (key, tools))
     }
     .await;
     remove_call(request_id)?;
     match result {
         Ok((key, tools)) => {
-            *DISCOVERY_CACHE.get_or_init(|| Mutex::new(None)).lock().map_err(|_| "MCP discovery cache is unavailable".to_string())? = Some((key, tools.clone()));
+            *DISCOVERY_CACHE
+                .get_or_init(|| Mutex::new(None))
+                .lock()
+                .map_err(|_| "MCP discovery cache is unavailable".to_string())? =
+                Some((key, tools.clone()));
             Ok(tools)
         }
         Err(error) => Err(error),
@@ -575,6 +608,37 @@ pub fn is_document_tool(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn context_server_deserializes_both_tool_allow_list_spellings() {
+        for field in ["readOnlyTools", "read_only_tools"] {
+            let input = json!({"id":"docs","url":"https://example.com/mcp",field:["docs:lookup"]});
+            let server: ContextServer = serde_json::from_value(input).unwrap();
+            assert_eq!(server.read_only_tools, ["docs:lookup"]);
+        }
+    }
+
+    #[test]
+    fn configured_server_validation_rejects_duplicate_ids() {
+        let servers = vec![
+            ContextServer {
+                id: "docs".into(),
+                url: "https://example.com/mcp".into(),
+                token: None,
+                read_only_tools: vec![],
+            },
+            ContextServer {
+                id: "docs".into(),
+                url: "https://example.com/mcp".into(),
+                token: None,
+                read_only_tools: vec![],
+            },
+        ];
+        assert_eq!(
+            validate_configured_servers(&servers),
+            Err("MCP server IDs must be unique".into())
+        );
+    }
     #[test]
     fn frames_results_as_untrusted_data() {
         let framed = frame_result(&json!({"content":[{"text":"reference"}]})).unwrap();

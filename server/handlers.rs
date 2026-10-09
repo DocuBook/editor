@@ -224,19 +224,34 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         "mcp_settings" => {
             configure_mcp(state)?;
-            let mut view = state.auth.config.lock().expect("lock").view(&state.data_dir)["mcp"].clone();
+            let mut view = state
+                .auth
+                .config
+                .lock()
+                .expect("lock")
+                .view(&state.data_dir)["mcp"]
+                .clone();
             if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
-                let configured: Vec<rust_ai::context::ContextServer> = std::env::var("DOCUBOOK_MCP_SERVERS").ok().and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+                let configured: Vec<rust_ai::context::ContextServer> =
+                    std::env::var("DOCUBOOK_MCP_SERVERS")
+                        .ok()
+                        .and_then(|raw| serde_json::from_str(&raw).ok())
+                        .unwrap_or_default();
                 view = Value::Array(configured.iter().map(|server| serde_json::json!({"id":server.id,"url":server.url,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty())})).collect());
             }
             Ok(serde_json::to_string(&serde_json::json!({
                 "servers": view,
                 "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok()
-            })).map_err(|e| e.to_string())?)
+            }))
+            .map_err(|e| e.to_string())?)
         }
         "set_mcp_settings" => {
             let servers = args.get("servers").cloned().unwrap_or(Value::Null);
-            sync(state, "config_set", serde_json::json!({"key":"mcp", "value":servers}))
+            sync(
+                state,
+                "config_set",
+                serde_json::json!({"key":"mcp", "value":servers}),
+            )
         }
         "call_context_tool" => {
             configure_mcp(state)?;
@@ -831,11 +846,8 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                     return Err("MCP servers are controlled by DOCUBOOK_MCP_SERVERS".into());
                 }
                 let servers = value.as_array().ok_or("mcp must be an array")?;
-                if servers.len() > 16 {
-                    return Err("Too many MCP servers".into());
-                }
-                let mut cfg = state.auth.config.lock().expect("lock");
                 let mut out = Vec::new();
+                let mut tokens = Vec::new();
                 for server in servers {
                     let id = server
                         .get("id")
@@ -856,47 +868,95 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                                 .collect()
                         })
                         .unwrap_or_default();
-                    rust_ai::context::validate_configured_server(
-                        &rust_ai::context::ContextServer {
-                            id: id.clone(),
-                            url: url.clone(),
-                            token: None,
-                            read_only_tools: read_only_tools.clone(),
-                        },
-                    )?;
-                    let token = server.get("token").and_then(Value::as_str).unwrap_or("");
-                    let key_id = format!("mcp:{id}");
-                    if !token.is_empty() {
-                        keys::set_key(&state.data_dir, &key_id, token)?;
-                    } else if server.get("token").is_some() {
-                        let _ = keys::delete_key(&state.data_dir, &key_id);
-                    }
+                    let token = server
+                        .get("token")
+                        .and_then(Value::as_str)
+                        .filter(|token| !token.is_empty())
+                        .map(str::to_owned);
+                    let remove_token = server
+                        .get("removeToken")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                     out.push(config::McpServer {
                         id,
                         url,
                         read_only_tools,
-                        has_token: !token.is_empty()
-                            || keys::get_key(&state.data_dir, &key_id).is_ok(),
+                        has_token: false,
                     });
+                    tokens.push((token, remove_token));
                 }
-                if out
+                let validation_servers = out
+                    .iter()
+                    .map(|server| rust_ai::context::ContextServer {
+                        id: server.id.clone(),
+                        url: server.url.clone(),
+                        token: None,
+                        read_only_tools: server.read_only_tools.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                rust_ai::context::validate_configured_servers(&validation_servers)?;
+                let mut cfg = state.auth.config.lock().expect("lock");
+                let previous_config = cfg.mcp.clone();
+                let mut previous_keys = std::collections::HashMap::new();
+                for id in previous_config
                     .iter()
                     .map(|server| server.id.as_str())
-                    .collect::<std::collections::HashSet<_>>()
-                    .len()
-                    != out.len()
+                    .chain(out.iter().map(|server| server.id.as_str()))
                 {
-                    return Err("MCP server IDs must be unique".into());
+                    let key = format!("mcp:{id}");
+                    previous_keys
+                        .entry(key.clone())
+                        .or_insert_with(|| keys::get_key(&state.data_dir, &key).ok());
+                }
+                for (server, (token, remove_token)) in out.iter_mut().zip(tokens.iter()) {
+                    let key_id = format!("mcp:{}", server.id);
+                    let key_result = if let Some(token) = token {
+                        keys::set_key(&state.data_dir, &key_id, token)
+                    } else if *remove_token {
+                        keys::delete_key(&state.data_dir, &key_id)
+                    } else {
+                        Ok(())
+                    };
+                    if let Err(error) = key_result {
+                        for (key, prior) in &previous_keys {
+                            restore_key(&state.data_dir, key, prior.as_deref());
+                        }
+                        return Err(error);
+                    }
+                    server.has_token = (token.is_some() && !remove_token)
+                        || keys::get_key(&state.data_dir, &key_id).is_ok();
                 }
                 let new_ids: std::collections::HashSet<String> =
                     out.iter().map(|server| server.id.clone()).collect();
                 for old in cfg.mcp.iter().filter(|old| !new_ids.contains(&old.id)) {
-                    let _ = keys::delete_key(&state.data_dir, &format!("mcp:{}", old.id));
+                    if let Err(error) =
+                        keys::delete_key(&state.data_dir, &format!("mcp:{}", old.id))
+                    {
+                        for (key, prior) in &previous_keys {
+                            restore_key(&state.data_dir, key, prior.as_deref());
+                        }
+                        return Err(error);
+                    }
                 }
                 cfg.mcp = out;
-                cfg.save()?;
+                if let Err(error) = cfg.save() {
+                    cfg.mcp = previous_config.clone();
+                    for (key, prior) in &previous_keys {
+                        restore_key(&state.data_dir, key, prior.as_deref());
+                    }
+                    return Err(error);
+                }
                 drop(cfg);
-                configure_mcp(state)?;
+                if let Err(error) = configure_mcp(state) {
+                    let mut cfg = state.auth.config.lock().expect("lock");
+                    cfg.mcp = previous_config;
+                    let _ = cfg.save();
+                    drop(cfg);
+                    for (key, prior) in &previous_keys {
+                        restore_key(&state.data_dir, key, prior.as_deref());
+                    }
+                    return Err(error);
+                }
                 Ok("null".into())
             } else {
                 state
