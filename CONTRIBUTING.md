@@ -13,18 +13,12 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 
 ## AI Context Sources
 
-AI context sources are backend configuration, not frontend settings. Production
-MCP servers must use Streamable HTTP over HTTPS; desktop stdio is not supported
-in the first iteration. The backend dynamically discovers tools, keeps server
-credentials private, and sends only normalized tool metadata to the provider.
-
-Configured read-only tools may be auto-allowed. Any tool outside the explicit
-read-only allow-list requires host confirmation and must be refused when no
-confirmation UI is available. Provider-native search is exposed only when the
-provider explicitly confirms support; otherwise use an MCP search tool. Results
-are bounded and framed as untrusted reference material. Never add a context
-tool named `applyDocumentOperations`, which remains the only terminal document
-edit path.
+AI context tools are groundwork only; MCP discovery and invocation, provider-
+native search, and runtime confirmation policies are not currently wired into
+the editor. Do not treat the context-tool metadata and bounded-result helpers as
+an active integration. Any future implementation must keep credentials in the
+backend, frame results as untrusted reference material, and preserve
+`applyDocumentOperations` as the only terminal document edit path.
 
 ## Build from Source
 

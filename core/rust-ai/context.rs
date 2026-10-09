@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::{io::{self, Write}, time::Duration};
 
 use super::tool_schema::DOCUMENT_OPERATION_TOOL;
 
@@ -85,11 +85,6 @@ pub fn validate_discovered_tools(
 }
 
 pub fn bound_reference(value: Value, limits: &ContextLimits) -> Result<String, String> {
-    let serialized =
-        serde_json::to_string(&value).map_err(|_| "Invalid context result".to_string())?;
-    if serialized.len() > limits.max_result_bytes {
-        return Err("Context result is too large".into());
-    }
     let item_count = value
         .as_array()
         .map(Vec::len)
@@ -97,7 +92,40 @@ pub fn bound_reference(value: Value, limits: &ContextLimits) -> Result<String, S
     if item_count.is_some_and(|items| items > limits.max_result_items) {
         return Err("Context result contains too many items".into());
     }
+    let mut serialized = BoundedWriter::new(limits.max_result_bytes);
+    serde_json::to_writer(&mut serialized, &value).map_err(|error| {
+        if error.io_error_kind().is_some() {
+            "Context result is too large".to_string()
+        } else {
+            "Invalid context result".to_string()
+        }
+    })?;
+    let serialized = String::from_utf8(serialized.bytes)
+        .map_err(|_| "Invalid context result".to_string())?;
     Ok(format!("{UNTRUSTED_REFERENCE_PREFIX}{serialized}"))
+}
+
+struct BoundedWriter {
+    bytes: Vec<u8>,
+    limit: usize,
+}
+
+impl BoundedWriter {
+    fn new(limit: usize) -> Self {
+        Self { bytes: Vec::with_capacity(limit.min(4096)), limit }
+    }
+}
+
+impl Write for BoundedWriter {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        if bytes.len() > self.limit.saturating_sub(self.bytes.len()) {
+            return Err(io::Error::new(io::ErrorKind::WriteZero, "context result limit exceeded"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> { Ok(()) }
 }
 
 #[cfg(test)]
@@ -141,5 +169,11 @@ mod tests {
             ..Default::default()
         };
         assert!(bound_reference(json!({"content":[{}, {}]}), &limits).is_err());
+    }
+
+    #[test]
+    fn stops_serialization_at_the_result_limit() {
+        let limits = ContextLimits { max_result_bytes: 8, ..Default::default() };
+        assert!(bound_reference(json!({"large": "value"}), &limits).is_err());
     }
 }
