@@ -848,11 +848,10 @@ pub fn initialize_mcp_settings(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
     let servers = load_mcp_settings(app);
-    configure_mcp_servers_with_tokens(app, &servers)
+    configure_mcp_servers_with_tokens(&servers)
 }
 
 fn configure_mcp_servers_with_tokens(
-    app: &tauri::AppHandle,
     servers: &[crate::rust_ai::context::ContextServer],
 ) -> Result<(), String> {
     let runtime = servers
