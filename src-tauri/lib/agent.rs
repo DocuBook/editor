@@ -689,8 +689,8 @@ pub async fn context_tools() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn call_context_tool(name: String, input: serde_json::Value) -> Result<String, String> {
-    crate::rust_ai::context::invoke(&name, input).await
+pub async fn call_context_tool(request_id: String, name: String, input: serde_json::Value) -> Result<String, String> {
+    crate::rust_ai::context::invoke(&request_id, &name, input).await
 }
 
 /// Cancel the in-flight AI request identified by `request_id`; an empty id
@@ -698,6 +698,9 @@ pub async fn call_context_tool(name: String, input: serde_json::Value) -> Result
 /// request lifecycle.
 #[tauri::command]
 pub fn cancel_ai(state: State<AppState>, request_id: Option<String>) {
+    if let Some(request_id) = request_id.as_deref() {
+        crate::rust_ai::context::cancel(request_id);
+    }
     state
         .ai_requests
         .cancel(request_id.as_deref().unwrap_or(""));

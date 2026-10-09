@@ -19,8 +19,6 @@ export interface ProviderInfo {
   api: string
   /** Valid model used to validate a newly entered key before model discovery is available. */
   defaultModel?: string
-  /** Native web search is advertised only when this capability is explicitly true. */
-  nativeSearch?: boolean
 }
 
 export const PROVIDERS: ProviderInfo[] = [

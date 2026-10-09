@@ -12,7 +12,7 @@
  *  Prompt policy and context assembly live in aiPrompt.ts; document operation
  *  helpers stay in aiBlocks.ts so this streaming sequence remains orchestration.
  */
-import { invoke, isTauri, listen } from "../lib/ipc";
+import { invoke, listen } from "../lib/ipc";
 import { toast } from "sonner";
 import { useAiChat } from "../stores/aiChat";
 import { useAiSettings } from "../stores/aiSettings";
@@ -138,7 +138,7 @@ async function runSendMessages(
         });
       }
     }
-  } else if (supportsTools && isTauri) {
+  } else if (supportsTools && Object.keys(suppliedToolDefs ?? {}).some((name) => name !== "applyDocumentOperations")) {
     const discovered = await invoke<any>("context_tools", {}).then((value) => {
       try { return typeof value === "string" ? JSON.parse(value) : value } catch { return [] }
     }).catch(() => []);
@@ -404,6 +404,7 @@ async function runSendMessages(
               });
               toolTranscript.push({ role: "assistant", content: null, tool_calls: providerToolCalls });
               for (const toolCall of contextCalls) {
+                if (abortSignal?.aborted) return;
                 let result: string;
                 if (!contextToolNames.has(String(toolCall.toolName ?? ""))) {
                   result = "Context tool is not available.";
@@ -413,7 +414,7 @@ async function runSendMessages(
                   try {
                     result = deps.executeContextTool
                       ? await deps.executeContextTool(toolCall.toolName, toolCall.input, abortSignal)
-                      : await invoke<string>("call_context_tool", { name: toolCall.toolName, input: toolCall.input });
+                      : await invoke<string>("call_context_tool", { requestId: currentRequestId, name: toolCall.toolName, input: toolCall.input }, abortSignal);
                   } catch (error) {
                     if (abortSignal?.aborted) throw error;
                     result = "Context tool execution failed.";
@@ -429,6 +430,7 @@ async function runSendMessages(
                 });
               }
               pendingDelta = "";
+              if (abortSignal?.aborted) return;
               continue;
             }
             /** Real correctness gate: referenced ids must exist in the document (blocking).
