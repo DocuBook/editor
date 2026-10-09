@@ -4,6 +4,7 @@
 //! state, and presentation. This module owns request assembly, SSE decoding,
 //! provider-safe errors, limits, and stable AI events.
 
+pub mod context;
 pub mod error;
 pub mod events;
 pub mod prompt;

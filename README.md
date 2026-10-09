@@ -37,8 +37,15 @@ For production, pin an image tag, place the container behind HTTPS, set `DB_SECU
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`                                            | unset        | Skips the setup wizard when both are set                                |
 | `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset        | Provisions a custom OpenAI-compatible provider                          |
 | `RUST_LOG`                                                                        | app defaults | Controls server log filtering                                           |
+| `DOCUBOOK_MCP_SERVERS`                                                            | unset        | Optional backend-only JSON configuration for MCP Streamable HTTP servers |
 
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
+
+#### AI context tools
+
+MCP context tools use backend-only `DOCUBOOK_MCP_SERVERS` JSON configuration, for example `[ {"id":"research","url":"https://mcp.example.com/mcp","token":"...","read_only_tools":["research:search"]} ]`. Configure an HTTPS Streamable HTTP endpoint only; redirects, credentials in URLs, private/link-local DNS targets, and non-HTTPS endpoints are rejected. `read_only_tools` uses `server-id:tool-name` identities. Only these configured read-only tools are discovered for AI calls. Other tools require a user-confirmation flow and are currently refused. Responses are bounded to 256 KiB and framed as untrusted reference data. API keys and MCP credentials remain backend-side.
+
+Native provider search is enabled only when an explicit provider capability is implemented and verified; unknown capability fails closed. Otherwise search must come from an explicitly configured MCP tool. `@mention` retrieval and the terminal `applyDocumentOperations` document-editing flow are unchanged.
 
 ```yaml
 services:

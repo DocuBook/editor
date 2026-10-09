@@ -10,6 +10,8 @@ permissions = [
   "allow-ask-ai",
   "allow-ai-settings",
   "allow-cancel-ai",
+  "allow-context-tools",
+  "allow-call-context-tool",
   "allow-close-vault",
   "allow-copy-path",
   "allow-create-directory",
@@ -114,6 +116,26 @@ commands.allow = ["cancel_ai"]
 identifier = "deny-cancel-ai"
 description = "Denies the cancel_ai command."
 commands.deny = ["cancel_ai"]
+
+[[permission]]
+identifier = "allow-context-tools"
+description = "Enables the context_tools command."
+commands.allow = ["context_tools"]
+
+[[permission]]
+identifier = "deny-context-tools"
+description = "Denies the context_tools command."
+commands.deny = ["context_tools"]
+
+[[permission]]
+identifier = "allow-call-context-tool"
+description = "Enables the call_context_tool command."
+commands.allow = ["call_context_tool"]
+
+[[permission]]
+identifier = "deny-call-context-tool"
+description = "Denies the call_context_tool command."
+commands.deny = ["call_context_tool"]
 
 [[permission]]
 identifier = "allow-close-vault"

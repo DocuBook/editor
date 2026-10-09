@@ -201,6 +201,12 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "config_set" => sync(state, cmd, args),
         "health" => Ok(cmds::health(state).to_string()),
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl")).await,
+        "context_tools" => Ok(serde_json::to_string(&rust_ai::context::discover().await?).map_err(|_| "Could not encode context tools".to_string())?),
+        "call_context_tool" => {
+            let name = s("name");
+            let input = args.get("input").cloned().unwrap_or(Value::Null);
+            rust_ai::context::invoke(&name, input).await.map_err(|error| error.to_string())
+        }
         "test_connection" => {
             probe::test_connection(
                 state,
