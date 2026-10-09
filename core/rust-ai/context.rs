@@ -170,25 +170,7 @@ async fn request(
             None,
         ));
     }
-    let envelopes: Vec<Value> = if content_type.starts_with("text/event-stream") {
-        let text = String::from_utf8(bytes).map_err(|_| "Invalid MCP SSE response".to_string())?;
-        text.split("\n\n")
-            .filter_map(|frame| {
-                let data = frame
-                    .lines()
-                    .filter_map(|line| line.strip_prefix("data:"))
-                    .map(str::trim)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                (!data.is_empty()).then_some(data)
-            })
-            .map(|data| {
-                serde_json::from_str(&data).map_err(|_| "Invalid MCP SSE JSON response".to_string())
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    } else {
-        vec![serde_json::from_slice(&bytes).map_err(|_| "Invalid MCP JSON response".to_string())?]
-    };
+    let envelopes = parse_envelopes(&content_type, &bytes)?;
     let envelope = envelopes
         .into_iter()
         .find(|envelope| {
@@ -207,6 +189,39 @@ async fn request(
         response_session.or_else(|| session.map(str::to_owned)),
         Some(envelope.get("result").cloned().unwrap_or(Value::Null)),
     ))
+}
+
+fn parse_envelopes(content_type: &str, bytes: &[u8]) -> Result<Vec<Value>, String> {
+    let payloads: Vec<Value> = if content_type.starts_with("text/event-stream") {
+        let text = String::from_utf8(bytes.to_vec())
+            .map_err(|_| "Invalid MCP SSE response".to_string())?
+            .replace("\r\n", "\n")
+            .replace('\r', "\n");
+        text.split("\n\n")
+            .filter_map(|frame| {
+                let data = frame
+                    .lines()
+                    .filter_map(|line| line.strip_prefix("data:"))
+                    .map(str::trim)
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                (!data.is_empty()).then_some(data)
+            })
+            .map(|data| {
+                serde_json::from_str(&data).map_err(|_| "Invalid MCP SSE JSON response".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        vec![serde_json::from_slice(bytes).map_err(|_| "Invalid MCP JSON response".to_string())?]
+    };
+
+    Ok(payloads
+        .into_iter()
+        .flat_map(|payload| match payload {
+            Value::Array(items) => items,
+            payload => vec![payload],
+        })
+        .collect())
 }
 
 async fn post(server: &ContextServer, method: &str, params: Value) -> Result<Value, String> {
@@ -420,6 +435,27 @@ mod tests {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'));
         assert!(name.len() <= 64);
+    }
+
+    #[test]
+    fn parses_crlf_sse_frames() {
+        let envelopes = parse_envelopes(
+            "text/event-stream",
+            b"event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"request\"}\r\n\r\n",
+        )
+        .unwrap();
+        assert_eq!(envelopes[0]["id"], "request");
+    }
+
+    #[test]
+    fn flattens_json_rpc_batches() {
+        let envelopes = parse_envelopes(
+            "application/json",
+            br#"[{"jsonrpc":"2.0","id":"other"},{"jsonrpc":"2.0","id":"request"}]"#,
+        )
+        .unwrap();
+        assert_eq!(envelopes.len(), 2);
+        assert_eq!(envelopes[1]["id"], "request");
     }
 
     #[tokio::test]
