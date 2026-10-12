@@ -64,48 +64,55 @@ const lockedEndpoint = (cfg: BackendAiSettings | null, provider: string, isCusto
 
 const isCustomProvider = (provider: string) => provider === CUSTOM_PROVIDER_ID
 
-function McpSettings({ servers, envManaged, ready, loading, error, retry }: { servers: Array<{id:string;url:string;readOnlyTools:string[];hasToken:boolean;token?:string}>; envManaged: boolean; ready: boolean; loading: boolean; error: string | null; retry: () => Promise<void> }) {
-  const [draft, setDraft] = useState<{id:string;url:string;readOnlyTools:string;token:string}>({id:'',url:'',readOnlyTools:'',token:''})
+function McpSettings({ servers, envManaged, ready, loading, error, retry, defaultTimeoutSeconds, maxTimeoutSeconds }: { servers: Array<{name:string;url:string;timeoutSeconds?:number|null;hasToken:boolean;token?:string}>; envManaged: boolean; ready: boolean; loading: boolean; error: string | null; retry: () => Promise<void>; defaultTimeoutSeconds: number; maxTimeoutSeconds: number }) {
+  const [draft, setDraft] = useState<{name:string;url:string;timeoutSeconds:string;token:string}>({name:'',url:'',timeoutSeconds:'',token:''})
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
-  const [editDraft, setEditDraft] = useState<{id:string;url:string;readOnlyTools:string;token:string;removeToken:boolean}>({id:'',url:'',readOnlyTools:'',token:'',removeToken:false})
+  const [editDraft, setEditDraft] = useState<{url:string;timeoutSeconds:string;token:string;removeToken:boolean}>({url:'',timeoutSeconds:'',token:'',removeToken:false})
   const disabled = !ready || envManaged || saving
   const save = async (next: any[]) => {
     if (!ready || envManaged || saving) return
+    if (next.some(server => server.timeoutSeconds != null && (!Number.isInteger(server.timeoutSeconds) || server.timeoutSeconds < 1 || server.timeoutSeconds > maxTimeoutSeconds))) {
+      toast.error(`Timeout must be 1–${maxTimeoutSeconds} seconds`)
+      return
+    }
     setSaving(true)
     try {
       const command = isTauri ? 'set_mcp_settings' : 'config_set'
       const args = isTauri ? { servers: next } : { key: 'mcp', value: next }
       await invoke(command, args)
       await retry()
-      setDraft({id:'',url:'',readOnlyTools:'',token:''})
+      setDraft({name:'',url:'',timeoutSeconds:'',token:''})
       setEditing(null)
       toast.success('MCP server settings saved')
     } catch (error) { toast.error(String(error)) }
     setSaving(false)
   }
   return <div className="space-y-3">
-    <p className="text-xs text-muted leading-relaxed">MCP tools are exposed to AI only when their fully qualified name is explicitly listed as read-only. Credentials stay in the backend key store and are never returned here.</p>
+    <p className="text-xs text-muted leading-relaxed">Name is a unique local label for this remote, like a Git remote; this UI does not start or stop remote servers. The MCP client discovers tools dynamically and filters for read-only tools. Existing backend allow-lists are preserved for compatibility; new remotes use remote annotations, which are hints, not guarantees. Credentials stay in the backend key store. Configure only endpoints you trust.</p>
     {envManaged && <p className="text-xs text-warning">MCP servers are controlled by DOCUBOOK_MCP_SERVERS.</p>}
     {loading ? <p role="status" className="text-xs text-muted">Loading MCP server settings…</p> : error && <div role="alert" className="flex items-center gap-2 text-xs text-danger"><span>Could not load MCP server settings: {error}</span><button onClick={() => { void retry().catch(() => {}) }} className="text-xs">Retry</button></div>}
-    {servers.map(server => <div key={server.id} className="rounded border border-border-subtle p-3 space-y-2">
-      {editing === server.id ? <>
+    {servers.map(server => <div key={server.name} className="rounded border border-border-subtle p-3 space-y-2">
+      {editing === server.name ? <>
+        <strong className="block text-xs">{server.name}</strong>
         <label className="block text-xs font-medium">HTTPS endpoint</label><input disabled={disabled} value={editDraft.url} onChange={e=>setEditDraft({...editDraft,url:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
-        <label className="block text-xs font-medium">Read-only tool names (one per line)</label><textarea disabled={disabled} value={editDraft.readOnlyTools} onChange={e=>setEditDraft({...editDraft,readOnlyTools:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" rows={3} />
+        <label className="block text-xs font-medium">Request timeout override (seconds; default {defaultTimeoutSeconds}, max {maxTimeoutSeconds})</label><input disabled={disabled} type="number" min="1" max={maxTimeoutSeconds} step="1" value={editDraft.timeoutSeconds} onChange={e=>setEditDraft({...editDraft,timeoutSeconds:e.target.value})} placeholder={String(defaultTimeoutSeconds)} className="w-full bg-background border border-border rounded px-3 py-2 text-xs" />
         <label className="block text-xs font-medium">Replace bearer token (optional)</label><input disabled={disabled} type="password" autoComplete="new-password" value={editDraft.token} onChange={e=>setEditDraft({...editDraft,token:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
+        <p className="text-[10px] text-muted">Sent as Authorization: Bearer for protected remote servers. Leave blank to keep the saved token, or use Remove saved token below.</p>
         {server.hasToken && <label className="flex items-center gap-2 text-xs"><input disabled={disabled} type="checkbox" checked={editDraft.removeToken} onChange={e=>setEditDraft({...editDraft,removeToken:e.target.checked,token:''})} />Remove saved token</label>}
-        <div className="flex gap-2"><button disabled={disabled} onClick={() => void save(servers.map(item => item.id === server.id ? {...item,url:editDraft.url,readOnlyTools:editDraft.readOnlyTools.split('\n').map(x=>x.trim()).filter(Boolean),...(editDraft.removeToken ? {token:'',removeToken:true} : editDraft.token ? {token:editDraft.token} : {})} : item))} className="text-xs">Save</button><button disabled={disabled} onClick={() => setEditing(null)} className="text-xs">Cancel</button></div>
+        <div className="flex gap-2"><button disabled={disabled} onClick={() => void save(servers.map(item => item.name === server.name ? {...item,url:editDraft.url,timeoutSeconds:editDraft.timeoutSeconds.trim() ? Number(editDraft.timeoutSeconds) : null,...(editDraft.removeToken ? {token:'',removeToken:true} : editDraft.token ? {token:editDraft.token} : {})} : item))} className="text-xs">Save</button><button disabled={disabled} onClick={() => setEditing(null)} className="text-xs">Cancel</button></div>
       </> : <>
-        <div className="flex items-center justify-between"><strong className="text-xs">{server.id}</strong><div className="flex gap-2"><button disabled={disabled} onClick={() => {setEditDraft({id:server.id,url:server.url,readOnlyTools:server.readOnlyTools.join('\n'),token:'',removeToken:false});setEditing(server.id)}} className="text-xs bg-transparent border-0 cursor-pointer disabled:opacity-40">Edit</button><button disabled={disabled} onClick={() => void save(servers.filter(item => item.id !== server.id))} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove</button></div></div>
+        <div className="flex items-center justify-between"><strong className="text-xs">{server.name}</strong><div className="flex gap-2"><button disabled={disabled} onClick={() => {setEditDraft({url:server.url,timeoutSeconds:server.timeoutSeconds == null ? '' : String(server.timeoutSeconds),token:'',removeToken:false});setEditing(server.name)}} className="text-xs bg-transparent border-0 cursor-pointer disabled:opacity-40">Edit</button><button disabled={disabled} onClick={() => void save(servers.filter(item => item.name !== server.name))} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove</button></div></div>
         <div className="text-[10px] text-muted break-all">{server.url}</div>
-        <div className="text-[10px] text-muted">Read-only tools: {server.readOnlyTools.join(', ') || 'none'} · {server.hasToken ? 'credential saved' : 'no credential'}</div>
+        <div className="text-[10px] text-muted">Timeout: {server.timeoutSeconds ?? defaultTimeoutSeconds}s{server.timeoutSeconds == null ? ' (default)' : ' (override)'} · {server.hasToken ? 'bearer token saved' : 'no bearer token'}</div>
       </>}
     </div>)}
-    <label className="block text-xs font-medium">Server ID</label><input disabled={disabled} value={draft.id} onChange={e=>setDraft({...draft,id:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs" placeholder="docs" />
+    <label className="block text-xs font-medium">Server Name</label><input disabled={disabled} value={draft.name} onChange={e=>setDraft({...draft,name:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs" placeholder="docs" />
     <label className="block text-xs font-medium">HTTPS endpoint</label><input disabled={disabled} value={draft.url} onChange={e=>setDraft({...draft,url:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" placeholder="https://mcp.example.com/mcp" />
-    <label className="block text-xs font-medium">Read-only tool names (one per line, serverId:toolName)</label><textarea disabled={disabled} value={draft.readOnlyTools} onChange={e=>setDraft({...draft,readOnlyTools:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" rows={3} />
+    <label className="block text-xs font-medium">Request timeout override (seconds; default {defaultTimeoutSeconds}, max {maxTimeoutSeconds})</label><input disabled={disabled} type="number" min="1" max={maxTimeoutSeconds} step="1" value={draft.timeoutSeconds} onChange={e=>setDraft({...draft,timeoutSeconds:e.target.value})} placeholder={String(defaultTimeoutSeconds)} className="w-full bg-background border border-border rounded px-3 py-2 text-xs" />
     <label className="block text-xs font-medium">Bearer token (optional)</label><input disabled={disabled} type="password" autoComplete="new-password" value={draft.token} onChange={e=>setDraft({...draft,token:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
-    <button disabled={disabled || !draft.id || !draft.url} onClick={() => void save([...servers, {id:draft.id,url:draft.url,readOnlyTools:draft.readOnlyTools.split('\n').map(x=>x.trim()).filter(Boolean),token:draft.token}])} className="px-3 py-2 rounded bg-accent text-on-accent border-0 text-xs cursor-pointer disabled:opacity-40">{saving ? 'Saving…' : 'Add server'}</button>
+    <p className="text-[10px] text-muted">Sent as Authorization: Bearer for protected remote servers. Leave blank if the server does not require bearer authentication.</p>
+    <button disabled={disabled || !draft.name || !draft.url} onClick={() => void save([...servers, {name:draft.name,url:draft.url,timeoutSeconds:draft.timeoutSeconds.trim() ? Number(draft.timeoutSeconds) : null,token:draft.token}])} className="px-3 py-2 rounded bg-accent text-on-accent border-0 text-xs cursor-pointer disabled:opacity-40">{saving ? 'Saving…' : 'Add remote'}</button>
   </div>
 }
 
@@ -141,8 +148,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
    *  localStorage. This copy also drives the lock state machine below. */
   const [backendCfg, setBackendCfg] = useState<BackendAiSettings | null>(null)
   const [backendLoading, setBackendLoading] = useState(true)
-  const [mcpServers, setMcpServers] = useState<Array<{id:string;url:string;readOnlyTools:string[];hasToken:boolean;token?:string}>>([])
+  const [mcpServers, setMcpServers] = useState<Array<{name:string;url:string;timeoutSeconds?:number|null;hasToken:boolean;token?:string}>>([])
   const [mcpEnvManaged, setMcpEnvManaged] = useState(false)
+  const [mcpDefaultTimeout, setMcpDefaultTimeout] = useState(10)
+  const [mcpMaxTimeout, setMcpMaxTimeout] = useState(120)
   const [mcpLoading, setMcpLoading] = useState(true)
   const [mcpError, setMcpError] = useState<string | null>(null)
   /** Custom provider config from the backend — source "env" means Docker
@@ -174,8 +183,10 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
       const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
       const list = Array.isArray(parsed) ? parsed : parsed?.servers ?? parsed?.mcp
       if (!Array.isArray(list)) throw new Error('Invalid MCP settings response')
-      setMcpServers(list.map((server: any) => ({ ...server, readOnlyTools: server.readOnlyTools ?? [] })))
+      setMcpServers(list.map((server: any) => ({ ...server, name: server.name ?? server.id })))
       setMcpEnvManaged(!!parsed?.envManaged)
+      if (Number.isInteger(parsed?.defaultTimeoutSeconds)) setMcpDefaultTimeout(parsed.defaultTimeoutSeconds)
+      if (Number.isInteger(parsed?.maxTimeoutSeconds)) setMcpMaxTimeout(parsed.maxTimeoutSeconds)
     } catch (error) {
       setMcpError(String(error))
       throw error
@@ -627,7 +638,7 @@ export default function SettingsModal({ onClose }: { onClose: () => void }) {
           )}
             </>
           ) : section === 'mcp' ? (
-            <McpSettings servers={mcpServers} envManaged={mcpEnvManaged} loading={mcpLoading} error={mcpError} retry={refreshMcpSettings} ready={!mcpLoading && !mcpError} />
+            <McpSettings servers={mcpServers} envManaged={mcpEnvManaged} loading={mcpLoading} error={mcpError} retry={refreshMcpSettings} ready={!mcpLoading && !mcpError} defaultTimeoutSeconds={mcpDefaultTimeout} maxTimeoutSeconds={mcpMaxTimeout} />
           ) : section === 'appearance' ? (
             <AppearanceSettings />
           ) : section === 'system' ? (

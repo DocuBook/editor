@@ -2,14 +2,17 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::watch;
 
 pub const MAX_DISCOVERED_TOOLS: usize = 64;
 pub const MAX_CONTEXT_RESULT_BYTES: usize = 256 * 1024;
 pub const MAX_CONTEXT_ITEMS: usize = 64;
-pub const CONTEXT_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+pub const DEFAULT_CONTEXT_REQUEST_TIMEOUT_SECS: u64 = 10;
+pub const MAX_CONTEXT_REQUEST_TIMEOUT_SECS: u64 = 120;
+
 pub const UNTRUSTED_REFERENCE_TYPE: &str = "untrusted_reference_data";
 
 type DiscoveryCache = Option<(String, Vec<ContextTool>)>;
@@ -18,6 +21,9 @@ type SessionCache = HashMap<String, (Option<String>, String)>;
 static DISCOVERY_CACHE: OnceLock<Mutex<DiscoveryCache>> = OnceLock::new();
 static CONTEXT_CALLS: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
 static MCP_SESSIONS: OnceLock<Mutex<SessionCache>> = OnceLock::new();
+static MCP_SESSION_GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
+    OnceLock::new();
+static NEXT_JSONRPC_ID: AtomicU64 = AtomicU64::new(1);
 static CONFIGURED_SERVERS: OnceLock<Mutex<Option<Vec<ContextServer>>>> = OnceLock::new();
 
 /// Set runtime-provided MCP configuration. Environment configuration remains
@@ -28,16 +34,30 @@ pub fn set_configured_servers(servers: Vec<ContextServer>) -> Result<(), String>
         .get_or_init(|| Mutex::new(None))
         .lock()
         .map_err(|_| "MCP configuration is unavailable".to_string())?;
-    if configured.as_ref() == Some(&servers) {
-        return Ok(());
-    }
+    let current_keys = servers
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<std::collections::HashSet<_>, _>>()
+        .map_err(|_| "Invalid MCP server configuration".to_string())?;
     let retired = {
-        let mut sessions = MCP_SESSIONS
+        let sessions = MCP_SESSIONS
             .get_or_init(|| Mutex::new(HashMap::new()))
             .lock()
             .map_err(|_| "MCP session cache is unavailable".to_string())?;
-        std::mem::take(&mut *sessions)
+        sessions
+            .iter()
+            .filter(|(key, (session, _))| {
+                session.is_some() && !current_keys.contains(*key)
+            })
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Vec<_>>()
     };
+    if !retired.is_empty() && tokio::runtime::Handle::try_current().is_err() {
+        return Err("MCP session cleanup requires an active Tokio runtime; configuration unchanged".into());
+    }
+    if configured.as_ref() == Some(&servers) && retired.is_empty() {
+        return Ok(());
+    }
     *configured = Some(servers);
     DISCOVERY_CACHE
         .get_or_init(|| Mutex::new(None))
@@ -48,10 +68,35 @@ pub fn set_configured_servers(servers: Vec<ContextServer>) -> Result<(), String>
         runtime.spawn(async move {
             for (key, (session, version)) in retired {
                 let Ok(server) = serde_json::from_str::<ContextServer>(&key) else {
+                    tracing::error!(event = "mcp_session_cleanup_failed", reason = "invalid_server_state");
                     continue;
                 };
-                if let Some(session) = session {
-                    let _ = terminate_session(&server, &session, &version).await;
+                let Some(session) = session else {
+                    continue;
+                };
+                let Ok(gate) = session_gate(&server.name) else {
+                    continue;
+                };
+                let _session_guard = gate.lock().await;
+                match terminate_session(&server, &session, &version).await {
+                    Ok(()) => {
+                        if let Ok(mut sessions) = MCP_SESSIONS
+                            .get_or_init(|| Mutex::new(HashMap::new()))
+                            .lock()
+                        {
+                            if sessions.get(&key).is_some_and(|(current, _)| {
+                                current.as_deref() == Some(session.as_str())
+                            }) {
+                                sessions.remove(&key);
+                            }
+                        }
+                    }
+                    Err(error) => tracing::warn!(
+                        event = "mcp_session_cleanup_failed",
+                        server = %server.name,
+                        error = %error,
+                        "MCP session remains cached for retry"
+                    ),
                 }
             }
         });
@@ -70,7 +115,7 @@ pub fn validate_configured_servers(servers: &[ContextServer]) -> Result<(), Stri
     for server in servers {
         validate_server(server)?;
     }
-    validate_server_ids(servers)
+    validate_server_names(servers)
 }
 
 fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
@@ -96,8 +141,11 @@ fn remove_call(request_id: &str) -> Result<(), String> {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct ContextServer {
-    pub id: String,
+    #[serde(alias = "id")]
+    pub name: String,
     pub url: String,
+    #[serde(rename = "timeoutSeconds", alias = "timeout_seconds", default)]
+    pub timeout_seconds: Option<u64>,
     #[serde(default)]
     pub token: Option<String>,
     #[serde(rename = "readOnlyTools", alias = "read_only_tools", default)]
@@ -106,7 +154,7 @@ pub struct ContextServer {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextTool {
-    pub server_id: String,
+    pub server_name: String,
     pub name: String,
     pub description: String,
     pub input_schema: Value,
@@ -132,15 +180,18 @@ struct RemoteTool {
 }
 
 fn validate_server(server: &ContextServer) -> Result<(), String> {
-    if server.id.is_empty()
-        || server.id.len() > 128
+    if server.name.is_empty()
+        || server.name.len() > 128
         || !server
-            .id
+            .name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
         || server.url.len() > 2048
+        || server
+            .timeout_seconds
+            .is_some_and(|timeout| !(1..=MAX_CONTEXT_REQUEST_TIMEOUT_SECS).contains(&timeout))
     {
-        return Err("Invalid MCP server identity or URL".into());
+        return Err("Invalid MCP server name, URL, or timeout".into());
     }
     let url = reqwest::Url::parse(&server.url).map_err(|_| "Invalid MCP server URL".to_string())?;
     if url.scheme() != "https" || url.username() != "" || url.password().is_some() {
@@ -149,16 +200,66 @@ fn validate_server(server: &ContextServer) -> Result<(), String> {
     crate::rust_ai::provider::validated_custom_addrs(&server.url, false).map(|_| ())
 }
 
-fn validate_server_ids(servers: &[ContextServer]) -> Result<(), String> {
-    let mut ids = std::collections::HashSet::new();
-    if servers.iter().any(|server| !ids.insert(server.id.as_str())) {
-        return Err("MCP server IDs must be unique".into());
+fn validate_server_names(servers: &[ContextServer]) -> Result<(), String> {
+    let mut names = std::collections::HashSet::new();
+    if servers
+        .iter()
+        .any(|server| !names.insert(server.name.as_str()))
+    {
+        return Err("MCP server names must be unique".into());
     }
     Ok(())
 }
 
+fn next_jsonrpc_id() -> String {
+    format!(
+        "docubook-{}",
+        NEXT_JSONRPC_ID.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+fn session_gate(server_name: &str) -> Result<Arc<tokio::sync::Mutex<()>>, String> {
+    let mut gates = MCP_SESSION_GATES
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .map_err(|_| "MCP session coordination is unavailable".to_string())?;
+    gates.retain(|_, gate| Arc::strong_count(gate) > 1);
+    Ok(gates
+        .entry(server_name.to_string())
+        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+        .clone())
+}
+
+fn remove_session(key: &str, session: &str) {
+    if let Ok(mut sessions) = MCP_SESSIONS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+    {
+        if sessions
+            .get(key)
+            .is_some_and(|(current, _)| current.as_deref() == Some(session))
+        {
+            sessions.remove(key);
+        }
+    }
+}
+
+fn tool_is_read_only(server: &ContextServer, tool: &RemoteTool) -> bool {
+    // Remote annotations are hints only; authorization comes from local configuration.
+    let qualified = format!("{}:{}", server.name, tool.name);
+    server
+        .read_only_tools
+        .iter()
+        .any(|allowed| allowed == &qualified)
+}
+
 fn client(server: &ContextServer) -> Result<reqwest::Client, String> {
     let (_, addrs) = crate::rust_ai::provider::validated_custom_addrs(&server.url, false)?;
+    let timeout = Duration::from_secs(
+        server
+            .timeout_seconds
+            .unwrap_or(DEFAULT_CONTEXT_REQUEST_TIMEOUT_SECS),
+    );
     let host = reqwest::Url::parse(&server.url)
         .map_err(|_| "Invalid MCP server URL".to_string())?
         .host_str()
@@ -166,8 +267,8 @@ fn client(server: &ContextServer) -> Result<reqwest::Client, String> {
         .to_string();
     reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONTEXT_REQUEST_TIMEOUT)
-        .timeout(CONTEXT_REQUEST_TIMEOUT)
+        .connect_timeout(timeout)
+        .timeout(timeout)
         .resolve_to_addrs(&host, &addrs)
         .build()
         .map_err(|error| format!("MCP client error: {error}"))
@@ -341,27 +442,36 @@ async fn post_with(
     params: Value,
     mut cancelled: Option<&mut watch::Receiver<bool>>,
 ) -> Result<Value, String> {
-    let initialize = json!({
-        "jsonrpc": "2.0", "id": "docubook-init", "method": "initialize",
-        "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "docubook", "version": "0.1"}}
-    });
     let key = serde_json::to_string(server)
         .map_err(|_| "Invalid MCP server configuration".to_string())?;
+    let gate = session_gate(&server.name)?;
+    let _session_guard = if let Some(cancelled) = cancelled.as_deref_mut() {
+        tokio::select! {
+            guard = gate.lock() => guard,
+            _ = cancelled.changed() => return Err("Context-tool request cancelled".into()),
+        }
+    } else {
+        gate.lock().await
+    };
     let existing = MCP_SESSIONS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .ok()
         .and_then(|sessions| sessions.get(&key).cloned());
-    let reused = existing.is_some();
     let (session, protocol_version) = if let Some((session, version)) = existing {
         (session, version)
     } else {
+        let initialize_id = next_jsonrpc_id();
+        let initialize = json!({
+            "jsonrpc": "2.0", "id": initialize_id.clone(), "method": "initialize",
+            "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "docubook", "version": "0.1"}}
+        });
         let (session, init) = request_cancellable(
             server,
             initialize,
             true,
             None,
-            Some("docubook-init"),
+            Some(&initialize_id),
             None,
             cancelled.as_deref_mut(),
         )
@@ -370,13 +480,19 @@ async fn post_with(
         let protocol_version = init
             .get("protocolVersion")
             .and_then(Value::as_str)
-            .ok_or_else(|| "MCP initialization omitted its protocol version".to_string())?;
-        (session, protocol_version.to_string())
-    };
-    if !reused {
-        let notification =
-            json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}});
-        let _ = request_cancellable(
+            .ok_or_else(|| "MCP initialization omitted its protocol version".to_string())?
+            .to_string();
+        let notification = json!({
+            "jsonrpc": "2.0", "method": "notifications/initialized", "params": {}
+        });
+        if let (Some(session), Some(version)) = (session.as_ref(), Some(&protocol_version)) {
+            MCP_SESSIONS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .map_err(|_| "MCP session cache unavailable".to_string())?
+                .insert(key.clone(), (Some(session.clone()), version.clone()));
+        }
+        if let Err(error) = request_cancellable(
             server,
             notification,
             false,
@@ -385,15 +501,32 @@ async fn post_with(
             Some(&protocol_version),
             cancelled.as_deref_mut(),
         )
-        .await?;
-    }
-    let call = json!({"jsonrpc":"2.0","id":"docubook-call","method":method,"params":params});
+        .await
+        {
+            if let Some(session) = session.as_deref() {
+                match terminate_session(server, session, &protocol_version).await {
+                    Ok(()) => remove_session(&key, session),
+                    Err(cleanup_error) => tracing::warn!(
+                        event = "mcp_session_cleanup_failed",
+                        server = %server.name,
+                        error = %cleanup_error,
+                        "MCP session remains cached for retry"
+                    ),
+                }
+            }
+            return Err(error);
+        }
+        (session, protocol_version)
+    };
+
+    let call_id = next_jsonrpc_id();
+    let call = json!({"jsonrpc":"2.0","id":call_id.clone(),"method":method,"params":params});
     let response = request_cancellable(
         server,
         call,
         true,
         session.as_deref(),
-        Some("docubook-call"),
+        Some(&call_id),
         Some(&protocol_version),
         cancelled,
     )
@@ -401,12 +534,15 @@ async fn post_with(
     let response = match response {
         Ok(response) => response,
         Err(error) => {
-            if reused {
-                if let Ok(mut sessions) = MCP_SESSIONS
-                    .get_or_init(|| Mutex::new(HashMap::new()))
-                    .lock()
-                {
-                    sessions.remove(&key);
+            if let Some(session) = session.as_deref() {
+                match terminate_session(server, session, &protocol_version).await {
+                    Ok(()) => remove_session(&key, session),
+                    Err(cleanup_error) => tracing::warn!(
+                        event = "mcp_session_cleanup_failed",
+                        server = %server.name,
+                        error = %cleanup_error,
+                        "MCP session remains cached for retry"
+                    ),
                 }
             }
             return Err(error);
@@ -471,7 +607,7 @@ fn server_config() -> Result<Vec<ContextServer>, String> {
     for server in &servers {
         validate_server(server)?;
     }
-    validate_server_ids(&servers)?;
+    validate_server_names(&servers)?;
     Ok(servers)
 }
 
@@ -479,12 +615,20 @@ async fn discover_from(
     servers: Vec<ContextServer>,
     cancelled: &mut watch::Receiver<bool>,
 ) -> Result<Vec<ContextTool>, String> {
+    let discovered = futures_util::future::join_all(servers.into_iter().map(|server| {
+        let mut cancelled = cancelled.clone();
+        async move {
+            let result = post_with(&server, "tools/list", json!({}), Some(&mut cancelled)).await?;
+            let listed: ToolListResult = serde_json::from_value(result)
+                .map_err(|_| "Malformed MCP discovery response".to_string())?;
+            Ok::<_, String>((server, listed.tools))
+        }
+    }))
+    .await;
     let mut output = Vec::new();
-    for server in servers {
-        let result = post_with(&server, "tools/list", json!({}), Some(cancelled)).await?;
-        let listed: ToolListResult = serde_json::from_value(result)
-            .map_err(|_| "Malformed MCP discovery response".to_string())?;
-        for tool in listed.tools {
+    for result in discovered {
+        let (server, tools) = result?;
+        for tool in tools {
             if output.len() == MAX_DISCOVERED_TOOLS
                 || tool.name.is_empty()
                 || tool.name.len() > 128
@@ -497,14 +641,10 @@ async fn discover_from(
                     "MCP discovery exceeds its tool limit or contains an invalid tool".into(),
                 );
             }
-            let qualified = format!("{}:{}", server.id, tool.name);
-            let read_only = server
-                .read_only_tools
-                .iter()
-                .any(|allowed| allowed == &qualified);
+            let read_only = tool_is_read_only(&server, &tool);
             let alias = format!("mcp_{}", output.len());
             output.push(ContextTool {
-                server_id: server.id.clone(),
+                server_name: server.name.clone(),
                 name: alias,
                 description: tool.description,
                 input_schema: tool.input_schema,
@@ -574,7 +714,7 @@ pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String
         }
         let server = servers
             .into_iter()
-            .find(|server| server.id == tool.server_id)
+            .find(|server| server.name == tool.server_name)
             .ok_or_else(|| "MCP server is not configured".to_string())?;
         let response = post_with(
             &server,
@@ -610,33 +750,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn context_server_deserializes_both_tool_allow_list_spellings() {
-        for field in ["readOnlyTools", "read_only_tools"] {
-            let input = json!({"id":"docs","url":"https://example.com/mcp",field:["docs:lookup"]});
-            let server: ContextServer = serde_json::from_value(input).unwrap();
-            assert_eq!(server.read_only_tools, ["docs:lookup"]);
-        }
+    fn context_server_accepts_name_and_migrates_legacy_id() {
+        let named: ContextServer = serde_json::from_value(json!({
+            "name":"docs",
+            "url":"https://example.com/mcp",
+            "timeoutSeconds":25
+        }))
+        .unwrap();
+        let legacy: ContextServer = serde_json::from_value(json!({
+            "id":"docs",
+            "url":"https://example.com/mcp",
+            "readOnlyTools":["docs:lookup"]
+        }))
+        .unwrap();
+        assert_eq!(named.name, legacy.name);
+        assert_eq!(named.url, legacy.url);
+        assert_eq!(named.timeout_seconds, Some(25));
+        assert_eq!(legacy.timeout_seconds, None);
+        assert_eq!(legacy.read_only_tools, ["docs:lookup"]);
     }
 
     #[test]
-    fn configured_server_validation_rejects_duplicate_ids() {
+    fn configured_server_validation_rejects_duplicate_names() {
         let servers = vec![
             ContextServer {
-                id: "docs".into(),
+                name: "docs".into(),
                 url: "https://example.com/mcp".into(),
+                timeout_seconds: None,
                 token: None,
-                read_only_tools: vec![],
+                read_only_tools: Vec::new(),
             },
             ContextServer {
-                id: "docs".into(),
+                name: "docs".into(),
                 url: "https://example.com/mcp".into(),
+                timeout_seconds: None,
                 token: None,
-                read_only_tools: vec![],
+                read_only_tools: Vec::new(),
             },
         ];
         assert_eq!(
             validate_configured_servers(&servers),
-            Err("MCP server IDs must be unique".into())
+            Err("MCP server names must be unique".into())
         );
     }
     #[test]
@@ -663,14 +817,65 @@ mod tests {
     }
 
     #[test]
-    fn rejects_duplicate_server_ids() {
+    fn filters_tools_using_local_allow_list() {
+        let safe: RemoteTool = serde_json::from_value(json!({
+            "name":"lookup",
+            "inputSchema":{"type":"object"},
+            "annotations":{"readOnlyHint":true,"destructiveHint":false}
+        }))
+        .unwrap();
+        let read_only_without_destructive_hint: RemoteTool = serde_json::from_value(json!({
+            "name":"search",
+            "inputSchema":{"type":"object"},
+            "annotations":{"readOnlyHint":true}
+        }))
+        .unwrap();
+        let destructive: RemoteTool = serde_json::from_value(json!({
+            "name":"delete",
+            "inputSchema":{"type":"object"},
+            "annotations":{"readOnlyHint":false,"destructiveHint":true}
+        }))
+        .unwrap();
+        let unannotated: RemoteTool = serde_json::from_value(json!({
+            "name":"unknown",
+            "inputSchema":{"type":"object"}
+        }))
+        .unwrap();
         let server = ContextServer {
-            id: "docs".into(),
+            name: "docs".into(),
             url: "https://example.com/mcp".into(),
+            timeout_seconds: None,
             token: None,
             read_only_tools: Vec::new(),
         };
-        assert!(validate_server_ids(&[server.clone(), server]).is_err());
+        assert!(!tool_is_read_only(&server, &safe));
+        assert!(!tool_is_read_only(&server, &read_only_without_destructive_hint));
+        assert!(!tool_is_read_only(&server, &destructive));
+        assert!(!tool_is_read_only(&server, &unannotated));
+
+        let legacy_allowlist = ContextServer {
+            read_only_tools: vec!["docs:unknown".into(), "docs:lookup".into()],
+            ..server.clone()
+        };
+        assert!(tool_is_read_only(&legacy_allowlist, &unannotated));
+        assert!(tool_is_read_only(&legacy_allowlist, &safe));
+    }
+
+    #[test]
+    fn jsonrpc_request_ids_are_unique() {
+        assert_ne!(next_jsonrpc_id(), next_jsonrpc_id());
+    }
+
+    #[test]
+    fn rejects_timeout_outside_configured_bounds() {
+        let server = ContextServer {
+            name: "docs".into(),
+            url: "https://example.com/mcp".into(),
+            timeout_seconds: Some(MAX_CONTEXT_REQUEST_TIMEOUT_SECS + 1),
+            token: None,
+            read_only_tools: Vec::new(),
+        };
+        assert!(validate_server(&server).is_err());
     }
 
     #[test]

@@ -748,13 +748,15 @@ pub fn mcp_settings(app: tauri::AppHandle) -> Result<String, String> {
             .unwrap_or_default();
     }
     serde_json::to_string(&serde_json::json!({
-        "servers": servers.iter().map(|server| serde_json::json!({"id":server.id,"url":server.url,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty()) || crate::keychain::get_key(&format!("mcp:{}",server.id)).is_ok()})).collect::<Vec<_>>(),
-        "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok()
+        "servers": servers.iter().map(|server| serde_json::json!({"name":server.name,"url":server.url,"timeoutSeconds":server.timeout_seconds,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty()) || crate::keychain::get_key(&format!("mcp:{}",server.name)).is_ok()})).collect::<Vec<_>>(),
+        "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok(),
+        "defaultTimeoutSeconds": crate::rust_ai::context::DEFAULT_CONTEXT_REQUEST_TIMEOUT_SECS,
+        "maxTimeoutSeconds": crate::rust_ai::context::MAX_CONTEXT_REQUEST_TIMEOUT_SECS
     })).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub fn set_mcp_settings(
+pub async fn set_mcp_settings(
     app: tauri::AppHandle,
     servers: Vec<crate::rust_ai::context::ContextServer>,
 ) -> Result<(), String> {
@@ -783,16 +785,16 @@ pub fn set_mcp_settings(
     for server in &servers {
         if let Some(token) = server.token.as_deref() {
             updates.push((
-                format!("mcp:{}", server.id),
+                format!("mcp:{}", server.name),
                 (!token.is_empty()).then(|| token.to_owned()),
             ));
         }
     }
     for server in old
         .iter()
-        .filter(|old| !servers.iter().any(|server| server.id == old.id))
+        .filter(|old| !servers.iter().any(|server| server.name == old.name))
     {
-        updates.push((format!("mcp:{}", server.id), None));
+        updates.push((format!("mcp:{}", server.name), None));
     }
     for (key, value) in updates {
         let prior = crate::keychain::get_key(&key).ok();
@@ -819,7 +821,7 @@ pub fn set_mcp_settings(
     let mut runtime = Vec::new();
     for server in &servers {
         runtime.push(crate::rust_ai::context::ContextServer {
-            token: crate::keychain::get_key(&format!("mcp:{}", server.id)).ok(),
+            token: crate::keychain::get_key(&format!("mcp:{}", server.name)).ok(),
             ..server.clone()
         });
     }
@@ -882,7 +884,7 @@ fn configure_mcp_servers_with_tokens(
     let runtime = servers
         .iter()
         .map(|server| crate::rust_ai::context::ContextServer {
-            token: crate::keychain::get_key(&format!("mcp:{}", server.id)).ok(),
+            token: crate::keychain::get_key(&format!("mcp:{}", server.name)).ok(),
             ..server.clone()
         })
         .collect();
