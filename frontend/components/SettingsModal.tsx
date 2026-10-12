@@ -89,7 +89,7 @@ function McpSettings({ servers, envManaged, ready, loading, error, retry, defaul
     setSaving(false)
   }
   return <div className="space-y-3">
-    <p className="text-xs text-muted leading-relaxed">Name is a unique local label for this remote, like a Git remote; this UI does not start or stop remote servers. The MCP client discovers tools dynamically and filters for read-only tools. Existing backend allow-lists are preserved for compatibility; new remotes use remote annotations, which are hints, not guarantees. Credentials stay in the backend key store. Configure only endpoints you trust.</p>
+    <p className="text-xs text-muted leading-relaxed">Name identifies this remote in DocuBook. Tools are discovered automatically; only allow-listed read-only tools are available. Add only trusted MCP endpoints.</p>
     {envManaged && <p className="text-xs text-warning">MCP servers are controlled by DOCUBOOK_MCP_SERVERS.</p>}
     {loading ? <p role="status" className="text-xs text-muted">Loading MCP server settings…</p> : error && <div role="alert" className="flex items-center gap-2 text-xs text-danger"><span>Could not load MCP server settings: {error}</span><button onClick={() => { void retry().catch(() => {}) }} className="text-xs">Retry</button></div>}
     {servers.map(server => <div key={server.name} className="rounded border border-border-subtle p-3 space-y-2">
