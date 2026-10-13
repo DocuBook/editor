@@ -88,6 +88,7 @@ function renderSidebar() {
       id="sidebar"
       onOpenSettings={() => {}}
       onOpenSearch={() => {}}
+      onOpenShortcuts={() => {}}
 
       onRequestCloseVault={() => {}}
       registerSearchFolder={() => () => {}}

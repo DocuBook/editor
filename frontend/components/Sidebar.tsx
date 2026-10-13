@@ -3,7 +3,7 @@ import { useVaultStore, type FileInfo } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { pollGitStatus } from '../stores/gitStatus'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
-import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp, Keyboard } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -50,13 +50,14 @@ interface SidebarProps {
   id?: string
   onOpenSettings: () => void
   onOpenSearch: () => void
+  onOpenShortcuts: () => void
 
   onRequestCloseVault: () => void
   onNavigate?: () => void
   registerSearchFolder: (fn: (path: string) => void) => () => void
 }
 
-export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
+export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortcuts, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const sidebarActionsRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
@@ -341,6 +342,9 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestClo
         )}
         <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" title="Settings" className={iconBtn}>
           <Settings size={15} />
+        </button>
+        <button onClick={(e) => { onOpenShortcuts(); e.currentTarget.blur() }} aria-label="Keyboard Shortcuts" title="Keyboard Shortcuts" className={iconBtn}>
+          <Keyboard size={15} />
         </button>
       </div>
 
