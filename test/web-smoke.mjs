@@ -83,6 +83,7 @@ await runSuite('web-smoke', {
     JSON.stringify(st))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => !document.querySelector('input[type="email"]') && !Array.from(document.querySelectorAll('button')).some(button => button.textContent?.includes('Create admin account')), { timeout: 10000 })
+  await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 10000 })
   const afterReload = await page.locator('body').innerText()
   ok('restart: session persists — still logged in (no login page)', !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
 })
