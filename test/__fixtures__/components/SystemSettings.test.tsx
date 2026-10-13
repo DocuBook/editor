@@ -77,7 +77,7 @@ describe('SystemSettings — change password', () => {
     expect(button.disabled).toBe(false)
   })
 
-  it('submits the typed passwords, then signs out once the confirmation has shown', async () => {
+  it('submits the typed passwords, then refreshes auth after the server revokes the session', async () => {
     vi.useFakeTimers()
     try {
       render()
@@ -99,25 +99,18 @@ describe('SystemSettings — change password', () => {
       // The server revoked every session, this one included — the form hands
       // off to the sign-in screen instead of sitting on a dead cookie.
       await act(async () => { await vi.advanceTimersByTimeAsync(1200) })
-      expect(invoke).toHaveBeenCalledWith('logout')
+      expect(invoke).toHaveBeenCalledWith('account_get')
     } finally {
       vi.useRealTimers()
     }
   })
 })
 
-describe('SystemSettings — sign out', () => {
-  it('logs out without submitting the password form', async () => {
+describe('SystemSettings — account actions', () => {
+  it('does not render a sign-out action in settings', async () => {
     render()
     await flush()
-    fillAllPasswords()
 
-    act(() => buttonByText('Sign out').click())
-    await flush()
-
-    expect(invoke).toHaveBeenCalledWith('logout')
-    /** A bare button inside the form would also submit it — and a filled form
-     *  would then change the password on the way out. */
-    expect(invoke.mock.calls.map(c => c[0])).not.toContain('change_password')
+    expect(Array.from(document.querySelectorAll('button')).some(button => button.textContent?.trim() === 'Sign out')).toBe(false)
   })
 })

@@ -21,7 +21,7 @@ await runSuite('web-smoke', {
   /* The wizard itself is under test — no API-side session bootstrap. */
   session: false,
   server: { binary: 'server/target/debug/docubook-server', env: { DB_SETUP_TOKEN: SETUP_TOKEN } },
-}, async ({ page, ok, base, restart }) => {
+}, async ({ page, ok, base, restart, vaultPath }) => {
   // ── Health ──
   const h = await (await fetch(`${base}/api/health`)).json()
   ok('health: returns JSON', h && typeof h.result === 'string' && h.result.includes('version'))
@@ -50,12 +50,15 @@ await runSuite('web-smoke', {
   const afterSetup = await page.locator('body').innerText()
   ok('setup wizard: admin created', mainUiOutput(afterSetup), afterSetup.slice(0, 80))
 
+  await page.locator(click('Open Folder')).click()
+  await page.waitForSelector(`button:has-text("${vaultPath.split('/').pop()}")`, { timeout: 4000 })
+  await page.locator(`button:has-text("${vaultPath.split('/').pop()}")`).click()
+  await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 8000 })
+
   // ── Logout → Login ──
-  await page.keyboard.press('Meta+,')
-  await page.waitForSelector(click('System'), { timeout: 4000 })
-  await page.locator(click('System')).click()
-  await page.waitForSelector(click('Sign out'), { timeout: 4000 })
-  await page.locator(click('Sign out')).click()
+  await page.locator('[aria-label="Open profile menu"]').click()
+  await page.waitForSelector(click('Log out'), { timeout: 4000 })
+  await page.locator(click('Log out')).click()
   await page.waitForSelector('text=Sign in', { timeout: 8000 })
   const loginVisible = await page.locator('body').innerText()
   ok('logout: login page shown', /Sign in/i.test(loginVisible), loginVisible.slice(0, 60))
@@ -65,9 +68,9 @@ await runSuite('web-smoke', {
   await page.waitForSelector(click('Sign in'), { timeout: 5000 })
   await page.locator(click('Sign in')).click()
   // Argon2id login can take >1s — wait for the main UI, not a fixed timeout.
-  await page.waitForFunction((ui) => new RegExp(ui, 'i').test(document.body.innerText), MAIN_UI, { timeout: 10000 })
+  await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 10000 })
   const afterLogin = await page.locator('body').innerText()
-  ok('login: main UI visible', mainUiOutput(afterLogin), afterLogin.slice(0, 80))
+  ok('login: main UI visible', !/Sign in/i.test(afterLogin) && await page.locator('[aria-label="Open profile menu"]').isVisible(), afterLogin.slice(0, 80))
 
   // ── Restart: admin config AND session must persist (sessions.json on /data) ──
   await restart()
