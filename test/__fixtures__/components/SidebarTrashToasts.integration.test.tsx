@@ -88,7 +88,7 @@ async function openTrash() {
       id="sidebar"
       onOpenSettings={() => {}}
       onOpenSearch={() => {}}
-      onOpenShortcuts={() => {}}
+
       onRequestCloseVault={() => {}}
       registerSearchFolder={() => () => {}}
     />,

@@ -10,7 +10,7 @@ import { useKeyboard } from '../hooks/useKeyboard'
 import { useTreeActions } from '../hooks/useTreeActions'
 import { stripMarkdownExt } from '../utils/fileKind'
 import { hasClipboardItem } from '../utils/fileClipboard'
-import SidebarFooter from './SidebarFooter'
+
 import SidebarPopover from './SidebarPopover'
 import SidebarContextMenu from './SidebarContextMenu'
 import GitPanel from './panels/GitPanel'
@@ -50,13 +50,13 @@ interface SidebarProps {
   id?: string
   onOpenSettings: () => void
   onOpenSearch: () => void
-  onOpenShortcuts: () => void
+
   onRequestCloseVault: () => void
   onNavigate?: () => void
   registerSearchFolder: (fn: (path: string) => void) => () => void
 }
 
-export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortcuts, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
+export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const sidebarActionsRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
@@ -343,7 +343,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           <Settings size={15} />
         </button>
       </div>
-      <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
+
       {ctxItem && (
         <SidebarContextMenu
           item={ctxItem}

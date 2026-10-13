@@ -62,9 +62,7 @@ export default function App() {
   const openSettings = useCallback(() => {
     setMobileDrawerOpen(false); setSearchOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); setSettingsOpen(true)
   }, [])
-  const openShortcuts = useCallback(() => {
-    setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setConfirmCloseVault(false); setShortcutsOpen(true)
-  }, [])
+
   const requestCloseVault = useCallback(() => {
     setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setShortcutsOpen(false); setConfirmCloseVault(true)
   }, [])
@@ -203,7 +201,7 @@ export default function App() {
     <div className="editor-shell h-screen overflow-hidden flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
         {isVaultOpen && isDesktop && desktopSidebarOpen && (
-          <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
+          <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
         )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <SyncStatusBadge />
@@ -234,7 +232,7 @@ export default function App() {
         lockScroll
         classNames={{ overlay: 'mobile-sidebar-drawer-overlay', content: 'mobile-sidebar-drawer-content', header: 'mobile-sidebar-drawer-header', title: 'mobile-sidebar-drawer-title', body: 'mobile-sidebar-drawer-body', close: 'mobile-sidebar-drawer-close' }}
       >
-        <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
+        <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
       </Drawer>
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
