@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+
 import { useVaultStore, type FileInfo } from '../stores/vault'
+import { useAuth } from '../stores/auth'
 import { useEditorStore } from '../stores/editor'
 import { pollGitStatus } from '../stores/gitStatus'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
-import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp, Keyboard } from 'lucide-react'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Option, ArrowBigUp } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -17,6 +19,7 @@ import GitPanel from './panels/GitPanel'
 import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
 import PermissionDialog from './PermissionDialog'
+import ProfileMenu from './ProfileMenu'
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
@@ -62,6 +65,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const sidebarActionsRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
   const [activePanel, setActivePanel] = useState<SidebarPanelId>('vault')
+
 
   /** Declared before closeContextMenu so it reads an initialized binding (react/immutability). */
   const [ctxItem, setCtxItem] = useState<FileInfo | null>(null)
@@ -340,13 +344,10 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
             )}
           </SidebarPopover>
         )}
-        <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" title="Settings" className={iconBtn}>
-          <Settings size={15} />
-        </button>
-        <button onClick={(e) => { onOpenShortcuts(); e.currentTarget.blur() }} aria-label="Keyboard Shortcuts" title="Keyboard Shortcuts" className={iconBtn}>
-          <Keyboard size={15} />
-        </button>
+
       </div>
+
+      <ProfileMenu isNative={isTauri} onOpenSettings={onOpenSettings} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
 
       {ctxItem && (
         <SidebarContextMenu
