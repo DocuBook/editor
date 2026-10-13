@@ -1,4 +1,4 @@
-import { createElement, Fragment, useRef, useState, useSyncExternalStore } from 'react'
+import { createElement, Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Select } from '@mantine/core'
 import { createHeadingBlockSpec, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, createExtension } from '@blocknote/core'
 import { createCodeBlockConfig, parsePreCode, parsePreCodeContent } from '@blocknote/core/blocks'
@@ -19,6 +19,7 @@ import {
 } from '@blocknote/math-block'
 import { createDiagramBlockConfig, parseDiagramCodeContent, parseDiagramCodeElement } from '@blocknote/diagram-block'
 import { CachedDiagramPreviewWithPopup } from './CachedDiagramPreview'
+import { PreviewSkeleton } from './PreviewSkeleton'
 import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
@@ -44,7 +45,7 @@ const usePreviewRenderingPaused = () => useSyncExternalStore(
 /* oxlint-disable react/refs -- deliberate render-time ref caching freezes preview
  * components during AI writing; moving these reads/writes into effects
  * reintroduces the preview flicker this wrapper exists to prevent. */
-function StableSourcePreview({ paused, props, language, codeInfo, Preview, fallback }: { paused: boolean; props: any; language: string; codeInfo: string; Preview: any; fallback: 'block' | 'inline' }) {
+function StableSourcePreview({ paused, props, Preview, fallback }: { paused: boolean; props: any; Preview: any; fallback: 'block' | 'inline' }) {
   const stableProps = useRef<any | null>(null)
   const stableElement = useRef<any | null>(null)
   const latestContentRef = useRef(props.contentRef)
@@ -67,39 +68,66 @@ function StableSourcePreview({ paused, props, language, codeInfo, Preview, fallb
     stableElement.current = null
   }
 
-  if (paused && !stableElement.current) {
-    if (!stableProps.current) {
-      const code = createElement('code', {
-        className: language ? `language-${language}` : undefined,
-        'data-language': codeInfo || undefined,
-        ref: stableContentRef.current,
-      })
-      stableElement.current = fallback === 'inline' ? code : createElement('pre', null, code)
-    } else {
-      const previewProps = {
-        ...stableProps.current,
-        contentRef: stableContentRef.current,
-        ...(fallback === 'inline' ? { node: stableNode.current, getPos: stableGetPos.current } : {}),
-      }
-      stableElement.current = createElement(Preview, previewProps)
+  // The freeze only stands in for a preview that ALREADY rendered: it keeps the
+  // last painted element on screen while the source streams. With no prior
+  // unpaused render (`stableProps.current === null`) there is nothing to freeze
+  // — a cold mount that inherits the paused flag must paint the real preview, or
+  // its raw source would show as bare text until rendering unpauses.
+  const frozen = paused && stableElement.current
+  if (paused && !stableElement.current && stableProps.current) {
+    const previewProps = {
+      ...stableProps.current,
+      contentRef: stableContentRef.current,
+      ...(fallback === 'inline' ? { node: stableNode.current, getPos: stableGetPos.current } : {}),
     }
+    stableElement.current = createElement(Preview, previewProps)
   }
 
-  return paused ? stableElement.current : createElement(Preview, props)
+  return frozen ? stableElement.current : createElement(Preview, props)
 }
 /* oxlint-enable react/refs */
 
 
-function createStablePreview(Preview: any, language: string | ((props: any) => string), fallback: 'block' | 'inline', codeInfo?: (props: any) => string) {
+function createStablePreview(Preview: any, fallback: 'block' | 'inline') {
   return function StableWrapper(props: any) {
-    const lang = typeof language === 'function' ? language(props) : language
-    return createElement(StableSourcePreview, { paused: usePreviewRenderingPaused(), props, language: lang, codeInfo: codeInfo ? codeInfo(props) : lang, Preview, fallback })
+    return createElement(StableSourcePreview, { paused: usePreviewRenderingPaused(), props, Preview, fallback })
   }
 }
 
-const StableDiagramPreview = createStablePreview(CachedDiagramPreviewWithPopup, 'mermaid', 'block')
-const StableMathBlockPreview = createStablePreview(MathBlockPreviewWithPopup, 'latex', 'block')
-const StableMathInlinePreview = createStablePreview(MathInlinePreviewWithPopup, 'latex', 'inline')
+/** Replaces a source-backed preview with `PreviewSkeleton` for the first paint
+ *  only, so a cold open reserves the preview's space instead of painting an empty
+ *  box (the raw source itself is hidden by the cold-open guard — see
+ *  `index.html`).
+ *
+ *  The diagram already has a real async gap (`mermaid.render` is awaited); math
+ *  and the code block render in the same commit, so for them this gate is what
+ *  creates the loading frame at all. `useEffect` runs after the first paint, so
+ *  the skeleton lands on screen first and the real preview swaps in on the next
+ *  frame — parity across all four kinds, not a per-kind accident. */
+function withColdOpenSkeleton(Preview: any, skeleton: any) {
+  return function ColdOpenPreview(props: any) {
+    const [cold, setCold] = useState(true)
+    useEffect(() => setCold(false), [])
+    return cold ? skeleton : createElement(Preview, props)
+  }
+}
+
+const StableDiagramPreview = createStablePreview(CachedDiagramPreviewWithPopup, 'block')
+// Exported alongside StableCodeBlockPreview so the freeze/wrapper behaviour is
+// testable for every source-backed preview, not just the code block.
+//
+// Math and the code block render in the same commit as their source, so they get
+// the extra one-frame cold gate to match the diagram's loading state. The diagram
+// already owns an async gap (Mermaid), so gating it again would only double the
+// skeleton.
+export const StableMathBlockPreview = withColdOpenSkeleton(
+  createStablePreview(MathBlockPreviewWithPopup, 'block'),
+  createElement(PreviewSkeleton),
+)
+export const StableMathInlinePreview = withColdOpenSkeleton(
+  createStablePreview(MathInlinePreviewWithPopup, 'inline'),
+  createElement(PreviewSkeleton, { inline: true }),
+)
 
 const mathBlockSpec = createReactBlockSpec(createMathBlockConfig, {
   meta: { code: true, defining: true, isolating: false, highlight: () => 'latex', hasPreview: true, hardBreakShortcut: 'shift+enter' },
@@ -290,11 +318,9 @@ export function CodeBlockSource(props: any) {
 
 /** Frozen wrapper (see StableSourcePreview) around the code block source view —
  *  exported so the AI-writing freeze behaviour is testable. */
-export const StableCodeBlockPreview = createStablePreview(
-  CodeBlockSource,
-  (p: any) => parseCodeBlockInfo(p.block?.props?.language ?? '').language,
-  'block',
-  (p: any) => p.block?.props?.language ?? '',
+export const StableCodeBlockPreview = withColdOpenSkeleton(
+  createStablePreview(CodeBlockSource, 'block'),
+  createElement(PreviewSkeleton),
 )
 
 /** Exported for the header-key test (the guard is what keeps ProseMirror's
