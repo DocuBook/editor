@@ -107,4 +107,17 @@ describe('diagram preview on a cold mount', () => {
     expect(container.textContent).not.toContain('flowchart')
     expect(container.textContent).not.toContain('Start')
   })
+
+  it('shows a rendered SVG after Mermaid resolves on a cold mount', async () => {
+    let resolveRender!: (result: { svg: string }) => void
+    mermaid.render.mockReturnValue(new Promise((resolve) => { resolveRender = resolve }))
+    await mountCold('graph TD; A-->B')
+
+    await act(async () => {
+      resolveRender({ svg: '<svg><g><path d="M0 0" /></g></svg>' })
+    })
+
+    expect(container.querySelector('svg path')).not.toBeNull()
+    expect(container.textContent).not.toContain('graph TD')
+  })
 })

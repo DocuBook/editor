@@ -26,15 +26,6 @@ Object.assign(window, {
   matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }),
 })
 
-// Deterministic KaTeX: the real one is fine, but its huge markup makes the
-// assertion noisy. What matters is that the formula appears once the gate opens.
-vi.mock('katex', () => ({
-  default: {
-    renderToString: (tex: string) => `<span class="katex">${tex}</span>`,
-    ParseError: class extends Error {},
-  },
-}))
-
 vi.mock('mermaid', () => ({ default: { render: vi.fn(), initialize: vi.fn() } }))
 vi.mock('react-icons/si', () => ({ SiMermaid: () => null }))
 vi.mock('react-icons/tb', () => ({ TbMathFunction: () => null }))
@@ -118,31 +109,35 @@ afterEach(() => {
 
 describe('math preview on a cold mount', () => {
   it('block equation shows the block skeleton first, then the formula', async () => {
-    coldRender(StableMathBlockPreview, blockProps('E = mc^2'))
+    const source = String.raw`\int_0^1 x^2 \, dx = \frac{1}{3}`
+    coldRender(StableMathBlockPreview, blockProps(source))
 
     // First paint: skeleton, and NOT the raw source.
     expect(container.querySelector('[data-testid="preview-skeleton"]')).not.toBeNull()
     expect(container.querySelector('.katex')).toBeNull()
-    expect(container.textContent).not.toContain('E = mc^2')
+    expect(container.textContent).not.toContain(source)
 
     await settle()
 
     // Gate opened: the formula, no skeleton left behind.
     expect(container.querySelector('.katex')).not.toBeNull()
+    expect(container.querySelector('.katex annotation')?.textContent).toBe(source)
     expect(container.querySelector('[data-testid="preview-skeleton"]')).toBeNull()
   })
 
   it('inline equation shows the INLINE skeleton first, then the formula', async () => {
-    coldRender(StableMathInlinePreview, inlineProps('x^2'))
+    const source = String.raw`\frac{a}{b} + \alpha`
+    coldRender(StableMathInlinePreview, inlineProps(source))
 
     // Inline shape, not the 96px block one, so it does not blow up the paragraph.
     expect(container.querySelector('[data-testid="preview-skeleton-inline"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="preview-skeleton"]')).toBeNull()
-    expect(container.textContent).not.toContain('x^2')
+    expect(container.textContent).not.toContain(source)
 
     await settle()
 
     expect(container.querySelector('.katex')).not.toBeNull()
+    expect(container.querySelector('.katex annotation')?.textContent).toBe(source)
     expect(container.querySelector('[data-testid="preview-skeleton-inline"]')).toBeNull()
   })
 

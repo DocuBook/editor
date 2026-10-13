@@ -38,7 +38,10 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
     target: ['es2021', 'chrome105', 'safari15'],
-    minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
+    // Safari 15's WebKit miscompiles minified SVG/MathML parsing paths used by
+    // Mermaid and KaTeX. Tauri supplies the target platform at build time; keep
+    // the browser build minified while shipping readable chunks to WKWebView.
+    minify: process.env.TAURI_ENV_PLATFORM === 'darwin' ? false : 'esbuild',
     sourcemap: !!process.env.TAURI_DEBUG,
     // Every chunk over this limit is already correctly split, so the warning no
     // longer points at anything actionable — it just fires on the four chunks
