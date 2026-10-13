@@ -89,6 +89,7 @@ async function openTrash() {
       onOpenSettings={() => {}}
       onOpenSearch={() => {}}
       onOpenShortcuts={() => {}}
+
       onRequestCloseVault={() => {}}
       registerSearchFolder={() => () => {}}
     />,

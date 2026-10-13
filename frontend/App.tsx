@@ -65,6 +65,7 @@ export default function App() {
   const openShortcuts = useCallback(() => {
     setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setConfirmCloseVault(false); setShortcutsOpen(true)
   }, [])
+
   const requestCloseVault = useCallback(() => {
     setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setShortcutsOpen(false); setConfirmCloseVault(true)
   }, [])

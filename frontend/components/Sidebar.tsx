@@ -3,14 +3,14 @@ import { useVaultStore, type FileInfo } from '../stores/vault'
 import { useEditorStore } from '../stores/editor'
 import { pollGitStatus } from '../stores/gitStatus'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
-import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp } from 'lucide-react'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Settings, Option, ArrowBigUp, Keyboard } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
 import { useTreeActions } from '../hooks/useTreeActions'
 import { stripMarkdownExt } from '../utils/fileKind'
 import { hasClipboardItem } from '../utils/fileClipboard'
-import SidebarFooter from './SidebarFooter'
+
 import SidebarPopover from './SidebarPopover'
 import SidebarContextMenu from './SidebarContextMenu'
 import GitPanel from './panels/GitPanel'
@@ -51,6 +51,7 @@ interface SidebarProps {
   onOpenSettings: () => void
   onOpenSearch: () => void
   onOpenShortcuts: () => void
+
   onRequestCloseVault: () => void
   onNavigate?: () => void
   registerSearchFolder: (fn: (path: string) => void) => () => void
@@ -342,8 +343,11 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
         <button data-testid="sidebar-settings" onClick={(e) => { onOpenSettings(); e.currentTarget.blur() }} aria-label="Open settings" title="Settings" className={iconBtn}>
           <Settings size={15} />
         </button>
+        <button onClick={(e) => { onOpenShortcuts(); e.currentTarget.blur() }} aria-label="Keyboard Shortcuts" title="Keyboard Shortcuts" className={iconBtn}>
+          <Keyboard size={15} />
+        </button>
       </div>
-      <SidebarFooter onOpenShortcuts={onOpenShortcuts} />
+
       {ctxItem && (
         <SidebarContextMenu
           item={ctxItem}

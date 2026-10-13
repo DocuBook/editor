@@ -89,6 +89,7 @@ function renderSidebar() {
       onOpenSettings={() => {}}
       onOpenSearch={() => {}}
       onOpenShortcuts={() => {}}
+
       onRequestCloseVault={() => {}}
       registerSearchFolder={() => () => {}}
     />,

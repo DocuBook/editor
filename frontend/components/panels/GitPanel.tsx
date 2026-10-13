@@ -16,6 +16,76 @@ interface GitEntry {
   path: string
 }
 
+interface BranchEntry { name: string; remote: boolean }
+
+function BranchSwitcher({ branch, open, onToggle }: { branch: string; open: boolean; onToggle: () => void }) {
+  const [branches, setBranches] = useState<BranchEntry[]>([])
+  const [busy, setBusy] = useState<string | null>(null)
+  const [newBranchName, setNewBranchName] = useState('')
+  const [error, setError] = useState('')
+
+  const toggle = async () => {
+    onToggle()
+    if (open) return
+    setError('')
+    setNewBranchName('')
+    try {
+      const result = await invoke<unknown>('git_branches')
+      const parsed = typeof result === 'string' ? JSON.parse(result) : result
+      setBranches(Array.isArray(parsed) ? parsed.filter((entry: any) => entry && typeof entry.name === 'string') : [])
+    } catch (e) { setError(String(e)) }
+  }
+
+  const checkout = async (entry: BranchEntry, create = false) => {
+    if (busy || (!create && entry.name === branch)) return
+    setBusy(entry.name)
+    setError('')
+    try {
+      await invoke(create ? 'git_create_branch' : 'git_checkout', create ? { branch: entry.name } : { branch: entry.name, remote: entry.remote })
+      onToggle()
+      const dirty = useEditorStore.getState().tabs.filter(tab => tab.dirty).length
+      await useEditorStore.getState().reloadAllTabs()
+      void pollGitStatus()
+      toast.success((create ? 'Created and switched to ' : 'Switched to ') + entry.name + (dirty ? ` — ${dirty} unsaved tab${dirty > 1 ? 's' : ''} kept open` : ''))
+    } catch (e) { setError(String(e)) }
+    finally { setBusy(null) }
+  }
+
+  const groups = [
+    ['Local', branches.filter(entry => !entry.remote)],
+    ['Remote', branches.filter(entry => entry.remote)],
+  ] as const
+
+  return (
+    <span className="min-w-0 flex-1">
+
+      <button type="button" onClick={() => void toggle()} aria-label="Switch branch" aria-expanded={open} title="Switch branch"
+        className="flex min-w-0 max-w-full items-center gap-1 rounded border-none bg-transparent px-1 py-1 text-left text-foreground-secondary hover:bg-surface-active hover:text-foreground cursor-pointer">
+        <GitBranch size={13} className="shrink-0 text-foreground-subtle" />
+        <span className="min-w-0 truncate font-mono text-[11px]">{branch || 'no branch'}</span>
+        <ChevronDown size={11} className={'shrink-0 text-muted transition-transform ' + (open ? 'rotate-180' : '')} />
+      </button>
+      {open && <SidebarPopover side="bottom">
+        <form onSubmit={e => { e.preventDefault(); const name = newBranchName.trim(); if (name) void checkout({ name, remote: false }, true) }} className="px-2 py-1.5 border-b border-border-subtle">
+          <input autoFocus value={newBranchName} onChange={e => setNewBranchName(e.target.value)} disabled={busy !== null} placeholder="Type to create a branch..." aria-label="Create branch" className="w-full min-w-0 bg-transparent border-none outline-none text-[12px] text-foreground placeholder:text-muted" />
+        </form>
+        <div className="max-h-[min(16rem,calc(100dvh-9rem))] overflow-y-auto py-1">
+          {groups.map(([label, entries]) => entries.length > 0 && <section key={label}>
+            <div className="px-2.5 pt-1.5 pb-1 text-[10px] uppercase tracking-wider text-foreground-subtle">{label}</div>
+            {entries.map(entry => <button type="button" key={entry.name} onClick={() => void checkout(entry)} disabled={busy !== null} className="flex w-full items-center gap-2 rounded border-none bg-transparent px-2.5 py-1.5 text-left text-[12px] text-foreground-secondary hover:bg-surface-active disabled:opacity-50">
+              <GitBranch size={11} className="shrink-0 text-foreground-subtle" /><span className="min-w-0 flex-1 truncate">{entry.name}</span>
+              {entry.name === branch && <Check size={12} className="shrink-0 text-accent" />}
+              {busy === entry.name && <span className="shrink-0 text-[10px] text-muted">switching…</span>}
+            </button>)}
+          </section>)}
+          {branches.length === 0 && !error && <div className="px-2.5 py-2 text-[11px] text-muted">No branches found</div>}
+          {error && <div className="px-2.5 py-1 text-[10px] text-danger wrap-break-word">{error}</div>}
+        </div>
+      </SidebarPopover>}
+    </span>
+  )
+}
+
 interface SyncOutcome { success: boolean; message: string; error: string; conflicts: string[] }
 interface PullOutcome extends SyncOutcome {
   state: 'upToDate' | 'fastForwarded' | 'adopted' | 'rebased' | 'merged' | 'conflicts' | 'failed'
@@ -114,7 +184,8 @@ function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (
 function SyncBar() {
   const { branch, ahead = 0, behind = 0, hasRemote, hasCommits, pushTarget = '', remotes = [], repoState = 'clean' } = useGitStatus()
   const [selected, setSelected] = useState('')
-  const [syncOpen, setSyncOpen] = useState(false)
+  const [activePopover, setActivePopover] = useState<'branch' | 'actions' | null>(null)
+  const syncOpen = activePopover === 'actions'
   const [syncState, setSyncState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
   const [activeAction, setActiveAction] = useState('')
   const [err, setErr] = useState('')
@@ -122,7 +193,7 @@ function SyncBar() {
   const [confirmAbort, setConfirmAbort] = useState<'merge' | 'rebase' | null>(null)
   const syncRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<HTMLDivElement>(null)
-  useClickOutside(syncRef, () => setSyncOpen(false))
+  useClickOutside(syncRef, () => setActivePopover(null))
 
   const rebasing = repoState.startsWith('rebase')
   const merging = repoState === 'merge'
@@ -168,7 +239,7 @@ function SyncBar() {
     try {
       const success = await action()
       setSyncState(success === false ? 'idle' : 'done')
-      setSyncOpen(false)
+      setActivePopover(null)
     } catch (e) {
       setErr(String(e))
       setSyncState('error')
@@ -259,8 +330,7 @@ function SyncBar() {
   return (
     <div ref={syncRef} className="relative border-b border-border-subtle px-3 py-2 text-[11px]">
       <div className="flex items-center gap-2">
-        <GitBranch size={13} className="shrink-0 text-foreground-subtle" />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground-secondary">{branch || 'no branch'}</span>
+        <BranchSwitcher branch={branch} open={activePopover === 'branch'} onToggle={() => setActivePopover(activePopover === 'branch' ? null : 'branch')} />
         {ahead > 0 && <span className="text-[10px] text-muted">↑{ahead}</span>}
         {behind > 0 && <span className="text-[10px] text-muted">↓{behind}</span>}
         {rebasing || merging ? (
@@ -274,7 +344,7 @@ function SyncBar() {
               type="button"
               aria-label="Git sync actions"
               aria-expanded={syncOpen}
-              onClick={() => setSyncOpen(open => !open)}
+              onClick={() => setActivePopover(activePopover === 'actions' ? null : 'actions')}
               disabled={!idle || busy}
               title={activeRemote && targetBranch ? `Sync ${targetBranch} with ${activeRemote}` : 'Sync current branch'}
               className="flex items-center gap-1 rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
@@ -526,8 +596,7 @@ export default function GitPanel() {
 
   return (
     <section aria-label="Git Panel" className="flex min-h-0 flex-1 flex-col text-xs">
-      {isRepo && <SyncBar />}
-      {!isRepo && (
+      {isRepo ? <SyncBar /> : (
         <div className="flex items-center gap-2 border-b border-border-subtle px-3 py-2">
           <GitBranch size={13} className="shrink-0 text-foreground-subtle" />
           <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-foreground-secondary">{branch || 'no branch'}</span>
