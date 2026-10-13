@@ -825,3 +825,26 @@ body .code-block-language-empty {
     min-width: 1px;
   }
 }
+
+/* Cold-open guard (code block included) for stylesheet-only entry points. The
+   authoritative explanation of the root cause lives in `index.html`'s <head>,
+   which inlines the same rule so it is parsed before any script runs. Keep the
+   two in sync. */
+#root
+  .bn-react-node-view-renderer
+  > [data-node-view-content-react] {
+  visibility: hidden;
+}
+
+/* The popup's own source, once it exists, is governed by the popup rules below. */
+#root
+  .bn-preview-with-source-popup:not([data-open="true"])
+  .bn-source-block-popup {
+  visibility: hidden;
+}
+
+/* An OPEN popup, and everything outside it, is unaffected — the editable source
+   is only ever hidden while its popup is closed. */
+#root .bn-preview-with-source-popup[data-open="true"] .bn-source-block-popup {
+  visibility: visible;
+}

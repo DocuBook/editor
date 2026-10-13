@@ -279,4 +279,18 @@ describe('codeBlock freeze while the AI writes', () => {
     expect(languageInput().value).toBe('python')
     expect(titleInput().value).toBe('b.py')
   })
+
+  /** The cold-open flash: a mount that inherits the paused flag with nothing
+   *  frozen yet (a stream from another tab, or a stale module flag) must paint
+   *  the REAL preview — the header and the `pre > code`, as always here. It must
+   *  not show the raw source as a bare `<code>`, which is what a first paint
+   *  with no prior unpaused render used to fall back to. */
+  it('paints the real preview on a cold mount that is already paused', async () => {
+    await act(async () => { setPreviewRenderingPaused(true) })
+
+    await renderBlock(StableCodeBlockPreview, 'ts title="a.ts"')
+
+    expect(languageInput().value).toBe('ts')
+    expect(container.querySelector('pre > code')!.getAttribute('data-language')).toBe('ts title="a.ts"')
+  })
 })
