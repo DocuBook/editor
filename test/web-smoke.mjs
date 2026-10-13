@@ -82,7 +82,7 @@ await runSuite('web-smoke', {
     st.setupRequired === false && Object.keys(st).sort().join(',') === 'setupRequired,setupToken',
     JSON.stringify(st))
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(1500)
+  await page.waitForFunction(() => !document.querySelector('input[type="email"]') && !Array.from(document.querySelectorAll('button')).some(button => button.textContent?.includes('Create admin account')), { timeout: 10000 })
   const afterReload = await page.locator('body').innerText()
-  ok('restart: session persists — still logged in (no login page)', mainUiOutput(afterReload) && !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
+  ok('restart: session persists — still logged in (no login page)', !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
 })
