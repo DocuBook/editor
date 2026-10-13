@@ -250,16 +250,20 @@ describe('AI floating composer', () => {
     expect(document.body.textContent).not.toContain('Continue Writing')
   })
 
-  it('accepts AI changes with Cmd+Enter only while reviewing and ignores IME composition', () => {
+  it('accepts AI changes with Cmd+Enter without submitting draft text or accepting during IME composition', () => {
     const ai = makeAi({ blockId: 'b1', status: 'user-reviewing' })
+    useAiChat.setState({ input: 'draft prompt' })
     useEditorStore.setState({ blockEditor: { getExtension: vi.fn(() => ai), getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })), getSelection: vi.fn(() => undefined) } })
     act(() => root!.render(<AiFloatingChat />))
+    const textarea = document.querySelector('textarea')!
 
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, isComposing: true })))
+    act(() => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, metaKey: true, isComposing: true })))
     expect(ai.acceptChanges).not.toHaveBeenCalled()
+    expect(ai.invokeAI).not.toHaveBeenCalled()
 
-    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true })))
+    act(() => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, metaKey: true })))
     expect(ai.acceptChanges).toHaveBeenCalledTimes(1)
+    expect(ai.invokeAI).not.toHaveBeenCalled()
   })
 
   it('leaves Escape to the IME while it composes', () => {

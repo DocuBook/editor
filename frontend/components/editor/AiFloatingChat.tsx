@@ -442,7 +442,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     setInput('')
   }
 
-  const accept = () => { setExpanded(false); ai.acceptChanges() }
+  const accept = useCallback(() => { setExpanded(false); ai.acceptChanges() }, [ai])
   const revert = () => { setExpanded(false); ai.rejectChanges() }
 
   useEffect(() => {
@@ -534,7 +534,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
           if (picker && event.key === 'Enter' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
           if (picker && event.key === 'Tab' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
           if (event.key === 'Backspace' && !input && mentions.length) { event.preventDefault(); removeMention(mentions[mentions.length - 1]); return }
-          if (event.key === 'Enter' && !event.shiftKey && hasInput && promptEnabled) { event.preventDefault(); submit() }
+          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && hasInput && promptEnabled) { event.preventDefault(); submit() }
         }} rows={1} role="combobox" aria-label="AI prompt" aria-expanded={pickerOpen} aria-controls={pickerOpen ? MENTION_LISTBOX_ID : undefined} aria-autocomplete="list" aria-activedescendant={pickerOpen && activeEntry ? optionId(activeIndex) : undefined} disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
         {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <Maximize2 size={16} />}</button>}
       </div>
