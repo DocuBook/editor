@@ -109,7 +109,7 @@ body {
     color: var(--color-foreground);
     font-size: 14px;
     line-height: 1.5;
-    overflow: auto;
+    overflow: hidden;
     /* NOTE: NO global user-select:none — in WebKit/Safari it aggressively blocks
        interaction on descendants (text selection AND drag-and-drop) and ignores
        child overrides. UI shells opt in via the shared .ui-shell class instead. */
@@ -305,6 +305,7 @@ html[data-toolbar-popup-open] .bn-editor {
    (the collapsed margin already rendered outside the box). */
 #root .bn-editor {
     display: flow-root;
+    overflow: visible;
 }
 @media (max-width: 639px) {
     #root .editor-content {
