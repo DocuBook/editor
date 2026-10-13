@@ -41,12 +41,6 @@ For production, pin an image tag, place the container behind HTTPS, set `DB_SECU
 
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
 
-#### AI context tools
-
-Configure up to 16 remote MCP Streamable HTTP servers in **Settings → MCP**, each with a unique user-chosen name and HTTPS endpoint. The MCP client discovers tools dynamically; Settings does not manage a tool list. A tool is callable only when its qualified name is present in the backend-held `readOnlyTools` allow-list; remote `readOnlyHint` and `destructiveHint` annotations are informational and never authorize a tool. The request timeout defaults to 10 seconds per HTTP request and can be overridden per remote from 1 to 120 seconds. An optional bearer token is sent as `Authorization: Bearer` for protected endpoints; leave it blank when the server does not require bearer authentication. Credentials stay in the desktop Keychain or web backend key store; on the web, set `DB_KEYS_PASSPHRASE` to encrypt `keys.json` at rest. `DOCUBOOK_MCP_SERVERS`, when set, overrides Settings and is read-only; its JSON entries use `name`, `url`, optional `timeoutSeconds`, `readOnlyTools`, and optional `token` (for example `[ {"name":"docs","url":"https://mcp.example.com/mcp","timeoutSeconds":20,"readOnlyTools":["docs:lookup"]} ]`). Redirects, URL credentials, private/link-local DNS targets, and non-HTTPS endpoints are rejected. Responses are bounded to 256 KiB and framed as untrusted reference data. `@mention` retrieval and `applyDocumentOperations` are unchanged.
-
-Native provider search is enabled only when an explicit provider capability is implemented and verified; unknown capability fails closed. Otherwise search must come from an explicitly configured MCP tool. `@mention` retrieval and the terminal `applyDocumentOperations` document-editing flow are unchanged.
-
 ```yaml
 services:
   docubook:
