@@ -250,6 +250,18 @@ describe('AI floating composer', () => {
     expect(document.body.textContent).not.toContain('Continue Writing')
   })
 
+  it('accepts AI changes with Cmd+Enter only while reviewing and ignores IME composition', () => {
+    const ai = makeAi({ blockId: 'b1', status: 'user-reviewing' })
+    useEditorStore.setState({ blockEditor: { getExtension: vi.fn(() => ai), getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })), getSelection: vi.fn(() => undefined) } })
+    act(() => root!.render(<AiFloatingChat />))
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, isComposing: true })))
+    expect(ai.acceptChanges).not.toHaveBeenCalled()
+
+    act(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true })))
+    expect(ai.acceptChanges).toHaveBeenCalledTimes(1)
+  })
+
   it('leaves Escape to the IME while it composes', () => {
     const ai = makeAi()
     useEditorStore.setState({
