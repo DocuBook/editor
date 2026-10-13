@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../stores/auth'
-import { BriefcaseBusiness, Keyboard, LogOut, Settings, UserRound, Users } from 'lucide-react'
+import { BriefcaseBusiness, ChevronDown, Keyboard, LogOut, Settings, UserRound, Users } from 'lucide-react'
 import SidebarPopover from './SidebarPopover'
 
 interface ProfileMenuProps {
@@ -46,7 +46,7 @@ export default function ProfileMenu({ isNative, onOpenSettings, onOpenShortcuts,
       <button ref={triggerRef} type="button" onClick={() => setOpen(value => !value)} aria-label="Open profile menu" aria-expanded={open} className="flex w-full cursor-pointer items-center gap-2 rounded-md border-none bg-transparent px-2 py-2 text-left hover:bg-surface-active">
         <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-active text-foreground-secondary"><UserRound size={15} /></span>
         <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-secondary">{email || (isNative ? 'Local profile' : 'Profile')}</span>
-        <span className="shrink-0 text-muted" aria-hidden="true">⌃</span>
+        <ChevronDown size={14} aria-hidden="true" className={`shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
         <SidebarPopover side="top">
