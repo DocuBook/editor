@@ -271,9 +271,10 @@ describe("aiSettings store", () => {
     expect(useAiSettings.getState().model).toBe("gpt-5.6");
     expect(useAiSettings.getState().models["openai"]).toBe("gpt-5.6");
 
-    // switch to another provider, pick a different model
+    // switch to another provider with no stored model — blank, NOT a catalog
+    // guess: models are discovered at runtime, so there is nothing to default to.
     useAiSettings.getState().setProvider("opencode-go");
-    expect(useAiSettings.getState().model).toBe("deepseek-v4-flash");
+    expect(useAiSettings.getState().model).toBe("");
     useAiSettings.getState().setModel("opus-5");
     expect(useAiSettings.getState().models["opencode-go"]).toBe("opus-5");
 
@@ -285,13 +286,14 @@ describe("aiSettings store", () => {
     expect(useAiSettings.getState().model).toBe("opus-5");
   });
 
-  it("setProvider uses valid bootstrap models before keyed discovery is available", () => {
-    for (const [provider, model] of [
-      ["opencode-go", "deepseek-v4-flash"],
-      ["deepseek", "deepseek-v4-flash"],
-    ]) {
+  it("setProvider leaves the model blank when the provider has none stored", () => {
+    // No baked-in bootstrap model: a hardcoded default was a guess the provider
+    // may not serve (the "default model not found" failure), so an unconfigured
+    // provider stays empty until the composer picker discovers one.
+    for (const provider of ["opencode-go", "deepseek"]) {
+      useAiSettings.setState({ model: "leftover", models: {} });
       useAiSettings.getState().setProvider(provider);
-      expect(useAiSettings.getState().model).toBe(model);
+      expect(useAiSettings.getState().model).toBe("");
     }
   });
 

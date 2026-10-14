@@ -48,17 +48,26 @@ pub(crate) async fn list_models(
     state: &AppState,
     provider: &str,
     base_url: &str,
+    draft_key: &str,
 ) -> Result<String, String> {
     let env_custom = if provider == agent::CUSTOM_PROVIDER_ID {
         custom_env_config()
     } else {
         None
     };
-    let api_key = env_custom
-        .as_ref()
-        .and_then(|(_, key, _)| key.clone())
-        .or_else(|| keys::get_key(&state.data_dir, provider).ok())
-        .ok_or_else(|| "No API key found".to_string())?;
+    /* A draft key (typed in Settings, not yet saved) wins so model discovery can
+     * run BEFORE the key is persisted: the settings form needs a model to save
+     * against, and the key cannot be stored until that save succeeds. Falls back
+     * to the env key, then the stored key. */
+    let api_key = if !draft_key.is_empty() {
+        draft_key.to_string()
+    } else {
+        env_custom
+            .as_ref()
+            .and_then(|(_, key, _)| key.clone())
+            .or_else(|| keys::get_key(&state.data_dir, provider).ok())
+            .ok_or_else(|| "No API key found".to_string())?
+    };
     let effective_base_url = if let Some((env_url, _, _)) = env_custom {
         env_url
     } else {
@@ -78,7 +87,7 @@ pub(crate) async fn list_models(
     let custom_resolution = if provider == agent::CUSTOM_PROVIDER_ID {
         Some(agent::validated_custom_addrs(&effective_base_url, false)?)
     } else {
-        agent::validate_provider_base_url(provider, &effective_base_url)?;
+        agent::validate_base_url(provider, &effective_base_url)?;
         None
     };
     let mut client_builder = reqwest::Client::builder()
@@ -135,7 +144,7 @@ pub(crate) async fn test_connection(
     let custom_resolution = if provider == agent::CUSTOM_PROVIDER_ID {
         Some(agent::validated_custom_addrs(&base_url, false)?)
     } else {
-        agent::validate_provider_base_url(provider, &base_url)?;
+        agent::validate_base_url(provider, &base_url)?;
         None
     };
     let mut client_builder = reqwest::Client::builder()

@@ -11,7 +11,9 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let root: Root | null = null
 const props = (overrides: Partial<React.ComponentProps<typeof ProfileMenu>> = {}) => ({
   isNative: false,
+  settingsOpen: false,
   onOpenSettings: vi.fn(),
+  onCloseSettings: vi.fn(),
   onOpenShortcuts: vi.fn(),
   onLogout: vi.fn(),
   ...overrides,
@@ -69,6 +71,19 @@ describe('ProfileMenu', () => {
     openMenu()
     act(() => Array.from(document.querySelectorAll('button')).find(button => button.textContent?.includes('Settings'))!.click())
     expect(onOpenSettings).toHaveBeenCalledOnce()
+  })
+
+  it('swaps the Settings row for a Go Back action while settings is open', () => {
+    const onCloseSettings = vi.fn()
+    renderMenu(props({ settingsOpen: true, onCloseSettings }))
+    openMenu()
+
+    expect(Array.from(document.querySelectorAll('button')).some(button => button.textContent?.includes('Settings'))).toBe(false)
+    const back = Array.from(document.querySelectorAll('button')).find(button => button.textContent?.includes('Go Back'))
+    expect(back).toBeDefined()
+    act(() => back!.click())
+    expect(onCloseSettings).toHaveBeenCalledOnce()
+    expect(document.body.textContent).not.toContain('Go Back')
   })
 
   it('dismisses on outside pointer and Escape, restoring focus on Escape', () => {

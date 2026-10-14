@@ -66,7 +66,6 @@ export default function SystemSettings() {
     <div className="flex flex-col gap-5">
       {/* Account */}
       <div>
-        <div className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">Account</div>
         {cfg.admin ? (
           <>
             <div className="text-xs text-muted mb-3">Signed in as <span className="text-foreground">{cfg.admin.email}</span></div>

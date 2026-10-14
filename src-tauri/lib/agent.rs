@@ -31,7 +31,7 @@ fn pin_custom_endpoint(
     base_url: &str,
 ) -> Result<reqwest::ClientBuilder, String> {
     if provider != crate::agent::CUSTOM_PROVIDER_ID {
-        crate::agent::validate_base_url(base_url)?;
+        crate::agent::validate_base_url(provider, base_url)?;
         return Ok(builder);
     }
     let (host, addrs) = crate::agent::validated_custom_addrs(base_url, true)?;
@@ -62,14 +62,26 @@ pub fn set_api_key(
         return Err("Provider is already configured; revoke it before changing settings".into());
     }
     crate::keychain::set_key(provider, key)?;
-    // The endpoint records where the key will actually be sent. An omitted URL
-    // (catalog provider, UI did not send one) must NOT erase a URL already on
+    // The endpoint records where the key will actually be sent. A supplied URL is
+    // bound to the provider BEFORE persisting (exact catalog host only); an omitted
+    // URL falls back to the catalog default and must NOT erase a URL already on
     // file — `validate_base_url` re-checks it at send time either way.
+    let base_url = match base_url.filter(|u| !u.is_empty()) {
+        Some(url) => {
+            if provider == crate::agent::CUSTOM_PROVIDER_ID {
+                crate::agent::validate_custom_base_url(&url, true)?;
+            } else {
+                crate::agent::validate_base_url(provider, &url)?;
+            }
+            Some(url)
+        }
+        None => None,
+    };
     let mut selection = load_selection(&app);
     {
         let endpoint = selection.endpoints.entry(provider.to_string()).or_default();
         endpoint.model = model.as_deref().unwrap_or("").to_string();
-        if let Some(url) = base_url.filter(|u| !u.is_empty()) {
+        if let Some(url) = base_url {
             endpoint.base_url = url;
         }
     }
@@ -668,7 +680,7 @@ pub async fn ask_ai(
             crate::keychain::get_key(&provider).map_err(|_| "No API key found in keychain")?;
         crate::agent::Agent::new(&provider, &model, &key, &resolved)
     } else {
-        crate::agent::validate_base_url(&resolved)?;
+        crate::agent::validate_base_url(&provider, &resolved)?;
         let key =
             crate::keychain::get_key(&provider).map_err(|_| "No API key found in keychain")?;
         crate::agent::Agent::new(&provider, &model, &key, &resolved)

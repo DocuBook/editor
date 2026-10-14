@@ -4,7 +4,7 @@ import { PanelLeftClose } from 'lucide-react'
 import Sidebar from './components/Sidebar'
 import SearchModal from './components/SearchModal'
 import Editor from './components/Editor'
-import SettingsModal from './components/SettingsModal'
+import SettingsPane from './components/SettingsPane'
 import ShortcutsModal from './components/ShortcutsModal'
 import { Toaster, toast } from 'sonner'
 
@@ -21,6 +21,7 @@ import Login from './components/Login'
 import { logger } from './utils/logger'
 import { useTheme } from './stores/theme'
 import { hydrateAiSettings } from './stores/aiSettings'
+import { useSettings } from './stores/settings'
 
 /** Root application component with keyboard shortcuts. */
 export default function App() {
@@ -31,7 +32,10 @@ export default function App() {
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  /** Settings now lives in the editor container, not a dialog. The store is the
+   *  single flag every entry point drives (sidebar tree, profile menu, ⌘,). */
+  const settingsOpen = useSettings(s => s.open)
+  const openSettingsStore = useSettings(s => s.openSettings)
   /** Search lives here (not in Sidebar) so ⌘F/⌘P and the modal keep working
    *  with the sidebar closed — Sidebar unmounts when hidden. */
   const [searchOpen, setSearchOpen] = useState(false)
@@ -47,7 +51,12 @@ export default function App() {
     searchFolderRef.current = fn
     return () => { if (searchFolderRef.current === fn) searchFolderRef.current = () => {} }
   }, [])
-  const modalOpen = searchOpen || settingsOpen || shortcutsOpen || confirmCloseVault
+  /** Settings is NOT a modal: it renders in the editor container and leaves the
+   *  workspace interactive, so it is deliberately absent here. The mobile drawer
+   *  may stay open over the pane, so the settings tree remains reachable for
+   *  further navigation — the external entry points (⌘, / profile menu) close the
+   *  drawer themselves when they open the pane. */
+  const modalOpen = searchOpen || shortcutsOpen || confirmCloseVault
   const sidebarOpen = isDesktop ? desktopSidebarOpen : mobileDrawerOpen
   const drawerOpen = !isDesktop && isVaultOpen && status === 'ready' && mobileDrawerOpen && !modalOpen
   const closeMobileDrawer = useCallback(() => setMobileDrawerOpen(false), [])
@@ -57,17 +66,17 @@ export default function App() {
     else if (!modalOpen) setMobileDrawerOpen(open => !open)
   }, [isDesktop, isVaultOpen, modalOpen, status])
   const openSearch = useCallback(() => {
-    setMobileDrawerOpen(false); setSettingsOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); setSearchOpen(true)
+    setMobileDrawerOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); setSearchOpen(true)
   }, [])
   const openSettings = useCallback(() => {
-    setMobileDrawerOpen(false); setSearchOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); setSettingsOpen(true)
-  }, [])
+    setMobileDrawerOpen(false); setSearchOpen(false); setShortcutsOpen(false); setConfirmCloseVault(false); openSettingsStore()
+  }, [openSettingsStore])
   const openShortcuts = useCallback(() => {
-    setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setConfirmCloseVault(false); setShortcutsOpen(true)
+    setMobileDrawerOpen(false); setSearchOpen(false); setConfirmCloseVault(false); setShortcutsOpen(true)
   }, [])
 
   const requestCloseVault = useCallback(() => {
-    setMobileDrawerOpen(false); setSearchOpen(false); setSettingsOpen(false); setShortcutsOpen(false); setConfirmCloseVault(true)
+    setMobileDrawerOpen(false); setSearchOpen(false); setShortcutsOpen(false); setConfirmCloseVault(true)
   }, [])
 
   /** Mobile drawer starts closed on every transition; desktop restores its own collapse preference. */
@@ -208,7 +217,11 @@ export default function App() {
         )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <SyncStatusBadge />
-          <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
+          {/* Settings swaps into the editor container — the workspace stays
+              mounted (no dialog), so the sidebar tree can keep driving it. */}
+          {settingsOpen
+            ? <SettingsPane />
+            : <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />}
         </main>
       </div>
 
@@ -238,7 +251,6 @@ export default function App() {
         <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
       </Drawer>
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       {confirmCloseVault && (
         <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={() => setConfirmCloseVault(false)}>

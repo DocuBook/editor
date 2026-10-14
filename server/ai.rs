@@ -131,7 +131,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
             if base_url.is_empty() {
                 return err_response("Provider, model, and base URL are required");
             }
-            if let Err(error) = agent::validate_provider_base_url(p, &base_url) {
+            if let Err(error) = agent::validate_base_url(p, &base_url) {
                 return err_response(&error);
             }
             let key = match keys::get_key(&state.data_dir, p) {

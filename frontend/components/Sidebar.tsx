@@ -20,6 +20,8 @@ import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
 import PermissionDialog from './PermissionDialog'
 import ProfileMenu from './ProfileMenu'
+import SettingsNav from './settings/SettingsNav'
+import { useSettings } from '../stores/settings'
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
@@ -65,6 +67,12 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   const sidebarActionsRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
   const [activePanel, setActivePanel] = useState<SidebarPanelId>('vault')
+  /** Settings is NOT a sidebar panel and has no tab: the profile menu (and ⌘,)
+   *  is the ONLY trigger, and it flips this store flag. While it is on, the tree
+   *  area swaps to the settings tree; the panel tabs stay as they were. */
+  const settingsOpen = useSettings(s => s.open)
+  const openSettings = useSettings(s => s.openSettings)
+  const closeSettings = useSettings(s => s.closeSettings)
 
 
   /** Declared before closeContextMenu so it reads an initialized binding (react/immutability). */
@@ -115,13 +123,17 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   } = useTreeActions({ registerSearchFolder, onDeleted: loadTrash, onNavigate })
 
   /* oxlint-disable react/set-state-in-effect -- resets the panel on vault change */
-  useEffect(() => { setActivePanel('vault') }, [vaultPath, isOpen])
+  useEffect(() => { if (!useSettings.getState().open) setActivePanel('vault') }, [vaultPath, isOpen])
   /* oxlint-enable react/set-state-in-effect */
 
   const selectPanel = async (panel: SidebarPanelId) => {
     setShowPlusMenu(false)
     setVaultMenuOpen(false)
     closeContextMenu()
+    /** Picking any panel leaves Settings: the settings tree is not a tab, so
+     *  switching panels while it is showing closes the editor-container pane to
+     *  avoid it lingering behind a panel. The section is kept for next time. */
+    if (settingsOpen) closeSettings()
     setActivePanel(panel)
     if (panel === 'trash') await loadTrash()
     // Changes reads the shared git-status store, which only refreshes on actions,
@@ -236,7 +248,10 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
         </button>
       </div>
 
-      {isOpen && activePanel === 'vault' && (
+      {/* Settings owns the whole tree area: while it is open, NO other tree panel
+          (vault / git / trash / backlinks) renders — the nav list sits where the
+          file tree normally is, directly under the search bar. */}
+      {!settingsOpen && isOpen && activePanel === 'vault' && (
         <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5">
             {loading && <div className="text-foreground-subtle text-xs p-2">Loading...</div>}
             {!loading && visibleItems.length === 0 && !creating && <div className="text-foreground-subtle italic text-xs p-2">Empty vault</div>}
@@ -273,8 +288,9 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
             ))}
           </div>
       )}
-      {isOpen && activePanel === 'git' && <GitPanel />}
-      {(isOpen || isTauri) && activePanel === 'trash' && (
+      {!settingsOpen && isOpen && activePanel === 'git' && <GitPanel />}
+      {settingsOpen && <SettingsNav />}
+      {!settingsOpen && (isOpen || isTauri) && activePanel === 'trash' && (
         <TrashPanel
           items={trashItems}
           loading={trashLoading}
@@ -285,8 +301,8 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           onBusyChange={setTrashBusy}
         />
       )}
-      {!isOpen && activePanel !== 'trash' && <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>}
-      {isOpen && activePanel === 'vault' && (
+      {!isOpen && activePanel !== 'trash' && !settingsOpen && <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>}
+      {!settingsOpen && isOpen && activePanel === 'vault' && (
         <div className="max-h-32 overflow-y-auto text-xs">
           <BacklinksPanel onNavigate={onNavigate} />
         </div>
@@ -347,7 +363,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
 
       </div>
 
-      <ProfileMenu isNative={isTauri} onOpenSettings={onOpenSettings} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
+      <ProfileMenu isNative={isTauri} settingsOpen={settingsOpen} onOpenSettings={() => { onOpenSettings(); openSettings() }} onCloseSettings={() => { onNavigate(); closeSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
 
       {ctxItem && (
         <SidebarContextMenu

@@ -274,7 +274,7 @@ mod api_tests {
 
         let (s, _, b) = post_with(
             &app,
-            "/api/set_api_key",
+            "/api/set_custom_endpoint",
             json!({ "provider": "openai-compatible", "key": "sk-test-42", "baseUrl": "https://kenari.id/v1", "model": "deepseek-v4-1-flash" }),
             Some(&cookie),
         )

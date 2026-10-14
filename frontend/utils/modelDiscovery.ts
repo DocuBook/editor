@@ -14,11 +14,16 @@ export interface DiscoveredModel {
 const TTL_MS = 5 * 60 * 1000
 const cache = new Map<string, { at: number; models: DiscoveredModel[] }>()
 
-export async function fetchProviderModels(provider: string, baseUrl: string): Promise<DiscoveredModel[]> {
+/** `apiKey` is optional: the composer discovers with the STORED key, while the
+ *  settings form may pass a key the user just typed but has not saved yet — the
+ *  one case where discovery must run before the backend knows the key. */
+export async function fetchProviderModels(provider: string, baseUrl: string, apiKey?: string): Promise<DiscoveredModel[]> {
   const key = provider + '|' + baseUrl
   const hit = cache.get(key)
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.models
-  const models = JSON.parse(await invoke<string>('list_models', { provider, baseUrl })) as DiscoveredModel[]
+  /** A cache hit is only reusable for a stored-key lookup: an explicit key is a
+   *  different (unsaved) credential, so it must not read the cached list. */
+  if (!apiKey && hit && Date.now() - hit.at < TTL_MS) return hit.models
+  const models = JSON.parse(await invoke<string>('list_models', { provider, baseUrl, ...(apiKey ? { apiKey } : {}) })) as DiscoveredModel[]
   // Dedupe by id — some /models endpoints return the same id with different
   // casing/duplicates, which breaks React list keys (duplicate-key warning).
   const seen = new Set<string>()
