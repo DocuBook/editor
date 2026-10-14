@@ -18,8 +18,17 @@ export default function ProfileMenu({ isNative, onOpenSettings, onOpenShortcuts,
   const triggerRef = useRef<HTMLButtonElement>(null)
   const firstItemRef = useRef<HTMLButtonElement>(null)
   const email = useAuth(state => state.email)
-  const close = () => { setOpen(false); triggerRef.current?.focus() }
+  const close = () => setOpen(false)
   const closeAnd = (action: () => void) => { close(); action() }
+  /** Restore focus only AFTER the popover has unmounted. Focusing the trigger
+   *  in the same tick as setOpen(false) is undone when React removes the still
+   *  mounted menu: the browser blurs the removed descendant to <body>, so the
+   *  menu dismisses but focus is left stranded. */
+  const wasOpen = useRef(false)
+  useEffect(() => {
+    if (wasOpen.current && !open) triggerRef.current?.focus()
+    wasOpen.current = open
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -30,14 +39,21 @@ export default function ProfileMenu({ isNative, onOpenSettings, onOpenShortcuts,
     const onMouseDown = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) close()
     }
-    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      /** Claim Escape so no global/drawer handler also reacts and moves focus
+       *  after we restore it to the trigger. */
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+    }
     document.addEventListener('pointerdown', onPointerDown)
     document.addEventListener('mousedown', onMouseDown)
-    window.addEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
     return () => {
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('mousedown', onMouseDown)
-      window.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('keydown', onKeyDown, true)
     }
   }, [open])
 
