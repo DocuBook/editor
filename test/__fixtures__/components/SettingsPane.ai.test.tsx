@@ -213,6 +213,26 @@ describe('SettingsPane — unconfigured provider', () => {
 })
 
 describe('SettingsPane — configured provider', () => {
+  it('keeps an incomplete endpoint editable when the backend reports no key', async () => {
+    backend.active = 'opencode-go'
+    backend.savedProviders = ['opencode-go']
+    backend.endpoints = {
+      'opencode-go': {
+        baseUrl: 'https://opencode.ai/zen/go/v1',
+        model: 'server-model',
+        probes: {},
+        hasKey: false,
+      },
+    }
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    expect(inSection('opencode-go', 'Base URL')!.readOnly).toBe(false)
+    expect(buttonsIn('opencode-go')).toContain('Save')
+    expect(buttonsIn('opencode-go')).toContain('Test')
+    expect(buttonsIn('opencode-go')).not.toContain('Revoke')
+  })
+
   it('locks the fields to the FETCHED backend values and offers only Revoke', async () => {
     // The reported bug: a fresh browser rendered an empty input column because
     // the fields came from a store snapshot instead of a fetch. Locked fields
