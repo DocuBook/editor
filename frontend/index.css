@@ -825,21 +825,3 @@ body .code-block-language-empty {
     min-width: 1px;
   }
 }
-
-/* Mirror the head guard for stylesheet-only entry points. The head copy is
-   required for the first paint before the application stylesheet loads. */
-#root
-  .bn-react-node-view-renderer
-  > [data-node-view-content-react] {
-  visibility: hidden;
-}
-
-#root
-  .bn-preview-with-source-popup:not([data-open="true"])
-  .bn-source-block-popup {
-  visibility: hidden;
-}
-
-#root .bn-preview-with-source-popup[data-open="true"] .bn-source-block-popup {
-  visibility: visible;
-}

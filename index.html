@@ -12,20 +12,6 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
         <meta name="theme-color" content="#0c0c0d" />
         <title>DocuBook Editor</title>
-        <!-- Hide source-backed node content during the brief cold-mount window
-             before BlockNote reparents contentDOM into its preview wrapper. This
-             must be parsed before the editor script to prevent a raw-source flash. -->
-        <style>
-            .bn-preview-with-source-popup:not([data-open='true']) .bn-source-block-popup {
-                visibility: hidden;
-            }
-            .bn-react-node-view-renderer > [data-node-view-content-react] {
-                visibility: hidden;
-            }
-            .bn-preview-with-source-popup[data-open='true'] .bn-source-block-popup {
-                visibility: visible;
-            }
-        </style>
     </head>
     <body>
         <div id="root"></div>
