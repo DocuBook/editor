@@ -24,8 +24,7 @@ const LOCKED_FIELD: React.CSSProperties = { background: 'var(--color-surface-act
  *  state machine's single input: configured → fields render the fetched values
  *  read-only and only Revoke is offered. */
 const hasBackendKey = (cfg: BackendAiSettings | null, provider: string): boolean =>
-  !!provider && !!cfg && (cfg.endpoints[provider]?.hasKey === true
-    || (!Object.prototype.hasOwnProperty.call(cfg.endpoints, provider) && cfg.savedProviders.includes(provider)))
+  !!provider && !!cfg && cfg.endpoints[provider]?.hasKey === true
 
 /** What a configured provider's fields are locked to: the endpoint the backend
  *  stored, with `env` (custom provider only) overriding it — the env vars win
