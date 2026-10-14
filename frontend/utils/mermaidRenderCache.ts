@@ -5,6 +5,7 @@ import {
   recordCacheSize,
 } from './cacheStats';
 import { createLruCache } from './lruCache';
+import { remapSvgIds } from './svgIdRemap';
 
 const DEFAULT_MAX_ENTRIES = 100;
 /** Total SVG budget in UTF-16 code units (≈2 bytes per unit at most). The cap
@@ -30,9 +31,9 @@ function withId<T extends { svg: string }>(
   from: string,
   to: string,
 ): T {
-  return from === to
-    ? result
-    : { ...result, svg: result.svg.replaceAll(from, to) };
+  // A plain replaceAll would also rewrite a longer id that has `from` as a
+  // prefix; see `remapSvgIds`.
+  return from === to ? result : { ...result, svg: remapSvgIds(result.svg, from, to) };
 }
 
 export function whenIdle<T>(run: () => Promise<T>): Promise<T> {

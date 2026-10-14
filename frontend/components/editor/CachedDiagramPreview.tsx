@@ -9,12 +9,13 @@ import mermaid from 'mermaid'
 import {
   getDiagramDictionary,
   initializeMermaid,
-  trimDiagramSVG,
   withSVGFontFamily,
   type DiagramBlockConfig,
 } from '@blocknote/diagram-block'
 import { SiMermaid } from 'react-icons/si'
 import { cacheDiagramSVG, peekDiagramSVG } from '../../utils/mermaidRenderCache'
+import { safeTrimDiagramSVG } from '../../utils/diagramTrim'
+import { remapSvgIds } from '../../utils/svgIdRemap'
 import { PreviewSkeleton } from './PreviewSkeleton'
 
 /** Each render needs its own element ID: Mermaid removes any existing document
@@ -36,7 +37,7 @@ interface StoredDiagram extends DiagramRenderState {
 const svgForPreview = (source: string, previewId: string): string => {
   const cached = peekDiagramSVG(source)
   return cached?.svg && cached.renderId
-    ? cached.svg.replaceAll(cached.renderId, previewId)
+    ? remapSvgIds(cached.svg, cached.renderId, previewId)
     : cached?.svg ?? ''
 }
 
@@ -51,8 +52,9 @@ const seed = (source: string, previewId: string): StoredDiagram => ({
  *  "keep the last good diagram up while editing" behaviour. It is reimplemented
  *  rather than reused because the cache must wrap the two steps that run AFTER
  *  `mermaid.render`, and the upstream hook exposes no seam for them: its state
- *  starts empty on every mount, so a remount both re-runs `trimDiagramSVG` (a
- *  synchronous `getBBox` reflow) and the font rewrite, AND shows a blank preview
+ *  starts empty on every mount, so a remount both re-runs the trim (a
+ *  synchronous `getBBox` reflow, guarded by `safeTrimDiagramSVG`) and the font
+ *  rewrite, AND shows a blank preview
  *  first — the flash a diagram-heavy document makes on every tab switch.
  *
  *  A tab switch remounts the block (see `editorFactory`: the BlockNote instance
@@ -76,7 +78,7 @@ function useCachedMermaidSVG(source: string, fontFamilyElement?: Element): Diagr
       : ''
 
     // Already painted from the cache by the render below; re-rendering would
-    // redo `trimDiagramSVG` for an SVG that is byte-identical.
+    // redo the trim for an SVG that is byte-identical.
     const cached = peekDiagramSVG(source)
     if (cached && cached.fontFamily === fontFamily) return
 
@@ -93,10 +95,10 @@ function useCachedMermaidSVG(source: string, fontFamilyElement?: Element): Diagr
         // render, and the visible SVG must survive while a new source is rendering.
         const { svg: rendered } = await mermaid.render(renderId, source)
         if (stale) return
-        const trimmed = trimDiagramSVG(rendered)
+        const trimmed = safeTrimDiagramSVG(rendered)
         const svg = fontFamily ? withSVGFontFamily(trimmed, fontFamily) : trimmed
         cacheDiagramSVG(source, svg, fontFamily, renderId)
-        setStored({ source, svg: svg.replaceAll(renderId, previewId) })
+        setStored({ source, svg: remapSvgIds(svg, renderId, previewId) })
       } catch (err) {
         if (stale) return
         // The last good diagram stays up, like the upstream hook: only the error
