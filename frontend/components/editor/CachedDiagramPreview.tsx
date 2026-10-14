@@ -15,7 +15,6 @@ import {
 } from '@blocknote/diagram-block'
 import { SiMermaid } from 'react-icons/si'
 import { cacheDiagramSVG, peekDiagramSVG } from '../../utils/mermaidRenderCache'
-import { PreviewSkeleton } from './PreviewSkeleton'
 
 /** Each render needs its own element ID: Mermaid removes any existing document
  *  element with the given ID when rendering, which would yank a displayed diagram
@@ -148,9 +147,7 @@ export const CachedDiagramPreviewWithPopup = (
             aria-label={dict.preview_label}
             dangerouslySetInnerHTML={{ __html: svg }}
           />
-        ) : error ? undefined : (
-          <PreviewSkeleton />
-        )
+        ) : undefined
       }
       error={error}
       errorPreview={

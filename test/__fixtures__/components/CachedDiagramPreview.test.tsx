@@ -23,7 +23,6 @@ vi.mock('@blocknote/core', () => ({
 }))
 
 vi.mock('react-icons/si', () => ({ SiMermaid: () => null }))
-vi.mock('@mantine/core', () => ({ Skeleton: ({ height }: { height: number }) => <div data-testid="skeleton" style={{ height }} /> }))
 
 vi.mock('@blocknote/react', () => ({
   // Renders its label like the real placeholder, so the error path is observable
@@ -174,28 +173,16 @@ describe('CachedDiagramPreviewWithPopup', () => {
     expect(container.innerHTML).not.toContain('id="old"')
   })
 
-  it('shows a skeleton while Mermaid renders, then caches the finished SVG', async () => {
-    let resolveRender!: (value: { svg: string }) => void
-    mermaid.render.mockReturnValueOnce(new Promise((resolve) => { resolveRender = resolve }))
-
-    renderDiagramNow('graph TD; A-->B')
-    expect(container.querySelector('[data-testid="skeleton"]')).not.toBeNull()
-    expect(container.querySelector('[data-has-preview="true"]')).not.toBeNull()
-
-    await act(async () => {
-      resolveRender({ svg: '<svg id="diagram"></svg>' })
-      await Promise.resolve()
-    })
-    expect(container.querySelector('[data-testid="skeleton"]')).toBeNull()
-
+  it('renders on a miss, then caches the finished SVG for the next mount', async () => {
+    await renderDiagram('graph TD; A-->B')
 
     expect(mermaid.render).toHaveBeenCalledOnce()
     expect(mermaid.render.mock.calls[0][1]).toBe('graph TD; A-->B')
     const renderId = mermaid.render.mock.calls[0][0]
-    expect(container.innerHTML).toContain('id="diagram"')
+    expect(container.innerHTML).toContain('id="mermaid-preview-')
     expect(container.innerHTML).not.toContain(`id="${renderId}"`)
     expect(peekDiagramSVG('graph TD; A-->B')?.renderId).toBe(renderId)
-    expect(peekDiagramSVG('graph TD; A-->B')?.svg).toContain('id="diagram"')
+    expect(peekDiagramSVG('graph TD; A-->B')?.svg).toContain(`id="${renderId}"`)
   })
 
   it('does not cache a diagram that failed to render, and keeps the last good one up', async () => {
