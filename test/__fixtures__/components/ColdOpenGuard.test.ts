@@ -54,9 +54,12 @@ const safariFallback = (() => {
 
 /** Selector-specificity score (a,b,c): id, class/attr/pseudo-class, element. */
 const specificity = (selector: string): [number, number, number] => {
-  const ids = (selector.match(/#[\w-]+/g) ?? []).length
-  const classes = (selector.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+(?:\([^)]*\))?/g) ?? []).length
-  const elements = (selector.match(/(^|\s|>|\+|~)[a-z][\w-]*/g) ?? []).length
+  // :not(), :is(), and :has() contribute the specificity of their arguments,
+  // not an additional pseudo-class point.
+  const selectorArguments = selector.replace(/:(?:not|is|has)\(([^()]*)\)/g, '$1')
+  const ids = (selectorArguments.match(/#[\w-]+/g) ?? []).length
+  const classes = (selectorArguments.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+(?:\([^)]*\))?/g) ?? []).length
+  const elements = (selectorArguments.match(/(^|\s|>|\+|~)[a-z][\w-]*/g) ?? []).length
   return [ids, classes, elements]
 }
 
