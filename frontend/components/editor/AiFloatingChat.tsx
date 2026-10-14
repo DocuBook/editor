@@ -442,7 +442,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     setInput('')
   }
 
-  const accept = useCallback(() => { setExpanded(false); ai.acceptChanges() }, [ai])
+  const accept = useCallback(() => { setExpanded(false); ai.acceptChanges() }, [ai, setExpanded])
   const revert = () => { setExpanded(false); ai.rejectChanges() }
 
   useEffect(() => {
