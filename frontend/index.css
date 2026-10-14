@@ -836,6 +836,15 @@ body .code-block-language-empty {
   visibility: hidden;
 }
 
+/* Visibility is inherited by the preview when its source shares the guarded
+   node-view subtree. Reassert it with enough specificity to beat the guard. */
+#root
+  .bn-react-node-view-renderer
+  .bn-preview-with-source-popup
+  .bn-preview-container {
+  visibility: visible;
+}
+
 /* The popup's own source, once it exists, is governed by the popup rules below. */
 #root
   .bn-preview-with-source-popup:not([data-open="true"])

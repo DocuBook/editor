@@ -47,6 +47,12 @@ describe('cold-open guard in index.html', () => {
     )
   })
 
+  it('keeps a settled preview visible despite inherited visibility', () => {
+    expect(headStyle).toContain(
+      '.bn-react-node-view-renderer .bn-preview-with-source-popup .bn-preview-container { visibility: visible; }',
+    )
+  })
+
   it('does not exclude the code block — its source is appended the same way', () => {
     // A code block has no separate preview, but its contentDOM is STILL appended
     // as a bare direct child during the cold window (then re-parented into

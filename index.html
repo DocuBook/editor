@@ -41,6 +41,11 @@
             .bn-react-node-view-renderer > [data-node-view-content-react] {
                 visibility: hidden;
             }
+            /* `visibility` is inherited: keep a settled preview visible when
+               its source shares the guarded node-view subtree. */
+            .bn-react-node-view-renderer .bn-preview-with-source-popup .bn-preview-container {
+                visibility: visible;
+            }
             /* An open popup's source stays editable and visible. */
             .bn-preview-with-source-popup[data-open='true'] .bn-source-block-popup {
                 visibility: visible;
