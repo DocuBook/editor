@@ -812,14 +812,16 @@ body .code-block-language-empty {
 
 /* Safari 15 / macOS 12 WKWebView does not support `overflow: clip`, which
    BlockNote uses to visually collapse closed math/diagram source popups.
-   `hidden` keeps the editable source mounted, unlike `display: none`. */
+   `hidden` keeps the editable source mounted, unlike `display: none`.
+   Deliberately NOT prefixed with `#root`: an id would outrank BlockNote's own
+   `.bn-source-block-popup` popup rules and re-open the #263 regression. These
+   selectors stay at the vendor's class specificity. */
 @supports not (overflow: clip) {
-  #root
-    .bn-preview-with-source-popup:not([data-open="true"])
+  .bn-preview-with-source-popup:not([data-open="true"])
     .bn-source-block-popup {
     overflow: hidden;
   }
-  #root .bn-code-block-source-popup-input-empty [data-node-view-content-react] {
+  .bn-code-block-source-popup-input-empty [data-node-view-content-react] {
     display: inline-block;
     min-height: 1em;
     min-width: 1px;
