@@ -3,6 +3,7 @@ import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { Plus, X, GitBranch, RefreshCw } from 'lucide-react'
 import { pollGitStatus } from '../stores/gitStatus'
+import SettingsSection from './settings/SettingsSection'
 
 interface GitRemote { name: string; url: string }
 interface GitSettingsData {
@@ -14,8 +15,8 @@ interface GitSettingsData {
 interface InitResult { created: boolean; branch: string }
 interface RemoteProbe { reachable: boolean; empty: boolean; defaultBranch: string; branches: number; error: string }
 
-/** Git settings section: commit identity + remotes + auth guidance. */
-export default function GitSettings() {
+/** Git settings page content: identity + remotes + auth guidance. */
+export default function GitSettings({ titleIsFirstSection = true }: { titleIsFirstSection?: boolean }) {
   const [data, setData] = useState<GitSettingsData | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -95,7 +96,26 @@ export default function GitSettings() {
     cancelRemoveRef.current?.focus()
   }
 
-  if (!data) return <div className="text-xs text-muted py-2">Loading git settings…</div>
+  /** Both anchors render in EVERY branch below (loading, no-vault, not-a-repo,
+   *  full form): the sidebar tree links to these ids, so an id that only exists
+   *  once git is fully set up would make two of its rows dead exactly when a
+   *  user most needs them (setting git up). Identity is always the FIRST section
+   *  on the page, so it passes `first` to drop its top divider (the page title
+   *  sits directly above it). Its id lives on the page title (the pane owns that
+   *  anchor), so Remotes keeps ITS divider unless the title is some other section. */
+  const identitySection = (body: React.ReactNode) => (
+    <SettingsSection title="Identity" first>{body}</SettingsSection>
+  )
+  const remotesAnchor = () => (
+    <SettingsSection id="git-remotes" first={!titleIsFirstSection} />
+  )
+
+  if (!data) return (
+    <div className="text-xs">
+      {identitySection(<div className="text-muted py-2">Loading git settings…</div>)}
+      {remotesAnchor()}
+    </div>
+  )
   /** Buttons need to read as buttons: `surface-hover` sits too close to the panel
    *  surface in both themes, so interactive controls carry either an accent fill
    *  (primary), a raised fill plus border (secondary), or the danger token. */
@@ -103,12 +123,16 @@ export default function GitSettings() {
   const btnSecondary = 'px-3 py-1.5 rounded-md bg-surface-active text-foreground border border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-xs whitespace-nowrap hover:bg-surface-hover transition-colors'
   const btnDanger = 'px-3 py-1.5 rounded-md bg-danger text-on-danger border-none cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-xs whitespace-nowrap hover:bg-danger-hover transition-colors'
   if (data.noVault) return (
-    <div className="text-xs text-muted leading-relaxed">
-      No vault is open — open or create a vault first, then return here to set up git (identity, remotes, publishing).
+    <div className="text-xs">
+      {identitySection(<div className="text-muted leading-relaxed">
+        No vault is open — open or create a vault first, then return here to set up git (identity, remotes, publishing).
+      </div>)}
+      {remotesAnchor()}
     </div>
   )
   if (!data.isRepo) return (
-    <div className="text-xs text-muted leading-relaxed flex flex-col gap-3">
+    <div className="text-xs">
+      {identitySection(<div className="text-muted leading-relaxed flex flex-col gap-3">
       <div>This vault is not a git repository yet — publishing is unavailable until it is. You can initialize one below, or open/clone a git repository from the welcome screen.</div>
       <label className="flex items-center gap-2 self-start text-muted">
         <span>Default branch</span>
@@ -124,27 +148,29 @@ export default function GitSettings() {
         first and then add the remote below — an existing local repository is never re-initialized.
       </div>
       {err && <div className="text-[11px] text-danger">{err}</div>}
+      </div>)}
+      {remotesAnchor()}
     </div>
   )
 
   const inputCls = 'w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono focus:border-accent'
   const rowBtnCls = 'px-2 py-0.5 rounded-md bg-surface-active text-foreground-secondary border border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-[11px] whitespace-nowrap hover:text-foreground transition-colors'
   return (
-    <div className="flex flex-col gap-4 text-xs">
-      {/* Commit identity */}
-      <div>
-        <div className="text-xs font-medium text-foreground mb-1.5">Commit identity</div>
+    <div className="text-xs">
+      {/* Identity */}
+      {identitySection(
+        <>
         <div className="flex gap-2">
           <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" className={inputCls} />
           <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className={inputCls} />
           <button onClick={saveIdentity} disabled={busy} className={'shrink-0 ' + btnPrimary}>{busy ? '…' : 'Save'}</button>
         </div>
         <div className="text-[10px] text-muted mt-1">Stored per-vault (local git config) — your global git config is untouched. Required before committing.</div>
-      </div>
+        </>
+      )}
 
       {/* Remotes */}
-      <div>
-        <div className="text-xs font-medium text-foreground mb-1.5">Remotes</div>
+      <SettingsSection id="git-remotes" title="Remotes">
         {data.remotes.length === 0
           ? <div className="text-muted mb-2">No remotes — add one to push.</div>
           : data.remotes.map(r => (
@@ -181,14 +207,14 @@ export default function GitSettings() {
           <span className="font-mono">branch.&lt;branch&gt;.pushRemote</span>, <span className="font-mono">remote.pushDefault</span>, then <span className="font-mono">origin</span>.
           Fetch, Rebase, and Merge live in the Changes panel, where the remote to sync with can be picked.
         </div>
-      </div>
+      </SettingsSection>
 
       {/* Auth guidance */}
-      <div className="text-[10px] text-muted leading-relaxed border-t border-border-subtle pt-3">
+      <div className="text-[10px] text-muted leading-relaxed mt-8 border-t border-border-subtle pt-4">
         <GitBranch size={11} className="inline mr-1 align-[-1px]" />
         Private repositories need credentials configured on this machine — the app uses them automatically: HTTPS → git credential helper (macOS Keychain), SSH → keys in ~/.ssh. Public repos need no setup.
       </div>
-      {err && <div className="text-[11px] text-danger">{err}</div>}
+      {err && <div className="text-[11px] text-danger mt-2">{err}</div>}
 
       {confirmRemove && (
         <div role="alertdialog" aria-modal="true" aria-label="Remove remote" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={cancelRemove} onKeyDown={e => { if (e.key === 'Escape') cancelRemove() }}>

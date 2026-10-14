@@ -1,9 +1,8 @@
 import { create } from 'zustand'
 import { invoke } from '../lib/ipc'
-import { PROVIDERS } from '../data/providers'
 
 /** Synthetic provider id for user-configured OpenAI-compatible endpoints — shared
- *  with SettingsModal and the Rust backend (agent::CUSTOM_PROVIDER_ID). */
+ *  with SettingsPane and the Rust backend (agent::CUSTOM_PROVIDER_ID). */
 export const CUSTOM_PROVIDER_ID = 'openai-compatible'
 
 /** One configured provider as the backend reports it (`ai_settings.endpoints`). */
@@ -83,10 +82,11 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
   baseUrls: {},
   probeTools: {},
   dirtySelection: false,
-  /** Restore the saved model, or use a valid bootstrap model so a new key can be validated before discovery. */
-  setProvider: (p) => {
-    set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || PROVIDERS.find(x => x.id === p)?.defaultModel || '' })
-  },
+  /** Switch provider, keeping whatever model THIS provider already had. No
+   *  catalog fallback: models are discovered at runtime, so an unconfigured
+   *  provider stays empty until the composer picker sets one (a baked-in default
+   *  was a guess that resolved to a model the provider does not serve). */
+  setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || '' }),
   /** Save model per-provider so it survives provider switches. Writing it to the
    *  backend is the caller's job (explicit Save / Test), never an implicit mirror. */
   setModel: (m) => set((s) => ({ model: m, models: { ...s.models, [s.provider]: m } })),
@@ -148,14 +148,15 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
     models[CUSTOM_PROVIDER_ID] = cfg.env.model
   }
   /** Model precedence, most authoritative first: the endpoint the server names as
-   *  active, then anything the server has for the selected provider, then the
-   *  catalog's bootstrap model (the local-selection path). What a browser last
-   *  PICKED is deliberately not consulted: on a fresh session that pick is gone
+   *  active, then anything the server has for the selected provider. Nothing else
+   *  — a catalog bootstrap model no longer exists (a hardcoded id the provider may
+   *  not serve), so a provider with no stored model hydrates as blank and the
+   *  composer picker resolves it through discovery. What a browser last PICKED is
+   *  deliberately not consulted either: on a fresh session that pick is gone
    *  anyway, and preferring it here would describe a model that is not the one
    *  being sent. */
   const model = models[active]
     || models[currentProvider]
-    || PROVIDERS.find(x => x.id === currentProvider)?.defaultModel
     || ''
   /** Composer picks are session-local (Settings Save is what tells the backend), so
    *  a repeat/delayed hydration — the App retry loop exists precisely because a

@@ -214,7 +214,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "config_get" => sync(state, cmd, args),
         "config_set" => sync(state, cmd, args),
         "health" => Ok(cmds::health(state).to_string()),
-        "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl")).await,
+        "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl"), &s("apiKey")).await,
         "context_tools" => {
             configure_mcp(state)?;
             Ok(
@@ -580,6 +580,16 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             let provider = s("provider");
             let key = s("key");
             let base_url = s("baseUrl");
+            // Every provider owns a base URL. When the UI sends one, bind it to the
+            // provider BEFORE persisting: exact catalog host only, so provider A's
+            // key can never be pointed at provider B's host. An omitted URL falls
+            // back to the catalog default (legacy callers that do not send one).
+            let base_url = if base_url.is_empty() {
+                agent::catalog_base_url(&provider).unwrap_or_default().to_string()
+            } else {
+                agent::validate_base_url(&provider, &base_url)?;
+                base_url
+            };
             let previous_key = keys::get_key(&state.data_dir, &provider).ok();
             let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("");
             // A configured provider is immutable until total revoke. Allow only

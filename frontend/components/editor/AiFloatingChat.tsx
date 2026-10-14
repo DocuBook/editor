@@ -51,10 +51,13 @@ const optionId = (position: number) => `mention-option-${position}`
 
 /** `aria-controls` target for the composer while the picker is open. */
 const MENTION_LISTBOX_ID = 'mention-listbox'
+/** Provider badges in the model picker. Name-style (not initialisms) so each
+ *  row reads as its provider: the catalog `name` alone is too wide for the row,
+ *  so short but spelled-out forms are used. */
 const MODEL_PROVIDER_LABELS: Record<string, string> = {
-  'opencode-go': 'Go',
-  deepseek: 'DS',
-  [CUSTOM_PROVIDER_ID]: 'OPC',
+  'opencode-go': 'Opencode',
+  deepseek: 'DeepSeek',
+  [CUSTOM_PROVIDER_ID]: 'OpenAI',
 }
 
 /** Folder part of a vault path (`docs/notes` for `docs/notes/guide.md`), empty

@@ -157,7 +157,14 @@ pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<
 }
 
 /// Validate a catalog provider endpoint before sending its stored key.
-pub fn validate_base_url(base_url: &str) -> Result<(), String> {
+///
+/// This is the SINGLE validation for ALL catalog providers: it checks the scheme
+/// and host (no credentials, no odd schemes), caps the resolved host at the
+/// allowlist, and — crucially — rejects a base URL whose HOST is not the catalog
+/// host for `provider`. Result: provider A's key can never be sent to provider
+/// B's host. Exact host equality (not a suffix match) is what stops
+/// `api.deepseek.com.evil.test` from passing.
+pub fn validate_base_url(provider: &str, base_url: &str) -> Result<(), String> {
     let url = reqwest::Url::parse(base_url).map_err(|_| format!("Invalid base URL: {base_url}"))?;
     let host = validate_scheme_and_host(&url)?;
     if !ALLOWED_API_HOSTS.contains(&host.as_str()) && !is_loopback(&host) {
@@ -165,24 +172,12 @@ pub fn validate_base_url(base_url: &str) -> Result<(), String> {
             "Base URL host \"{host}\" is not an allowed provider endpoint"
         ));
     }
-    Ok(())
-}
-
-/// Validate catalog provider URL binding. A valid provider key must not be sent
-/// to another valid provider host supplied by the browser.
-#[allow(dead_code)]
-pub fn validate_provider_base_url(provider: &str, base_url: &str) -> Result<(), String> {
-    validate_base_url(base_url)?;
     let canonical = catalog_base_url(provider).ok_or("Unknown provider")?;
-    // Derive the expected host from the catalog URL rather than a second copy of
-    // the host list: adding a provider then cannot leave the two out of sync.
     let expected = reqwest::Url::parse(canonical)
         .map_err(|_| "Invalid catalog base URL".to_string())?
         .host_str()
         .unwrap_or("")
         .to_ascii_lowercase();
-    let url = reqwest::Url::parse(base_url).map_err(|_| "Invalid base URL".to_string())?;
-    let host = url.host_str().unwrap_or("").to_ascii_lowercase();
     if host != expected {
         return Err("Base URL does not match provider".into());
     }
@@ -257,31 +252,45 @@ mod tests {
     }
 
     #[test]
-    fn validate_base_url_allows_catalog_providers_and_loopback() {
-        assert!(validate_base_url("https://api.deepseek.com/v1").is_ok());
-        assert!(validate_base_url("https://opencode.ai/zen/go/v1").is_ok());
-        assert!(validate_base_url("http://localhost:11434/v1").is_ok());
-        assert!(validate_base_url("http://127.0.0.1:8080/v1").is_ok());
+    fn validate_base_url_allows_catalog_providers() {
+        assert!(validate_base_url("deepseek", "https://api.deepseek.com/v1").is_ok());
+        assert!(validate_base_url("opencode-go", "https://opencode.ai/zen/go/v1").is_ok());
     }
 
     #[test]
-    fn validate_provider_base_url_binds_key_to_catalog_host() {
-        assert!(validate_provider_base_url("deepseek", "https://api.deepseek.com/v1").is_ok());
-        assert!(
-            validate_provider_base_url("opencode-go", "https://opencode.ai/zen/go/v1").is_ok()
-        );
-        assert!(validate_provider_base_url("deepseek", "https://opencode.ai/zen/go/v1").is_err());
-        assert!(validate_provider_base_url("unknown", "https://api.deepseek.com/v1").is_err());
+    fn validate_base_url_still_binds_a_loopback_host_to_the_provider() {
+        // Loopback is allowlisted, but a catalog provider has no loopback catalog
+        // host, so setting one must FAIL rather than silently send the key there.
+        assert!(validate_base_url("deepseek", "http://localhost:11434/v1").is_err());
+        assert!(validate_base_url("deepseek", "http://127.0.0.1:8080/v1").is_err());
+        // A user-hosted endpoint belongs on the Custom provider, which accepts any
+        // public/loopback host through `validate_custom_base_url`.
+        assert!(validate_custom_base_url("http://localhost:11434/v1", true).is_ok());
+    }
+
+    #[test]
+    fn validate_base_url_binds_key_to_catalog_host() {
+        assert!(validate_base_url("deepseek", "https://api.deepseek.com/v1").is_ok());
+        assert!(validate_base_url("opencode-go", "https://opencode.ai/zen/go/v1").is_ok());
+        assert!(validate_base_url("deepseek", "https://opencode.ai/zen/go/v1").is_err());
+        assert!(validate_base_url("unknown", "https://api.deepseek.com/v1").is_err());
+    }
+
+    #[test]
+    fn validate_base_url_binds_host_exactly_not_by_suffix() {
+        // A suffix match would accept `api.deepseek.com.evil.test`; exact host
+        // equality is what keeps the key on the provider's own host.
+        assert!(validate_base_url("deepseek", "https://api.deepseek.com.evil.test/v1").is_err());
     }
 
     #[test]
     fn validate_base_url_rejects_ssrf_and_exfiltration() {
-        assert!(validate_base_url("http://169.254.169.254/latest/meta-data").is_err());
-        assert!(validate_base_url("https://169.254.169.254/latest/meta-data").is_err());
-        assert!(validate_base_url("http://10.0.0.1/v1").is_err());
-        assert!(validate_base_url("https://evil.example.com/v1").is_err());
-        assert!(validate_base_url("ftp://x/v1").is_err());
-        assert!(validate_base_url("not-a-url").is_err());
+        assert!(validate_base_url("deepseek", "http://169.254.169.254/latest/meta-data").is_err());
+        assert!(validate_base_url("deepseek", "https://169.254.169.254/latest/meta-data").is_err());
+        assert!(validate_base_url("deepseek", "http://10.0.0.1/v1").is_err());
+        assert!(validate_base_url("deepseek", "https://evil.example.com/v1").is_err());
+        assert!(validate_base_url("deepseek", "ftp://x/v1").is_err());
+        assert!(validate_base_url("deepseek", "not-a-url").is_err());
     }
 
     #[test]

@@ -35,7 +35,7 @@ vi.mock('../../../frontend/components/Editor', () => ({
   ),
 }))
 vi.mock('../../../frontend/components/SearchModal', () => ({ default: () => <div data-testid="search" /> }))
-vi.mock('../../../frontend/components/SettingsModal', () => ({ default: () => <div data-testid="settings" /> }))
+vi.mock('../../../frontend/components/SettingsPane', () => ({ default: () => <div data-testid="settings" /> }))
 vi.mock('../../../frontend/components/StatusBar', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/SetupWizard', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/Login', () => ({ default: () => null }))
@@ -58,6 +58,7 @@ vi.mock('../../../frontend/utils/logger', () => ({ logger: { error: vi.fn() } })
 vi.mock('sonner', () => ({ Toaster: () => null, toast: { error: vi.fn() } }))
 
 import App from '../../../frontend/App'
+import { useSettings } from '../../../frontend/stores/settings'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -74,6 +75,7 @@ function setDesktop(matches: boolean) {
 beforeEach(() => {
   mediaListeners = new Set()
   desktop = true
+  useSettings.setState({ open: false, section: 'ai-provider' })
   document.body.innerHTML = '<div id="root"></div>'
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({
     matches: desktop,
@@ -144,5 +146,20 @@ describe('responsive sidebar', () => {
     act(() => toggle.click())
 
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-size')).toBe('70%')
+  })
+
+  /** Settings is opened by the profile menu / ⌘, (the store), NOT a sidebar tab.
+   *  Because Settings is not a blocking modal, the mobile drawer may stay open
+   *  over the pane so the settings tree remains reachable on a phone. */
+  it('keeps the mobile drawer reachable when Settings is opened', () => {
+    act(() => setDesktop(false))
+    const toggle = document.querySelector<HTMLButtonElement>('[aria-label="toggle-sidebar"]')!
+    act(() => toggle.click())
+    expect(document.getElementById('mobile-sidebar')).not.toBeNull()
+
+    act(() => useSettings.getState().openSettings('git-identity'))
+
+    expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
   })
 })

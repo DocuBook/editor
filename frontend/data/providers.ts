@@ -17,11 +17,14 @@ export interface ProviderInfo {
   name: string
   /** OpenAI-compatible base URL. Empty = not usable from the catalog. */
   api: string
-  /** Valid model used to validate a newly entered key before model discovery is available. */
-  defaultModel?: string
 }
 
+/** The built-in catalog. No model is baked in: model lists are DISCOVERED at
+ *  runtime per endpoint (composer picker / backend `list_models`), and a
+ *  hand-written default was a fiction that broke when the provider did not serve
+ *  it. An unconfigured provider therefore has NO model until the user picks one
+ *  in the composer. */
 export const PROVIDERS: ProviderInfo[] = [
-  { id: 'opencode-go', name: 'Opencode Go', api: 'https://opencode.ai/zen/go/v1', defaultModel: 'deepseek-v4-flash' },
-  { id: 'deepseek', name: 'DeepSeek', api: 'https://api.deepseek.com', defaultModel: 'deepseek-v4-flash' },
+  { id: 'opencode-go', name: 'Opencode Go', api: 'https://opencode.ai/zen/go/v1' },
+  { id: 'deepseek', name: 'DeepSeek', api: 'https://api.deepseek.com' },
 ]

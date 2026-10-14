@@ -57,6 +57,7 @@ vi.mock('../../../frontend/components/panels/GitPanel', () => ({ default: () => 
 
 import Sidebar from '../../../frontend/components/Sidebar'
 import { copyItem } from '../../../frontend/utils/fileClipboard'
+import { useSettings } from '../../../frontend/stores/settings'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -104,6 +105,7 @@ const clickOutside = () => act(() => document.body.dispatchEvent(new MouseEvent(
 beforeEach(() => {
   vaultState.visibleItems = [{ path: 'notes/active.md', name: 'active.md', type: '0', depth: 0 }]
   vaultState.vaultPath = '/vault'
+  useSettings.setState({ open: false, section: 'ai-provider' })
   document.body.innerHTML = '<div id="root"></div>'
 })
 afterEach(() => { if (root) act(() => root!.unmount()); root = null; vi.clearAllMocks() })
@@ -365,5 +367,23 @@ describe('SidebarContextMenu in the Sidebar', () => {
     openMenu()
 
     expect(menuButton('Paste')!.disabled).toBe(true)
+  })
+
+  /** Settings replaces the tree area entirely: the file rows must not render
+   *  behind the settings nav list, or the sidebar would show two overlapping
+   *  navigation surfaces at once. */
+  it('hides the file tree and shows the settings nav while settings is open', async () => {
+    renderSidebar()
+    await flush()
+    expect(document.querySelector('[data-testid="settings-nav"]')).toBeNull()
+    expect(document.body.textContent).toContain('active')
+
+    act(() => useSettings.getState().openSettings('git-identity'))
+    await flush()
+
+    expect(document.querySelector('[data-testid="settings-nav"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="settings-nav-section-git-identity"]')).not.toBeNull()
+    // The vault tree row is gone — no `active` file row under the search bar.
+    expect(Array.from(document.querySelectorAll<HTMLElement>('span.truncate')).some(n => n.textContent === 'active')).toBe(false)
   })
 })
