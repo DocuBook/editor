@@ -12,40 +12,6 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content" />
         <meta name="theme-color" content="#0c0c0d" />
         <title>DocuBook Editor</title>
-        <!-- Cold-open guard — the authoritative copy of this root cause.
-
-             The editable source of a source-backed block is a ProseMirror
-             contentDOM that React appends TWICE on a cold mount: first as a
-             DIRECT CHILD of the block's node view renderer (while the popup or
-             `pre > code` wrapper does not exist yet), then re-parented into it.
-             Nothing hides the first append, so the raw source paints for a frame
-             — the flash. BlockNote's own hiding rule cannot win that race: it
-             lives in the LAZY WysiwygEditorHost stylesheet, which lands after
-             the append. This copy is inlined in the document head, so it is
-             parsed before any script runs and applied before the first editor
-             frame, independent of chunk order.
-
-             The direct-child rule is UNCONDITIONAL: every source-backed node
-             view — code block included — appends its raw source this way, so
-             excluding any of them would let its source paint. It can only match
-             while the contentDOM is un-parented, which is exactly that window;
-             after settle the code block's contentDOM lives inside `pre > code`.
-             `frontend/index.css` mirrors it for stylesheet-only entry points. -->
-        <style>
-            /* Closed popup: never paint its source, whatever the late BlockNote
-               rule says about its colour. */
-            .bn-preview-with-source-popup:not([data-open='true']) .bn-source-block-popup {
-                visibility: hidden;
-            }
-            /* The un-parented contentDOM window (see the comment above). */
-            .bn-react-node-view-renderer > [data-node-view-content-react] {
-                visibility: hidden;
-            }
-            /* An open popup's source stays editable and visible. */
-            .bn-preview-with-source-popup[data-open='true'] .bn-source-block-popup {
-                visibility: visible;
-            }
-        </style>
     </head>
     <body>
         <div id="root"></div>
