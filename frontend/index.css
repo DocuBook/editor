@@ -836,6 +836,12 @@ body .code-block-language-empty {
   visibility: hidden;
 }
 
+/* Rendered Mermaid and KaTeX share the popup subtree; keep them visible while
+   the closed source popup is hidden. The head copy above covers cold mounts. */
+#root .bn-preview-container {
+  visibility: visible;
+}
+
 /* The popup's own source, once it exists, is governed by the popup rules below. */
 #root
   .bn-preview-with-source-popup:not([data-open="true"])

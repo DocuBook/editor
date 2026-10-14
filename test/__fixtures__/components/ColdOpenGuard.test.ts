@@ -20,6 +20,7 @@ import { describe, expect, it } from 'vitest'
 // Resolved from the project root (vitest's cwd), the same way the config and
 // other fixture tests reach repo-level files.
 const indexHtml = readFileSync(resolve(process.cwd(), 'index.html'), 'utf8')
+const frontendCss = readFileSync(resolve(process.cwd(), 'frontend/index.css'), 'utf8')
 
 /** The <style> block the head carries, whitespace-normalised for matching. */
 const headStyle = (() => {
@@ -63,6 +64,11 @@ describe('cold-open guard in index.html', () => {
     expect(headStyle).toContain(
       ".bn-preview-with-source-popup[data-open='true'] .bn-source-block-popup { visibility: visible; }",
     )
+  })
+
+  it('keeps rendered previews visible inside the hidden source-popup subtree', () => {
+    expect(headStyle).toContain('.bn-preview-container { visibility: visible; }')
+    expect(frontendCss).toContain('#root .bn-preview-container {\n  visibility: visible;\n}')
   })
 
   it('targets the real BlockNote class names the popup and node view ship', () => {

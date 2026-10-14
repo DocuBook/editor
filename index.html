@@ -41,6 +41,11 @@
             .bn-react-node-view-renderer > [data-node-view-content-react] {
                 visibility: hidden;
             }
+            /* The preview shares the source-popup subtree. Do not let the
+               closed popup's inherited visibility hide rendered SVG or math. */
+            .bn-preview-container {
+                visibility: visible;
+            }
             /* An open popup's source stays editable and visible. */
             .bn-preview-with-source-popup[data-open='true'] .bn-source-block-popup {
                 visibility: visible;
