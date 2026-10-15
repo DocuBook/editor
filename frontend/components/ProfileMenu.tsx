@@ -72,7 +72,6 @@ export default function ProfileMenu({ isNative, settingsOpen, onOpenSettings, on
         <SidebarPopover side="top">
           <div className="px-2.5 py-2">
             <div className="flex items-center gap-2 text-foreground"><UserRound size={15} className="shrink-0 text-foreground-subtle" /><span className="truncate text-[12px] font-medium">{email || (isNative ? 'Local user' : 'Account')}</span></div>
-            {email && <div className="truncate pl-5.75 pt-0.5 text-[11px] text-muted">{email}</div>}
           </div>
           <div className="my-1 border-t border-border-subtle" />
           <button type="button" disabled title="Coming soon" className={`${menuItem} cursor-not-allowed text-muted opacity-50`}><Users size={14} /> Invite members</button>
