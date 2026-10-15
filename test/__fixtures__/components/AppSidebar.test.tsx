@@ -36,6 +36,11 @@ vi.mock('../../../frontend/components/Editor', () => ({
 }))
 vi.mock('../../../frontend/components/SearchModal', () => ({ default: () => <div data-testid="search" /> }))
 vi.mock('../../../frontend/components/SettingsPane', () => ({ default: () => <div data-testid="settings" /> }))
+vi.mock('../../../frontend/components/SettingsHeader', () => ({
+  SettingsHeader: ({ sidebarToggleRef, onToggleSidebar, sidebarOpen }: { sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; sidebarOpen: boolean }) => (
+    <button ref={sidebarToggleRef} aria-label="settings-toggle-sidebar" data-open={String(sidebarOpen)} onClick={onToggleSidebar}>Toggle</button>
+  ),
+}))
 vi.mock('../../../frontend/components/StatusBar', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/SetupWizard', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/Login', () => ({ default: () => null }))
@@ -124,18 +129,38 @@ describe('responsive sidebar', () => {
     expect(document.activeElement).toBe(toggle)
   })
 
-  it('closes and blocks mobile drawer while a competing modal is open', () => {
+  /** Settings is opened by the profile menu / ⌘, (the store), NOT a sidebar tab.
+   *  Because Settings is not a blocking modal, the drawer stays usable from the
+   *  Settings surface too: opening it, then toggling again, re-opens the drawer. */
+  it('lets the Settings header re-open the mobile drawer over the pane', () => {
     act(() => setDesktop(false))
-    const toggle = document.querySelector<HTMLButtonElement>('[aria-label="toggle-sidebar"]')!
-    act(() => toggle.click())
-    expect(document.getElementById('mobile-sidebar')).not.toBeNull()
-
+    // Reach Settings the mobile way: through the drawer's profile menu.
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="toggle-sidebar"]')!.click())
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="sidebar-settings"]')!.click())
     expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('false')
 
-    act(() => toggle.click())
-    expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('false')
+    // The editor mock is unmounted; the Settings header's own toggle now drives
+    // the SAME App-owned drawer state (it is not a modal, so nothing blocks it).
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="settings-toggle-sidebar"]')!.click())
+    expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
+  })
+
+  /** The regression this fixes: the editor's TabBar carried the ONLY sidebar
+   *  toggle, and it unmounts when Settings opens — so on a phone the user was
+   *  stranded in Settings with no control to reach the navigation drawer. The
+   *  Settings header must provide that control in the editor's absence. */
+  it('offers a sidebar toggle in Settings once the editor unmounts', () => {
+    act(() => setDesktop(false))
+
+    act(() => useSettings.getState().openSettings())
+    expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
+    // The editor (and its TabBar toggle) is gone...
+    expect(document.querySelector('[aria-label="toggle-sidebar"]')).toBeNull()
+
+    // ...but the Settings header keeps a live toggle that opens the drawer.
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="settings-toggle-sidebar"]')!.click())
+    expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
   })
 
   /** The drawer is the whole navigation surface on a phone, so it takes most of

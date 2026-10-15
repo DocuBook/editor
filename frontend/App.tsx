@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import SearchModal from './components/SearchModal'
 import Editor from './components/Editor'
 import SettingsPane from './components/SettingsPane'
+import { SettingsHeader } from './components/SettingsHeader'
 import ShortcutsModal from './components/ShortcutsModal'
 import { Toaster, toast } from 'sonner'
 
@@ -235,9 +236,15 @@ export default function App() {
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <SyncStatusBadge />
           {/* Settings swaps into the editor container — the workspace stays
-              mounted (no dialog), so the sidebar tree can keep driving it. */}
+              mounted (no dialog), so the sidebar tree can keep driving it. On
+              mobile the editor's TabBar (whose sidebar toggle opened the drawer)
+              is gone, so a matching header carries the same toggle — otherwise
+              the user is stranded in Settings with no way back to the tree. */}
           {settingsOpen
-            ? <SettingsPane />
+            ? <>
+                {!isDesktop && <SettingsHeader sidebarOpen={sidebarOpen} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />}
+                <SettingsPane />
+              </>
             : <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />}
         </main>
       </div>
