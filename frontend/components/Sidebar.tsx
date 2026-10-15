@@ -231,26 +231,33 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       {permission && <PermissionDialog pane={permission.pane} message={permission.message} onClose={() => setPermission(null)} />}
       {isMacTauri ? (
         <div data-tauri-drag-region className="flex h-12 shrink-0 items-center pl-18 pr-2">
-          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} disabled={trashBusy} />
+          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} disabled={trashBusy} />
         </div>
       ) : (
         <div className="px-2 pt-2">
-          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} trashCount={trashItems.length} isNative={isTauri} disabled={trashBusy} />
+          <SidebarTabMenu active={activePanel} onChange={panel => void selectPanel(panel)} disabled={trashBusy} />
         </div>
       )}
 
-      {/* Search modal lives in App so ⌘F/⌘P still work with the sidebar closed. */}
-      <div className="px-2 py-2">
-        <button onClick={onOpenSearch} aria-label="Search project files" className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground-secondary cursor-pointer transition-colors text-left">
-          <Search size={14} className="text-muted shrink-0" />
-          <span className="flex-1 truncate text-[13px]">Search</span>
-          <kbd className="inline-flex items-center gap-0.5 bg-surface px-1 py-0.5 rounded-[3px] text-[10px] font-mono text-muted border border-border-subtle"><Command size={9} />F</kbd>
-        </button>
-      </div>
+      {/* Search is scoped to the FOLDER TAB: it is the one panel that navigates
+          files, so Changes and Trash leave the row out instead of keeping a
+          search bar they cannot use. Settings hides it too — the nav list takes
+          over the whole sidebar area. ⌘F/⌘P still open the modal anywhere: the
+          modal lives in App precisely so no panel has to host it. */}
+      {!settingsOpen && activePanel === 'vault' && (
+        <div className="px-2 py-2">
+          <button onClick={onOpenSearch} aria-label="Search project files" className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground-secondary cursor-pointer transition-colors text-left">
+            <Search size={14} className="text-muted shrink-0" />
+            <span className="flex-1 truncate text-[13px]">Search</span>
+            <kbd className="inline-flex items-center gap-0.5 bg-surface px-1 py-0.5 rounded-[3px] text-[10px] font-mono text-muted border border-border-subtle"><Command size={9} />F</kbd>
+          </button>
+        </div>
+      )}
 
       {/* Settings owns the whole tree area: while it is open, NO other tree panel
           (vault / git / trash / backlinks) renders — the nav list sits where the
-          file tree normally is, directly under the search bar. */}
+          file tree normally is, directly under the search bar (which Settings
+          also hides, since it owns the whole column). */}
       {!settingsOpen && isOpen && activePanel === 'vault' && (
         <div className="flex-1 p-2 text-sm overflow-y-auto space-y-0.5">
             {loading && <div className="text-foreground-subtle text-xs p-2">Loading...</div>}

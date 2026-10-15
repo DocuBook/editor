@@ -10,7 +10,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let root: Root | null
 
-function renderMenu(props: { active: SidebarPanelId; onChange: (panel: SidebarPanelId) => void; trashCount: number; isNative: boolean; disabled?: boolean }) {
+function renderMenu(props: { active: SidebarPanelId; onChange: (panel: SidebarPanelId) => void; disabled?: boolean }) {
   root = createRoot(document.getElementById('root')!)
   act(() => root!.render(<SidebarTabMenu {...props} />))
 }
@@ -30,7 +30,7 @@ afterEach(() => {
 
 describe('SidebarTabMenu', () => {
   it('renders three tabs in order', () => {
-    renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 0, isNative: true })
+    renderMenu({ active: 'vault', onChange: vi.fn() })
 
     expect(tabs()).toHaveLength(3)
     expect(tabs().map(tab => tab.getAttribute('aria-label'))).toEqual(['Folders', 'Changes', 'Trash'])
@@ -43,7 +43,7 @@ describe('SidebarTabMenu', () => {
     const labels: Record<SidebarPanelId, string> = { vault: 'Folders', git: 'Changes', trash: 'Trash' }
     for (const active of ['vault', 'git', 'trash'] as SidebarPanelId[]) {
       if (root) act(() => root!.unmount())
-      renderMenu({ active, onChange: vi.fn(), trashCount: 5, isNative: true })
+      renderMenu({ active, onChange: vi.fn() })
 
       for (const tab of tabs()) {
         const expected = tab.getAttribute('aria-label') === labels[active] ? labels[active] : ''
@@ -53,35 +53,28 @@ describe('SidebarTabMenu', () => {
   })
 
   it('does not render a trash count indicator', () => {
-    renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 7, isNative: true })
+    renderMenu({ active: 'vault', onChange: vi.fn() })
 
     const menu = document.querySelector('[role="tablist"]')!
     expect(menu.textContent).not.toMatch(/[0-9]/)
     expect(tabById('trash-toggle').textContent).toBe('')
   })
 
-  it('disables web trash only when the trash count is zero', () => {
-    renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 0, isNative: false })
-    expect(tabById('trash-toggle').disabled).toBe(true)
+  /** Trash is reachable on EVERY runtime, empty or not: it used to be gated on
+   *  `trashCount > 0` for web only, which made the Docker build lose the panel
+   *  entirely until something had been deleted — and lost the "empty" state too.
+   *  The panel itself reports emptiness; the tab never hides it. */
+  it('keeps every tab enabled regardless of platform or trash contents', () => {
+    renderMenu({ active: 'vault', onChange: vi.fn() })
 
-    act(() => root!.unmount())
-    renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 3, isNative: false })
-    expect(tabById('trash-toggle').disabled).toBe(false)
-
-    for (const id of ['sidebar-panel-vault', 'sidebar-panel-git']) {
+    for (const id of ['sidebar-panel-vault', 'sidebar-panel-git', 'trash-toggle']) {
       expect(tabById(id).disabled).toBe(false)
     }
   })
 
-  it('keeps native trash enabled even when empty', () => {
-    renderMenu({ active: 'vault', onChange: vi.fn(), trashCount: 0, isNative: true })
-
-    expect(tabById('trash-toggle').disabled).toBe(false)
-  })
-
   it('reports the selected panel through onChange', () => {
     const onChange = vi.fn()
-    renderMenu({ active: 'vault', onChange, trashCount: 2, isNative: true })
+    renderMenu({ active: 'vault', onChange })
 
     act(() => tabById('sidebar-panel-git').click())
     expect(onChange).toHaveBeenLastCalledWith('git')
@@ -94,17 +87,9 @@ describe('SidebarTabMenu', () => {
     expect(onChange).toHaveBeenCalledTimes(3)
   })
 
-  it('ignores clicks on disabled web trash', () => {
-    const onChange = vi.fn()
-    renderMenu({ active: 'vault', onChange, trashCount: 0, isNative: false })
-
-    act(() => tabById('trash-toggle').click())
-    expect(onChange).not.toHaveBeenCalled()
-  })
-
   it('locks every tab while a trash batch action is in flight', () => {
     const onChange = vi.fn()
-    renderMenu({ active: 'trash', onChange, trashCount: 3, isNative: true, disabled: true })
+    renderMenu({ active: 'trash', onChange, disabled: true })
 
     for (const tab of tabs()) expect(tab.disabled).toBe(true)
     act(() => tabById('sidebar-panel-vault').click())
