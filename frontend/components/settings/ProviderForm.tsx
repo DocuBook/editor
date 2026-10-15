@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Check, Loader, RefreshCw } from 'lucide-react'
-import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettings, setSavedProviders, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
+import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
 import { resolveProbeModel, autoProbe } from '../../utils/aiProbe'
 import { fetchProviderModels } from '../../utils/modelDiscovery'
 import { FORM_DIVIDER_CLASS, FORM_DIVIDER_FIRST_CLASS } from './SettingsSection'
@@ -76,10 +76,21 @@ async function discoverModel(provider: string, customBaseUrl: string, key: strin
  *  Duplicate backend reads are acceptable here — fetchAiSettings only READS
  *  config.json, and writes are guarded by the per-instance `saving` flag, so the
  *  instances never race on a mutation. Hidden instances (a collapsed/never
- *  mounted section) cost nothing, so each form holds only the state it shows. */
+ *  mounted section) cost nothing, so each form holds only the state it shows.
+ *
+ *  The read itself goes through fetchAiSettingsShared, so the three instances
+ *  mounting from one page open share ONE request instead of firing three — while
+ *  each instance still holds only the state it renders. */
 export default function ProviderForm({ provider, first }: { provider: string; first?: boolean }) {
-  const { model, probeTools, models,
-    clearApiKey, removeSavedProvider } = useAiSettings()
+  const { model, probeTools, models, dirtySelection,
+    forgetProvider } = useAiSettings()
+
+  /** The store selection, READ here so the form can adopt a composer pick. The
+   *  form's own locked-field values still come from its fetch of the backend, which
+   *  is what the server actually holds — this subscription is only for the MODEL,
+   *  whose single editable UI is the composer picker. */
+  const storeProvider = useAiSettings(s => s.provider)
+  const storeModel = useAiSettings(s => s.model)
 
   /** API key is entered here but NEVER read back from the backend —
    *  the key stays in the keychain (SEC-5: keys are backend-only). */
@@ -111,7 +122,7 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   const [customCfg, setCustomCfg] = useState<{ source: string; baseUrl?: string; hasKey: boolean; model?: string } | null>(null)
   const refreshBackend = async () => {
     const [settings, custom] = await Promise.all([
-      fetchAiSettings(),
+      fetchAiSettingsShared(),
       invoke<string>('custom_ai_config').catch(() => ''),
     ])
     if (custom) {
@@ -119,7 +130,7 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
         const parsed = JSON.parse(custom)
         setCustomCfg(parsed)
         // Env model is forced — sync the store so transport + probe align.
-        if (parsed.source === 'env' && parsed.model) useAiSettings.getState().setModel(parsed.model)
+        if (parsed.source === 'env' && parsed.model) useAiSettings.getState().setModel(useAiSettings.getState().provider, parsed.model)
       } catch { /* keep the previous config rather than rendering a half-parsed one */ }
     }
     setBackendLoading(false)
@@ -130,6 +141,13 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   /* oxlint-disable react/set-state-in-effect -- initial async load from the backend */
   useEffect(() => { void refreshBackend() }, [])
   /* oxlint-enable react/set-state-in-effect */
+  useEffect(() => subscribeAiSettingsHydration(settings => {
+    setBackendCfg(settings)
+    setSavedProviders(settings.savedProviders)
+  }), [])
+  /** Window/tab focus does NOT refresh here any more: three instances meant three
+   *  listener pairs, so the re-read moved to the app root (see App.tsx) where it
+   *  runs once for the whole surface. */
   const envCustom = customCfg?.source === 'env'
   const envCustomRef = useRef(envCustom)
   const probeToolsRef = useRef(probeTools)
@@ -202,6 +220,13 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
    *  forms at once. */
   const providerModel = models[provider] || (useAiSettings.getState().provider === provider ? model : '') || ''
 
+  /** A live composer pick for THIS provider, when this form's provider is the
+   *  active one. `dirtySelection` marks that the pick is session-local and the
+   *  backend has not been told yet, so the store — not the fetched config — is the
+   *  fresher truth for the MODEL. The rest of the form (lock state, base URL)
+   *  still follows the fetch, which is what the server actually holds. */
+  const livePick = provider === storeProvider && dirtySelection ? storeModel : ''
+
   /** Seed the input buffers from the backend for THIS provider. These buffers are
    *  inputs only — they are not state, never persisted anywhere, and never read
    *  back by the transport: the backend owns the persisted copy. An unconfigured
@@ -214,10 +239,12 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   }, [backendCfg, provider, backendLoading])
   /** Prefill the model buffer from whatever this provider already has (the store's
    *  current selection for the active provider, else its stored row) so editing an
-   *  unconfigured-but-known provider does not demand retyping a model. */
+   *  unconfigured-but-known provider does not demand retyping a model. A live
+   *  composer pick wins: it is newer than the fetch this form rendered from, and
+   *  the Model field is the same single setting the picker edits. */
   useEffect(() => {
-    setModelInput(providerModel)
-  }, [providerModel])
+    setModelInput(livePick || providerModel)
+  }, [livePick, providerModel])
   /* oxlint-enable react/set-state-in-effect */
 
   /** The model to validate/persist with, in order: what the user picked in the
@@ -325,8 +352,11 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
     setSaving(true)
     try {
       await invoke('delete_api_key', { provider })
-      clearApiKey(provider)
-      removeSavedProvider(provider)
+      /** ONE complete removal, not three partial ones: the store drops the key,
+       *  the model, the base URL, the probes and the saved-provider row together.
+       *  Clearing only the key here left a stale model that the unlocked Model
+       *  field then rendered — the outdated model outliving the revoke. */
+      forgetProvider(provider)
       setKeyInput('')
       /** Re-read the backend instead of trusting the local list: what is editable
        *  next is decided by what the server actually holds now. */

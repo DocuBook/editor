@@ -489,8 +489,11 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   }, [modelPickerOpen, modelsLoading, provider, model])
   const selectModel = (id: string, nextModel: string) => {
     if (!nextModel) return
-    if (provider !== id) setProvider(id)
-    setModel(nextModel)
+    setProvider(id)
+    /** The model is filed against the provider the pick was MADE for, passed
+     *  explicitly — not against whatever provider the store holds by then, which
+     *  made this pair order-dependent. */
+    setModel(id, nextModel)
     /** A composer pick is session-local until Settings saves it — tell hydration
      *  (which may still be retrying from boot) not to clobber it with the
      *  backend's stale active model. */

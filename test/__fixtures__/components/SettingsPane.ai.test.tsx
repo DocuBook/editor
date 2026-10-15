@@ -36,7 +36,7 @@ vi.mock('../../../frontend/lib/ipc', async importOriginal => ({
 vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 import SettingsPane from '../../../frontend/components/SettingsPane'
-import { useAiSettings } from '../../../frontend/stores/aiSettings'
+import { hydrateAiSettings, useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useSettings } from '../../../frontend/stores/settings'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -399,6 +399,27 @@ describe('SettingsPane — revoke', () => {
     expect(buttonsIn('opencode-go')).not.toContain('Revoke')
   })
 
+  it('clears the saved model so the form does not revive the revoked endpoint\'s model', async () => {
+    configure('opencode-go')
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    clickText('Revoke')
+    // A total revoke drops the key and every endpoint value server-side.
+    backend.active = ''
+    backend.endpoints = {}
+    backend.savedProviders = []
+    clickConfirmRevoke()
+    await settle()
+
+    // The revoked model must not survive in the store: the form's model buffer is
+    // seeded from it, so keeping it would leave a Model field spelling out an
+    // endpoint the user just revoked — and the next unconfigured save would
+    // validate against a model from a provider that no longer exists.
+    expect(useAiSettings.getState().models['opencode-go']).toBeUndefined()
+    expect(inSection('opencode-go', 'Model')!.value).toBe('')
+  })
+
   it('does not call the removed bulk set_probes command', async () => {
     configure('opencode-go')
     useAiSettings.setState({ provider: 'opencode-go' })
@@ -443,6 +464,67 @@ describe('SettingsPane — save', () => {
     expect(commands).toContain('set_api_key')
     expect(inSection('opencode-go', 'Base URL')!.readOnly).toBe(true)
     expect(buttonsIn('opencode-go')).toContain('Revoke')
+  })
+
+  /** A live composer pick is newer than the fetch this form rendered from, so the
+   *  Model field — the SAME single setting the picker edits — must show it instead
+   *  of whatever stale per-provider row the store holds. Only UNCONFIGURED providers
+   *  render the field at all, so the backend reports no endpoint here. */
+  it('adopts a live composer pick instead of the stored per-provider model', async () => {
+    useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'picked-this-session',
+      models: { 'opencode-go': 'picked-this-session' },
+      dirtySelection: true,
+    })
+    await render()
+
+    // No backend endpoint, so nothing but the live pick can fill this field.
+    expect(inSection('opencode-go', 'Model')!.value).toBe('picked-this-session')
+  })
+
+  /** Window/tab focus re-reads the backend so a change made in another browser or
+   *  tab is not invisible until a save/revoke happens to refresh. That listener
+   *  lives at the APP ROOT now, not inside each form (three forms meant three
+   *  listener pairs), so this test exercises the shared hydration path directly.
+   *  ProviderForm's local backend snapshot — and the lock state it drives — is
+   *  what is asserted. */
+  it('updates an already-mounted form when shared hydration picks up a change made elsewhere', async () => {
+    configure('opencode-go', { baseUrl: 'https://old.example.com/v1' })
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    expect(inSection('opencode-go', 'Base URL')!.value).toBe('https://old.example.com/v1')
+
+    // Another browser saves a new endpoint while this one is in the background.
+    configure('opencode-go', { baseUrl: 'https://new.example.com/v1' })
+    // The app-root focus listener calls hydrateAiSettings; exercise that shared
+    // path directly because this fixture renders SettingsPane without App.
+    await act(async () => { await hydrateAiSettings() })
+    await settle()
+
+    // The refresh updates both the authoritative store snapshot and the form's
+    // local backend snapshot.
+    expect(useAiSettings.getState().baseUrls['opencode-go']).toBe('https://new.example.com/v1')
+    expect(inSection('opencode-go', 'Base URL')!.value).toBe('https://new.example.com/v1')
+  })
+
+  /** The form no longer attaches its own focus listener: with three instances that
+   *  was three listener pairs. Guard it, so the duplication cannot creep back. */
+  it('does not attach its own window focus listener per form', async () => {
+    configure('opencode-go', { baseUrl: 'https://old.example.com/v1' })
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    const before = invoke.mock.calls.filter(c => c[0] === 'ai_settings').length
+    await act(async () => { window.dispatchEvent(new Event('focus')) })
+    await settle()
+
+    // Exactly ONE request for the mount. This also proves the assertion below is
+    // not vacuous: were the form still attaching its own focus listener, this
+    // would be 2 after the dispatch below (verified by reverting the relocation).
+    expect(before).toBe(1)
+    expect(invoke.mock.calls.filter(c => c[0] === 'ai_settings').length).toBe(before)
   })
 
   /** No model is baked into the catalog, so a first-time save (no model picked
