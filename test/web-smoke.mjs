@@ -55,6 +55,37 @@ await runSuite('web-smoke', {
   await page.locator(`button:has-text("${vaultPath.split('/').pop()}")`).click()
   await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 8000 })
 
+  // ── Sidebar panel tabs (web/Docker) ──
+  /* The Trash tab used to be disabled on web whenever the trash was empty
+     (`trashCount === 0`), so the panel was unreachable until something had been
+     deleted. Nothing in the web UI can PUT a file in the trash (deleting is
+     native-only), so on this runtime the tab was effectively dead — and looked
+     identical to "temporarily disabled". The tab is now enabled on every
+     runtime and the PANEL reports emptiness instead. */
+  const trashTab = page.locator('[data-testid="trash-toggle"]')
+  await trashTab.waitFor({ timeout: 8000 })
+  ok('sidebar: trash tab is reachable with an empty trash', await trashTab.isEnabled())
+  ok('sidebar: trash tab is not click-blocked', await trashTab.getAttribute('disabled') === null)
+
+  await trashTab.click()
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Search project files"]'), null, { timeout: 4000 })
+  ok('sidebar: search bar leaves with the Trash tab',
+    await page.locator('[aria-label="Search project files"]').count() === 0)
+
+  /* Search belongs to the Folders tab: it rides the panel that navigates files,
+     and Settings takes the whole column (hiding it too). */
+  await page.locator('[data-testid="sidebar-panel-vault"]').click()
+  await page.waitForSelector('[aria-label="Search project files"]', { timeout: 4000 })
+  ok('sidebar: search bar returns on the Folders tab',
+    await page.locator('[aria-label="Search project files"]').count() === 1)
+
+  await page.locator('[data-testid="sidebar-toggle"]').click()
+  await page.waitForFunction(() => document.querySelector('[aria-label="Search files"]') !== null, null, { timeout: 4000 })
+  ok('sidebar: collapsed sidebar leaves the search icon as the only control',
+    await page.locator('[aria-label="Search project files"]').count() === 0)
+  await page.locator('[data-testid="sidebar-toggle"]').click()
+  await page.waitForSelector('[aria-label="Search project files"]', { timeout: 4000 })
+
   // ── Logout → Login ──
   await page.locator('[aria-label="Open profile menu"]').click()
   await page.waitForSelector(click('Log out'), { timeout: 4000 })
