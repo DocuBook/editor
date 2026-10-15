@@ -36,7 +36,7 @@ vi.mock('../../../frontend/lib/ipc', async importOriginal => ({
 vi.mock('sonner', () => ({ toast: { success: toastSuccess, error: toastError } }))
 
 import SettingsPane from '../../../frontend/components/SettingsPane'
-import { useAiSettings } from '../../../frontend/stores/aiSettings'
+import { hydrateAiSettings, useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useSettings } from '../../../frontend/stores/settings'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -486,9 +486,10 @@ describe('SettingsPane — save', () => {
   /** Window/tab focus re-reads the backend so a change made in another browser or
    *  tab is not invisible until a save/revoke happens to refresh. That listener
    *  lives at the APP ROOT now, not inside each form (three forms meant three
-   *  listener pairs), so this test remounts to model the effect. ProviderForm's
-   *  own mount-time fetch — and the lock state it drives — is what is asserted. */
-  it('re-reads the backend when the surface remounts, picking up a change made elsewhere', async () => {
+   *  listener pairs), so this test exercises the shared hydration path directly.
+   *  ProviderForm's local backend snapshot — and the lock state it drives — is
+   *  what is asserted. */
+  it('updates an already-mounted form when shared hydration picks up a change made elsewhere', async () => {
     configure('opencode-go', { baseUrl: 'https://old.example.com/v1' })
     useAiSettings.setState({ provider: 'opencode-go' })
     await render()
@@ -497,13 +498,14 @@ describe('SettingsPane — save', () => {
 
     // Another browser saves a new endpoint while this one is in the background.
     configure('opencode-go', { baseUrl: 'https://new.example.com/v1' })
-    await act(async () => { root!.unmount() })
-    root = null
-    await render()
+    // The app-root focus listener calls hydrateAiSettings; exercise that shared
+    // path directly because this fixture renders SettingsPane without App.
+    await act(async () => { await hydrateAiSettings() })
+    await settle()
 
-    // Same provider, so only the fetch can supply this value — the store carries
-    // no base URL for it (applyBackendSettings would otherwise mask a broken fetch).
-    expect(useAiSettings.getState().baseUrls['opencode-go']).toBeUndefined()
+    // The refresh updates both the authoritative store snapshot and the form's
+    // local backend snapshot.
+    expect(useAiSettings.getState().baseUrls['opencode-go']).toBe('https://new.example.com/v1')
     expect(inSection('opencode-go', 'Base URL')!.value).toBe('https://new.example.com/v1')
   })
 

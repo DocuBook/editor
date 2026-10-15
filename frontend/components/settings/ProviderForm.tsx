@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Check, Loader, RefreshCw } from 'lucide-react'
-import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, setSavedProviders, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
+import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
 import { resolveProbeModel, autoProbe } from '../../utils/aiProbe'
 import { fetchProviderModels } from '../../utils/modelDiscovery'
 import { FORM_DIVIDER_CLASS, FORM_DIVIDER_FIRST_CLASS } from './SettingsSection'
@@ -141,6 +141,10 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   /* oxlint-disable react/set-state-in-effect -- initial async load from the backend */
   useEffect(() => { void refreshBackend() }, [])
   /* oxlint-enable react/set-state-in-effect */
+  useEffect(() => subscribeAiSettingsHydration(settings => {
+    setBackendCfg(settings)
+    setSavedProviders(settings.savedProviders)
+  }), [])
   /** Window/tab focus does NOT refresh here any more: three instances meant three
    *  listener pairs, so the re-read moved to the app root (see App.tsx) where it
    *  runs once for the whole surface. */

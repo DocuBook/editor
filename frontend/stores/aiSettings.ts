@@ -148,7 +148,19 @@ export async function hydrateAiSettings(): Promise<boolean> {
   const cfg = await fetchAiSettings()
   if (!cfg) return false
   useAiSettings.setState(applyBackendSettings(cfg))
+  for (const listener of aiSettingsHydrationListeners) listener(cfg)
   return true
+}
+
+type AiSettingsHydrationListener = (settings: BackendAiSettings) => void
+const aiSettingsHydrationListeners = new Set<AiSettingsHydrationListener>()
+
+/** Notify mounted settings forms when the app-root refresh gets a fresh payload.
+ *  The forms keep local lock/input state, so updating the store alone cannot make
+ *  an already-mounted form reflect a change made in another tab. */
+export function subscribeAiSettingsHydration(listener: AiSettingsHydrationListener): () => void {
+  aiSettingsHydrationListeners.add(listener)
+  return () => aiSettingsHydrationListeners.delete(listener)
 }
 
 /** Map the backend payload onto store state. Pure so it can be reasoned about
