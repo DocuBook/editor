@@ -7,7 +7,7 @@ const { storage: localStorage, values: storage } = createMemoryStorage();
 vi.stubGlobal("localStorage", localStorage);
 vi.stubGlobal("window", { localStorage });
 
-const { useAiSettings, hydrateAiSettings, setSavedProviders } = await import("../../../frontend/stores/aiSettings");
+const { useAiSettings, hydrateAiSettings, setSavedProviders, fetchAiSettingsShared } = await import("../../../frontend/stores/aiSettings");
 
 // The store talks to the backend through the ipc bridge; hydration is the only
 // path under test here, so the bridge is mocked per test.
@@ -61,11 +61,64 @@ describe("aiSettings store", () => {
     // reintroduce a second source of truth.
     invoke.mockResolvedValue(payload());
     useAiSettings.getState().setProvider("opencode-go");
-    useAiSettings.getState().setModel("deepseek-v4-flash");
+    useAiSettings.getState().setModel("opencode-go", "deepseek-v4-flash");
     useAiSettings.getState().setApiKey("sk-secret-42");
     await hydrateAiSettings();
 
     expect(storage.get("docubook:ai-settings")).toBeUndefined();
+  });
+
+  it("fetchAiSettingsShared collapses an OVERLAPPING burst into one request", async () => {
+    // Three ProviderForm instances mount from one page open; they must share one
+    // read rather than fire three identical requests. The calls have to genuinely
+    // overlap for that to be the thing under test, so the backend is parked on a
+    // deferred promise: three SEQUENTIAL awaits would instead be exercising the
+    // not-a-cache rule below.
+    let release!: (value: string) => void
+    const parked = new Promise<string>(resolve => { release = resolve })
+    invoke.mockReturnValue(parked)
+
+    const all = Promise.all([
+      fetchAiSettingsShared(),
+      fetchAiSettingsShared(),
+      fetchAiSettingsShared(),
+    ])
+    // One request dispatched while the first is still in flight. The async fn
+    // body runs synchronously up to its first await, so this is already settled
+    // here even without a microtask hop — no timing assumption to be flaky about.
+    const dispatched = invoke.mock.calls.filter(call => call[0] === "ai_settings");
+    expect(dispatched).toHaveLength(1);
+    expect(dispatched[0][1]).toBeUndefined();
+
+    release(payload())
+    const [a, b, c] = await all
+    // Still one after settling: no queued caller slipped in a second request.
+    expect(invoke.mock.calls.filter(call => call[0] === "ai_settings")).toHaveLength(1);
+
+    // Every caller still gets the payload it needs for its own lock state.
+    expect(a?.savedProviders).toEqual(["opencode-go"]);
+    expect(b?.savedProviders).toEqual(["opencode-go"]);
+    expect(c?.savedProviders).toEqual(["opencode-go"]);
+  });
+
+  it("fetchAiSettingsShared is single-flight, NOT a cache — a later call reads again", async () => {
+    // A cached payload would let stale lock state unlock fields the server still
+    // holds a key for, so the promise must be dropped once it settles.
+    invoke.mockResolvedValue(payload());
+    await fetchAiSettingsShared();
+    await fetchAiSettingsShared();
+
+    expect(invoke.mock.calls.filter(call => call[0] === "ai_settings")).toHaveLength(2);
+  });
+
+  it("fetchAiSettingsShared releases the slot after a failure so a retry can run", async () => {
+    invoke.mockRejectedValueOnce(new Error("401 Unauthorized"));
+    await expect(fetchAiSettingsShared()).resolves.toBeNull();
+
+    invoke.mockResolvedValue(payload());
+    const retried = await fetchAiSettingsShared();
+
+    expect(retried?.savedProviders).toEqual(["opencode-go"]);
   });
 
   it("hydrateAiSettings SETS state from the backend (server is authoritative)", async () => {
@@ -111,7 +164,7 @@ describe("aiSettings store", () => {
     await hydrateAiSettings(); // first hydration adopts the backend
     expect(useAiSettings.getState().model).toBe("deepseek-v4-flash");
 
-    useAiSettings.getState().setModel("deepseek-reasoner");
+    useAiSettings.getState().setModel("opencode-go", "deepseek-reasoner");
     useAiSettings.getState().markSelectionDirty();
 
     await hydrateAiSettings(); // pending retry lands with the old active model
@@ -267,7 +320,7 @@ describe("aiSettings store", () => {
 
   it("setModel saves per-provider and restores on provider switch", () => {
     useAiSettings.getState().setProvider("openai");
-    useAiSettings.getState().setModel("gpt-5.6");
+    useAiSettings.getState().setModel("openai", "gpt-5.6");
     expect(useAiSettings.getState().model).toBe("gpt-5.6");
     expect(useAiSettings.getState().models["openai"]).toBe("gpt-5.6");
 
@@ -275,7 +328,7 @@ describe("aiSettings store", () => {
     // guess: models are discovered at runtime, so there is nothing to default to.
     useAiSettings.getState().setProvider("opencode-go");
     expect(useAiSettings.getState().model).toBe("");
-    useAiSettings.getState().setModel("opus-5");
+    useAiSettings.getState().setModel("opencode-go", "opus-5");
     expect(useAiSettings.getState().models["opencode-go"]).toBe("opus-5");
 
     // switch back — last model for openai is restored, not defaulted to cheapest
@@ -284,6 +337,19 @@ describe("aiSettings store", () => {
 
     useAiSettings.getState().setProvider("opencode-go");
     expect(useAiSettings.getState().model).toBe("opus-5");
+  });
+
+  it("setModel files the model under the provider it was given, whatever the active one is", () => {
+    // The provider is an explicit argument, so the write no longer depends on the
+    // order of setProvider/setModel — the bug class where a model was filed under
+    // whichever provider happened to be active at call time.
+    useAiSettings.getState().setProvider("openai");
+    useAiSettings.getState().setModel("opencode-go", "opus-5");
+
+    expect(useAiSettings.getState().models["opencode-go"]).toBe("opus-5");
+    // A background write for ANOTHER provider must not yank the live selection.
+    expect(useAiSettings.getState().model).toBe("");
+    expect(useAiSettings.getState().provider).toBe("openai");
   });
 
   it("setProvider leaves the model blank when the provider has none stored", () => {
@@ -394,7 +460,7 @@ describe("aiSettings store", () => {
     vi.useFakeTimers();
     invoke.mockResolvedValue("null");
     useAiSettings.getState().setProvider("opencode-go");
-    useAiSettings.getState().setModel("deepseek-v4-reasoner");
+    useAiSettings.getState().setModel("opencode-go", "deepseek-v4-reasoner");
     useAiSettings.getState().setProbeTools("opencode-go", "deepseek-v4-reasoner", true);
     useAiSettings.getState().setBaseUrl("https://proxy.example.com/v1");
     await vi.advanceTimersByTimeAsync(1000);
@@ -441,5 +507,32 @@ describe("aiSettings store", () => {
     expect(
       useAiSettings.getState().probeTools["openai-compatible"]?.["gpt-4o-mini"],
     ).toBe(false);
+  });
+
+  it("forgetProvider drops every per-provider row, so no stale model survives a revoke", () => {
+    const s = useAiSettings.getState();
+    s.setProvider("opencode-go");
+    s.setModel("opencode-go", "deepseek-v4-reasoner");
+    s.setApiKey("sk-live-key");
+    s.setBaseUrl("https://api.example.com/v1");
+    s.setProbeTools("opencode-go", "deepseek-v4-reasoner", true);
+    s.addSavedProvider("opencode-go");
+    // A second provider must be left completely untouched.
+    s.addSavedProvider("deepseek");
+    useAiSettings.getState().setModel("deepseek", "deepseek-chat");
+
+    useAiSettings.getState().forgetProvider("opencode-go");
+
+    const after = useAiSettings.getState();
+    // All of it, or the unlocked Model field would render the revoked model.
+    expect(after.models["opencode-go"]).toBeUndefined();
+    expect(after.baseUrls["opencode-go"]).toBeUndefined();
+    expect(after.probeTools["opencode-go"]).toBeUndefined();
+    expect(after.apiKeys["opencode-go"]).toBeUndefined();
+    expect(after.savedProviders).toEqual(["deepseek"]);
+    // The revoked provider was active, so the live selection is cleared too.
+    expect(after.provider).toBe("");
+    expect(after.model).toBe("");
+    expect(after.apiKey).toBe("");
   });
 });

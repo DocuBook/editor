@@ -57,13 +57,22 @@ interface AiSettingsState {
    *  re-applying the backend's stale active model. */
   dirtySelection: boolean
   setProvider: (p: string) => void
-  setModel: (m: string) => void
+  /** Save a model against the provider it BELONGS to. The provider is an explicit
+   *  argument, not `s.provider` at call time: keying on the current provider made
+   *  the write order-dependent, so any caller that set the model before switching
+   *  provider filed it under the wrong one. */
+  setModel: (provider: string, model: string) => void
   setApiKey: (key: string) => void
   setBaseUrl: (url: string) => void
   setProbeTools: (provider: string, model: string, tools: boolean) => void
   clearApiKey: (providerId: string) => void
   addSavedProvider: (id: string) => void
   removeSavedProvider: (id: string) => void
+  /** A TOTAL revoke has to leave nothing of the provider behind: dropping only the
+   *  key would leave its saved model (and base URL) in state, which the form then
+   *  feeds back into the now-unlocked Model field — spelling out the endpoint the
+   *  user just revoked and re-validating the next save against it. */
+  forgetProvider: (providerId: string) => void
   markSelectionDirty: () => void
 }
 
@@ -89,7 +98,13 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
   setProvider: (p) => set({ provider: p, apiKey: get().apiKeys[p] || '', model: get().models[p] || '' }),
   /** Save model per-provider so it survives provider switches. Writing it to the
    *  backend is the caller's job (explicit Save / Test), never an implicit mirror. */
-  setModel: (m) => set((s) => ({ model: m, models: { ...s.models, [s.provider]: m } })),
+  setModel: (provider, model) => set((s) => ({
+    models: { ...s.models, [provider]: model },
+    /** Live selection follows only when the write is FOR the active provider: a
+     *  background write for another provider (a late hydration, a probe for a form
+     *  the user is not looking at) must not yank the composer off the live pick. */
+    ...(s.provider === provider ? { model } : {}),
+  })),
   setApiKey: (key) => set((s) => ({ apiKey: key, apiKeys: { ...s.apiKeys, [s.provider]: key } })),
   /** Save the custom base URL per-provider (openai-compatible). Not secret — and
    *  only ever a local render value here; the backend owns the persisted copy. */
@@ -104,6 +119,20 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
   clearApiKey: (pid) => set((s) => { const { [pid]: _, ...rest } = s.apiKeys; return { apiKeys: rest, ...(s.provider === pid ? { apiKey: '' } : {}) } }),
   addSavedProvider: (id) => set({ savedProviders: [...new Set([...get().savedProviders, id])] }),
   removeSavedProvider: (id) => set({ savedProviders: get().savedProviders.filter(x => x !== id) }),
+  forgetProvider: (pid) => set((s) => {
+    /** Every per-provider row, dropped together in ONE write: the list, the key
+     *  buffer, the model and the base URL are one provider's state, so clearing
+     *  them piecemeal is how a stale model outlived its key. */
+    const { [pid]: _key, ...apiKeys } = s.apiKeys
+    const { [pid]: _model, ...models } = s.models
+    const { [pid]: _url, ...baseUrls } = s.baseUrls
+    const { [pid]: _probes, ...probeTools } = s.probeTools
+    return {
+      apiKeys, models, baseUrls, probeTools,
+      savedProviders: s.savedProviders.filter(x => x !== pid),
+      ...(s.provider === pid ? { provider: '', model: '', apiKey: '' } : {}),
+    }
+  }),
   markSelectionDirty: () => set({ dirtySelection: true }),
 }))
 
@@ -175,6 +204,23 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
     baseUrls,
     probeTools,
   }
+}
+
+/** Single-flight for the BURST case only: three ProviderForm instances mount from
+ *  one page open, and boot retry + window focus can land together, so the same
+ *  read used to fire three times. Callers that overlap share one request.
+ *
+ *  Deliberately NOT a cache: the promise is dropped the moment it settles, so the
+ *  next call reads the backend fresh. A cache here would let a stale payload drive
+ *  the lock state machine — the dangerous direction, since a wrong "configured"
+ *  unlocks fields the server still holds a key for. Per-instance form state is
+ *  untouched: each form still holds only the lock state it renders. */
+let settingsInFlight: Promise<BackendAiSettings | null> | null = null
+
+export async function fetchAiSettingsShared(): Promise<BackendAiSettings | null> {
+  if (settingsInFlight) return settingsInFlight
+  settingsInFlight = fetchAiSettings().finally(() => { settingsInFlight = null })
+  return settingsInFlight
 }
 
 /** Read the backend AI configuration. Null when the command is unavailable

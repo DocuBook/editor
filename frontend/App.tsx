@@ -127,6 +127,23 @@ export default function App() {
   /** Single event-driven git-status refresher shared by the editor UI — runs on
    *  git actions, vault open/close, and window focus (no interval). */
   useGitStatusRefresh()
+  /** AI settings refresher — ONE listener for the whole app, attached here rather
+   *  than inside each ProviderForm (three instances meant three listener pairs).
+   *  A change made in another browser/tab is otherwise invisible until a save or
+   *  revoke happens to refresh: the server is authoritative but never pushes. Same
+   *  event-driven, no-interval pattern as the git-status refresher. Deliberately
+   *  NOT gated on the settings surface being open — the composer, transport and
+   *  auto-commit consume this store while Settings is closed. */
+  useEffect(() => {
+    const refresh = () => void hydrateAiSettings()
+    const onVisibility = () => { if (document.visibilityState === 'visible') refresh() }
+    window.addEventListener('focus', refresh)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', refresh)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
   useAuthGuard()
 
   const conflicts = useSyncStore(s => s.conflicts)
