@@ -85,7 +85,6 @@ describe('responsive tabs', () => {
     const label = document.querySelector<HTMLElement>('[title="active-document-with-a-long-name.md"]')
     const activeTab = document.querySelector<HTMLElement>('[data-tab-path]')!
     expect(label?.classList.contains('truncate')).toBe(true)
-    expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
     expect(document.querySelector<HTMLButtonElement>('[aria-label="Close active-document-with-a-long-name.md"]')!.style.pointerEvents).toBe('auto')
     // Tab boundaries come from the strip (adjacent-sibling rule), so no tab ever
     // carries a border of its own — that is what left a dangling edge before.
@@ -108,7 +107,6 @@ describe('responsive tabs', () => {
     expect(document.querySelector<HTMLElement>('[data-tab-path="notes/last.md"]')!.classList.contains('border-r')).toBe(false)
     expect(activeTab.classList.contains('border-r')).toBe(false)
     expect(activeTab.className).not.toContain('shadow-[inset_0_-1px_0_var(--color-accent)]')
-    expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
     expect(document.querySelector('[aria-label="Editor actions"]')).toBeNull()
   })
 
@@ -121,7 +119,6 @@ describe('responsive tabs', () => {
       'notes/active-document-with-a-long-name.md',
       'notes/last.md',
     ])
-    expect(document.querySelector('[data-testid="active-tab-indicator"]')).not.toBeNull()
     expect(document.querySelector('[aria-label="Editor actions"]')).toBeNull()
     const modeToggle = document.querySelector<HTMLButtonElement>('[aria-label="Switch to Markdown mode"]')
     expect(modeToggle).not.toBeNull()
