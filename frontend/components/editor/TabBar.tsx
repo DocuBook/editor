@@ -58,87 +58,91 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   }, [curTab])
 
   return (
-    <div data-tauri-drag-region={isMacTauri ? true : undefined} className={'editor-tab-bar ui-shell relative z-30 h-12 flex items-center flex-nowrap shrink-0 text-xs ' + (compact ? 'gap-2 pl-4 pr-4 ' : 'gap-3 pr-6 ') + (!compact && isMacTauri && !sidebarOpen ? 'pl-20' : !compact ? 'pl-6' : '')}>
-      <span className={'inline-flex shrink-0 items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
-        <button
-          ref={sidebarToggleRef}
-          data-testid="sidebar-toggle"
-          onClick={onToggleSidebar}
-          aria-label={isDesktop ? (sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar') : (sidebarOpen ? 'Close sidebar drawer' : 'Open sidebar drawer')}
-          aria-expanded={sidebarOpen}
-          aria-controls={isDesktop ? 'desktop-sidebar' : 'mobile-sidebar'}
-          aria-haspopup={isDesktop ? undefined : 'dialog'}
-          className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active p-2"
-        >
-          <PanelLeft size={16} />
-        </button>
-        {!sidebarOpen && (
+    /** The bar is the full-width chrome strip (background + hairline + drag
+     *  region); `-track` inside is the layout row, so the background spans edge
+     *  to edge on wide displays where the row itself is centred and capped. */
+    <div data-tauri-drag-region={isMacTauri ? true : undefined} className="editor-tab-bar relative z-30 h-12 shrink-0">
+      <div className={'editor-tab-bar-track ui-shell h-full flex items-center flex-nowrap text-xs ' + (compact ? 'gap-2 pl-4 pr-4 ' : 'gap-3 pr-6 ') + (!compact && isMacTauri && !sidebarOpen ? 'pl-20' : !compact ? 'pl-6' : '')}>
+        <span className={'inline-flex shrink-0 items-center ' + (sidebarOpen ? '' : 'rounded-md border border-border-subtle bg-background overflow-hidden')}>
           <button
-            onClick={onOpenSearch}
-            aria-label="Search files"
-            className="cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active p-2 border-l border-border-subtle"
+            ref={sidebarToggleRef}
+            data-testid="sidebar-toggle"
+            onClick={onToggleSidebar}
+            aria-label={isDesktop ? (sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar') : (sidebarOpen ? 'Close sidebar drawer' : 'Open sidebar drawer')}
+            aria-expanded={sidebarOpen}
+            aria-controls={isDesktop ? 'desktop-sidebar' : 'mobile-sidebar'}
+            aria-haspopup={isDesktop ? undefined : 'dialog'}
+            className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active p-2"
           >
-            <Search size={16} />
+            <PanelLeft size={16} />
           </button>
-        )}
-      </span>
-      {showInlineEditing && (
-      <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background">
-        <button onClick={() => undo()} disabled={!canUndo} title="Undo" aria-label="Undo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
-        <button onClick={() => redo()} disabled={!canRedo} title="Redo" aria-label="Redo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 border-l border-border-subtle flex items-center justify-center"><ChevronRight size={16} /></button>
-      </span>
-      )}
-      <div ref={tabStripRef} className={'tab-strip flex-1 min-w-0 flex items-stretch h-full overflow-y-hidden scrollbar-none ' + (compact ? 'overflow-hidden' : 'overflow-x-auto')}>
-        {tabs.length === 0 ? <span className="text-foreground-subtle italic self-center">No file open</span> : visibleTabs.map(tab => (
-          <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
-            className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-6 pr-8 ' : 'whitespace-nowrap shrink-0 px-8 ') + (activeTab === tab.path ? 'tab-active bg-background text-foreground' : 'tab-inactive text-foreground-subtle')}>
-            {activeTab === tab.path && <span data-testid="active-tab-indicator" aria-hidden="true" className={'absolute size-1.5 rounded-full bg-accent ' + (compact ? 'left-2' : 'left-3')} />}
-            <span title={compact ? tab.name : undefined} className={(compact ? 'min-w-0 truncate ' : '') + (tab.deleted ? 'line-through opacity-50' : '')}>{tab.name}</span>
-            <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} aria-label={'Close ' + tab.name} style={compact ? { opacity: 1, pointerEvents: 'auto' } : undefined} className="tab-close-btn absolute right-1 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
-          </div>
-        ))}
-      </div>
-
-      {showInlineEditing && (
-      /** One icon showing the mode a click switches to — markdown icon while
-       *  in WYSIWYG, blocks icon while in source (same rule as the menu). */
-      <button
-        onClick={() => useEditorStore.getState().toggleEditMode()}
-        disabled={!toggleable}
-        aria-label={editMode === 'editor' ? 'Switch to Markdown mode' : 'Switch to WYSIWYG mode'}
-        title={tabs.length === 0 ? 'No file to switch' : !toggleable ? 'Preview only' : editMode === 'editor' ? 'Switch to Markdown' : 'Switch to WYSIWYG'}
-        className="flex items-center justify-center shrink-0 min-w-10 sm:min-w-8 p-2 rounded-md border border-border-subtle bg-background cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed">
-        <ModeSwitchIcon editMode={editMode} size={15} />
-      </button>
-      )}
-
-      {compact && (
-        <span className="relative shrink-0" ref={actionsRef}>
-          <button onClick={() => setActionsOpen(o => !o)} aria-label="Editor actions" aria-expanded={actionsOpen}
-            className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
-            Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
-          </button>
-          {actionsOpen && (
-            <div className="ui-popover absolute top-full right-0 mt-1 min-w-50 p-1 z-50">
-              <button onClick={() => undo()} disabled={!canUndo}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0"><ChevronLeft size={14} /></span>
-                <span>Undo</span>
-              </button>
-              <button onClick={() => redo()} disabled={!canRedo}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0"><ChevronRight size={14} /></span>
-                <span>Redo</span>
-              </button>
-              <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0"><ModeSwitchIcon editMode={editMode} size={14} /></span>
-                <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
-              </button>
-            </div>
+          {!sidebarOpen && (
+            <button
+              onClick={onOpenSearch}
+              aria-label="Search files"
+              className="cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active p-2 border-l border-border-subtle"
+            >
+              <Search size={16} />
+            </button>
           )}
         </span>
-      )}
+        {showInlineEditing && (
+        <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background">
+          <button onClick={() => undo()} disabled={!canUndo} title="Undo" aria-label="Undo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
+          <button onClick={() => redo()} disabled={!canRedo} title="Redo" aria-label="Redo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 border-l border-border-subtle flex items-center justify-center"><ChevronRight size={16} /></button>
+        </span>
+        )}
+        <div ref={tabStripRef} className={'tab-strip flex-1 min-w-0 flex items-stretch h-full overflow-y-hidden scrollbar-none ' + (compact ? 'overflow-hidden' : 'overflow-x-auto')}>
+          {tabs.length === 0 ? <span className="text-foreground-subtle italic self-center">No file open</span> : visibleTabs.map(tab => (
+            <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
+              className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-4 pr-8 ' : 'whitespace-nowrap shrink-0 px-8 ') + (activeTab === tab.path ? 'tab-active text-foreground' : 'tab-inactive text-foreground-subtle')}>
+              <span title={compact ? tab.name : undefined} className={(compact ? 'min-w-0 truncate ' : '') + (tab.deleted ? 'line-through opacity-50' : '')}>{tab.name}</span>
+              <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} aria-label={'Close ' + tab.name} style={compact ? { opacity: 1, pointerEvents: 'auto' } : undefined} className="tab-close-btn absolute right-1 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
+            </div>
+          ))}
+        </div>
+
+        {showInlineEditing && (
+        /** One icon showing the mode a click switches to — markdown icon while
+         *  in WYSIWYG, blocks icon while in source (same rule as the menu). */
+        <button
+          onClick={() => useEditorStore.getState().toggleEditMode()}
+          disabled={!toggleable}
+          aria-label={editMode === 'editor' ? 'Switch to Markdown mode' : 'Switch to WYSIWYG mode'}
+          title={tabs.length === 0 ? 'No file to switch' : !toggleable ? 'Preview only' : editMode === 'editor' ? 'Switch to Markdown' : 'Switch to WYSIWYG'}
+          className="flex items-center justify-center shrink-0 min-w-10 sm:min-w-8 p-2 rounded-md border border-border-subtle bg-background cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed">
+          <ModeSwitchIcon editMode={editMode} size={15} />
+        </button>
+        )}
+
+        {compact && (
+          <span className="relative shrink-0" ref={actionsRef}>
+            <button onClick={() => setActionsOpen(o => !o)} aria-label="Editor actions" aria-expanded={actionsOpen}
+              className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
+              Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
+            </button>
+            {actionsOpen && (
+              <div className="ui-popover absolute top-full right-0 mt-1 min-w-50 p-1 z-50">
+                <button onClick={() => undo()} disabled={!canUndo}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                  <span className="text-foreground-secondary shrink-0"><ChevronLeft size={14} /></span>
+                  <span>Undo</span>
+                </button>
+                <button onClick={() => redo()} disabled={!canRedo}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                  <span className="text-foreground-secondary shrink-0"><ChevronRight size={14} /></span>
+                  <span>Redo</span>
+                </button>
+                <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
+                  className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
+                  <span className="text-foreground-secondary shrink-0"><ModeSwitchIcon editMode={editMode} size={14} /></span>
+                  <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
+                </button>
+              </div>
+            )}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

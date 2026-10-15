@@ -749,11 +749,21 @@ body .code-block-language-empty {
     }
 }
 
+/* The tab bar and the sidebar share ONE chrome surface (--color-surface), so the
+   two read as a single continuous shell in light theme instead of the bar
+   sitting on the document's white. The bar is the full-width strip; the row of
+   controls inside is `-track` and is what the wide-display centring targets, so
+   the background still spans edge to edge when the row is capped at 1280px. */
+.editor-tab-bar {
+    background: var(--color-surface);
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
 /* Keep the document surface and its tab bar visually centered on wide displays.
    The existing shell/sidebar layout stays unchanged; the rail keeps a small
    breathing space even when the sidebar is open, then caps at 1280px. */
 @media (min-width: 1440px) {
-    .editor-tab-bar,
+    .editor-tab-bar-track,
     .editor-content,
     .editor-ai-rail {
         width: min(calc(100% - 6rem), 1280px);
@@ -792,10 +802,20 @@ body .code-block-language-empty {
     border-left: 1px solid var(--color-border-subtle);
 }
 
-/* Tab hover effects */
+/* On the surface-toned bar the active tab lifts to the pressed/hover token, the
+   same relationship SidebarTabMenu's selected item has with its container, so
+   the active tab reads as raised in BOTH themes (light and dark). Inactive tabs
+   stay flush with the bar. */
+.tab-item.tab-active {
+  background: var(--color-surface-active);
+}
+
+/* Tab hover effects. Hover uses the ONE-STEP-lit surface token, distinct from
+   the stronger --color-surface-active the active tab occupies, so hovering an
+   inactive tab never looks identical to selecting it. */
 .tab-inactive:hover {
   color: var(--color-foreground-quaternary);
-  background: var(--color-surface-active);
+  background: var(--color-surface-hover);
 }
 .tab-close-btn {
   opacity: 0;
