@@ -5,8 +5,6 @@ export type SidebarPanelId = 'vault' | 'git' | 'trash'
 interface SidebarTabMenuProps {
   active: SidebarPanelId
   onChange: (panel: SidebarPanelId) => void
-  trashCount: number
-  isNative: boolean
   /** Locks every tab while a Trash batch action runs — switching panels would
    *  unmount TrashPanel mid-flight and let a second batch start concurrently. */
   disabled?: boolean
@@ -18,12 +16,17 @@ const ITEMS = [
   { id: 'trash' as const, label: 'Trash', Icon: Trash },
 ]
 
-export default function SidebarTabMenu({ active, onChange, trashCount, isNative, disabled: locked = false }: SidebarTabMenuProps) {
+export default function SidebarTabMenu({ active, onChange, disabled: locked = false }: SidebarTabMenuProps) {
   return (
     <div role="tablist" aria-label="Sidebar panels" className="flex w-full min-w-0 items-center gap-0.5 rounded-lg border border-border-subtle bg-background p-0.5">
       {ITEMS.map(({ id, label, Icon }) => {
         const selected = id === active
-        const disabled = locked || (id === 'trash' && !isNative && trashCount === 0)
+        /** Every tab is reachable regardless of platform or how full its panel is:
+         *  the Trash tab opens and reports "empty" instead of hiding behind a count
+         *  gate, which used to make the web build lose the panel entirely until
+         *  something had been deleted. Its CONTENT (TrashPanel) still owns the
+         *  empty state. Only a running Trash batch locks the tabs. */
+        const disabled = locked
         return (
           <button
             key={id}
