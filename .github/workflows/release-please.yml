@@ -199,7 +199,7 @@ jobs:
         if: steps.pr.outputs.branch != ''
         run: |
           changed=false
-          if ! git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
+          if ! git diff --exit-code --quiet -- package-lock.json core/Cargo.lock src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
             changed=true
           fi
           if [ "$changed" = false ] && [ "${{ steps.rebase.outputs.rebased }}" != true ]; then
@@ -209,7 +209,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if [ "$changed" = true ]; then
-            git add package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
+            git add package-lock.json core/Cargo.lock src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
             git commit -m "chore(release): sync lockfiles and normalise changelog heading"
           fi
           if [ "${{ steps.rebase.outputs.rebased }}" = true ]; then
