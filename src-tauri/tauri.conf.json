@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DocuBook Editor",
-  "version": "0.1.8",
+  "version": "0.2.0",
   "identifier": "com.docubook.editor",
   "build": {
     "frontendDist": "../dist",
@@ -22,7 +22,10 @@
         "decorations": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "trafficLightPosition": { "x": 16, "y": 16 },
+        "trafficLightPosition": {
+          "x": 16,
+          "y": 16
+        },
         "dragDropEnabled": false,
         "theme": "Dark"
       }
