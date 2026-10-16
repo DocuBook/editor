@@ -34,6 +34,8 @@ jobs:
         run: node test/check-acl.mjs
       - name: Docker path guard (shared core crate is packaged)
         run: node test/check-docker-paths.mjs
+      - name: Release config guard (release-please config is not stale)
+        run: node test/check-release-config.mjs
       - name: Frontend tests
         run: npm test
       - name: Check version consistency (manifests + locks + changelog section)
@@ -49,7 +51,11 @@ jobs:
           for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v"; do
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done
-          grep -q "^## v$npm_v — " CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v —'"; exit 1; }
+          # Accept both changelog heading dialects: the hand-written sections
+          # ("## v0.1.8 — 2026-10-03") and the release-please generated ones
+          # ("## v0.2.0 (2026-10-16)"). Release-please's heading format is not
+          # configurable, so the gate accepts either rather than fighting it.
+          grep -qE "^## v$npm_v( —| \()" CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v' (expected '## v$npm_v — ' or '## v$npm_v (')"; exit 1; }
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             expected_tag="v$npm_v"
             [ "$GITHUB_REF_NAME" = "$expected_tag" ] || {
