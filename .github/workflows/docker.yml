@@ -6,6 +6,12 @@ on:
   push:
     tags:
       - 'v*'
+    # release-please tags the release commit via the API *after* it lands on
+    # master, so the tag push event never fires for a release — the run we get
+    # is the master push, and no `startsWith(github.ref, 'refs/tags/v')` test
+    # can match it. Watch master too and let the resolve-tag job decide whether
+    # the pushed commit actually carries a release tag.
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
@@ -21,6 +27,45 @@ permissions:
   contents: read
 
 jobs:
+  # A tag push names the tag in github.ref. release-please instead creates the
+  # tag on an already-pushed master commit, so no tag-ref run exists and every
+  # `startsWith(github.ref, 'refs/tags/v')` test below was false — which is how
+  # v0.2.0 shipped no image to GHCR. Resolve "is this a release tag?" once here
+  # and gate the publish steps on the output instead of on github.ref.
+  resolve-tag:
+    runs-on: ubuntu-24.04
+    # Runs on PRs too (with an empty tag) purely so `build-and-push`, which
+    # needs it, is not skipped — a skipped dependency would skip the PR check.
+    # The resolver itself is only reached when a release is possible: a PR can
+    # never be one, and the lookup would be wasted API calls.
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve the release tag
+        id: resolve
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
+      # package.json is read by the validation step, so check out — but only
+      # when there is a tag to validate.
+      - uses: actions/checkout@v7
+        if: steps.resolve.outputs.tag != ''
+      - name: Validate release tag
+        if: steps.resolve.outputs.tag != ''
+        shell: bash
+        run: |
+          version=$(jq -r '.version' package.json)
+          expected_tag="v$version"
+          [ "${{ steps.resolve.outputs.tag }}" = "$expected_tag" ] || {
+            echo "::error::Release tag ${{ steps.resolve.outputs.tag }} does not match manifest version $expected_tag"
+            exit 1
+          }
+          echo "OK: tag $expected_tag matches package.json"
+
   frontend:
     runs-on: ubuntu-24.04
     steps:
@@ -44,8 +89,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-    needs: [frontend]
-    # PRs validate amd64 only. Tags and manual runs use native amd64 + arm64 runners.
+    needs: [frontend, resolve-tag]
+    # PRs validate amd64 only. Releases and manual runs use native amd64 + arm64.
     strategy:
       fail-fast: false
       matrix:
@@ -55,23 +100,19 @@ jobs:
       name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
     steps:
       - uses: actions/checkout@v7
-      - name: Validate release tag
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          version=$(jq -r '.version' package.json)
-          expected_tag="v$version"
-          [ "$GITHUB_REF_NAME" = "$expected_tag" ] || {
-            echo "::error::Release tag $GITHUB_REF_NAME does not match manifest version $expected_tag"
-            exit 1
-          }
+        with:
+          # On a release, build the exact tagged tree rather than the branch.
+          ref: ${{ needs.resolve-tag.outputs.tag || github.sha }}
       - name: Download frontend
         uses: actions/download-artifact@v8
         with:
+          # The frontend artifact is keyed by the run's SHA; keep it that way so
+          # this lookup still works when the checkout ref is a tag.
           name: docker-web-${{ github.sha }}
           path: .docker-web
       - uses: docker/setup-buildx-action@v4
       - name: Log in to GHCR
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-tag.outputs.tag != ''
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -79,14 +120,17 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Image metadata
         id: meta
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-tag.outputs.tag != ''
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
+          # metadata-action derives ref-based tags from github.ref, which on the
+          # release-please master push is refs/heads/master. Feed it the resolved
+          # tag via `value` so the image gets :vX.Y.Z and :X.Y.Z (+ latest).
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-          flavor: latest=auto
+            type=semver,pattern={{version}},value=${{ needs.resolve-tag.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.resolve-tag.outputs.tag }}
+            type=raw,value=latest,enable=${{ !contains(needs.resolve-tag.outputs.tag, '-') }}
       - name: Build PR check
         if: github.event_name == 'pull_request'
         uses: docker/build-push-action@v7
@@ -110,12 +154,12 @@ jobs:
           tags: ${{ env.IMAGE }}:check-${{ matrix.slug }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
       - name: Smoke test image
-        if: github.event_name != 'push'
+        if: github.event_name != 'push' || needs.resolve-tag.outputs.tag == ''
         run: sudo sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}:check-${{ matrix.slug }}" "${{ matrix.platform }}"
 
       - name: Build and push platform image
         id: build
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-tag.outputs.tag != ''
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -126,16 +170,16 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
           cache-to: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }},mode=max
       - name: Smoke test published image
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-tag.outputs.tag != ''
         run: sudo sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}@${{ steps.build.outputs.digest }}" "${{ matrix.platform }}"
       - name: Export digest
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-tag.outputs.tag != ''
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
       - name: Upload digest
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        if: needs.resolve-tag.outputs.tag != ''
         uses: actions/upload-artifact@v7
         with:
           name: docker-digest-${{ matrix.slug }}
@@ -147,8 +191,8 @@ jobs:
     permissions:
       contents: read
       packages: write
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build-and-push]
+    if: needs.resolve-tag.outputs.tag != ''
+    needs: [build-and-push, resolve-tag]
     runs-on: ubuntu-24.04
     environment: release-auto
     steps:
@@ -170,10 +214,12 @@ jobs:
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.IMAGE }}
+          # Same as the platform job: derive tags from the resolved tag, not
+          # from github.ref (which is a branch on the release-please push).
           tags: |
-            type=ref,event=tag
-            type=semver,pattern={{version}}
-          flavor: latest=auto
+            type=semver,pattern={{version}},value=${{ needs.resolve-tag.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.resolve-tag.outputs.tag }}
+            type=raw,value=latest,enable=${{ !contains(needs.resolve-tag.outputs.tag, '-') }}
       - name: Create multi-platform manifest
         working-directory: /tmp/digests
         run: |

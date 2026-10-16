@@ -41,6 +41,8 @@ jobs:
         run: node test/check-release-config.mjs
       - name: Changelog heading guard (release PR heading normaliser works)
         run: node test/check-changelog-heading.mjs
+      - name: Release tag guard (release detection does not depend on github.ref)
+        run: node test/check-release-tag.mjs
       - name: Frontend tests
         run: npm test
       - name: Check version consistency (manifests + locks + changelog section)
@@ -216,7 +218,19 @@ jobs:
     # Run on PRs too — build is a required branch-protection check, and this
     # catches dependency/compile breaks (e.g. a major bump) before merge.
     # Artifacts upload regardless; publish stays tag-only.
-    if: github.event_name == 'pull_request' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    #
+    # NOT a plain `startsWith(github.ref, 'refs/tags/v')` check: release-please
+    # tags the release commit via the API *after* that commit is already on
+    # master, so GitHub emits no second run for the tag — the only run for the
+    # release SHA carries `ref=refs/heads/master`, which failed the tag test and
+    # silently skipped build → release-gate → publish (v0.2.0 shipped no DMGs
+    # and no image). A master push IS the release commit, so accept it; publish
+    # and release-gate are still hard-gated to real tags below.
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/master')
     needs: [test]
     # PRs: heavy build waits for admin approval (build-approval env).
     # Tag push (release) / manual: runs automatically (release-auto env).
@@ -325,17 +339,35 @@ jobs:
           if-no-files-found: error
 
   release-gate:
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Release-only. `needs: build` now runs on a master push too, so this must
+    # decide "is a release" from the tag on the commit, not from the ref the run
+    # started on — see .github/scripts/resolve-release-tag.sh for why.
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'push' && github.ref_type == 'branch')
     needs: [lint, test, e2e, test-server-linux, security, build]
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v7
+      - name: Resolve the release tag
+        id: releasetag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
       - name: All release checks passed
-        run: echo "All CI, security, platform, and artifact checks passed for $GITHUB_REF_NAME"
+        if: steps.releasetag.outputs.tag != ''
+        run: echo "All CI, security, platform, and artifact checks passed for ${{ steps.releasetag.outputs.tag }}"
 
   publish:
-    if: startsWith(github.ref, 'refs/tags/v')
     needs: [release-gate]
-    # Tag-only — release publishes automatically (no approval gate).
+    # Same tag decision as release-gate: publish must fire for the
+    # release-please master push, not just for a literal tag push.
+    if: >-
+      always() && needs.release-gate.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') ||
+       (github.event_name == 'push' && github.ref_type == 'branch'))
+    # Tag-only release — publishes automatically (no approval gate).
     environment: release-auto
     runs-on: ubuntu-22.04
     permissions:
@@ -343,6 +375,17 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      - name: Resolve the release tag
+        id: releasetag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
+          grep -q '^tag=v' "$GITHUB_OUTPUT" || {
+            echo "::error::No release tag on $GITHUB_SHA — refusing to publish"
+            exit 1
+          }
       - uses: actions/download-artifact@v8
         with:
           pattern: DocuBook-*
@@ -353,7 +396,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ steps.releasetag.outputs.tag }}"
           # Extract changelog section matching the tag version
           awk -v tag="$TAG" '
             BEGIN { flag=0 }
@@ -380,7 +423,7 @@ jobs:
           **Web (Docker):** self-host via the container image
           ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)):
           ```bash
-          docker run -d --name docubook -p 8080:8080 -v docubook:/data ghcr.io/docubook/editor:${{ github.ref_name }}
+          docker run -d --name docubook -p 8080:8080 -v docubook:/data ghcr.io/docubook/editor:$TAG
           ```
 
           ---
@@ -396,4 +439,13 @@ jobs:
           case "$TAG" in
             *-*) RELEASE_FLAGS+=(--prerelease) ;;
           esac
-          gh release create "$TAG" "${DMGS[@]}" SHA256SUMS.txt "${RELEASE_FLAGS[@]}"
+          # release-please already created the release for this tag, so
+          # `create` would fail with "release already exists". Upload onto the
+          # existing release instead; fall back to create when it is absent
+          # (a plain tag push that bypasses release-please).
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" "${RELEASE_FLAGS[@]}"
+            gh release upload "$TAG" "${DMGS[@]}" SHA256SUMS.txt --clobber
+          else
+            gh release create "$TAG" "${DMGS[@]}" SHA256SUMS.txt "${RELEASE_FLAGS[@]}"
+          fi
