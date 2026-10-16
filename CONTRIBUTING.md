@@ -170,15 +170,27 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
 `CHANGELOG.md` by hand any more.
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
-2. **`release-please` opens or updates one release PR** on every push to
-   `master`, titled `chore(release): vX.Y.Z — DocuBook`. The PR bumps the four
-   manifests and prepends a `## vX.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`,
-   grouping entries by commit type.
+2. **`release-please` opens or updates one release PR**, titled
+   `chore(release): vX.Y.Z — DocuBook`. The PR bumps the four manifests and
+   prepends a `## vX.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, grouping
+   entries by commit type.
+
+   It rewrites the release branch on every push to `master` — the workflow
+   explicitly rebases the branch on the new `master` head and force-updates the
+   ref (not a merge), so the PR never needs manual rebasing. `always-update` in
+   `release-please-config.json` makes release-please rebuild the branch when it
+   has a release candidate; the workflow rebase also covers pushes containing
+   only hidden `docs`, `test`, or `chore` commits. `always-update` is a
+   root-level manifest option — it is not read from `packages`.
+
 3. **The same workflow syncs the lockfiles** onto the release-PR branch. It
    bumps `package-lock.json` and the two consumer `Cargo.lock` root versions,
    and rewrites the generated changelog heading to this repo's format. This is
    the CI-side twin of the `pre-push` hook — release-please pushes manifests
    only, and the version-consistency gate below would otherwise fail the PR.
+   The job runs after *every* release-please run and resolves the branch by the
+   `autorelease: pending` label, because the action only reports a branch in its
+   `pr` output when it *opened* a PR, not when it rebased one.
 4. **Audit gate — enforced by CI.** The version-consistency check in `ci.yml`
    fails the build if any of the **four manifests + three locks** drift, or if
    `CHANGELOG.md` is missing the section for the current version. Master must be
@@ -199,9 +211,12 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
 | `core/Cargo.toml` | **nothing** — the internal crate is versioned independently |
 
 The changelog heading format is deliberately CI-side: release-please emits
-`## X.Y.Z (YYYY-MM-DD)`, and the `sync-lockfiles` job rewrites it to
-`## vX.Y.Z — YYYY-MM-DD` so every section in the file reads the same. The gate in
-`ci.yml` accepts either dialect.
+`## X.Y.Z (YYYY-MM-DD)` — or, for the `github` changelog dialect this repo gets,
+`## [X.Y.Z](compare-url) (YYYY-MM-DD)` — and the `sync-lockfiles` job rewrites
+either to `## vX.Y.Z — YYYY-MM-DD` so every section in the file reads the same.
+The heading rewrite fails loudly if it finds no heading for the current version,
+so a release-please format change surfaces in CI instead of shipping an
+un-normalised changelog that the gate below then rejects.
 
 **Version bumps are SemVer, decided by the highest-ranked commit type in the
 release.** `feat` → minor, a breaking change (`!` or a `BREAKING CHANGE:`

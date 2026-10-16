@@ -61,21 +61,63 @@ jobs:
   # release PR instead, swap in a PAT or GitHub App token
   # (`secrets.RELEASE_PLEASE_TOKEN`) in BOTH the checkout below and the action
   # above — that is the only way to get workflows triggered by a bot push.
+  # NOTE: `prs_created` is only `true` when a pull request was *opened*. On a
+  # rebase of an existing release PR the action updates the branch and reports
+  # `prs_created == 'false'` with no `pr` output at all, so a narrow
+  # `prs_created == 'true'` guard skips exactly the case this job needs to fix.
+  # The branch is therefore resolved by label instead of from the action output.
   sync-lockfiles:
     needs: [release-please]
-    if: needs.release-please.outputs.prs_created == 'true'
+    if: always() && needs.release-please.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      pull-requests: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - name: Resolve the release PR branch
+        id: pr
+        run: |
+          branch=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --label "autorelease: pending" --limit 1 --json headRefName \
+            --jq '.[0].headRefName')
+          if [ -z "$branch" ] || [ "$branch" = "null" ]; then
+            echo "No open release PR — nothing to sync."
+            echo "branch=" >> "$GITHUB_OUTPUT"
+          else
+            echo "Release PR branch: $branch"
+            echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout the release PR branch
+        if: steps.pr.outputs.branch != ''
         uses: actions/checkout@v7
         with:
-          # release-please's release PR branch, e.g. release-please--branches--master
-          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          ref: ${{ steps.pr.outputs.branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # `always-update` only applies when release-please has a release
+      # candidate to process. Hidden-only commits can therefore leave an
+      # existing release branch based on an old master head. Rebase it here so
+      # every successful run keeps the release PR current.
+      - name: Rebase the release PR onto master
+        id: rebase
+        if: steps.pr.outputs.branch != ''
+        run: |
+          before=$(git rev-parse HEAD)
+          git fetch origin master
+          git rebase origin/master
+          after=$(git rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "rebased=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "rebased=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v7
+        if: steps.pr.outputs.branch != ''
         with:
           node-version: "22.12.0"
 
@@ -84,14 +126,20 @@ jobs:
       # — never `cargo generate-lockfile`, which re-resolves every dep), and the
       # Cargo.lock root-version lines follow their manifests.
       - name: Sync package-lock.json
+        if: steps.pr.outputs.branch != ''
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Sync Cargo.lock root versions
+        if: steps.pr.outputs.branch != ''
         run: |
-          sync_root_version() {  # $1 = crate dir, $2 = crate name
-            local dir="$1" name="$2"
+          sync_root_version() {  # $1 = crate dir, $2 = crate name, $3 = manifest dir
+            local dir="$1" name="$2" manifest="${3:-$1}"
             local v
-            v=$(grep '^version' "$dir/Cargo.toml" | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+            v=$(grep -m1 '^version' "$manifest/Cargo.toml" | sed 's/.*"\([^"]*\)".*/\1/')
+            if [ -z "$v" ]; then
+              echo "::error::could not read the version out of $manifest/Cargo.toml"
+              exit 1
+            fi
             awk -v target="$name" -v ver="$v" '
               /^\[\[package\]\]/ { in_target = 0 }
               /^name = "/ {
@@ -105,11 +153,21 @@ jobs:
           sync_root_version src-tauri docubook-desktop
           sync_root_version server docubook-server
 
-      # release-please writes "## 0.2.0 (2026-10-16)"; this repo's history uses
-      # "## v0.1.8 — 2026-10-03", and ci.yml's version gate keys on the "v"
-      # prefix. The heading format is not configurable, so rewrite it here to
-      # keep every section in CHANGELOG.md consistent and the gate satisfied.
+      # release-please writes the heading in one of two dialects, depending on
+      # the changelog type it selects (this repo gets the `github` dialect):
+      #   ## [0.2.0](https://…/compare/v0.1.8...v0.2.0) (2026-10-16)
+      #   ## 0.2.0 (2026-10-16)
+      # This repo's history uses "## v0.1.8 — 2026-10-03" and ci.yml's version
+      # gate keys on the "v" prefix, so the heading is rewritten here.
+      #
+      # The pattern is deliberately loose on the link target — the compare URL
+      # contains its own parens — and strict on the version boundary, so a
+      # sibling section such as "## 0.2.01" is not mistaken for this release.
+      # Failing loudly matters: the earlier exact-match predicate silently
+      # no-opped on the `github` dialect, which is how the un-normalised
+      # heading reached ci.yml and failed the version-consistency gate.
       - name: Normalise the changelog heading
+        if: steps.pr.outputs.branch != ''
         run: |
           node - <<'NODE'
           const fs = require('fs');
@@ -117,27 +175,44 @@ jobs:
           const path = 'CHANGELOG.md';
           const src = fs.readFileSync(path, 'utf8');
           const lines = src.split('\n');
-          const i = lines.findIndex(l =>
-            l === `## ${version} (` || l.startsWith(`## ${version} (`));
+          const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const heading = new RegExp(
+            `^## (?:\\[v?${escaped}\\]\\([^\\n]*?\\)|v?${escaped})\\s*(?:\\((\\d{4}-\\d{2}-\\d{2})\\))?\\s*$` +
+            `|^## v?${escaped}\\s*[\\u2014:\\u00b7-]\\s*(\\d{4}-\\d{2}-\\d{2})\\s*$`
+          );
+          const i = lines.findIndex(l => heading.test(l));
           if (i === -1) {
-            console.log('heading already normalised (or not found) — nothing to do');
-            process.exit(0);
+            console.error(`no changelog heading for ${version} — release-please changed its format; update the pattern in Normalise the changelog heading`);
+            process.exit(1);
           }
-          const m = lines[i].match(/^## \S+ \(([^)]*)\)$/);
-          const date = m ? m[1] : new Date().toISOString().slice(0, 10);
+          const m = lines[i].match(heading);
+          const date = (m && (m[1] || m[2])) || new Date().toISOString().slice(0, 10);
           lines[i] = `## v${version} — ${date}`;
           fs.writeFileSync(path, lines.join('\n'));
           console.log(`rewrote: ${lines[i]}`);
           NODE
 
       - name: Commit and push if a lock changed
+        if: steps.pr.outputs.branch != ''
         run: |
-          if git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
+          changed=false
+          if ! git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
+            changed=true
+          fi
+          if [ "$changed" = false ] && [ "${{ steps.rebase.outputs.rebased }}" != true ]; then
             echo "Nothing to commit — lockfiles and changelog already in sync."
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
-          git commit -m "chore(release): sync lockfiles and normalise changelog heading"
-          git push
+          if [ "$changed" = true ]; then
+            git add package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
+            git commit -m "chore(release): sync lockfiles and normalise changelog heading"
+          fi
+          if [ "${{ steps.rebase.outputs.rebased }}" = true ]; then
+            git push --force-with-lease origin "HEAD:${BRANCH}"
+          else
+            git push origin "HEAD:${BRANCH}"
+          fi
+        env:
+          BRANCH: ${{ steps.pr.outputs.branch }}
