@@ -39,25 +39,35 @@ jobs:
         run: node test/check-docker-paths.mjs
       - name: Release config guard (release-please config is not stale)
         run: node test/check-release-config.mjs
+      - name: Changelog heading guard (release PR heading normaliser works)
+        run: node test/check-changelog-heading.mjs
       - name: Frontend tests
         run: npm test
       - name: Check version consistency (manifests + locks + changelog section)
         run: |
           npm_v=$(node -p "require('./package.json').version")
           lock_v=$(node -p "require('./package-lock.json').version")
-          cargo_v=$(grep '^version' src-tauri/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
-          server_v=$(grep '^version' server/Cargo.toml | head -1 | awk '{print $3}' | tr -d '"')
+          cargo_v=$(grep -m1 '^version' src-tauri/Cargo.toml | awk '{print $3}' | tr -d '"')
+          server_v=$(grep -m1 '^version' server/Cargo.toml | awk '{print $3}' | tr -d '"')
+          # Read tauri.conf.json through JSON, not grep: the key is indented, so a
+          # `grep -A2 '^version'` never matched and silently produced an empty
+          # string — which made the comparison below vacuously true and skipped
+          # the file entirely.
           tauri_v=$(node -p "require('./src-tauri/tauri.conf.json').version")
-          desktop_lock_v=$(grep -A1 'name = "docubook-desktop"' src-tauri/Cargo.lock | grep '^version' | head -1 | awk '{print $3}' | tr -d '"')
-          server_lock_v=$(grep -A1 'name = "docubook-server"' server/Cargo.lock | grep '^version' | head -1 | awk '{print $3}' | tr -d '"')
+          desktop_lock_v=$(grep -A1 'name = "docubook-desktop"' src-tauri/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
+          server_lock_v=$(grep -A1 'name = "docubook-server"' server/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
           echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v tauri.conf.json=$tauri_v Cargo.lock(desktop)=$desktop_lock_v Cargo.lock(server)=$server_lock_v"
           for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v"; do
+            [ -n "$v" ] || { echo "::error::Could not extract a version — a manifest may have moved or changed format"; exit 1; }
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done
-          # Accept both changelog heading dialects: the hand-written sections
+          # Accept both changelog heading dialects: this repo's own
           # ("## v0.1.8 — 2026-10-03") and the release-please generated ones
-          # ("## v0.2.0 (2026-10-16)"). Release-please's heading format is not
-          # configurable, so the gate accepts either rather than fighting it.
+          # ("## 0.2.0 (…)" / "## [0.2.0](…) (…)"). The release PR is normalised
+          # to the first form by release-please.yml before it reaches this gate;
+          # accepting the others too keeps the gate usable on an un-normalised
+          # branch and across the dialect release-please happens to pick.
+          # test/check-changelog-heading.mjs guards this pattern and that rewrite.
           grep -qE "^## v$npm_v( —| \()" CHANGELOG.md || { echo "::error::CHANGELOG.md missing section '## v$npm_v' (expected '## v$npm_v — ' or '## v$npm_v (')"; exit 1; }
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             expected_tag="v$npm_v"
