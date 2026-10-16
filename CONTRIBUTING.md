@@ -81,7 +81,7 @@ editor/
 - **Web auth:** first run requires an admin account (Argon2id); setup cannot be skipped and login remains required. Sessions are httpOnly cookies (rate-limited login) persisted in `sessions.json` (SHA-256 hashed tokens — they survive server restarts, so redeploys don't log users out). `DB_SETUP_TOKEN` protects account creation. Env vars win over Settings → System overrides.
 - **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web, optionally AES-256-GCM encrypted at rest via `DB_KEYS_PASSPHRASE` (Argon2id-derived key). Stored keys are not returned to or persisted by the frontend; `ask_ai` resolves them backend-side and ignores a key supplied in that request.
 - **Permissions (desktop) and web IPC:** `generate_handler!` in `src-tauri/lib.rs` is the single source of truth for the command surface. Adding or removing a command means updating `src-tauri/capabilities/default.json`, `src-tauri/permissions/default.toml`, and the `server/handlers.rs` dispatch in the same change; `node test/check-acl.mjs` (CI lint job) fails when any of them drifts, including a stale desktop-only/web-only exception.
-- **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles. The internal `core` crate is versioned independently (the pre-push hook still syncs its `Cargo.lock` and the `docubook-core` entry in the consumer locks).
+- **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles. All four are bumped automatically by `release-please`; never edit them by hand (see [Release workflow](#release-workflow-automated--release-please)). The internal `core` crate is versioned independently (the pre-push hook still syncs its `Cargo.lock` and the `docubook-core` entry in the consumer locks).
 
 ## Workflow
 
@@ -157,29 +157,91 @@ Release artifacts are published only from version tags.
 
 The pre-commit hook runs `lint-staged` (oxlint on staged TypeScript files). The pre-push hook syncs lockfiles from manifests (npm `--package-lock-only` + root-version-only `Cargo.lock` updates across the three crates), **fails if a lock changed**, then runs the type check (`npx tsc -b`). It does **not** run any tests — desktop, shared-engine (`core`), and server Rust tests plus frontend tests must be run manually before pushing (see [Workflow](#workflow)); PR CI runs them regardless.
 
-## Release workflow (custom — no semantic-release/changeset)
+## Release workflow (automated — release-please)
 
 ```
-PR (conventional commit) → merge to master → CI audit → tag on master → CI publishes
+PR (conventional commit) → merge to master → release-please opens/updates
+  chore(release): vX.Y.Z → CI audit → merge → tag + CHANGELOG → CI publishes
 ```
+
+Releases are driven by [`release-please`](https://github.com/googleapis/release-please)
+(`.github/workflows/release-please.yml`, config in `release-please-config.json`,
+state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
+`CHANGELOG.md` by hand any more.
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
-2. **Version bump + changelog** in the release commit: bump the **manifests only** (`package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `src-tauri/tauri.conf.json`) plus a `## vX.Y.Z — YYYY-MM-DD` section in `CHANGELOG.md` (custom format, grouped sections). **Never bump `*.lock` by hand** — the pre-push hook syncs `package-lock.json` (npm `--package-lock-only`) and all three `Cargo.lock` files (root versions only, deps untouched — plus the `docubook-core` entry in the two consumer locks) from the manifests, and **rejects the push** if a lock had to change so the sync lands in its own commit before re-pushing.
-3. **Audit gate — enforced by CI, not a local script.** The version-consistency check in `ci.yml` (runs on master after merge) fails the build if: any of the **four manifests + three locks** drift, or `CHANGELOG.md` is missing the `## vX.Y.Z —` section for the current version. Master must be green before tagging.
-4. **Tag on master — immutable, annotated:**
-   ```sh
-   git tag -a vX.Y.Z -m "vX.Y.Z — <summary>"
-   git push origin master
-   git push origin vX.Y.Z
-   ```
-   Tag push triggers CI publish (desktop DMG + multi-platform Docker image).
+2. **`release-please` opens or updates one release PR** on every push to
+   `master`, titled `chore(release): vX.Y.Z — DocuBook`. The PR bumps the four
+   manifests and prepends a `## vX.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`,
+   grouping entries by commit type.
+3. **The same workflow syncs the lockfiles** onto the release-PR branch. It
+   bumps `package-lock.json` and the two consumer `Cargo.lock` root versions,
+   and rewrites the generated changelog heading to this repo's format. This is
+   the CI-side twin of the `pre-push` hook — release-please pushes manifests
+   only, and the version-consistency gate below would otherwise fail the PR.
+4. **Audit gate — enforced by CI.** The version-consistency check in `ci.yml`
+   fails the build if any of the **four manifests + three locks** drift, or if
+   `CHANGELOG.md` is missing the section for the current version. Master must be
+   green before tagging.
+5. **Merging the release PR is the release.** release-please tags `vX.Y.Z` on
+   `master`, which triggers CI publish (desktop DMG + multi-platform Docker
+   image). No manual `git tag` step exists.
+
+**What release-please does and does not touch:**
+
+| File | Bumped by |
+| --- | --- |
+| `package.json` | release-please (release type `node`) |
+| `src-tauri/Cargo.toml` | release-please (`extra-files`, toml) |
+| `server/Cargo.toml` | release-please (`extra-files`, toml) |
+| `src-tauri/tauri.conf.json` | release-please (`extra-files`, json) |
+| `package-lock.json`, both consumer `Cargo.lock` | the `sync-lockfiles` job |
+| `core/Cargo.toml` | **nothing** — the internal crate is versioned independently |
+
+The changelog heading format is deliberately CI-side: release-please emits
+`## X.Y.Z (YYYY-MM-DD)`, and the `sync-lockfiles` job rewrites it to
+`## vX.Y.Z — YYYY-MM-DD` so every section in the file reads the same. The gate in
+`ci.yml` accepts either dialect.
+
+**Version bumps are SemVer, decided by the highest-ranked commit type in the
+release.** `feat` → minor, a breaking change (`!` or a `BREAKING CHANGE:`
+footer) → major, everything else → patch. While the major is `0`,
+`bump-minor-pre-major` (set in `release-please-config.json`) holds a breaking
+change at a **minor** bump, so `0.1.8` → `0.2.0` rather than `1.0.0`;
+`1.0.0` is therefore a deliberate step, not a side effect (see **Versioning** in
+`CHANGELOG.md`). `bump-patch-for-minor-pre-major` is deliberately **not** set:
+enabling it would fold a `feat` into a patch release, so features would stop
+advancing the minor version.
 
 **Rules:**
 
-- **Tags are immutable** — never force-move a released tag. A fix after release means a new version (bump the pre-release number, e.g. `next.1`), then the full flow again.
-- Tag only on `master` (a tag on a branch survives squash-merge poorly: the tagged commit is not reachable from master).
-- Version bumps go together in the release commit — never bump in a feature PR.
-- Docker image: immutable version tags with the `v` prefix (`:v0.1.0-next`); stable tags also move `:latest`, while prerelease tags do not.
+- **Never bump a version by hand** — not in a feature PR, not in a release
+  commit. A manual bump desynchronises the manifest from
+  `.release-please-manifest.json` and the next release PR will be wrong.
+- **Never edit `CHANGELOG.md`'s current-version section by hand.** Commits after
+  a release PR is opened are folded into it automatically on the next push.
+- **Tags are immutable** — never force-move a released tag. A fix after release
+  means a new version, then the full flow again.
+- **Tags land on `master` only.**
+- Docker image: immutable version tags with the `v` prefix (`:v0.1.0-next`);
+  stable tags also move `:latest`, while prerelease tags do not.
+- **Prerelease builds:** a change needing field validation before a stable
+  release is cut with `versioning: prerelease` + `prerelease-type` rather than
+  by hand (see **Versioning** in `CHANGELOG.md`).
+- **Reaching `1.0.0` is manual.** A breaking change will not get you there while
+  the major is `0`. Put `Release-As: 1.0.0` in the release commit's footer (or
+  set `"release-as"` in the config for one run), then **remove it** — `release-as`
+  is sticky and would pin every later release.
+  `node test/check-release-config.mjs` (CI lint job) fails if `release-as` is
+  still set to a version that has already shipped, if `bootstrap-sha` does not
+  resolve, or if `changelog-sections` drifts from the types the `commit-msg` hook
+  allows. Run it locally after editing either release config file.
+
+> A push made with `GITHUB_TOKEN` does not trigger other workflows, so the
+> `sync-lockfiles` commit does not re-run `ci.yml` on the release PR. Checks run
+> when the PR is opened and after the merge. To have them run on every push to
+> the release PR, set a PAT or GitHub App token as `RELEASE_PLEASE_TOKEN` and
+> use it in both the action and the checkout.
 
 ## Contribution licensing
 

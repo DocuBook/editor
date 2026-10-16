@@ -1,0 +1,36 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+
+  "bootstrap-sha": "f6ee177",
+  "release-type": "node",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+
+  "pull-request-title-pattern": "chore(release): v${version} — ${component}",
+
+  "bump-minor-pre-major": true,
+
+  "changelog-sections": [
+    { "type": "feat", "section": "🚀 Features" },
+    { "type": "fix", "section": "🐛 Bug Fixes" },
+    { "type": "security", "section": "🛡️ Security" },
+    { "type": "perf", "section": "⚡ Performance" },
+    { "type": "refactor", "section": "🔄 Refactor" },
+    { "type": "docs", "section": "📚 Documentation", "hidden": true },
+    { "type": "test", "section": "🧪 Testing & CI", "hidden": true },
+    { "type": "ci", "section": "🔧 CI" },
+    { "type": "chore", "section": "🔄 Version / Hygiene", "hidden": true }
+  ],
+
+  "packages": {
+    ".": {
+      "component": "DocuBook",
+
+      "extra-files": [
+        { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" },
+        { "type": "toml", "path": "server/Cargo.toml", "jsonpath": "$.package.version" },
+        { "type": "json", "path": "src-tauri/tauri.conf.json", "jsonpath": "$.version" }
+      ]
+    }
+  }
+}

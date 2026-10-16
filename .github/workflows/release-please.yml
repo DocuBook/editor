@@ -1,0 +1,143 @@
+# Automated releases — release-please.
+#
+# Flow (matches CONTRIBUTING.md "Release workflow"):
+#   1. Conventional commits land on master (squash-merge, one subject per PR).
+#   2. This workflow opens/updates one release PR:
+#        chore(release): vX.Y.Z — DocuBook
+#      The PR bumps the four manifests and prepends a ## vX.Y.Z — YYYY-MM-DD
+#      section to CHANGELOG.md.
+#   3. Merging that PR tags vX.Y.Z, which triggers ci.yml `publish` (DMGs) and
+#      docker.yml (multi-arch image).
+#
+# The manifests release-please edits directly:
+#   package.json            (release-type "node", implicit)
+#   src-tauri/Cargo.toml    (extra-files, toml)   -> package.version
+#   server/Cargo.toml       (extra-files, toml)   -> package.version
+#   src-tauri/tauri.conf.json (extra-files, json) -> version
+#
+# NOT edited here: package-lock.json and the three Cargo.lock files. The
+# pre-push hook (.husky/pre-push) owns lock syncing and *rejects* a push that
+# changes a lock, so the sync must land in its own commit — see the
+# `sync-lockfiles` job below, which pushes it onto the release PR branch.
+#
+# core/Cargo.toml is intentionally NOT bumped: CONTRIBUTING.md states the
+# internal core crate is versioned independently.
+
+name: Release Please
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-24.04
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      prs_created: ${{ steps.release.outputs.prs_created }}
+      pr: ${{ steps.release.outputs.pr }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # release-please bumps manifests only. Lockfiles then drift from those
+  # manifests, and CI's version-consistency gate (ci.yml `lint`) would fail the
+  # release PR for exactly the reason the pre-push hook guards against. That
+  # hook cannot help here — release-please pushes with a token, not a local
+  # checkout — so the sync is reproduced here and committed onto the branch.
+  #
+  # KNOWN LIMITATION (deliberate): a push made with GITHUB_TOKEN does NOT
+  # trigger other workflows, so this commit will not re-run ci.yml on the
+  # release PR. The checks therefore run on the PR as release-please opened it
+  # and after the merge to master. To make them run on every push to the
+  # release PR instead, swap in a PAT or GitHub App token
+  # (`secrets.RELEASE_PLEASE_TOKEN`) in BOTH the checkout below and the action
+  # above — that is the only way to get workflows triggered by a bot push.
+  sync-lockfiles:
+    needs: [release-please]
+    if: needs.release-please.outputs.prs_created == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout the release PR branch
+        uses: actions/checkout@v7
+        with:
+          # release-please's release PR branch, e.g. release-please--branches--master
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.12.0"
+
+      # Same three syncs the pre-push hook performs, kept in step with it:
+      # npm rewrites package-lock.json from package.json (resolutions preserved
+      # — never `cargo generate-lockfile`, which re-resolves every dep), and the
+      # Cargo.lock root-version lines follow their manifests.
+      - name: Sync package-lock.json
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+
+      - name: Sync Cargo.lock root versions
+        run: |
+          sync_root_version() {  # $1 = crate dir, $2 = crate name
+            local dir="$1" name="$2"
+            local v
+            v=$(grep '^version' "$dir/Cargo.toml" | head -1 | sed 's/.*"\([^"]*\)".*/\1/')
+            awk -v target="$name" -v ver="$v" '
+              /^\[\[package\]\]/ { in_target = 0 }
+              /^name = "/ {
+                n = $0; sub(/^name = "/, "", n); sub(/".*/, "", n)
+                in_target = (n == target) ? 1 : 0
+              }
+              in_target && /^version = / { sub(/version = ".*"/, "version = \"" ver "\"") }
+              { print }
+            ' "$dir/Cargo.lock" > "$dir/Cargo.lock.tmp" && mv "$dir/Cargo.lock.tmp" "$dir/Cargo.lock"
+          }
+          sync_root_version src-tauri docubook-desktop
+          sync_root_version server docubook-server
+
+      # release-please writes "## 0.2.0 (2026-10-16)"; this repo's history uses
+      # "## v0.1.8 — 2026-10-03", and ci.yml's version gate keys on the "v"
+      # prefix. The heading format is not configurable, so rewrite it here to
+      # keep every section in CHANGELOG.md consistent and the gate satisfied.
+      - name: Normalise the changelog heading
+        run: |
+          node - <<'NODE'
+          const fs = require('fs');
+          const version = require('./package.json').version;      // already bumped in the PR
+          const path = 'CHANGELOG.md';
+          const src = fs.readFileSync(path, 'utf8');
+          const lines = src.split('\n');
+          const i = lines.findIndex(l =>
+            l === `## ${version} (` || l.startsWith(`## ${version} (`));
+          if (i === -1) {
+            console.log('heading already normalised (or not found) — nothing to do');
+            process.exit(0);
+          }
+          const m = lines[i].match(/^## \S+ \(([^)]*)\)$/);
+          const date = m ? m[1] : new Date().toISOString().slice(0, 10);
+          lines[i] = `## v${version} — ${date}`;
+          fs.writeFileSync(path, lines.join('\n'));
+          console.log(`rewrote: ${lines[i]}`);
+          NODE
+
+      - name: Commit and push if a lock changed
+        run: |
+          if git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
+            echo "Nothing to commit — lockfiles and changelog already in sync."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
+          git commit -m "chore(release): sync lockfiles and normalise changelog heading"
+          git push

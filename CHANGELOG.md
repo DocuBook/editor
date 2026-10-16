@@ -188,11 +188,63 @@ First public build, published for early access testing. Everything listed below 
 
 ## Versioning
 
-This project follows **manual versioning** (not semver). Versions are:
+Versions are proposed automatically by **release-please** from the conventional
+commits on `master`, following SemVer adjusted for a pre-1.0 project. The
+release type is decided by the **highest-ranked conventional commit type in the
+range**, so one `feat` anywhere in the release lifts the whole release to minor,
+and a `fix` alongside it does not pull it back down.
+
+### Which commit type yields which bump
+
+| Commit type | Bump (pre-1.0) | Bump (post-1.0) | Example |
+| --- | --- | --- | --- |
+| `feat` | minor | minor | `0.1.8` → `0.2.0`, `1.0.0` → `1.1.0` |
+| `feat!` / `fix!` / any `BREAKING CHANGE:` footer | **minor** | **major** | `0.1.8` → `0.2.0`, `1.0.0` → `2.0.0` |
+| `fix`, `security`, `perf`, `refactor`, `ci`, `docs`, `test`, `chore` | patch | patch | `0.1.8` → `0.1.9`, `1.0.0` → `1.0.1` |
+
+In other words: **patch** is the floor (any commit that is not a feature or a
+breaking change), **minor** is a feature, and **major** is a breaking change —
+except that while the major is `0` a breaking change is held at minor, because
+`0.x` carries no stability promise.
+
+### Reaching 1.0.0
+
+Nothing bumps the major automatically today. `bump-minor-pre-major` (set in
+`release-please-config.json`) deliberately caps a breaking change at a **minor**
+bump while the major is `0`, so `1.0.0` is a **manual decision**, not a
+side effect of a breaking commit:
+
+1. Open a release PR as usual and let it propose `0.x.y`.
+2. On that PR, add `Release-As: 1.0.0` as a **footer of the release commit**, or
+   set `"release-as": "1.0.0"` in `release-please-config.json` for one run.
+   release-please then proposes `1.0.0` instead of the computed version.
+3. **Remove the override** — `release-as` is sticky and would otherwise pin
+   every later release to `1.0.0`.
+
+After `1.0.0` exists, breaking changes bump the major on their own and
+`bump-minor-pre-major` no longer applies.
+
+`bump-patch-for-minor-pre-major` is deliberately **not** set: enabling it would
+fold a `feat` into a patch release, so features would stop advancing the minor
+version.
+
+### Versions this project has shipped
 
 - `0.1.0` — First stable release. API and configuration formats are settled.
-- `0.x.0-next` — Later testing builds, when a change needs field validation before it lands in a stable release. Features, API, and configuration format may change.
-- `0.x.y-beta` — Beta releases. API stabilization in progress.
-- `1.x.0` — Future stable releases.
+- `0.1.x` — Patch releases. Historically some carried features too, because
+  versions were set by hand before release-please; under the current rules a
+  `feat` now always advances the minor instead.
+- `0.x.0` — Minor releases. New features, and breaking changes while the major is
+  `0`.
+- `0.x.y-next` / `0.x.y-beta` — Testing and beta builds, cut with the
+  `prerelease` versioning strategy (`prerelease-type` set to `next` or `beta`) so
+  the pre-release part is generated rather than typed by hand. Published as
+  GitHub pre-releases and excluded from `:latest`.
+- `1.x.0` — Future stable releases, once the API is declared stable (see
+  **Reaching 1.0.0** above).
+
+**Nobody sets a version by hand.** The version in `CHANGELOG.md`, the four
+manifests, and the git tag all come from the same release PR — see
+[Release workflow](./CONTRIBUTING.md#release-workflow-automated--release-please).
 
 See [README.md](README.md) for documentation and setup guide.
