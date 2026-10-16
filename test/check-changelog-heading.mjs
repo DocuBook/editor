@@ -122,7 +122,7 @@ if (!gateLine) {
   const pattern = gateLine
     .replace(/.*grep -qE "/, "")
     .replace(/".*/, "")
-    .replace(/\$npm_v/g, "0\.2\.0");
+    .replace(/\$npm_v/g, "0\\.2\\.0");
   if (!pattern.startsWith("^## v")) {
     fail(`ci.yml: could not parse the gate pattern out of ${JSON.stringify(gateLine.trim())}`);
   } else {
