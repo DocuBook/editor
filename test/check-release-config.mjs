@@ -160,6 +160,66 @@ for (const required of [
   }
 }
 
+// --- 8. The workflow's lockfile sync must match the pre-push hook's, entry for
+// entry. The hook syncs the root package AND the nested `docubook-core`
+// dependency entry inside each consumer lock; the workflow must do both.
+//
+// Missing the nested sync is silent in CI: the version-consistency gate used to
+// read only the root entries, so a stale nested `docubook-core` passed lint
+// while `cargo check --locked` failed in both consumers. That is exactly the
+// drift PR 276 needed a manual fixup for (commit bef7584), so it is asserted
+// here instead of trusted to a comment.
+const syncStepStart = workflow.indexOf("Sync Cargo.lock root versions");
+const ciWorkflow = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
+if (syncStepStart === -1) {
+  warn("release-please.yml: no 'Sync Cargo.lock root versions' step — nothing syncs the locks on the release PR");
+} else {
+  const syncStep = workflow.slice(syncStepStart);
+  for (const [name, needle, why] of [
+    [
+      "the nested core dependency sync in src-tauri/Cargo.lock",
+      'set_package_version src-tauri/Cargo.lock docubook-core "$core_v"',
+      "core is a path dependency of the desktop app, so its version is recorded a " +
+        "second time inside src-tauri/Cargo.lock and must track core/Cargo.toml",
+    ],
+    [
+      "the nested core dependency sync in server/Cargo.lock",
+      'set_package_version server/Cargo.lock docubook-core "$core_v"',
+      "core is a path dependency of the server, so its version is recorded a second " +
+        "time inside server/Cargo.lock and must track core/Cargo.toml",
+    ],
+  ]) {
+    if (!syncStep.includes(needle)) {
+      warn(`release-please.yml is missing ${name} — ${why}`);
+    }
+  }
+  // The consumer locks are also synced by the hook; a workflow that syncs fewer
+  // of them than the hook leaves a drift only a local push can detect.
+  for (const lock of ["src-tauri/Cargo.lock", "server/Cargo.lock"]) {
+    if (!syncStep.includes(lock)) {
+      warn(`release-please.yml never touches ${lock} — release-please only bumps manifests, so this lock would drift`);
+    }
+  }
+}
+
+// --- 9. The CI version gate must compare the nested entries too, or a release
+// PR with a stale nested `docubook-core` stays green (as it did for PR 276)
+// and only fails later, on a developer's push.
+if (!/grep -A1 'name = "docubook-core"' src-tauri\/Cargo\.lock/.test(ciWorkflow)) {
+  warn(
+    "ci.yml: the version-consistency check does not compare the nested " +
+      "docubook-core entry in src-tauri/Cargo.lock — a stale nested version would " +
+      "pass lint while `cargo check --locked` fails",
+  );
+}
+if (!/grep -A1 'name = "docubook-core"' server\/Cargo\.lock/.test(ciWorkflow)) {
+  warn(
+    "ci.yml: the version-consistency check does not compare the nested " +
+      "docubook-core entry in server/Cargo.lock — a stale nested version would " +
+      "pass lint while `cargo check --locked` fails",
+  );
+}
+
 if (failures.length) {
   console.error(`release config guard failed (${failures.length}):`);
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -174,5 +234,6 @@ console.log(
   `release config OK — ${sections.length} sections, ` +
     `bootstrap-sha ${bootstrap ? "resolves" : "(unset)"}, ` +
     `manifest agrees with package.json (${pkg}), core tracks the release version, ` +
-    `and the workflow synchronizes hidden-only pushes`,
+    `the workflow synchronizes hidden-only pushes, and both consumer locks are ` +
+    `synced (root + nested core) and verified`,
 );

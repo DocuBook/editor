@@ -60,8 +60,15 @@ jobs:
           desktop_lock_v=$(grep -A1 'name = "docubook-desktop"' src-tauri/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
           server_lock_v=$(grep -A1 'name = "docubook-server"' server/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
           core_lock_v=$(grep -A1 'name = "docubook-core"' core/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
-          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v core=$core_v tauri.conf.json=$tauri_v Cargo.lock(desktop)=$desktop_lock_v Cargo.lock(server)=$server_lock_v Cargo.lock(core)=$core_lock_v"
-          for v in "$lock_v" "$cargo_v" "$server_v" "$core_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v" "$core_lock_v"; do
+          # `core` is a path dependency of both consumers, so it also appears as a
+          # nested [[package]] entry in their locks. Those drifts are invisible to
+          # the root-only checks above (and did pass this gate while
+          # `cargo check --locked` failed in v0.2.0's PR 276), so they are
+          # extracted and compared here as well.
+          desktop_core_lock_v=$(grep -A1 'name = "docubook-core"' src-tauri/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
+          server_core_lock_v=$(grep -A1 'name = "docubook-core"' server/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
+          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v core=$core_v tauri.conf.json=$tauri_v Cargo.lock(desktop)=$desktop_lock_v Cargo.lock(server)=$server_lock_v Cargo.lock(core)=$core_lock_v Cargo.lock(desktop core dep)=$desktop_core_lock_v Cargo.lock(server core dep)=$server_core_lock_v"
+          for v in "$lock_v" "$cargo_v" "$server_v" "$core_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v" "$core_lock_v" "$desktop_core_lock_v" "$server_core_lock_v"; do
             [ -n "$v" ] || { echo "::error::Could not extract a version — a manifest may have moved or changed format"; exit 1; }
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done
