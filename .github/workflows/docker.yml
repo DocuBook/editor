@@ -43,6 +43,14 @@ jobs:
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
     steps:
+      # MUST come before the resolver: this step runs a repo script
+      # (./.github/scripts/resolve-release-tag.sh) relative to the workspace, and
+      # GitHub does NOT check the repo out for you. Without it the step died with
+      # exit 127 ("No such file or directory"), which failed resolve-tag and
+      # skipped build-and-push/merge on every master push and tag push — the
+      # image was never built. It went unnoticed while only PRs ran this workflow
+      # routinely; the check below is cheap and the tag lookup is gated on it.
+      - uses: actions/checkout@v7
       - name: Resolve the release tag
         id: resolve
         if: github.event_name != 'pull_request'
@@ -50,10 +58,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
-      # package.json is read by the validation step, so check out — but only
-      # when there is a tag to validate.
-      - uses: actions/checkout@v7
-        if: steps.resolve.outputs.tag != ''
+      # package.json is read by this step, so it relies on the checkout above
+      # being unconditional — it no longer fetches the repo itself.
       - name: Validate release tag
         if: steps.resolve.outputs.tag != ''
         shell: bash

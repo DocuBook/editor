@@ -74,6 +74,31 @@ for (const file of readdirSync(workflowDir).filter((f) => f.endsWith('.yml'))) {
         `publishes under would be derived from github.ref, which is a branch on release-please runs.`,
     )
   }
+
+  // --- 4. The resolver is a repo-relative script: any job that runs it must check
+  // the repo out FIRST. GitHub does not populate the workspace for you, so a step
+  // ordering mistake here dies with exit 127 ("No such file or directory") — which
+  // is how docker.yml's `resolve-tag` shipped broken: it ran
+  // `./.github/scripts/resolve-release-tag.sh` before `actions/checkout`, failing
+  // the job and skipping build-and-push/merge on every master and tag push, so no
+  // image was ever built.
+  lines.forEach((line, i) => {
+    // Match only the actual invocation, not a comment that merely names the
+    // script (this repo documents it in several comments).
+    if (!/^\s*run:.*resolve-release-tag\.sh/.test(line)) return
+    // Walk back to this job's 2-space header, then look for a checkout between it
+    // and the resolver step.
+    let header = i - 1
+    while (header >= 0 && !/^\s{2}[a-z][a-z0-9-]*:\s*$/.test(lines[header])) header--
+    const before = lines.slice(header + 1, i).join('\n')
+    if (!/actions\/checkout@/.test(before)) {
+      fail(
+        `.github/workflows/${file}:${i + 1} runs ${RESOLVER} but no \`actions/checkout\` step ` +
+          `precedes it in the same job — the workspace is empty, so the script is missing and the ` +
+          `job dies with exit 127. Move the checkout above the resolver.`,
+      )
+    }
+  })
 }
 
 // --- 2. Exercise the resolver against a stubbed `gh` (offline, deterministic)
@@ -217,5 +242,6 @@ if (failures.length) {
 console.log(
   'Release-tag guard OK — no workflow decides a release from github.ref, the resolver ' +
     'finds a lightweight tag on a master push, passes through a tag push, and rejects an untagged ' +
-    'commit, and publish skips (never fails) on a non-release push',
+    'commit, publish skips (never fails) on a non-release push, and every resolver call is ' +
+    'preceded by a checkout',
 )
