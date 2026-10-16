@@ -49,6 +49,7 @@ jobs:
           lock_v=$(node -p "require('./package-lock.json').version")
           cargo_v=$(grep -m1 '^version' src-tauri/Cargo.toml | awk '{print $3}' | tr -d '"')
           server_v=$(grep -m1 '^version' server/Cargo.toml | awk '{print $3}' | tr -d '"')
+          core_v=$(grep -m1 '^version' core/Cargo.toml | awk '{print $3}' | tr -d '"')
           # Read tauri.conf.json through JSON, not grep: the key is indented, so a
           # `grep -A2 '^version'` never matched and silently produced an empty
           # string — which made the comparison below vacuously true and skipped
@@ -56,8 +57,9 @@ jobs:
           tauri_v=$(node -p "require('./src-tauri/tauri.conf.json').version")
           desktop_lock_v=$(grep -A1 'name = "docubook-desktop"' src-tauri/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
           server_lock_v=$(grep -A1 'name = "docubook-server"' server/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
-          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v tauri.conf.json=$tauri_v Cargo.lock(desktop)=$desktop_lock_v Cargo.lock(server)=$server_lock_v"
-          for v in "$lock_v" "$cargo_v" "$server_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v"; do
+          core_lock_v=$(grep -A1 'name = "docubook-core"' core/Cargo.lock | grep -m1 '^version' | awk '{print $3}' | tr -d '"')
+          echo "package.json=$npm_v package-lock=$lock_v Cargo.toml=$cargo_v server=$server_v core=$core_v tauri.conf.json=$tauri_v Cargo.lock(desktop)=$desktop_lock_v Cargo.lock(server)=$server_lock_v Cargo.lock(core)=$core_lock_v"
+          for v in "$lock_v" "$cargo_v" "$server_v" "$core_v" "$tauri_v" "$desktop_lock_v" "$server_lock_v" "$core_lock_v"; do
             [ -n "$v" ] || { echo "::error::Could not extract a version — a manifest may have moved or changed format"; exit 1; }
             [ "$npm_v" = "$v" ] || { echo "::error::Version mismatch — bump manifests together (pre-push hook syncs *.lock)"; exit 1; }
           done

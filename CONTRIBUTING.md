@@ -81,7 +81,7 @@ editor/
 - **Web auth:** first run requires an admin account (Argon2id); setup cannot be skipped and login remains required. Sessions are httpOnly cookies (rate-limited login) persisted in `sessions.json` (SHA-256 hashed tokens — they survive server restarts, so redeploys don't log users out). `DB_SETUP_TOKEN` protects account creation. Env vars win over Settings → System overrides.
 - **API keys:** macOS Keychain on desktop; `keys.json` (0600) in `/data` on web, optionally AES-256-GCM encrypted at rest via `DB_KEYS_PASSPHRASE` (Argon2id-derived key). Stored keys are not returned to or persisted by the frontend; `ask_ai` resolves them backend-side and ignores a key supplied in that request.
 - **Permissions (desktop) and web IPC:** `generate_handler!` in `src-tauri/lib.rs` is the single source of truth for the command surface. Adding or removing a command means updating `src-tauri/capabilities/default.json`, `src-tauri/permissions/default.toml`, and the `server/handlers.rs` dispatch in the same change; `node test/check-acl.mjs` (CI lint job) fails when any of them drifts, including a stale desktop-only/web-only exception.
-- **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles. All four are bumped automatically by `release-please`; never edit them by hand (see [Release workflow](#release-workflow-automated--release-please)). The internal `core` crate is versioned independently (the pre-push hook still syncs its `Cargo.lock` and the `docubook-core` entry in the consumer locks).
+- **Versions:** `package.json`, `src-tauri/Cargo.toml`, `server/Cargo.toml`, `core/Cargo.toml`, and `src-tauri/tauri.conf.json` must stay in sync — CI enforces this across manifests and lockfiles. All five are bumped automatically by `release-please`; never edit them by hand (see [Release workflow](#release-workflow-automated--release-please)).
 
 ## Workflow
 
@@ -171,7 +171,7 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
 2. **`release-please` opens or updates one release PR**, titled
-   `chore(release): vX.Y.Z — DocuBook`. The PR bumps the four manifests and
+   `chore(release): vX.Y.Z — DocuBook`. The PR bumps the five manifests and
    prepends a `## vX.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, grouping
    entries by commit type.
 
@@ -192,7 +192,7 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
    `autorelease: pending` label, because the action only reports a branch in its
    `pr` output when it *opened* a PR, not when it rebased one.
 4. **Audit gate — enforced by CI.** The version-consistency check in `ci.yml`
-   fails the build if any of the **four manifests + three locks** drift, or if
+   fails the build if any of the **five manifests + three locks** drift, or if
    `CHANGELOG.md` is missing the section for the current version. Master must be
    green before tagging.
 5. **Merging the release PR is the release.** release-please tags `vX.Y.Z` on
@@ -206,9 +206,9 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
 | `package.json` | release-please (release type `node`) |
 | `src-tauri/Cargo.toml` | release-please (`extra-files`, toml) |
 | `server/Cargo.toml` | release-please (`extra-files`, toml) |
+| `core/Cargo.toml` | release-please (`extra-files`, toml) |
 | `src-tauri/tauri.conf.json` | release-please (`extra-files`, json) |
-| `package-lock.json`, both consumer `Cargo.lock` | the `sync-lockfiles` job |
-| `core/Cargo.toml` | **nothing** — the internal crate is versioned independently |
+| `package-lock.json`, all three `Cargo.lock` | the `sync-lockfiles` job |
 
 The changelog heading format is deliberately CI-side: release-please emits
 `## X.Y.Z (YYYY-MM-DD)` — or, for the `github` changelog dialect this repo gets,

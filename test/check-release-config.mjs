@@ -127,7 +127,28 @@ if (rootManifest === undefined) {
   );
 }
 
-// --- 6. The workflow must handle hidden-only pushes, which release-please
+// --- 6. The root package must bump the internal core crate alongside the app
+// manifests. It is a workspace-shared dependency (both the desktop app and the
+// server compile it in), so leaving it out would let core drift to a version
+// that no longer matches the release it shipped with.
+const rootPackage = config.packages?.["."];
+const extraFiles = rootPackage?.["extra-files"] ?? [];
+const coreUpdater = extraFiles.find((f) => f.path === "core/Cargo.toml");
+if (!coreUpdater) {
+  warn(
+    'release-please-config.json: the "." package is missing the core extra-file ' +
+      'updater ({ "type": "toml", "path": "core/Cargo.toml", "jsonpath": "$.package.version" }) ' +
+      "— core/Cargo.toml would stop tracking the release version.",
+  );
+} else if (coreUpdater.type !== "toml" || coreUpdater.jsonpath !== "$.package.version") {
+  warn(
+    `release-please-config.json: the core extra-file updater is ` +
+      `${JSON.stringify(coreUpdater)} — expected { "type": "toml", ` +
+      `"jsonpath": "$.package.version" } so it rewrites the [package] version.`,
+  );
+}
+
+// --- 7. The workflow must handle hidden-only pushes, which release-please
 // cannot turn into a release candidate even when always-update is enabled.
 for (const required of [
   "git fetch origin master",
@@ -152,5 +173,6 @@ if (failures.length) {
 console.log(
   `release config OK — ${sections.length} sections, ` +
     `bootstrap-sha ${bootstrap ? "resolves" : "(unset)"}, ` +
-    `manifest agrees with package.json (${pkg}) and workflow synchronizes hidden-only pushes`,
+    `manifest agrees with package.json (${pkg}), core tracks the release version, ` +
+    `and the workflow synchronizes hidden-only pushes`,
 );
