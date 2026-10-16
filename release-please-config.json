@@ -31,6 +31,7 @@
       "extra-files": [
         { "type": "toml", "path": "src-tauri/Cargo.toml", "jsonpath": "$.package.version" },
         { "type": "toml", "path": "server/Cargo.toml", "jsonpath": "$.package.version" },
+        { "type": "toml", "path": "core/Cargo.toml", "jsonpath": "$.package.version" },
         { "type": "json", "path": "src-tauri/tauri.conf.json", "jsonpath": "$.version" }
       ]
     }

@@ -4,7 +4,7 @@
 #   1. Conventional commits land on master (squash-merge, one subject per PR).
 #   2. This workflow opens/updates one release PR:
 #        chore(release): vX.Y.Z — DocuBook
-#      The PR bumps the four manifests and prepends a ## vX.Y.Z — YYYY-MM-DD
+#      The PR bumps the five manifests and prepends a ## vX.Y.Z — YYYY-MM-DD
 #      section to CHANGELOG.md.
 #   3. Merging that PR tags vX.Y.Z, which triggers ci.yml `publish` (DMGs) and
 #      docker.yml (multi-arch image).
@@ -13,6 +13,7 @@
 #   package.json            (release-type "node", implicit)
 #   src-tauri/Cargo.toml    (extra-files, toml)   -> package.version
 #   server/Cargo.toml       (extra-files, toml)   -> package.version
+#   core/Cargo.toml         (extra-files, toml)   -> package.version
 #   src-tauri/tauri.conf.json (extra-files, json) -> version
 #
 # NOT edited here: package-lock.json and the three Cargo.lock files. The
@@ -20,8 +21,9 @@
 # changes a lock, so the sync must land in its own commit — see the
 # `sync-lockfiles` job below, which pushes it onto the release PR branch.
 #
-# core/Cargo.toml is intentionally NOT bumped: CONTRIBUTING.md states the
-# internal core crate is versioned independently.
+# The internal core crate rides the same version as the app: it is bumped here
+# through extra-files and its Cargo.lock root entry is synced below, so a core
+# API change that the consumers pick up is reflected by one release number.
 
 name: Release Please
 
@@ -152,6 +154,7 @@ jobs:
           }
           sync_root_version src-tauri docubook-desktop
           sync_root_version server docubook-server
+          sync_root_version core docubook-core
 
       # release-please writes the heading in one of two dialects, depending on
       # the changelog type it selects (this repo gets the `github` dialect):
