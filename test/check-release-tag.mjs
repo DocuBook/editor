@@ -99,6 +99,35 @@ for (const file of readdirSync(workflowDir).filter((f) => f.endsWith('.yml'))) {
       )
     }
   })
+
+  // --- 5. A smoke test must not run when the image it inspects was never built.
+  //
+  // docker.yml builds an image under two mutually exclusive conditions (`check-`
+  // tag on PR/dispatch, digest on a resolved tag) and smoke-tests it. The smoke
+  // step's own condition was "not the tag path", which also matched a master push
+  // with NO tag — a run where every build step is skipped. `docker run` then hit
+  // "manifest unknown" (exit 125). Whatever gates a build must also gate the
+  // smoke test that consumes it, so the smoke conditions may only reference the
+  // same inputs the build conditions do.
+  const smokeLines = lines.filter((l) => /smoke-test\.sh/.test(l) && /^\s*run:/.test(l))
+  for (const smoke of smokeLines) {
+    // Walk back from the smoke step to its own `if:` (within ~6 lines above).
+    const at = lines.lastIndexOf(smoke)
+    const window = lines.slice(Math.max(0, at - 8), at).join('\n')
+    const ifMatch = window.match(/\n\s*if:\s*(.+)\s*$/)
+    if (!ifMatch) continue // no condition: always runs, which the builds must cover
+    const cond = ifMatch[1]
+    // The build-local image only exists on PR/dispatch; the digest only on a tag.
+    const inspectsCheckTag = /check-\$\{\{\s*matrix\.slug/.test(smoke)
+    if (inspectsCheckTag && /event_name\s*!=\s*['"]push['"]/.test(cond)) {
+      fail(
+        `.github/workflows/${file} smoke-tests the local check- image under \`${cond.trim()}\` — ` +
+          `the negated push test is also true for a master push with no release tag, where no ` +
+          `build step runs, so the image is missing ("manifest unknown", exit 125). Gate it on ` +
+          `the same event names that build it (pull_request / workflow_dispatch).`,
+      )
+    }
+  }
 }
 
 // --- 2. Exercise the resolver against a stubbed `gh` (offline, deterministic)
@@ -242,6 +271,6 @@ if (failures.length) {
 console.log(
   'Release-tag guard OK — no workflow decides a release from github.ref, the resolver ' +
     'finds a lightweight tag on a master push, passes through a tag push, and rejects an untagged ' +
-    'commit, publish skips (never fails) on a non-release push, and every resolver call is ' +
-    'preceded by a checkout',
+    'commit, publish skips (never fails) on a non-release push, every resolver call is preceded ' +
+    'by a checkout, and no image smoke test outruns the build that produces it',
 )

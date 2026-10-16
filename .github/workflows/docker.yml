@@ -159,8 +159,15 @@ jobs:
           load: true
           tags: ${{ env.IMAGE }}:check-${{ matrix.slug }}
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
+      # Only meaningful when one of the two local `check-<slug>` builds above
+      # actually ran. The old condition was "not the tag-publish path"
+      # (`event_name != 'push' || tag == ''`), which is also true for a master
+      # push with NO tag — a run where all three builds are skipped, so nothing
+      # tagged `check-<slug>` exists and `docker run` died with "manifest unknown"
+      # (exit 125). That case only became reachable once resolve-tag stopped
+      # failing at exit 127. Tie the smoke test to the builds, not to the event.
       - name: Smoke test image
-        if: github.event_name != 'push' || needs.resolve-tag.outputs.tag == ''
+        if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
         run: sudo sh .github/scripts/smoke-test.sh "${{ env.IMAGE }}:check-${{ matrix.slug }}" "${{ matrix.platform }}"
 
       - name: Build and push platform image
