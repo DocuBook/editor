@@ -354,6 +354,12 @@ jobs:
       (github.event_name == 'push' && github.ref_type == 'branch')
     needs: [lint, test, e2e, test-server-linux, security, build]
     runs-on: ubuntu-22.04
+    # Resolved ONCE here and consumed by publish, so both jobs share one answer
+    # instead of each re-deriving "is a release" from github.ref. An empty tag
+    # means "this run is not a release" — the normal case for a plain master
+    # push, not an error.
+    outputs:
+      tag: ${{ steps.releasetag.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
       - name: Resolve the release tag
@@ -368,12 +374,17 @@ jobs:
 
   publish:
     needs: [release-gate]
-    # Same tag decision as release-gate: publish must fire for the
-    # release-please master push, not just for a literal tag push.
+    # Gate on the RESOLVED tag, not on the event/ref heuristic. The old
+    # `(github.event_name == 'push' && github.ref_type == 'branch')` clause was
+    # true for EVERY master push — release or not — so a plain master push ran
+    # this job and then hard-failed in the resolve step below ("refusing to
+    # publish"), painting master red for a non-release. Now a run with no tag on
+    # its commit simply SKIPS, which is how release-gate and docker.yml already
+    # behave. The release-please master push still publishes, because its commit
+    # carries the tag release-please created via the API.
     if: >-
-      always() && needs.release-gate.result == 'success' &&
-      (startsWith(github.ref, 'refs/tags/v') ||
-       (github.event_name == 'push' && github.ref_type == 'branch'))
+      needs.release-gate.result == 'success' &&
+      needs.release-gate.outputs.tag != ''
     # Tag-only release — publishes automatically (no approval gate).
     environment: release-auto
     runs-on: ubuntu-22.04
@@ -382,17 +393,16 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
+      # The tag comes from release-gate's output, so this job cannot disagree
+      # with the gate about whether the run is a release.
       - name: Resolve the release tag
         id: releasetag
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
-          grep -q '^tag=v' "$GITHUB_OUTPUT" || {
-            echo "::error::No release tag on $GITHUB_SHA — refusing to publish"
-            exit 1
-          }
+          echo "tag=${{ needs.release-gate.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          echo "Publishing ${{ needs.release-gate.outputs.tag }}"
       - uses: actions/download-artifact@v8
         with:
           pattern: DocuBook-*
