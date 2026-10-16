@@ -1,5 +1,62 @@
 # Changelog
 
+## v0.2.0 — 2026-10-16
+
+
+### 🚀 Features
+
+* add sidebar profile menu ([#256](https://github.com/DocuBook/editor/issues/256)) ([a825774](https://github.com/DocuBook/editor/commit/a825774d8c4b9386d383d64856ab7468e447a70c))
+* **ai:** add accept keyboard shortcut ([#258](https://github.com/DocuBook/editor/issues/258)) ([54fd1c4](https://github.com/DocuBook/editor/commit/54fd1c49a700d28ad28ef5a05551c318791eb9f2))
+* **ai:** add MCP context tools ([#239](https://github.com/DocuBook/editor/issues/239)) ([9233df0](https://github.com/DocuBook/editor/commit/9233df08540b8a30cbc1dadf2ae0e4f61a45aae3))
+* **ai:** prototype model-driven context tool round-trips ([#236](https://github.com/DocuBook/editor/issues/236)) ([86a8723](https://github.com/DocuBook/editor/commit/86a8723be7943ac2d13e3e6ede6fab9ee8f25e5b))
+* **editor:** persist WYSIWYG-only block formatting in a vault snapshot cache ([882b29d](https://github.com/DocuBook/editor/commit/882b29d91bed347e3b9686b587979350d5b8d161))
+* **git:** open changes as an inline diff in the editor ([#232](https://github.com/DocuBook/editor/issues/232)) ([4407812](https://github.com/DocuBook/editor/commit/4407812af049c33634801b9fbd8b1000b617143c))
+* **mcp:** align remote settings and runtime filtering ([#242](https://github.com/DocuBook/editor/issues/242)) ([a7dc5aa](https://github.com/DocuBook/editor/commit/a7dc5aa80893eb98c52b1648b8ae33f60c5cc9ab))
+* **mcp:** complete MCP settings and lifecycle follow-ups ([#241](https://github.com/DocuBook/editor/issues/241)) ([ca94ed1](https://github.com/DocuBook/editor/commit/ca94ed1080817a623f4609ef382f5880c6b26216))
+
+
+### 🐛 Bug Fixes
+
+* **ai:** drop stale model on revoke and unify the settings refresh path ([#268](https://github.com/DocuBook/editor/issues/268)) ([cba7c6a](https://github.com/DocuBook/editor/commit/cba7c6a0f803a6e2b3e297f7cd2359764e683ec3))
+* **ai:** keep the formatting toolbar down after an AI result ([#226](https://github.com/DocuBook/editor/issues/226)) ([04d49cb](https://github.com/DocuBook/editor/commit/04d49cbf0ddd18d5ed64bed5a01c25a7afcde466))
+* **deps:** force katex ^0.19.0 to clear transitive advisory ([#228](https://github.com/DocuBook/editor/issues/228)) ([28c775d](https://github.com/DocuBook/editor/commit/28c775dc86d9ba080696477c427e86676841eb66))
+* **editor:** drop #root specificity from Safari 15 popup fallback ([#263](https://github.com/DocuBook/editor/issues/263)) ([#265](https://github.com/DocuBook/editor/issues/265)) ([349c3e1](https://github.com/DocuBook/editor/commit/349c3e19d822d49e10f528f3c7d570e84d11c985))
+* **editor:** satisfy exhaustive-deps in the AI accept shortcut ([f390ca8](https://github.com/DocuBook/editor/commit/f390ca8277afa512a53c644ceabfb3af3faa88cb))
+* **editor:** seed each cached editor with its own markdown ([#229](https://github.com/DocuBook/editor/issues/229)) ([2ce815b](https://github.com/DocuBook/editor/commit/2ce815bdcb5ac6d5fbd23be0713b9ac4be5f661e))
+* **editor:** show a skeleton, never raw source, on a cold open ([#259](https://github.com/DocuBook/editor/issues/259)) ([c24b51e](https://github.com/DocuBook/editor/commit/c24b51e996d2795c5e0c685952950cd55ae1b610))
+* **editor:** tab close affordance on every tab + neighbour activation ([#233](https://github.com/DocuBook/editor/issues/233)) ([1a9d386](https://github.com/DocuBook/editor/commit/1a9d38669c4f5fba4187489a96760ac7e5f608c7))
+* **editor:** use one scroll container ([#257](https://github.com/DocuBook/editor/issues/257)) ([8d26e01](https://github.com/DocuBook/editor/commit/8d26e0106b3335d124cc22ca029924a5c4e65e70))
+* **git:** refresh status when the Changes tab opens ([#231](https://github.com/DocuBook/editor/issues/231)) ([149a728](https://github.com/DocuBook/editor/commit/149a7283525126da69c48928f3fc0b0fea5f11e6))
+* **git:** style the inline diff as coloured +/- callouts ([#234](https://github.com/DocuBook/editor/issues/234)) ([00087c7](https://github.com/DocuBook/editor/commit/00087c7afad36cb3dfd85f65791b99025fd0899f))
+* **permissions:** include WYSIWYG snapshot commands in default ACL ([b3abbda](https://github.com/DocuBook/editor/commit/b3abbda478fdd83b2ebcd4324b92c9d8f96153bc))
+* **profile-menu:** remove duplicate email line in popover header ([564aa91](https://github.com/DocuBook/editor/commit/564aa9173a4bcf44741d2954a7cc9de613dc0bc8))
+* **profile-menu:** restore focus to trigger after Escape dismissal ([d71fb2e](https://github.com/DocuBook/editor/commit/d71fb2eb66aca0fa83fa5b4ee4029085fe88e4dc))
+* **release:** repair the release PR heading normaliser and lockfile sync ([#274](https://github.com/DocuBook/editor/issues/274)) ([22a89bb](https://github.com/DocuBook/editor/commit/22a89bb2a9cc79cbd00ff2b4dfd1e244455610a6))
+* **release:** track the core crate version with the app release ([#275](https://github.com/DocuBook/editor/issues/275)) ([7eb4683](https://github.com/DocuBook/editor/commit/7eb46833f9e92db6066909f10df3cf568d1d2886))
+* **settings:** restore mobile navigation controls ([#271](https://github.com/DocuBook/editor/issues/271)) ([7ff2552](https://github.com/DocuBook/editor/commit/7ff2552dea944522d96c20b4fc1e5ebdb98aa9f0))
+* **sidebar:** scope search bar to the Folders tab and keep Trash reachable ([#269](https://github.com/DocuBook/editor/issues/269)) ([088de8b](https://github.com/DocuBook/editor/commit/088de8b977677f2d3511bf24367483d42e42cd22))
+* **vault:** bound and serialize snapshot operations ([d2f6774](https://github.com/DocuBook/editor/commit/d2f6774dbc6ea9c2aa83e282367bd0336d6c72ab))
+* **vault:** cap desktop reads and surface media errors across runtimes ([#225](https://github.com/DocuBook/editor/issues/225)) ([d14e3ee](https://github.com/DocuBook/editor/commit/d14e3ee1637a4f8f32494fe034c7cd4088583a0a))
+
+
+### 🛡️ Security
+
+* **deps:** bump rustls to 0.23.46 for RUSTSEC-2026-0346..0349 ([#267](https://github.com/DocuBook/editor/issues/267)) ([74d151b](https://github.com/DocuBook/editor/commit/74d151b329e92016974d036522de1ead5f40e623))
+
+
+### 🔄 Refactor
+
+* **core:** extract the shared Rust engine into a docubook-core crate ([#227](https://github.com/DocuBook/editor/issues/227)) ([e8f328d](https://github.com/DocuBook/editor/commit/e8f328d1dc50b1541a742c48803d3ca740cb67b3))
+* **git:** move branch picker into changes panel ([#255](https://github.com/DocuBook/editor/issues/255)) ([fd986c4](https://github.com/DocuBook/editor/commit/fd986c488cbd840936b000c10624036e238bc863))
+* **search:** extract reusable file meta label ([#235](https://github.com/DocuBook/editor/issues/235)) ([7b09b67](https://github.com/DocuBook/editor/commit/7b09b67921e8cf65e70858f57de041fbd1ecc229))
+* **settings:** move settings from dialog to sidebar menu + editor container ([#266](https://github.com/DocuBook/editor/issues/266)) ([bf73750](https://github.com/DocuBook/editor/commit/bf737502afdbb05cec706a1d88a1557524839c91))
+* **ui:** give the tab bar the sidebar's surface background ([#270](https://github.com/DocuBook/editor/issues/270)) ([10fb1ee](https://github.com/DocuBook/editor/commit/10fb1ee157470e1e6ccc5b796c5fe336b3ec2447))
+
+
+### 🔧 CI
+
+* **release:** automate releases with release-please ([#272](https://github.com/DocuBook/editor/issues/272)) ([e096e9c](https://github.com/DocuBook/editor/commit/e096e9c7c7d9ec85621e06ed13e3d6950443400e))
+
 ## v0.1.8 — 2026-10-03
 
 ### Patch Release
