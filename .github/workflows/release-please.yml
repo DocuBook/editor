@@ -123,8 +123,8 @@ jobs:
             console.log('heading already normalised (or not found) — nothing to do');
             process.exit(0);
           }
-          const m = lines[i].match(/^\(## ${version} \()([^)]*)(\))$/);
-          const date = m ? m[2] : new Date().toISOString().slice(0, 10);
+          const m = lines[i].match(/^## \S+ \(([^)]*)\)$/);
+          const date = m ? m[1] : new Date().toISOString().slice(0, 10);
           lines[i] = `## v${version} — ${date}`;
           fs.writeFileSync(path, lines.join('\n'));
           console.log(`rewrote: ${lines[i]}`);
