@@ -21,6 +21,9 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The release config guard resolves bootstrap-sha against history.
+          fetch-depth: 0
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
