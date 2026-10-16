@@ -96,6 +96,25 @@ jobs:
         with:
           ref: ${{ steps.pr.outputs.branch }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      # `always-update` only applies when release-please has a release
+      # candidate to process. Hidden-only commits can therefore leave an
+      # existing release branch based on an old master head. Rebase it here so
+      # every successful run keeps the release PR current.
+      - name: Rebase the release PR onto master
+        id: rebase
+        if: steps.pr.outputs.branch != ''
+        run: |
+          before=$(git rev-parse HEAD)
+          git fetch origin master
+          git rebase origin/master
+          after=$(git rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "rebased=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "rebased=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: actions/setup-node@v7
         if: steps.pr.outputs.branch != ''
@@ -176,24 +195,24 @@ jobs:
       - name: Commit and push if a lock changed
         if: steps.pr.outputs.branch != ''
         run: |
-          if git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
+          changed=false
+          if ! git diff --exit-code --quiet -- package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md; then
+            changed=true
+          fi
+          if [ "$changed" = false ] && [ "${{ steps.rebase.outputs.rebased }}" != true ]; then
             echo "Nothing to commit — lockfiles and changelog already in sync."
             exit 0
           fi
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
-          git commit -m "chore(release): sync lockfiles and normalise changelog heading"
-          # This commit is always built on top of the head just checked out, so a
-          # plain push is a fast-forward. That matters: the branch is owned by
-          # release-please, which force-updates it (updateRef with force=true)
-          # whenever it regenerates the release notes. `--force-with-lease`
-          # compares against this checkout's stale remote-tracking ref, not the
-          # live head, so against release-please's own force-push it is a
-          # no-op guard — and it would only ever be protecting a commit we did
-          # not write. A rejected push here is the correct outcome: it means
-          # release-please rebased underneath us, and re-running the job rebuilds
-          # this commit on the new head.
-          git push origin "HEAD:${BRANCH}"
+          if [ "$changed" = true ]; then
+            git add package-lock.json src-tauri/Cargo.lock server/Cargo.lock CHANGELOG.md
+            git commit -m "chore(release): sync lockfiles and normalise changelog heading"
+          fi
+          if [ "${{ steps.rebase.outputs.rebased }}" = true ]; then
+            git push --force-with-lease origin "HEAD:${BRANCH}"
+          else
+            git push origin "HEAD:${BRANCH}"
+          fi
         env:
           BRANCH: ${{ steps.pr.outputs.branch }}

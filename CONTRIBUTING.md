@@ -175,15 +175,13 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
    prepends a `## vX.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, grouping
    entries by commit type.
 
-   It rewrites the release branch on every push to `master` — it rebuilds the
-   branch on top of the new `master` head and force-updates the ref (a `git
-   tree` + `updateRef` force push, not a merge), so the PR never needs manual
-   rebasing. That is forced by `always-update` in `release-please-config.json`:
-   without it, release-please only rewrites the PR when the generated body
-   changes, and since `docs`, `test` and `chore` are `hidden` in
-   `changelog-sections`, those commits produce no changelog line and would leave
-   the PR silently stale. `always-update` is a root-level manifest option — it
-   is not read from `packages`.
+   It rewrites the release branch on every push to `master` — the workflow
+   explicitly rebases the branch on the new `master` head and force-updates the
+   ref (not a merge), so the PR never needs manual rebasing. `always-update` in
+   `release-please-config.json` makes release-please rebuild the branch when it
+   has a release candidate; the workflow rebase also covers pushes containing
+   only hidden `docs`, `test`, or `chore` commits. `always-update` is a
+   root-level manifest option — it is not read from `packages`.
 
 3. **The same workflow syncs the lockfiles** onto the release-PR branch. It
    bumps `package-lock.json` and the two consumer `Cargo.lock` root versions,

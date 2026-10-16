@@ -31,6 +31,7 @@ import { execFileSync } from "node:child_process";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const readJson = (p) => JSON.parse(readFileSync(join(root, p), "utf8"));
+const workflow = readFileSync(join(root, ".github/workflows/release-please.yml"), "utf8");
 
 const failures = [];
 const warn = (msg) => failures.push(msg);
@@ -126,6 +127,18 @@ if (rootManifest === undefined) {
   );
 }
 
+// --- 6. The workflow must handle hidden-only pushes, which release-please
+// cannot turn into a release candidate even when always-update is enabled.
+for (const required of [
+  "git fetch origin master",
+  "git rebase origin/master",
+  "git push --force-with-lease origin \"HEAD:${BRANCH}\"",
+]) {
+  if (!workflow.includes(required)) {
+    warn(`release-please.yml is missing the hidden-push synchronization step: ${required}`);
+  }
+}
+
 if (failures.length) {
   console.error(`release config guard failed (${failures.length}):`);
   for (const failure of failures) console.error(`  - ${failure}`);
@@ -139,5 +152,5 @@ if (failures.length) {
 console.log(
   `release config OK — ${sections.length} sections, ` +
     `bootstrap-sha ${bootstrap ? "resolves" : "(unset)"}, ` +
-    `manifest agrees with package.json (${pkg})`,
+    `manifest agrees with package.json (${pkg}) and workflow synchronizes hidden-only pushes`,
 );
