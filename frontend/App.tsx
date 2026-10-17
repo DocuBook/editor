@@ -242,7 +242,7 @@ export default function App() {
               the user is stranded in Settings with no way back to the tree. */}
           {settingsOpen
             ? <>
-                <SettingsHeader isDesktop={isDesktop} sidebarOpen={sidebarOpen} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />
+                {!isDesktop && <SettingsHeader sidebarOpen={sidebarOpen} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />}
                 <SettingsPane />
               </>
             : <Editor sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={toggleSidebar} onOpenSearch={openSearch} />}
