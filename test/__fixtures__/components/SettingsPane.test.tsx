@@ -338,6 +338,23 @@ describe('SettingsPane — anchor scroll', () => {
    *  The pane reserves trailing space so the section top-aligns: the amount is
    *  `clientHeight - lastSectionHeight - 72` (72 = pane py-10 + section
    *  scroll-mt-8). jsdom has no layout, so the geometry is stubbed. */
+  it('keeps the pane a containing block so a positioned child cannot escape to the document', async () => {
+    useSettings.setState({ open: true, section: 'ai-provider' })
+    await render()
+
+    const pane = document.querySelector<HTMLElement>('.settings-pane-scroll')!
+    // The reported bug (short window / IME): Mantine's input labels are
+    // `.sr-only`, an ABSOLUTELY-positioned element with no positioned ancestor.
+    // Its containing block then falls back to the INITIAL containing block, so it
+    // escapes this box's `overflow-y: auto` clip and lands at the bottom of the
+    // scrolled content — which gives the DOCUMENT scroll range. The anchor
+    // effect's `scrollIntoView` (and the IME caret reveal) then scroll the shell,
+    // dragging the 48px mobile top bar off the top of the screen. jsdom has no
+    // layout, so the invariant is asserted structurally: the scroll box must be
+    // positioned to be that containing block.
+    expect(pane.classList.contains('relative')).toBe(true)
+  })
+
   it('reserves trailing space so a short LAST section can reach the top', async () => {
     useSettings.setState({ open: true, section: 'ai-mcp-server' })
     await render()

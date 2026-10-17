@@ -205,7 +205,15 @@ export default function SettingsPane() {
    *  behind it. */
   return (
     <div data-testid="settings-container" className="flex-1 flex flex-col min-w-0 min-h-0">
-      <div ref={paneScrollRef} className="settings-pane-scroll flex-1 min-h-0 overflow-y-auto px-6 py-10">
+      {/* `relative` keeps the pane a containing block: an absolutely-positioned
+          descendant (e.g. Mantine's `.sr-only` label for its password inputs)
+          would otherwise resolve against the initial containing block instead of
+          this scroll box, escaping its `overflow-y: auto` clip and landing at the
+          bottom of the scrolled content — which hands the DOCUMENT scroll range,
+          so `scrollIntoView` (below) or the IME/caret reveal scrolls the shell and
+          drags the 48px mobile top bar off the top of the screen. Making this box
+          the containing block contains+clips those descendants instead. */}
+      <div ref={paneScrollRef} className="settings-pane-scroll relative flex-1 min-h-0 overflow-y-auto px-6 py-10">
         <div ref={paneContentRef} className="mx-auto w-full max-w-2xl">
           {/* The first section's anchor id rides the page title, so its sidebar
               row scrolls to the heading. One id, on the heading, per page. */}
