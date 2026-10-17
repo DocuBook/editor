@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.2.1 — 2026-10-17
+
+
+### 🐛 Bug Fixes
+
+* **docker:** check out the repo before running the tag resolver ([2e95bb3](https://github.com/DocuBook/editor/commit/2e95bb39b05f44890d02a3cefc795bc93541783d))
+* **docker:** only smoke-test the local image when a build produced it ([32297f1](https://github.com/DocuBook/editor/commit/32297f165277d9b90e72939dd0f69c560f194d45))
+* **release:** publish artifacts for release-please tags ([998b019](https://github.com/DocuBook/editor/commit/998b019d562c25d83e18b048fa0f87969a21abb1))
+* **release:** skip publish on a non-release push instead of failing it ([00291b9](https://github.com/DocuBook/editor/commit/00291b907f9e15d8be822688b8fb2b953d2ac3ee))
+* **release:** sync the nested core lock entries and gate on them ([4272649](https://github.com/DocuBook/editor/commit/427264918e9ac6e8e2b4006ed16a2f500538ad81))
+* **release:** sync the stale core dependency in the desktop lockfile ([880f64f](https://github.com/DocuBook/editor/commit/880f64f7599f330a25e929d8e9470987bcf74540))
+* **settings:** keep sidebar toggle and search at every width ([#277](https://github.com/DocuBook/editor/issues/277)) ([c190520](https://github.com/DocuBook/editor/commit/c1905205646b082e05731ad4049e2b5e4a01298d))
+
 ## v0.2.0 — 2026-10-16
 
 
