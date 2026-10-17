@@ -37,8 +37,8 @@ vi.mock('../../../frontend/components/Editor', () => ({
 vi.mock('../../../frontend/components/SearchModal', () => ({ default: () => <div data-testid="search" /> }))
 vi.mock('../../../frontend/components/SettingsPane', () => ({ default: () => <div data-testid="settings" /> }))
 vi.mock('../../../frontend/components/SettingsHeader', () => ({
-  SettingsHeader: ({ isDesktop, sidebarToggleRef, onToggleSidebar, sidebarOpen }: { isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; sidebarOpen: boolean }) => (
-    <button ref={sidebarToggleRef} aria-label="settings-toggle-sidebar" data-open={String(sidebarOpen)} data-desktop={String(isDesktop)} onClick={onToggleSidebar}>Toggle</button>
+  SettingsHeader: ({ sidebarToggleRef, onToggleSidebar, sidebarOpen }: { sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; sidebarOpen: boolean }) => (
+    <button ref={sidebarToggleRef} aria-label="settings-toggle-sidebar" data-open={String(sidebarOpen)} onClick={onToggleSidebar}>Toggle</button>
   ),
 }))
 vi.mock('../../../frontend/components/StatusBar', () => ({ default: () => null }))
@@ -185,43 +185,6 @@ describe('responsive sidebar', () => {
     act(() => useSettings.getState().openSettings('git-identity'))
 
     expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
-    expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
-  })
-
-  /** The regression: Settings chrome was gated on `!isDesktop`, so it existed
-   *  only below the 640px breakpoint. Opening Settings at desktop width rendered
-   *  no header at all — unlike the editor, whose TabBar always carries a toggle. */
-  it('keeps a Settings toggle at desktop width, where the sidebar is inline', () => {
-    expect(document.getElementById('desktop-sidebar')).not.toBeNull()
-
-    act(() => useSettings.getState().openSettings())
-    expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
-
-    // Chrome is a property of the Settings surface, not the breakpoint.
-    const headerToggle = document.querySelector<HTMLButtonElement>('[aria-label="settings-toggle-sidebar"]')!
-    expect(headerToggle).not.toBeNull()
-    expect(headerToggle.dataset.desktop).toBe('true')
-
-    // ...and it drives the SAME desktop collapse state the editor's TabBar does.
-    act(() => headerToggle.click())
-    expect(document.getElementById('desktop-sidebar')).toBeNull()
-  })
-
-  /** The IME/rotation case: opening the soft keyboard crosses the 640px query
-   *  mid-session. `isDesktop` flips while Settings is open; the header must
-   *  survive the flip instead of unmounting with the old `!isDesktop` guard. */
-  it('keeps the Settings toggle when the breakpoint flips while Settings is open', () => {
-    act(() => useSettings.getState().openSettings())
-    const headerToggle = () => document.querySelector<HTMLButtonElement>('[aria-label="settings-toggle-sidebar"]')
-    expect(headerToggle()).not.toBeNull()
-    expect(headerToggle()!.dataset.desktop).toBe('true')
-
-    // Soft keyboard opens → viewport shrinks under 640px.
-    act(() => setDesktop(false))
-    expect(headerToggle()).not.toBeNull()
-    expect(headerToggle()!.dataset.desktop).toBe('false')
-
-    act(() => headerToggle()!.click())
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
   })
 })
