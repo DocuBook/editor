@@ -48,6 +48,12 @@ interface SettingsState {
   /** Section the sidebar last anchored to. The pane scrolls to it; a plain
    *  "open settings" leaves the current one so ⌘, returns where you left off. */
   section: SettingsSectionId
+  /** Bumped on EVERY navigation request (openSettings / setSection), even when
+   *  `section` does not change. The pane's scroll effect keys on it so a repeated
+   *  click on the SAME anchor still re-centers the pane: a value-equal `section`
+   *  alone would bail out of re-rendering and skip the scroll, stranding a user
+   *  who scrolled deep into a section taller than the window. */
+  navNonce: number
   openSettings: (section?: SettingsSectionId) => void
   closeSettings: () => void
   setSection: (section: SettingsSectionId) => void
@@ -59,7 +65,8 @@ interface SettingsState {
 export const useSettings = create<SettingsState>()((set) => ({
   open: false,
   section: 'general-themes',
-  openSettings: (section) => set(state => ({ open: true, section: section ?? state.section })),
+  navNonce: 0,
+  openSettings: (section) => set(state => ({ open: true, section: section ?? state.section, navNonce: state.navNonce + 1 })),
   closeSettings: () => set({ open: false }),
-  setSection: (section) => set({ section }),
+  setSection: (section) => set(state => ({ section, navNonce: state.navNonce + 1 })),
 }))

@@ -307,3 +307,76 @@ describe('SettingsPane — one page per menu', () => {
     expect(section('general-account')!.className).toContain('border-t')
   })
 })
+
+describe('SettingsPane — anchor scroll', () => {
+  /** A section taller than the window: the user scrolls inside it, then clicks
+   *  the SAME sidebar anchor to jump back to its top. The selected section id is
+   *  value-equal on the repeat, so without the store's nav nudge the scroll effect
+   *  would be skipped and the click would do nothing. */
+  it('re-centers the pane when the same section is re-selected', async () => {
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll as unknown as typeof Element.prototype.scrollIntoView
+    try {
+      await render()
+
+      scroll.mockClear()
+      // Re-select the section that is already current (the repeat click).
+      act(() => useSettings.getState().setSection('ai-provider'))
+      await settle()
+
+      expect(scroll).toHaveBeenCalled()
+    } finally {
+      // jsdom leaves scrollIntoView undefined; the pane guards its call and the
+      // other settings tests rely on that no-op, so put it back.
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
+  })
+
+  /** A LAST section shorter than the pane: `scrollIntoView({block:'start'})`
+   *  clamps at the scroll limit, so the section can never reach the top — it
+   *  hovers near the bottom with the previous (long) section filling the view.
+   *  The pane reserves trailing space so the section top-aligns: the amount is
+   *  `clientHeight - lastSectionHeight - 72` (72 = pane py-10 + section
+   *  scroll-mt-8). jsdom has no layout, so the geometry is stubbed. */
+  it('reserves trailing space so a short LAST section can reach the top', async () => {
+    useSettings.setState({ open: true, section: 'ai-mcp-server' })
+    await render()
+
+    const pane = document.querySelector<HTMLElement>('.settings-pane-scroll')!
+    const content = pane.firstElementChild as HTMLElement
+    const sections = content.querySelectorAll<HTMLElement>('[data-settings-section]')
+    const lastSection = sections[sections.length - 1]
+    // The section the sidebar anchors on the AI page IS the last one.
+    expect(lastSection.id).toBe('ai-mcp-server')
+
+    Object.defineProperty(pane, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(lastSection, 'offsetHeight', { value: 300, configurable: true })
+
+    act(() => useSettings.getState().setSection('ai-mcp-server'))
+    await settle()
+
+    // 500 - 300 - 72 = 128.
+    expect(content.style.paddingBottom).toBe('128px')
+  })
+
+  /** A last section that already fills (or exceeds) the pane reaches the top on
+   *  its own, so no trailing space is reserved — the page keeps its natural
+   *  bottom instead of gaining a blank gap. */
+  it('reserves no trailing space when the last section already fills the pane', async () => {
+    useSettings.setState({ open: true, section: 'ai-mcp-server' })
+    await render()
+
+    const pane = document.querySelector<HTMLElement>('.settings-pane-scroll')!
+    const content = pane.firstElementChild as HTMLElement
+    const sections = content.querySelectorAll<HTMLElement>('[data-settings-section]')
+    const lastSection = sections[sections.length - 1]
+
+    Object.defineProperty(pane, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(lastSection, 'offsetHeight', { value: 1000, configurable: true })
+
+    act(() => useSettings.getState().setSection('ai-mcp-server'))
+    await settle()
+
+    expect(content.style.paddingBottom).toBe('')
+  })
+})
