@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.2.2 — 2026-10-17
+
+
+### 🐛 Bug Fixes
+
+* **settings:** top-align the last settings section on short windows ([#279](https://github.com/DocuBook/editor/issues/279)) ([e6e3c82](https://github.com/DocuBook/editor/commit/e6e3c82326d5a59bce5bf1acc0df9d4867ec3fb0))
+
 ## v0.2.1 — 2026-10-17
 
 
