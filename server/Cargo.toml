@@ -31,7 +31,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 argon2 = "0.5"
 aes-gcm = "0.10"
-sha2 = "0.10"
+sha2 = "0.11"
 getrandom = "0.2"
 rand = "0.8"
 git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2", "vendored-openssl"] }
