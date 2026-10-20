@@ -1,38 +1,78 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import { X, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
-import { BsMarkdown } from 'react-icons/bs'
-import { LuPencilRuler } from 'react-icons/lu'
-import { useEditorStore, type EditMode } from '../../stores/editor'
-import { isMacTauri, isTauri } from '../../lib/ipc'
+import { X, ChevronDown, ChevronLeft, ChevronRight, Share } from 'lucide-react'
+import { toast } from 'sonner'
+import { useEditorStore } from '../../stores/editor'
+import { invoke, isMacTauri, isTauri } from '../../lib/ipc'
 import { editorFileKind } from '../../utils/fileKind'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import { SidebarToggle } from '../SidebarToggle'
 import { TopBarShell } from '../TopBarShell'
-
-/** The one mode-switch icon, shared by the inline toolbar toggle and the
- *  compact Actions item: shows the mode a click switches TO (markdown icon
- *  while in WYSIWYG, pencil-ruler while in source). Single source, so the two
- *  controls can never drift apart. */
-function ModeSwitchIcon({ editMode, size }: { editMode: EditMode; size: number }) {
-  return editMode === 'editor' ? <BsMarkdown size={size} /> : <LuPencilRuler size={size} />
-}
+import { EditorActionsMenu } from './editorActions'
+import { buildEditorActions, type EditorApp } from './editorActionItems'
 
 export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [actionsOpen, setActionsOpen] = useState(false)
+  /** Detected editors are cached per file path, so a slow response for the
+   *  previous tab can never paint under the current one. */
+  const [detected, setDetected] = useState<{ forPath: string | null; list: EditorApp[] }>({ forPath: null, list: [] })
   const actionsRef = useRef<HTMLSpanElement>(null)
   useClickOutside(actionsRef, () => setActionsOpen(false))
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
   /** Compact web (<640px, Docker/web only — native macOS untouched):
    *  single row keeps [panel|search] + tabs + Actions; undo/redo + mode
-   *  toggle move into the Actions menu. Git actions live in Changes. */
+   *  toggle move into the Actions menu. Every other layout uses the same menu
+   *  behind an icon trigger. Git actions live in Changes. */
   const compact = !isTauri && !isDesktop
-  const showInlineEditing = !compact
+  /** Trigger presentation is pure viewport width, independent of runtime: below
+   *  640px the menu stays the compact text trigger, at/above it becomes the
+   *  icon trigger. `compact` still owns the web-only layout changes. */
+  const compactTrigger = !isDesktop
   const visibleTabs = compact ? tabs.filter(tab => tab.path === activeTab) : tabs
+
+  const filePath = file?.path
+  const fileDeleted = !!file?.deleted
+  const editors = detected.forPath === filePath ? detected.list : []
+  /** Fetch on open, not in an effect: the menu is the only consumer, and a
+   *  failure just falls back to the generic "Open in editor" row. */
+  const toggleActions = () => {
+    const next = !actionsOpen
+    setActionsOpen(next)
+    if (!next || !isTauri || !filePath || fileDeleted) return
+    invoke<EditorApp[]>('list_editors', { path: filePath })
+      .then(list => setDetected({ forPath: filePath, list: Array.isArray(list) ? list : [] }))
+      .catch(() => setDetected({ forPath: filePath, list: [] }))
+  }
   const closeActions = () => setActionsOpen(false)
   /** Only .md files can toggle Editor ↔ Code; a read-only diff tab cannot. */
   const toggleable = file ? editorFileKind(file.path) === 'wysiwyg' && file.view !== 'diff' : false
+
+  /** External editor reads the file from disk, so pending autosave edits must
+   *  land first — otherwise the editor opens a stale document. */
+  const openInEditor = async (app?: string) => {
+    if (!file) return
+    try {
+      await useEditorStore.getState().persistAllDirty()
+      await invoke('open_in_editor', { path: file.path, app: app ?? null })
+    } catch (error) {
+      toast.error(String(error))
+    }
+  }
+  const revealInFinder = async () => {
+    if (!file) return
+    try { await invoke('reveal_in_finder', { path: file.path }) }
+    catch (error) { toast.error(String(error)) }
+  }
+  const actions = buildEditorActions({
+    canUndo, canRedo, onUndo: undo, onRedo: redo, includeHistory: compactTrigger,
+    editMode, toggleable, hasFile: !!file, fileDeleted,
+    editors: isTauri ? editors : [],
+    onToggleMode: () => { void useEditorStore.getState().toggleEditMode(); closeActions() },
+    onOpenInEditor: isTauri ? (app?: string) => { closeActions(); void openInEditor(app) } : undefined,
+    onRevealInFinder: isTauri ? () => { closeActions(); void revealInFinder() } : undefined,
+    revealLabel: isMacTauri ? 'Reveal in Finder' : 'Reveal in File Manager',
+  })
 
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
@@ -65,7 +105,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
      *  to edge on wide displays where the row itself is centred and capped. */
     <TopBarShell dragRegion={isMacTauri} className={(compact ? 'gap-2 pl-4 pr-4 ' : 'gap-3 pr-6 ') + (!compact && isMacTauri && !sidebarOpen ? 'pl-20' : !compact ? 'pl-6' : '')}>
       <SidebarToggle sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
-      {showInlineEditing && (
+      {!compactTrigger && (
       <span className="inline-flex shrink-0 items-center rounded-md border border-border-subtle bg-background">
         <button onClick={() => undo()} disabled={!canUndo} title="Undo" aria-label="Undo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 flex items-center justify-center"><ChevronLeft size={16} /></button>
         <button onClick={() => redo()} disabled={!canRedo} title="Redo" aria-label="Redo" className="rounded cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed min-w-10 sm:min-w-8 p-2 border-l border-border-subtle flex items-center justify-center"><ChevronRight size={16} /></button>
@@ -81,46 +121,17 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
         ))}
       </div>
 
-      {showInlineEditing && (
-      /** One icon showing the mode a click switches to — markdown icon while
-       *  in WYSIWYG, blocks icon while in source (same rule as the menu). */
-      <button
-        onClick={() => useEditorStore.getState().toggleEditMode()}
-        disabled={!toggleable}
-        aria-label={editMode === 'editor' ? 'Switch to Markdown mode' : 'Switch to WYSIWYG mode'}
-        title={tabs.length === 0 ? 'No file to switch' : !toggleable ? 'Preview only' : editMode === 'editor' ? 'Switch to Markdown' : 'Switch to WYSIWYG'}
-        className="flex items-center justify-center shrink-0 min-w-10 sm:min-w-8 p-2 rounded-md border border-border-subtle bg-background cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active disabled:opacity-30 disabled:cursor-not-allowed">
-        <ModeSwitchIcon editMode={editMode} size={15} />
-      </button>
-      )}
-
-      {compact && (
-        <span className="relative shrink-0" ref={actionsRef}>
-          <button onClick={() => setActionsOpen(o => !o)} aria-label="Editor actions" aria-expanded={actionsOpen}
-            className="rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2">
-            Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} />
-          </button>
-          {actionsOpen && (
-            <div className="ui-popover absolute top-full right-0 mt-1 min-w-50 p-1 z-50">
-              <button onClick={() => undo()} disabled={!canUndo}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0"><ChevronLeft size={14} /></span>
-                <span>Undo</span>
-              </button>
-              <button onClick={() => redo()} disabled={!canRedo}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0"><ChevronRight size={14} /></span>
-                <span>Redo</span>
-              </button>
-              <button onClick={() => { useEditorStore.getState().toggleEditMode(); closeActions() }} disabled={!toggleable}
-                className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] bg-transparent border-none rounded hover:bg-surface-active disabled:opacity-40 disabled:cursor-not-allowed text-left">
-                <span className="text-foreground-secondary shrink-0"><ModeSwitchIcon editMode={editMode} size={14} /></span>
-                <span>{tabs.length === 0 ? 'No file to switch' : toggleable ? 'Switch to ' + (editMode === 'editor' ? 'markdown' : 'editor') : 'Preview only'}</span>
-              </button>
-            </div>
-          )}
-        </span>
-      )}
+      <span className="relative shrink-0" ref={actionsRef}>
+        <button onClick={toggleActions} aria-label="More actions" title="More actions" aria-expanded={actionsOpen}
+          className={compactTrigger
+            ? 'rounded cursor-pointer text-xs flex items-center gap-1 text-foreground-subtle hover:text-foreground hover:bg-surface-active p-2'
+            : 'flex items-center justify-center min-w-10 sm:min-w-8 p-2 rounded-md border border-border-subtle bg-background cursor-pointer text-foreground-subtle hover:text-foreground-secondary hover:bg-surface-active'}>
+          {compactTrigger
+            ? <>Actions <ChevronDown size={12} className={'transition-transform ' + (actionsOpen ? 'rotate-180' : '')} /></>
+            : <Share size={15} />}
+        </button>
+        {actionsOpen && <EditorActionsMenu actions={actions} />}
+      </span>
     </TopBarShell>
   )
 }
