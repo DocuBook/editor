@@ -367,7 +367,7 @@ function ToolbarComponents({ children }: { children: ReactNode }) {
  *  so no shell is left without an insert or reorder affordance. */
 export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: boolean; blockActions?: boolean } = {}) => {
   const editor = useBlockNoteEditor<any, any, any>()
-  const blockTypes = blockTypeSelectItems(editor)
+  const blockTypes = blockTypeSelectItems(editor.dictionary)
     .filter(item => item.type !== 'heading' || (Number(item.props?.level) <= 5 && item.props?.isToggleable !== true))
     .map(item => item.type === 'heading'
       ? { ...item, props: Object.fromEntries(Object.entries(item.props ?? {}).filter(([key]) => key !== 'isToggleable')) }

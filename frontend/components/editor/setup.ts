@@ -118,8 +118,7 @@ const mathInlineSpec = createReactInlineContentSpec(mathInlineContentConfig, {
 }, [MathInlineInputRulesExtension])
 
 const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
-  meta: { code: true, defining: true, isolating: false, highlight: () => 'mermaid', hasPreview: true },
-  experimental_keyboard: { enter: 'line-break' },
+  meta: { code: true, defining: true, isolating: false, highlight: () => 'mermaid', hasPreview: true, hardBreakShortcut: 'enter' },
   parse: parseDiagramCodeElement,
   parseContent: parseDiagramCodeContent,
   runsBefore: ['codeBlock'],
