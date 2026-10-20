@@ -372,6 +372,14 @@ fn editor_command(spec: &str) -> Option<(String, Vec<String>)> {
     Some((program, parts.map(str::to_string).collect()))
 }
 
+fn jxa_args(script: &str, paths: &[&Path]) -> Vec<std::ffi::OsString> {
+    ["-l", "JavaScript", "-e", script]
+        .into_iter()
+        .map(std::ffi::OsString::from)
+        .chain(paths.iter().map(|path| path.as_os_str().to_owned()))
+        .collect()
+}
+
 /** One detected editor: the app that can take the vault folder as a project. */
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EditorApp { pub name: String, pub path: String }
@@ -397,8 +405,7 @@ fn detected_editors(file: &Path, dir: &Path) -> Vec<EditorApp> {
   return JSON.stringify(out)
 }"#;
     let output = match std::process::Command::new("osascript")
-        .args(["-l", "JavaScript", "-e", SCRIPT, "--"])
-        .arg(file).arg(dir)
+        .args(jxa_args(SCRIPT, &[file, dir]))
         .output()
     { Ok(o) if o.status.success() => o, _ => return vec![] };
     serde_json::from_slice::<Vec<EditorApp>>(&output.stdout).unwrap_or_default()
@@ -413,8 +420,7 @@ fn detected_editors(_file: &Path, _dir: &Path) -> Vec<EditorApp> { vec![] }
 fn default_application(path: &Path) -> Option<String> {
     const SCRIPT: &str = r#"ObjC.import('AppKit'); function run(argv) { const u = $.NSURL.fileURLWithPath(argv[0]); const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL(u); return app ? ObjC.unwrap(app.path) : ''; }"#;
     let output = std::process::Command::new("osascript")
-        .args(["-l", "JavaScript", "-e", SCRIPT, "--"])
-        .arg(path)
+        .args(jxa_args(SCRIPT, &[path]))
         .output()
         .ok()?;
     if !output.status.success() { return None; }
@@ -536,6 +542,21 @@ mod tests {
     fn editor_command_splits_program_and_arguments() {
         assert_eq!(editor_command("code --wait"), Some(("code".to_string(), vec!["--wait".to_string()])));
         assert_eq!(editor_command("   "), None);
+    }
+
+    #[test]
+    fn jxa_paths_follow_the_script_without_an_extra_argument() {
+        let file = Path::new("/vault/notes/my note.md");
+        let dir = Path::new("/vault");
+        let args = jxa_args("function run(argv) {}", &[file, dir]);
+
+        assert_eq!(args[0], "-l");
+        assert_eq!(args[1], "JavaScript");
+        assert_eq!(args[2], "-e");
+        assert_eq!(args[3], "function run(argv) {}");
+        assert_eq!(args[4], file.as_os_str());
+        assert_eq!(args[5], dir.as_os_str());
+        assert_eq!(args.len(), 6);
     }
 
     /** GUI editors live inside `.app` bundles whose paths contain spaces; the
