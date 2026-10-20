@@ -10,7 +10,8 @@ import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingTool
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 
-import { combineByGroup, SourceBlockWithPreviewExtension, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
+import { combineByGroup, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
+import { SourceBlockWithPreviewExtension } from '@blocknote/core/extensions'
 import { Selection, TextSelection } from 'prosemirror-state'
 import { getMathSlashMenuItems } from '@blocknote/math-block'
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
