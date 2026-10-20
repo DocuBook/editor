@@ -52,6 +52,37 @@ describe('SidebarTabMenu', () => {
     }
   })
 
+  /** Layout contract jsdom cannot measure: the active tab must be sized by its
+   *  content so its label is never ellipsized (the old `flex-1 min-w-0 truncate`
+   *  combination shrank it to `Chan…`), while icon-only tabs take the slack and
+   *  keep a 40px tap floor instead of the old 28px squares. */
+  it('sizes the active label to its content and keeps icon tabs tappable', () => {
+    const labels: Record<SidebarPanelId, string> = { vault: 'Folders', git: 'Changes', trash: 'Trash' }
+    for (const active of ['vault', 'git', 'trash'] as SidebarPanelId[]) {
+      if (root) act(() => root!.unmount())
+      renderMenu({ active, onChange: vi.fn() })
+
+      for (const tab of tabs()) {
+        const classes = tab.className.split(/\s+/)
+        const label = tab.querySelector('span.font-medium')
+        if (tab.getAttribute('aria-label') === labels[active]) {
+          expect(classes).toContain('shrink-0')
+          expect(classes).toContain('whitespace-nowrap')
+          expect(classes).not.toContain('flex-1')
+          expect(classes).not.toContain('min-w-0')
+          expect(label).not.toBeNull()
+          expect(label!.className).not.toContain('truncate')
+          expect(label!.className).not.toContain('min-w-0')
+        } else {
+          expect(classes).toContain('flex-1')
+          expect(classes).toContain('min-w-10')
+          expect(classes).not.toContain('shrink-0')
+          expect(label).toBeNull()
+        }
+      }
+    }
+  })
+
   it('does not render a trash count indicator', () => {
     renderMenu({ active: 'vault', onChange: vi.fn() })
 

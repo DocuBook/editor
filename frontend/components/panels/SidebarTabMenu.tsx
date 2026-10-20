@@ -18,7 +18,7 @@ const ITEMS = [
 
 export default function SidebarTabMenu({ active, onChange, disabled: locked = false }: SidebarTabMenuProps) {
   return (
-    <div role="tablist" aria-label="Sidebar panels" className="flex w-full min-w-0 items-center gap-0.5 rounded-lg border border-border-subtle bg-background p-0.5">
+    <div role="tablist" aria-label="Sidebar panels" className="flex w-full min-w-0 items-center gap-1 rounded-lg border border-border-subtle bg-background p-1">
       {ITEMS.map(({ id, label, Icon }) => {
         const selected = id === active
         /** Every tab is reachable regardless of platform or how full its panel is:
@@ -39,15 +39,18 @@ export default function SidebarTabMenu({ active, onChange, disabled: locked = fa
             disabled={disabled}
             onClick={() => onChange(id)}
             className={
-              'inline-flex h-7 min-w-7 items-center justify-center gap-1 rounded-md border-none px-1.5 text-[11px] transition-colors ' +
+              /** The active tab is sized by its content (`shrink-0`) so the label can
+               *  never truncate; icon-only tabs take the slack (`flex-1`) with a 40px
+               *  floor, which keeps them tappable instead of the old 28px squares. */
+              'inline-flex h-8 items-center justify-center gap-1 rounded-md border-none px-2 text-[11px] transition-colors ' +
               (selected
-                ? 'min-w-0 flex-1 bg-surface-active text-foreground'
-                : 'shrink-0 bg-transparent text-foreground-subtle hover:bg-surface-hover hover:text-foreground-secondary') +
+                ? 'shrink-0 whitespace-nowrap bg-surface-active text-foreground'
+                : 'min-w-10 flex-1 bg-transparent text-foreground-subtle hover:bg-surface-hover hover:text-foreground-secondary') +
               (disabled ? ' cursor-not-allowed opacity-35' : ' cursor-pointer')
             }
           >
             <Icon size={14} className="shrink-0" />
-            {selected && <span className="min-w-0 truncate font-medium">{label}</span>}
+            {selected && <span className="whitespace-nowrap font-medium">{label}</span>}
           </button>
         )
       })}
