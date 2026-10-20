@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/DocuBook/editor/compare/v0.2.2...v0.3.0) (2026-10-20)
+
+
+### 🚀 Features
+
+* **tabbar:** unify actions menu and add desktop editor actions ([#300](https://github.com/DocuBook/editor/issues/300)) ([be77254](https://github.com/DocuBook/editor/commit/be772546d9d05d8ce3555bd747e38c1dce260939))
+
+
+### 🐛 Bug Fixes
+
+* **sidebar:** keep panel tab labels uncut and icon tabs tappable ([#298](https://github.com/DocuBook/editor/issues/298)) ([f50e064](https://github.com/DocuBook/editor/commit/f50e064caf100da577dcb1b86cea98455fa2ce24))
+
 ## v0.2.2 — 2026-10-17
 
 
