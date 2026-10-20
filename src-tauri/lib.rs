@@ -145,6 +145,9 @@ pub fn run() {
             commands::app::health,
             commands::app::app_ready_to_close,
             commands::vault::open_system_settings,
+            commands::vault::list_editors,
+            commands::vault::open_in_editor,
+            commands::vault::reveal_in_finder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

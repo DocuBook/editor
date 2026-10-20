@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const runtime = vi.hoisted(() => ({ isTauri: false }))
+const invokeMock = vi.hoisted(() => vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined))
 const gitState = vi.hoisted(() => ({ current: { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'clean' as string } }))
 const editorState = vi.hoisted(() => ({
   activeTab: 'notes/active-document-with-a-long-name.md' as string | null,
@@ -18,6 +19,7 @@ const editorState = vi.hoisted(() => ({
   canRedo: false,
   undo: vi.fn(),
   redo: vi.fn(),
+  persistAllDirty: vi.fn(async () => {}),
   switchTab: vi.fn(),
   closeTab: vi.fn(async () => {}),
   toggleEditMode: vi.fn(),
@@ -34,8 +36,8 @@ vi.mock('../../../frontend/stores/gitStatus', () => ({
 }))
 vi.mock('../../../frontend/lib/ipc', () => ({
   get isTauri() { return runtime.isTauri },
-  isMacTauri: false,
-  invoke: vi.fn(),
+  isMacTauri: true,
+  invoke: invokeMock,
 }))
 vi.mock('sonner', () => ({ toast: { info: vi.fn() } }))
 
@@ -65,6 +67,7 @@ function renderedTabPaths() {
 
 beforeEach(() => {
   runtime.isTauri = false
+  invokeMock.mockImplementation(async () => undefined)
   gitState.current = { isRepo: false, hasRemote: false, ahead: 0, upstream: '', status: '', repoState: 'clean' }
   document.body.innerHTML = '<div id="root"></div>'
   vi.stubGlobal('CSS', { escape: (value: string) => value })
@@ -93,7 +96,7 @@ describe('responsive tabs', () => {
     expect(activeTab.className).not.toContain('shadow-[inset_0_-1px_0_var(--color-accent)]')
   })
 
-  it('keeps every tab and removes Actions on desktop web', () => {
+  it('keeps every tab and shows the icon Actions trigger on desktop web', () => {
     renderTabBar(true)
 
     expect(renderedTabPaths()).toEqual([
@@ -107,10 +110,22 @@ describe('responsive tabs', () => {
     expect(document.querySelector<HTMLElement>('[data-tab-path="notes/last.md"]')!.classList.contains('border-r')).toBe(false)
     expect(activeTab.classList.contains('border-r')).toBe(false)
     expect(activeTab.className).not.toContain('shadow-[inset_0_-1px_0_var(--color-accent)]')
-    expect(document.querySelector('[aria-label="Editor actions"]')).toBeNull()
+    // Wide layouts keep history inline; the icon trigger holds the rest.
+    const actions = document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')
+    expect(actions).not.toBeNull()
+    expect(actions!.textContent).not.toContain('Actions')
+    expect(document.querySelector('[aria-label="Undo"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="Redo"]')).not.toBeNull()
+    act(() => actions!.click())
+    expect(document.body.textContent).toContain('Switch to markdown')
+    expect(document.body.textContent).not.toContain('Undo')
+    expect(document.body.textContent).not.toContain('Redo')
+    // External editor + Finder actions are desktop-only.
+    expect(document.body.textContent).not.toContain('Open in editor')
+    expect(document.body.textContent).not.toContain('Reveal in Finder')
   })
 
-  it('keeps every tab and desktop controls in narrow Tauri windows', () => {
+  it('keeps every tab and adds desktop-only file actions in narrow Tauri windows', async () => {
     runtime.isTauri = true
     renderTabBar(false)
 
@@ -119,31 +134,100 @@ describe('responsive tabs', () => {
       'notes/active-document-with-a-long-name.md',
       'notes/last.md',
     ])
-    expect(document.querySelector('[aria-label="Editor actions"]')).toBeNull()
-    const modeToggle = document.querySelector<HTMLButtonElement>('[aria-label="Switch to Markdown mode"]')
-    expect(modeToggle).not.toBeNull()
-    // In WYSIWYG the button shows the icon of the mode a click switches TO:
+    const actions = document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!
+    // Below 640px the trigger stays the compact text button, even on Tauri.
+    expect(actions.textContent).toContain('Actions')
+    expect(document.querySelector('[aria-label="Undo"]')).toBeNull()
+    await act(async () => { actions.click() })
+    expect(document.body.textContent).toContain('Undo')
+    expect(document.body.textContent).toContain('Redo')
+    expect(document.body.textContent).toContain('Open in editor')
+    expect(document.body.textContent).toContain('Reveal in Finder')
+    // In WYSIWYG the menu item shows the icon of the mode a click switches TO:
     // BsMarkdown (16px grid) — not the LuPencilRuler (24px grid) shown in source mode.
-    expect(modeToggle!.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 16 16')
-    act(() => modeToggle!.click())
+    const modeItem = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Switch to markdown')!
+    expect(modeItem.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 16 16')
+    act(() => modeItem.click())
     expect(editorState.toggleEditMode).toHaveBeenCalledTimes(1)
+  })
+
+  it('flushes and opens the active file in the external editor', async () => {
+    runtime.isTauri = true
+    renderTabBar(true)
+
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!.click())
+    const openItem = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Open in editor')!
+    await act(async () => { openItem.click() })
+
+    expect(editorState.persistAllDirty).toHaveBeenCalledTimes(1)
+    expect(invokeMock).toHaveBeenCalledWith('open_in_editor', { path: 'notes/active-document-with-a-long-name.md', app: null })
+  })
+
+  it('lists detected editors and opens the chosen one', async () => {
+    runtime.isTauri = true
+    invokeMock.mockImplementation(async (cmd: unknown) => cmd === 'list_editors'
+      ? [{ name: 'Zed', path: '/Applications/Zed.app' }]
+      : undefined)
+    renderTabBar(true)
+    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!.click() })
+
+    // Names come from LaunchServices, not a hardcoded list.
+    const openItem = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Open in Zed')!
+    await act(async () => { openItem.click() })
+
+    expect(invokeMock).toHaveBeenCalledWith('open_in_editor', { path: 'notes/active-document-with-a-long-name.md', app: '/Applications/Zed.app' })
+  })
+
+  it('uses a brand icon per editor and a generic fallback', async () => {
+    runtime.isTauri = true
+    invokeMock.mockImplementation(async (cmd: unknown) => cmd === 'list_editors'
+      ? [
+        { name: 'Zed', path: '/Applications/Zed.app' },
+        { name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app' },
+        { name: 'Some Editor', path: '/Applications/Some Editor.app' },
+      ]
+      : undefined)
+    renderTabBar(true)
+    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!.click() })
+
+    const iconOf = (label: string) => Array.from(document.querySelectorAll('button'))
+      .find(b => b.textContent === label)!.querySelector('svg')!
+    // Simple-icons/brand sets are filled; lucide is stroked.
+    expect(iconOf('Open in Zed').getAttribute('fill')).toBe('currentColor')
+    // VS Code's icon lives in the react-icons/vsc set (16px grid).
+    expect(iconOf('Open in Visual Studio Code').getAttribute('viewBox')).toBe('0 0 16 16')
+    // Unknown editors still get a row — only the icon is generic.
+    expect(iconOf('Open in Some Editor').getAttribute('fill')).toBe('none')
+  })
+
+  it('reveals the active file in Finder', async () => {
+    runtime.isTauri = true
+    renderTabBar(true)
+
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!.click())
+    const revealItem = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Reveal in Finder')!
+    await act(async () => { revealItem.click() })
+
+    expect(invokeMock).toHaveBeenCalledWith('reveal_in_finder', { path: 'notes/active-document-with-a-long-name.md' })
   })
 
   it('shows editor-only Actions in compact web layout', () => {
     renderTabBar(false)
 
-    const actions = document.querySelector<HTMLButtonElement>('[aria-label="Editor actions"]')!
+    const actions = document.querySelector<HTMLButtonElement>('[aria-label="More actions"]')!
     expect(actions).not.toBeNull()
-    // Compact keeps the mode toggle inside Actions only — no inline mode button.
+    // Compact keeps history + mode inside Actions only — no inline buttons.
     expect(document.querySelector('[aria-label="Switch to Markdown mode"]')).toBeNull()
+    expect(document.querySelector('[aria-label="Undo"]')).toBeNull()
     act(() => actions.click())
 
     expect(document.body.textContent).toContain('Undo')
     expect(document.body.textContent).toContain('Redo')
     expect(document.body.textContent).toContain('Switch to markdown')
-    // Compact uses the same mode icon as the inline toggle — shared ModeSwitchIcon.
+    // Compact uses the same shared mode icon as every other trigger.
     const modeItem = Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Switch to markdown')!
     expect(modeItem.querySelector('svg')!.getAttribute('viewBox')).toBe('0 0 16 16')
+    expect(document.body.textContent).not.toContain('Open in editor')
     expect(document.body.textContent).not.toContain('Commit')
     expect(document.body.textContent).not.toContain('Push')
   })

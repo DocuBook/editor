@@ -56,6 +56,9 @@ permissions = [
   "allow-move-path",
   "allow-open-vault",
   "allow-open-system-settings",
+  "allow-list-editors",
+  "allow-open-in-editor",
+  "allow-reveal-in-finder",
   "allow-read-file",
   "allow-file-version",
   "allow-read-file-binary",
@@ -629,6 +632,36 @@ commands.allow = ["resolve_mentions"]
 identifier = "deny-resolve-mentions"
 description = "Denies resolving @-mentions to vault files."
 commands.deny = ["resolve_mentions"]
+
+[[permission]]
+identifier = "allow-list-editors"
+description = "Enables the list_editors command (desktop only)."
+commands.allow = ["list_editors"]
+
+[[permission]]
+identifier = "deny-list-editors"
+description = "Denies the list_editors command."
+commands.deny = ["list_editors"]
+
+[[permission]]
+identifier = "allow-open-in-editor"
+description = "Enables the open_in_editor command (desktop only)."
+commands.allow = ["open_in_editor"]
+
+[[permission]]
+identifier = "deny-open-in-editor"
+description = "Denies the open_in_editor command."
+commands.deny = ["open_in_editor"]
+
+[[permission]]
+identifier = "allow-reveal-in-finder"
+description = "Enables the reveal_in_finder command (desktop only)."
+commands.allow = ["reveal_in_finder"]
+
+[[permission]]
+identifier = "deny-reveal-in-finder"
+description = "Denies the reveal_in_finder command."
+commands.deny = ["reveal_in_finder"]
 
 [[permission]]
 identifier = "allow-restore-file"

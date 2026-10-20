@@ -1,3 +1,4 @@
+use std::path::Path;
 use tauri::State;
 use crate::AppState;
 
@@ -359,9 +360,218 @@ pub fn open_system_settings(pane: &str) -> Result<(), String> {
     { let _ = pane; Err("System Settings deep links are macOS-only".to_string()) }
 }
 
+/** Path spec from `$VISUAL` / `$EDITOR`, split into program + arguments. No shell
+ *  is involved, so command chaining in the variable is never executed. A GUI
+ *  editor spec often points inside an `.app` bundle, whose path contains spaces —
+ *  an existing whole path is therefore taken as the program, unsplit. */
+fn editor_command(spec: &str) -> Option<(String, Vec<String>)> {
+    let trimmed = spec.trim();
+    if Path::new(trimmed).exists() { return Some((trimmed.to_string(), Vec::new())); }
+    let mut parts = trimmed.split_whitespace();
+    let program = parts.next()?.to_string();
+    Some((program, parts.map(str::to_string).collect()))
+}
+
+fn jxa_args(script: &str, paths: &[&Path]) -> Vec<std::ffi::OsString> {
+    ["-l", "JavaScript", "-e", script]
+        .into_iter()
+        .map(std::ffi::OsString::from)
+        .chain(paths.iter().map(|path| path.as_os_str().to_owned()))
+        .collect()
+}
+
+/** One detected editor: the app that can take the vault folder as a project. */
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EditorApp { pub name: String, pub path: String }
+
+/** macOS apps that can open BOTH the file and its folder — i.e. editors that
+ *  accept the whole vault as a project. LaunchServices supplies the list, so no
+ *  editor name, CLI or bundle id is hardcoded. */
+#[cfg(target_os = "macos")]
+fn detected_editors(file: &Path, dir: &Path) -> Vec<EditorApp> {
+    const SCRIPT: &str = r#"ObjC.import('AppKit'); function run(argv) {
+  const ws = $.NSWorkspace.sharedWorkspace
+  const files = ws.URLsForApplicationsToOpenURL($.NSURL.fileURLWithPath(argv[0]))
+  const dirs = ws.URLsForApplicationsToOpenURL($.NSURL.fileURLWithPath(argv[1]))
+  if (!files || !dirs) return '[]'
+  const folders = {}
+  for (let i = 0; i < dirs.count; i++) folders[ObjC.unwrap(dirs.objectAtIndex(i).path)] = true
+  const out = []
+  for (let i = 0; i < files.count; i++) {
+    const path = ObjC.unwrap(files.objectAtIndex(i).path)
+    if (!folders[path]) continue
+    out.push({ path: path, name: path.split('/').pop().replace(/\.app$/, '') })
+  }
+  return JSON.stringify(out)
+}"#;
+    let output = match std::process::Command::new("osascript")
+        .args(jxa_args(SCRIPT, &[file, dir]))
+        .output()
+    { Ok(o) if o.status.success() => o, _ => return vec![] };
+    serde_json::from_slice::<Vec<EditorApp>>(&output.stdout).unwrap_or_default()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn detected_editors(_file: &Path, _dir: &Path) -> Vec<EditorApp> { vec![] }
+
+/** macOS default application for `path`, read from LaunchServices. Only used
+ *  when no folder-capable editor exists, so the file can still be opened. */
+#[cfg(target_os = "macos")]
+fn default_application(path: &Path) -> Option<String> {
+    const SCRIPT: &str = r#"ObjC.import('AppKit'); function run(argv) { const u = $.NSURL.fileURLWithPath(argv[0]); const app = $.NSWorkspace.sharedWorkspace.URLForApplicationToOpenURL(u); return app ? ObjC.unwrap(app.path) : ''; }"#;
+    let output = std::process::Command::new("osascript")
+        .args(jxa_args(SCRIPT, &[path]))
+        .output()
+        .ok()?;
+    if !output.status.success() { return None; }
+    let app = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!app.is_empty()).then_some(app)
+}
+
+#[cfg(target_os = "macos")]
+fn open_with_app(app: &str, paths: &[&Path]) -> Result<(), String> {
+    let mut command = std::process::Command::new("open");
+    command.arg("-a").arg(app);
+    for path in paths { command.arg(path); }
+    let status = command.status().map_err(|e| format!("Could not open {app}: {e}"))?;
+    // `open` exits non-zero when the bundle is missing or refuses the request;
+    // returning Ok there would report a success that never happened.
+    status.success().then_some(()).ok_or_else(|| format!("Could not open {app}"))
+}
+
+/** Open the vault (with `file` focused) in the user's editor. `app` comes from
+ *  the detected list, so an explicit choice is honored; otherwise `$VISUAL` /
+ *  `$EDITOR` is tried first and a broken CLI (e.g. `code` missing from the GUI
+ *  PATH) falls through to detection instead of failing the action. */
+fn launch_editor(vault_root: &Path, file: &Path, app: Option<&str>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    if let Some(app) = app {
+        if !detected_editors(file, vault_root).iter().any(|e| e.path == app) {
+            return Err(format!("Editor not available: {app}"));
+        }
+        return open_with_app(app, &[vault_root, file]);
+    }
+    // Detection is macOS-only, so an explicit editor choice cannot be honored
+    // elsewhere — fail loudly instead of silently opening a different app.
+    #[cfg(not(target_os = "macos"))]
+    if app.is_some() {
+        return Err("Choosing an editor is only supported on macOS".to_string());
+    }
+    if let Some(spec) = std::env::var("VISUAL").ok().filter(|s| !s.trim().is_empty())
+        .or_else(|| std::env::var("EDITOR").ok().filter(|s| !s.trim().is_empty()))
+    {
+        if let Some((program, args)) = editor_command(&spec) {
+            use std::process::Stdio;
+            if std::process::Command::new(&program)
+                .args(args)
+                .arg(vault_root)
+                .arg(file)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .is_ok()
+            { return Ok(()); }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(editor) = detected_editors(file, vault_root).first() {
+            return open_with_app(&editor.path, &[vault_root, file]);
+        }
+        // Nothing can take a folder: still open the file rather than dead-end.
+        let app = default_application(file).ok_or_else(|| "No application can open this file".to_string())?;
+        open_with_app(&app, &[file])
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        tauri_plugin_opener::open_path(file, None::<&str>)
+            .map_err(|e| format!("Could not open file: {e}"))
+    }
+}
+
+/** Apps that can open this vault as a project, for the Actions menu. */
+#[tauri::command]
+pub async fn list_editors(path: String, state: State<'_, AppState>) -> Result<Vec<EditorApp>, String> {
+    let (root, file) = {
+        let vault = state.vault.lock().expect("lock");
+        let v = vault.as_ref().ok_or_else(|| "No vault".to_string())?;
+        (v.root().to_path_buf(), v.absolute_path(&path)?)
+    };
+    // LaunchServices is a blocking subprocess call; keep it off the main thread
+    // (this runs on every Actions menu open).
+    tauri::async_runtime::spawn_blocking(move || detected_editors(&file, &root))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/** Open a vault file in the user's editor, with the vault as the project root.
+ *  Desktop-only: the web runtime has no local editor. */
+#[tauri::command]
+pub async fn open_in_editor(path: String, app: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let (root, file) = {
+        let vault = state.vault.lock().expect("lock");
+        let v = vault.as_ref().ok_or_else(|| "No vault".to_string())?;
+        (v.root().to_path_buf(), v.absolute_path(&path)?)
+    };
+    tauri::async_runtime::spawn_blocking(move || launch_editor(&root, &file, app.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/** Reveal a vault file in the OS file manager (Finder on macOS). Desktop-only. */
+#[tauri::command]
+pub async fn reveal_in_finder(path: String, state: State<'_, AppState>) -> Result<(), String> {
+    let target = {
+        let vault = state.vault.lock().expect("lock");
+        let v = vault.as_ref().ok_or_else(|| "No vault".to_string())?;
+        v.absolute_path(&path)?
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        tauri_plugin_opener::reveal_item_in_dir(&target).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_command_splits_program_and_arguments() {
+        assert_eq!(editor_command("code --wait"), Some(("code".to_string(), vec!["--wait".to_string()])));
+        assert_eq!(editor_command("   "), None);
+    }
+
+    #[test]
+    fn jxa_paths_follow_the_script_without_an_extra_argument() {
+        let file = Path::new("/vault/notes/my note.md");
+        let dir = Path::new("/vault");
+        let args = jxa_args("function run(argv) {}", &[file, dir]);
+
+        assert_eq!(args[0], "-l");
+        assert_eq!(args[1], "JavaScript");
+        assert_eq!(args[2], "-e");
+        assert_eq!(args[3], "function run(argv) {}");
+        assert_eq!(args[4], file.as_os_str());
+        assert_eq!(args[5], dir.as_os_str());
+        assert_eq!(args.len(), 6);
+    }
+
+    /** GUI editors live inside `.app` bundles whose paths contain spaces; the
+     *  whole existing path must stay one program instead of splitting apart. */
+    #[test]
+    fn editor_command_keeps_paths_with_spaces_intact() {
+        let dir = std::env::temp_dir().join(format!("docubook editor spec {}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("Sublime Text");
+        std::fs::write(&bin, "").unwrap();
+        let spec = bin.to_str().unwrap().to_string();
+
+        assert_eq!(editor_command(&spec), Some((spec.clone(), Vec::new())));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn vault_name_validation() {

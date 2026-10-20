@@ -121,6 +121,15 @@ impl Vault {
     pub fn name(&self) -> String {
         self.root.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
     }
+/** Absolute path of an existing vault entry, for handing to the OS (open in
+ *  editor / reveal in file manager). `safe_path` blocks traversal and symlink
+ *  escapes; the existence check keeps those callers from passing the OS a path
+ *  that silently does nothing. */
+    pub fn absolute_path(&self, path: &str) -> Result<PathBuf, String> {
+        let target = self.safe_path(path)?;
+        if !target.exists() { return Err(format!("Not found: {path}")); }
+        Ok(target)
+    }
 /** Walk a directory and return sorted file list (dirs first, alphabetical). */
 /** Resolve a vault-relative path safely.
  *  Rejects absolute paths and any path that resolves (after symlink resolution
@@ -834,6 +843,20 @@ mod tests {
         assert!(v.safe_path("./notes.md").is_ok());
         // filename containing ".." is not a traversal component
         assert!(v.safe_path("a..b.md").is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn absolute_path_requires_existing_entry_inside_vault() {
+        let dir = std::env::temp_dir().join(format!("docubook-abs-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("notes.md"), "x").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.absolute_path("notes.md").unwrap(), dir.join("notes.md"));
+        assert!(v.absolute_path("missing.md").is_err());
+        assert!(v.absolute_path("../escape.md").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
