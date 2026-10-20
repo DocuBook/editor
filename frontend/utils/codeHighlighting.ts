@@ -15,7 +15,7 @@
  *  streaming fence (` ```pyth `) must not make Shiki load a grammar for a
  *  language that does not exist yet.
  */
-import { SyntaxHighlightingExtension } from '@blocknote/core'
+import { SyntaxHighlightingExtension } from '@blocknote/core/extensions'
 
 export const syntaxHighlighting = SyntaxHighlightingExtension({
   createHighlighter: () => import('./shikiHighlighter').then(({ createEditorHighlighter }) => createEditorHighlighter()),

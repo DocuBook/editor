@@ -102,7 +102,7 @@ const StableMathBlockPreview = createStablePreview(MathBlockPreviewWithPopup, 'l
 const StableMathInlinePreview = createStablePreview(MathInlinePreviewWithPopup, 'latex', 'inline')
 
 const mathBlockSpec = createReactBlockSpec(createMathBlockConfig, {
-  meta: { code: true, defining: true, isolating: false, highlight: () => 'latex', hasPreview: true, hardBreakShortcut: 'shift+enter' },
+  meta: { code: true, defining: true, isolating: false, highlight: () => 'latex', hasPreview: true },
   parse: parseBlockMathMLElement,
   parseContent: parseBlockMathMLContent,
   render: StableMathBlockPreview,
@@ -118,7 +118,8 @@ const mathInlineSpec = createReactInlineContentSpec(mathInlineContentConfig, {
 }, [MathInlineInputRulesExtension])
 
 const diagramSpec = createReactBlockSpec(createDiagramBlockConfig, {
-  meta: { code: true, defining: true, isolating: false, highlight: () => 'mermaid', hasPreview: true, hardBreakShortcut: 'enter' },
+  meta: { code: true, defining: true, isolating: false, highlight: () => 'mermaid', hasPreview: true },
+  experimental_keyboard: { enter: 'line-break' },
   parse: parseDiagramCodeElement,
   parseContent: parseDiagramCodeContent,
   runsBefore: ['codeBlock'],
