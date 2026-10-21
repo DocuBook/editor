@@ -75,9 +75,11 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         // Stay tripped: once the provider is over budget there is nothing left to read
-        // that we would hand over, so stop pulling from the socket entirely.
+        // that we would hand over, so stop pulling from the socket entirely. The error
+        // is yielded exactly once; returning `None` afterwards fuses the stream so a
+        // consumer that polls to completion cannot spin on a never-ending error.
         if this.tripped {
-            return Poll::Ready(Some(Err(BodyError::TooLarge)));
+            return Poll::Ready(None);
         }
         match Pin::new(&mut this.inner).poll_next(cx) {
             Poll::Ready(Some(Ok(chunk))) => {
@@ -98,6 +100,20 @@ where
 /// A `BodyError::TooLarge` is ours, not the transport's, so it must not go through
 /// `sanitize_ai_error` and lose the size framing.
 const TOO_LARGE_MESSAGE: &str = "AI response too large";
+
+/// How often a pending chunk read re-checks the cancellation flag.
+///
+/// `AtomicBool` has no wakeup of its own, so a Stop that arrives while the
+/// stream is parked on `events.next()` is only observable by polling. The
+/// transport read timeout stays the backstop for genuine provider stalls.
+const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Resolve once the caller has asked to stop.
+async fn cancel_requested(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::SeqCst) {
+        tokio::time::sleep(CANCEL_POLL_INTERVAL).await;
+    }
+}
 
 pub async fn stream_chat(
     response: Response,
@@ -157,23 +173,40 @@ pub async fn stream_chat(
         }
         // Only the event carrying the prefill latency is bounded here; a stall later
         // in the stream is the transport's read timeout to catch.
+        // Race every read against the cancellation poller: an `AtomicBool` cannot
+        // be awaited, so without this a Stop arriving mid-stall went unobserved
+        // until the transport read timeout elapsed.
         let next = if saw_event {
-            events.next().await
+            tokio::select! {
+                next = events.next() => next,
+                _ = cancel_requested(&cancel) => {
+                    cancelled = true;
+                    break;
+                }
+            }
         } else {
-            match tokio::time::timeout(Duration::from_secs(30), events.next()).await {
-                Ok(next) => next,
-                Err(_) => {
-                    tracing::warn!(
-                        event = "ai_request_failure",
-                        provider = %provider,
-                        model = %model,
-                        status = status.as_u16(),
-                        duration_ms = started.elapsed().as_millis() as u64,
-                        body_bytes = 0_u64,
-                        error_category = "first_chunk_timeout"
-                    );
-                    send_error(&tx, "AI provider did not respond — try again").await;
-                    return;
+            tokio::select! {
+                result = tokio::time::timeout(Duration::from_secs(30), events.next()) => {
+                    match result {
+                        Ok(next) => next,
+                        Err(_) => {
+                            tracing::warn!(
+                                event = "ai_request_failure",
+                                provider = %provider,
+                                model = %model,
+                                status = status.as_u16(),
+                                duration_ms = started.elapsed().as_millis() as u64,
+                                body_bytes = 0_u64,
+                                error_category = "first_chunk_timeout"
+                            );
+                            send_error(&tx, "AI provider did not respond — try again").await;
+                            return;
+                        }
+                    }
+                }
+                _ = cancel_requested(&cancel) => {
+                    cancelled = true;
+                    break;
                 }
             }
         };
@@ -681,5 +714,89 @@ mod tests {
 
         assert_eq!(rx.recv().await, Some(Err("AI response too large".into())));
         assert!(rx.recv().await.is_none());
+    }
+
+    /// One-shot server that sends a single SSE frame and then holds the socket
+    /// open, so `stream_chat` parks on `events.next()` — the state where a
+    /// cancellation flag used to go unobserved until the transport timeout.
+    async fn stalled_sse_after_first_event(payload: &str) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let frame = format!("data: {payload}\n\n");
+        tokio::spawn(async move {
+            use tokio::io::AsyncWriteExt;
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut head = [0_u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut head).await;
+            let _ = socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                )
+                .await;
+            let _ = socket.write_all(frame.as_bytes()).await;
+            let _ = socket.flush().await;
+            // Deliberately no shutdown: keep the body open so the client stays
+            // pending until the test's cancellation wins.
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        addr.to_string()
+    }
+
+    #[tokio::test]
+    async fn cancel_is_observed_while_the_stream_is_stalled() {
+        // Regression: Stop used to go unread while `events.next().await` was
+        // pending, so a stalled provider kept the turn alive until the transport
+        // read timeout (120s in both consumers).
+        let addr = stalled_sse_after_first_event(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).await;
+        let response = get_sse(format!("http://{addr}/chat")).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let task_cancel = Arc::clone(&cancel);
+        let handle = tokio::spawn(async move {
+            stream_chat(
+                response,
+                "test".into(),
+                "test".into(),
+                task_cancel,
+                Instant::now(),
+                tx,
+            )
+            .await;
+        });
+
+        // Wait until the frame is processed, so the stream is parked on the next
+        // read rather than still connecting.
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(value))) if value == "hi"));
+
+        cancel.store(true, Ordering::SeqCst);
+        tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("cancellation must not wait for the transport read timeout")
+            .unwrap();
+
+        assert!(
+            rx.recv().await.is_none(),
+            "a cancelled stream must not emit anything further"
+        );
+    }
+
+    #[tokio::test]
+    async fn oversized_body_stream_is_fused_after_the_error() {
+        use futures_util::StreamExt as _;
+
+        // `BoundedBytes` must not keep returning `Ready` forever after tripping:
+        // a consumer that polls to completion would spin instead of stopping.
+        let inner = futures_util::stream::iter(vec![Ok::<_, std::io::Error>(
+            bytes::Bytes::from_static(b"123456789"),
+        )]);
+        let mut bounded = BoundedBytes::new(inner, 4);
+
+        assert!(matches!(
+            bounded.next().await,
+            Some(Err(BodyError::TooLarge))
+        ));
+        assert!(bounded.next().await.is_none());
     }
 }

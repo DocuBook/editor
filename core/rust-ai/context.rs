@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -118,11 +118,18 @@ pub fn validate_configured_servers(servers: &[ContextServer]) -> Result<(), Stri
     validate_server_names(servers)
 }
 
-fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
-    let mut calls = CONTEXT_CALLS
+/// Lock the active-call registry, recovering from poisoning. The map only ever
+/// holds whole entries, so a recovered guard is still sound; returning an error
+/// here would silently disable Stop for an already-running request.
+fn calls() -> MutexGuard<'static, HashMap<String, watch::Sender<bool>>> {
+    CONTEXT_CALLS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
-        .map_err(|_| "Context-tool cancellation is unavailable".to_string())?;
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
+    let mut calls = calls();
     if calls.contains_key(request_id) {
         return Err("Context-tool request is already active".into());
     }
@@ -131,11 +138,7 @@ fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), St
 }
 
 fn remove_call(request_id: &str) -> Result<(), String> {
-    CONTEXT_CALLS
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .map_err(|_| "Context-tool cancellation is unavailable".to_string())?
-        .remove(request_id);
+    calls().remove(request_id);
     Ok(())
 }
 
@@ -731,12 +734,10 @@ pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String
 }
 
 pub fn cancel(request_id: &str) {
-    if let Some(sender) = CONTEXT_CALLS
-        .get_or_init(|| Mutex::new(HashMap::new()))
-        .lock()
-        .ok()
-        .and_then(|mut calls| calls.remove(request_id))
-    {
+    // Recover from a poisoned lock instead of silently doing nothing: a panic
+    // elsewhere must not turn Stop into a no-op for an already-running request.
+    let sender = calls().remove(request_id);
+    if let Some(sender) = sender {
         let _ = sender.send(true);
     }
 }
@@ -907,5 +908,20 @@ mod tests {
         assert!(register_call("same-request", second).is_err());
         cancel("same-request");
         remove_call("same-request").unwrap();
+    }
+
+    #[test]
+    fn cancellation_registry_survives_a_poisoned_lock() {
+        let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _guard = calls();
+            panic!("poison the active-call registry");
+        }));
+        assert!(poisoned.is_err());
+
+        let (sender, mut receiver) = watch::channel(false);
+        register_call("poison-recovery", sender).unwrap();
+        cancel("poison-recovery");
+        assert!(*receiver.borrow_and_update());
+        remove_call("poison-recovery").unwrap();
     }
 }
