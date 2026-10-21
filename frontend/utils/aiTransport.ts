@@ -42,6 +42,13 @@ const MAX_CONTEXT_TOOL_ROUNDS = 4;
 const MAX_CONTEXT_TOOL_CALLS = 8;
 const MAX_CONTEXT_TOOL_RESULT_CHARS = 12_000;
 const MAX_CONTEXT_TOOL_TOTAL_CHARS = 48_000;
+/** Backend paging tool for large context results (core/rust-ai/context.rs).
+ *  Page reads get their own budget so reading a long result does not consume
+ *  the budget for real lookups; pages are ~11k chars each. */
+const READ_CONTEXT_RESULT_TOOL = "read_context_result";
+const MAX_CONTEXT_PAGE_ROUNDS = 12;
+const MAX_CONTEXT_PAGE_CALLS = 12;
+const MAX_CONTEXT_PAGE_TOTAL_CHARS = 120_000;
 
 function untrustedContextResult(text: string, remainingChars: number): string {
   const limit = Math.max(0, Math.min(MAX_CONTEXT_TOOL_RESULT_CHARS, remainingChars));
@@ -331,6 +338,9 @@ async function runSendMessages(
         let contextToolRounds = 0;
         let contextToolCalls = 0;
         let contextToolChars = 0;
+        let contextPageRounds = 0;
+        let contextPageCalls = 0;
+        let contextPageChars = 0;
         /** Outer turn loop. Each iteration = one provider attempt (which may itself
          *  contain semantic-validation retries). A turn normally ends the stream, but
          *  the Path A → Path B fallback re-enters for exactly one more iteration. */
@@ -387,9 +397,16 @@ async function runSendMessages(
               ? toolBuffer.filter((toolCall: any) => !isDocumentOperationToolCall(toolCall))
               : [];
             if (contextCalls.length) {
-              contextToolRounds++;
-              contextToolCalls += contextCalls.length;
-              if (contextToolRounds > MAX_CONTEXT_TOOL_ROUNDS || contextToolCalls > MAX_CONTEXT_TOOL_CALLS) {
+              const isPageRead = (toolCall: any) => toolCall.toolName === READ_CONTEXT_RESULT_TOOL;
+              const pageCalls = contextCalls.filter(isPageRead).length;
+              if (pageCalls === contextCalls.length) contextPageRounds++;
+              else contextToolRounds++;
+              contextPageCalls += pageCalls;
+              contextToolCalls += contextCalls.length - pageCalls;
+              if (
+                contextToolRounds > MAX_CONTEXT_TOOL_ROUNDS || contextToolCalls > MAX_CONTEXT_TOOL_CALLS ||
+                contextPageRounds > MAX_CONTEXT_PAGE_ROUNDS || contextPageCalls > MAX_CONTEXT_PAGE_CALLS
+              ) {
                 throw new Error("Context tool limit exceeded");
               }
               const providerToolCalls = contextCalls.map((toolCall: any) => {
@@ -410,9 +427,12 @@ async function runSendMessages(
               for (const toolCall of contextCalls) {
                 if (abortSignal?.aborted) return;
                 let result: string;
+                const pageRead = isPageRead(toolCall);
+                const usedChars = pageRead ? contextPageChars : contextToolChars;
+                const totalChars = pageRead ? MAX_CONTEXT_PAGE_TOTAL_CHARS : MAX_CONTEXT_TOOL_TOTAL_CHARS;
                 if (!contextToolNames.has(String(toolCall.toolName ?? ""))) {
                   result = "Context tool is not available.";
-                } else if (contextToolChars >= MAX_CONTEXT_TOOL_TOTAL_CHARS) {
+                } else if (usedChars >= totalChars) {
                   result = "Context result budget exhausted.";
                 } else {
                   try {
@@ -424,9 +444,9 @@ async function runSendMessages(
                     result = "Context tool execution failed.";
                   }
                 }
-                const remaining = MAX_CONTEXT_TOOL_TOTAL_CHARS - contextToolChars;
-                const content = untrustedContextResult(result, remaining);
-                contextToolChars += content.length;
+                const content = untrustedContextResult(result, totalChars - usedChars);
+                if (pageRead) contextPageChars += content.length;
+                else contextToolChars += content.length;
                 toolTranscript.push({
                   role: "tool",
                   tool_call_id: toolCall.providerToolCallId,
