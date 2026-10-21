@@ -139,6 +139,12 @@ body {
     user-select: text;
 }
 
+/* A blocked remote image is a local `data:` placeholder (mediaPolicy) and the
+   click target that opts that one image in, so it must read as interactive. */
+#root img[src*="docubook-blocked-media"] {
+    cursor: pointer;
+}
+
 /* A formatting-toolbar menu/popover opens over the line its caret sits in,
    and the caret can end up painted above it — no z-index wins that fight: a
    caret is drawn in the text layer, and on iOS WebKit it has been seen over

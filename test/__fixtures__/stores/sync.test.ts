@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { useSyncStore, contentVersion, isRetryableError, persistedSyncState } from '../../../frontend/stores/sync'
+import { useSyncStore, contentVersion, isRetryableError, persistedSyncState, setSyncVaultScope, isSyncRecordInScope } from '../../../frontend/stores/sync'
 import { invoke } from '../../../frontend/lib/ipc'
 
 vi.mock('../../../frontend/lib/ipc', () => ({
@@ -55,9 +55,10 @@ describe('isRetryableError', () => {
 
 })
 
-const reset = () => useSyncStore.setState({
-  queue: [], conflicts: [], draining: false, attempts: 0, lastError: '',
-})
+const reset = () => {
+  useSyncStore.getState().reset()
+  setSyncVaultScope('')
+}
 
 describe('sync store queue and drain', () => {
   beforeEach(() => {
@@ -138,6 +139,24 @@ describe('sync store queue and drain', () => {
     await first
   })
 
+  it('waits for an in-flight write before a vault transition continues', async () => {
+    let resolveWrite!: (value: string) => void
+    vi.mocked(invoke).mockReturnValue(new Promise<string>(resolve => { resolveWrite = resolve }))
+    setSyncVaultScope('/vaults/a')
+    useSyncStore.getState().enqueue({ path: 'a.md', content: 'from a', baseVersion: null })
+    const drain = useSyncStore.getState().drain()
+    const { waitForSyncWrites } = await import('../../../frontend/stores/sync')
+    setSyncVaultScope('')
+    let transitioned = false
+    const transition = waitForSyncWrites().then(() => { transitioned = true })
+
+    await Promise.resolve()
+    expect(transitioned).toBe(false)
+    resolveWrite(written())
+    await Promise.all([drain, transition])
+    expect(transitioned).toBe(true)
+  })
+
 
   it('resolves keep-mine by re-basing on the current disk version', async () => {
     vi.mocked(invoke).mockResolvedValue(written('v10'))
@@ -208,6 +227,87 @@ describe('sync store queue and drain', () => {
     expect(queue).toHaveLength(0)
     expect(conflicts).toHaveLength(0)
     expect(failures[0].content).toBe('precious')
+  })
+})
+
+describe('sync store vault scoping', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(invoke).mockResolvedValue('')
+    reset()
+  })
+
+  /** Paths are vault-relative: `notes/a.md` in vault A and vault B are different
+   *  files. Replaying a queue from A while B is open would write into the wrong
+   *  vault, so records carry their origin and drain skips foreign ones. */
+  it('stamps records with the active vault and drains only that vault', async () => {
+    vi.mocked(invoke).mockResolvedValue(written())
+    setSyncVaultScope('/vaults/a')
+    useSyncStore.getState().enqueue({ path: 'a.md', content: 'one', baseVersion: null })
+
+    expect(useSyncStore.getState().queue[0].vaultPath).toBe('/vaults/a')
+
+    setSyncVaultScope('/vaults/b')
+    await useSyncStore.getState().drain()
+
+    expect(invoke).not.toHaveBeenCalled()
+    expect(useSyncStore.getState().queue).toHaveLength(1)
+
+    setSyncVaultScope('/vaults/a')
+    await useSyncStore.getState().drain()
+
+    expect(invoke).toHaveBeenCalledWith('write_file_checked', { path: 'a.md', content: 'one', baseVersion: null })
+    expect(useSyncStore.getState().queue).toHaveLength(0)
+  })
+
+  it('scopes conflicts and failures to their vault', () => {
+    setSyncVaultScope('/vaults/a')
+    useSyncStore.getState().addConflict({ path: 'a.md', mine: 'm', theirs: 't', theirsVersion: 'v', baseContent: null })
+
+    setSyncVaultScope('/vaults/b')
+    expect(useSyncStore.getState().hasConflict('a.md')).toBe(false)
+    expect(useSyncStore.getState().conflicts[0].vaultPath).toBe('/vaults/a')
+
+    // Same relative path in the current vault must get its own record, not
+    // supersede the other vault's conflict.
+    useSyncStore.getState().addConflict({ path: 'a.md', mine: 'm2', theirs: 't2', theirsVersion: 'v2', baseContent: null })
+    expect(useSyncStore.getState().conflicts).toHaveLength(2)
+    expect(useSyncStore.getState().hasConflict('a.md')).toBe(true)
+
+    // Discarding in B must leave A's record untouched.
+    useSyncStore.getState().discard('a.md')
+    expect(useSyncStore.getState().conflicts).toHaveLength(1)
+    expect(useSyncStore.getState().conflicts[0].vaultPath).toBe('/vaults/a')
+  })
+
+  it('counts only the current vault in pendingCount', () => {
+    setSyncVaultScope('/vaults/a')
+    useSyncStore.getState().enqueue({ path: 'a.md', content: 'x', baseVersion: null })
+    setSyncVaultScope('/vaults/b')
+    useSyncStore.getState().enqueue({ path: 'b.md', content: 'y', baseVersion: null })
+
+    expect(useSyncStore.getState().pendingCount()).toBe(1)
+  })
+
+  /** Pre-scoping records have no vault identity. Dropping them would destroy
+   *  offline work on upgrade, so they stay in scope until logout clears them. */
+  it('treats legacy records without a vault as in scope', () => {
+    expect(isSyncRecordInScope({ path: 'a.md' } as { vaultPath?: string })).toBe(true)
+    expect(isSyncRecordInScope({ vaultPath: '/vaults/a' }, '/vaults/b')).toBe(false)
+  })
+
+  it('reset clears every collection so nothing survives logout', () => {
+    setSyncVaultScope('/vaults/a')
+    useSyncStore.getState().enqueue({ path: 'a.md', content: 'secret', baseVersion: null })
+    useSyncStore.getState().addConflict({ path: 'a.md', mine: 'm', theirs: 't', theirsVersion: 'v', baseContent: null })
+
+    useSyncStore.getState().reset()
+
+    const state = useSyncStore.getState()
+    expect(state.queue).toHaveLength(0)
+    expect(state.conflicts).toHaveLength(0)
+    expect(state.failures).toHaveLength(0)
+    expect(state.draining).toBe(false)
   })
 })
 

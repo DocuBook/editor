@@ -9,6 +9,7 @@ import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, C
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
+import { mapWithConcurrency } from '../utils/concurrency'
 import { useTreeActions } from '../hooks/useTreeActions'
 import { stripMarkdownExt } from '../utils/fileKind'
 import { hasClipboardItem } from '../utils/fileClipboard'
@@ -22,6 +23,9 @@ import PermissionDialog from './PermissionDialog'
 import ProfileMenu from './ProfileMenu'
 import SettingsNav from './settings/SettingsNav'
 import { useSettings } from '../stores/settings'
+
+/** Concurrent restore/permanent-delete calls for one trash batch. */
+const TRASH_ACTION_CONCURRENCY = 4
 
 /** Panel showing backlinks for the currently active file. */
 function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
@@ -143,10 +147,12 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   }
   const runTrashAction = async (command: 'restore_file' | 'delete_trash_item', items: TrashItem[]) => {
     const failed: unknown[] = []
-    for (const item of items) {
+    // Independent per-item backend calls: a bounded fan-out beats a serial loop
+    // for a large selection, without turning a batch action into a flood.
+    await mapWithConcurrency(items, TRASH_ACTION_CONCURRENCY, async (item) => {
       try { await invoke(command, { trashName: item.name }) }
       catch(e) { console.error(e); failed.push(e) }
-    }
+    })
     /** A privacy-permission failure is actionable, so it opens the dialog that
      *  deep-links the System Settings pane. Checking the first failure is enough:
      *  a batch fails uniformly when the grant is missing. */

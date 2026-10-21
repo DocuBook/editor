@@ -13,7 +13,7 @@ export function ImagePreview({ fileName, vaultPath, relPath }: { fileName: strin
   const [preview, setPreview] = useState<{ target: string; src: string | null; error: string | null } | null>(null)
   useEffect(() => {
     let alive = true
-    fileUrl(vaultPath, relPath)
+    fileUrl(relPath)
       .then(src => { if (alive) setPreview({ target, src, error: null }) })
       .catch(e => { if (alive) setPreview({ target, src: null, error: mediaErrorMessage(e) }) })
     return () => { alive = false }
@@ -27,7 +27,7 @@ export function ImagePreview({ fileName, vaultPath, relPath }: { fileName: strin
           fileUrl; on web the <img> fetch is where a 404/403/413 surfaces, and
           this turns the bare error into the real reason. */}
       <img src={currentPreview.src} alt={fileName} className="max-w-full max-h-full object-contain rounded-md" onError={() => {
-        void mediaFailureReason(vaultPath, relPath).then(message => {
+        void mediaFailureReason(relPath).then(message => {
           setPreview(prev => prev?.target === target ? { ...prev, error: message } : prev)
         })
       }} />

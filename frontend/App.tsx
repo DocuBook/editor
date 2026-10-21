@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Drawer } from '@mantine/core'
 import { PanelLeftClose } from 'lucide-react'
 import Sidebar from './components/Sidebar'
@@ -12,7 +12,7 @@ import { Toaster, toast } from 'sonner'
 import { useGitStatusRefresh } from './stores/gitStatus'
 import { useEditorStore } from './stores/editor'
 import { useVaultStore } from './stores/vault'
-import { useSyncStore, installSyncListeners } from './stores/sync'
+import { useSyncStore, installSyncListeners, isSyncRecordInScope } from './stores/sync'
 import ConflictDialog from './components/ConflictDialog'
 import SyncStatusBadge from './components/editor/SyncStatusBadge'
 import { listen, invoke } from './lib/ipc'
@@ -29,6 +29,7 @@ export default function App() {
   const { status } = useAuth()
   const colorScheme = useTheme(s => s.colorScheme)
   const isVaultOpen = useVaultStore(s => s.isOpen)
+  const vaultPath = useVaultStore(s => s.vaultPath)
   const openVault = useVaultStore(s => s.openVault)
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 640px)').matches)
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
@@ -148,19 +149,26 @@ export default function App() {
   useAuthGuard()
 
   const conflicts = useSyncStore(s => s.conflicts)
+  /** Only conflicts raised by the vault that is open now. The store is shared
+   *  across vaults (queued writes must survive a switch), so the UI has to
+   *  filter — a relative path from another vault names a different file. */
+  const scopedConflicts = useMemo(
+    () => conflicts.filter(c => isSyncRecordInScope(c, vaultPath)),
+    [conflicts, vaultPath],
+  )
   /** Paths the user dismissed with "Decide later". The conflict stays in the
    *  store (nothing is lost) but stops re-opening the dialog unprompted; the
    *  status badge keeps showing it so it cannot be forgotten. */
   const [dismissedConflicts, setDismissedConflicts] = useState<Record<string, true>>({})
   const conflictIdentity = (conflict: typeof conflicts[number]) => conflict.id
-  const activeConflict = conflicts.find(c => !dismissedConflicts[conflictIdentity(c)])
+  const activeConflict = scopedConflicts.find(c => !dismissedConflicts[conflictIdentity(c)])
   const resolveConflict = useCallback(async (choice: 'mine' | 'theirs') => {
-    const path = useSyncStore.getState().conflicts.find(c => !dismissedConflicts[conflictIdentity(c)])?.path
+    const path = useSyncStore.getState().conflicts.find(c => !dismissedConflicts[conflictIdentity(c)] && isSyncRecordInScope(c, vaultPath))?.path
     if (!path) return
     const editor = useEditorStore.getState()
     if (choice === 'mine') await editor.applyConflictMine(path)
     else await editor.applyConflictTheirs(path)
-  }, [dismissedConflicts])
+  }, [dismissedConflicts, vaultPath])
 
   /** Offline queue: drain when connectivity returns or auth/vault becomes ready. */
   useEffect(() => installSyncListeners(() => useAuth.getState().status === 'ready' && useVaultStore.getState().isOpen), [])

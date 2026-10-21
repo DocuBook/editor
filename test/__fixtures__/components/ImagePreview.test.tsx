@@ -20,7 +20,7 @@ let container: HTMLDivElement
 let root: Root
 
 beforeEach(() => {
-  ipc.fileUrl.mockReset().mockImplementation(async (_vaultPath: string, relPath: string) => `/api/file?path=${relPath}`)
+  ipc.fileUrl.mockReset().mockImplementation(async (relPath: string) => `/api/file?path=${relPath}`)
   ipc.mediaErrorMessage.mockReset().mockReturnValue('Could not load preview')
   ipc.mediaFailureReason.mockReset()
   container = document.createElement('div')

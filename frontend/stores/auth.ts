@@ -1,8 +1,34 @@
 import { create } from 'zustand'
 import { useEffect } from 'react'
 import { invoke, isTauri, listen } from '../lib/ipc'
+import { useEditorStore } from './editor'
+import { useSyncStore } from './sync'
+import { clearEditorCache } from '../utils/editorCache'
+import { clearDiagramSVG } from '../utils/mermaidRenderCache'
 
 export type AuthStatus = 'checking' | 'setup' | 'login' | 'ready' | 'error'
+
+/** Drop everything that belongs to the signed-in account.
+ *
+ *  Persisted stores keep their own copy in localStorage, so clearing only the
+ *  in-memory state would leak note contents (the sync queue and conflicts store
+ *  full file bodies) to whoever signs in next on the same browser. Both halves
+ *  are cleared here, and the sync store's `reset` cancels pending retries so a
+ *  drain cannot repopulate the queue after logout.
+ *
+ *  The vault selection is deliberately left intact: it holds only paths and
+ *  folder-expansion flags, never note bodies, and the login screen relies on it
+ *  to bring the user back to the vault they were in. */
+function clearClientState(): void {
+  useSyncStore.getState().reset()
+  useSyncStore.persist.clearStorage()
+  // closeAllTabs only clears memory — it never saves, so it is safe after the
+  // backend session has been revoked.
+  useEditorStore.getState().closeAllTabs()
+  useEditorStore.persist.clearStorage()
+  clearEditorCache()
+  clearDiagramSVG()
+}
 
 interface AuthState {
   status: AuthStatus
@@ -49,6 +75,7 @@ export const useAuth = create<AuthState>((set) => ({
 
   logout: async () => {
     try { await invoke('logout') } catch { /* ignore */ }
+    clearClientState()
     set({ status: 'login', email: '' })
   },
 }))

@@ -7,23 +7,13 @@ import { useEditorStore } from '../../stores/editor'
 import { useAiChat } from '../../stores/aiChat'
 import { captureAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
 import { looksLikeLink, resolveLinkInput } from '../../utils/linkInput'
+import { openExternalLink } from '../../utils/externalLink'
+import { isVaultLinkUrl, resolveVaultLinkTarget } from '../../utils/wikilink'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { FormattingToolbarPopover } from './FormattingToolbarPopover'
 import { InsertBlockButton } from './InsertBlockButton'
 import { MoveBlockDownButton, MoveBlockUpButton } from './MoveBlockButtons'
-
-/** Open an external URL: native uses the system opener (tauri-plugin-opener →
- *  macOS `open` → default browser); web falls back to window.open. Same user
- *  behavior on both runtimes (ADR D10 parity). */
-async function openExternal(url: string) {
-  try {
-    const { openUrl } = await import('@tauri-apps/plugin-opener')
-    await openUrl(url)
-  } catch {
-    window.open(url, '_blank')
-  }
-}
 
 /** Shared link URL/text form — submits AS-TYPED (no https:// forcing).
  *  BlockNote's default EditLinkMenuItems.validateUrl prepends
@@ -153,31 +143,13 @@ export function WikiLinkToolbar({ url, text, range, setToolbarOpen, setToolbarPo
   const Components = useComponentsContext()!
   const openFile = useEditorStore(s => s.openFile)
   const activeTab = useEditorStore(s => s.activeTab)
-  /** Vault link = no scheme and not protocol-relative (//host). Covers plain
-   *  names, ./ and ../ (resolved against the ACTIVE file's folder — Obsidian
-   *  semantics, NOT the vault root), and / (vault root). Absolute filesystem
-   *  paths are excluded (no scheme check above rejects them; the server's
-   *  safe_path also guards against any traversal). */
-  const isVaultLink = !!url && !/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('//')
+  const isVaultLink = isVaultLinkUrl(url)
   const open = () => {
     if (!url) return
-    if (!isVaultLink) { openExternal(url); return }
-    const target = url.split('#')[0].split('?')[0]   // strip #anchor / ?query
-    if (!target) return                              // anchor-only link
-    const curFile = activeTab ?? ''
-    const curDir = curFile.includes('/') ? curFile.substring(0, curFile.lastIndexOf('/')) : ''
-    const resolved = target.startsWith('/')
-      ? target.replace(/^\/+/, '')                   // /path → vault root
-      : (() => {
-          const parts: string[] = []
-          for (const seg of [curDir, target].filter(Boolean).join('/').split('/')) {
-            if (seg === '..') parts.pop()
-            else if (seg === '.' || seg === '') continue
-            else parts.push(seg)
-          }
-          return parts.join('/')
-        })()
-    openFile(resolved, target.split('/').pop() || resolved)
+    if (!isVaultLink) { void openExternalLink(url); return }
+    const resolved = resolveVaultLinkTarget(url, activeTab ?? '')
+    if (!resolved) return                              // anchor-only link
+    openFile(resolved, resolved.split('/').pop() || resolved)
   }
   return (
     <Components.LinkToolbar.Root className="bn-toolbar bn-link-toolbar">

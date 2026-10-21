@@ -46,3 +46,41 @@ describe("KaTeX render memo", () => {
     expect(readCacheStats()["katex-render"]).toMatchObject({ hits: 1, misses: 1 });
   });
 });
+
+/** KaTeX output is injected with `dangerouslySetInnerHTML` (see MathPreview), and
+ *  the formula source comes from note content. `trust` is what gates `\href`,
+ *  `\url`, `\includegraphics` and the `\html*` commands, so it must be off on
+ *  every render — even if a caller asks for it, and even though KaTeX defaults
+ *  it to false today. Same regression shape as the Mermaid security pin. */
+describe("KaTeX trust pinning", () => {
+  it("forces trust off even when the caller asks for trust", () => {
+    const render = vi.fn(() => "<span>k</span>");
+    const cached = cachedRenderToString(render);
+
+    cached("\\href{javascript:alert(1)}{x}", { trust: true, displayMode: true });
+
+    expect(render).toHaveBeenCalledWith("\\href{javascript:alert(1)}{x}", {
+      trust: false,
+      displayMode: true,
+    });
+  });
+
+  it("passes trust off when no options were given", () => {
+    const render = vi.fn(() => "<span>k</span>");
+    const cached = cachedRenderToString(render);
+
+    cached("x");
+
+    expect(render).toHaveBeenCalledWith("x", { trust: false });
+  });
+
+  it("keys the cache on the sanitized options, so trust:true cannot seed it", () => {
+    const render = vi.fn(() => "<span>k</span>");
+    const cached = cachedRenderToString(render);
+
+    cached("y", { trust: true });
+    cached("y", { trust: false });
+
+    expect(render).toHaveBeenCalledOnce();
+  });
+});

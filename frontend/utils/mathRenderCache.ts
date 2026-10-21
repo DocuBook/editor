@@ -21,15 +21,24 @@ const cache = createLruCache<string>({
 });
 
 /** Wrap `renderToString` with the memo. Failures are NOT cached, so a formula the
- *  user is mid-way through typing re-renders as it changes. */
+ *  user is mid-way through typing re-renders as it changes.
+ *
+ *  `trust` is forced off on every call. KaTeX gates `\href`, `\url`,
+ *  `\includegraphics`, `\htmlClass`, `\htmlId`, `\htmlStyle` and `\htmlData` on
+ *  that flag, and its output is injected with `dangerouslySetInnerHTML` (see
+ *  `MathPreview`) — formula source comes from note content, so this is a
+ *  security boundary, not a preference. `false` is KaTeX's default today, but
+ *  pinning it here makes the guarantee independent of a version bump or a
+ *  caller passing its own options. */
 export function cachedRenderToString(
   renderToString: (tex: string, options?: KatexOptions) => string,
 ): (tex: string, options?: KatexOptions) => string {
   return (tex, options) => {
-    const key = options ? `${tex}\u0000${JSON.stringify(options)}` : tex;
+    const safeOptions: KatexOptions = { ...options, trust: false };
+    const key = `${tex}\u0000${JSON.stringify(safeOptions)}`;
     const hit = cache.peek(key);
     if (hit !== null) return hit;
-    const html = renderToString(tex, options);
+    const html = renderToString(tex, safeOptions);
     cache.set(key, html);
     return html;
   };

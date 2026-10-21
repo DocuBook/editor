@@ -5,7 +5,7 @@
  *  (utils/editorFactory) and survives tab switches — only the view
  *  (BlockNoteView) remounts. Markdown is parsed once; undo history persists.
  *  In-flight AI is settled and serialized before any view detaches. */
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react'
 import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
@@ -33,6 +33,7 @@ import { isCodeBlockHeaderField, setPreviewRenderingPaused, setWikilinkStylerPau
 import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
 import { loadMarkdownIntoEditor, type CachedEditor } from '../../utils/editorFactory'
+import { allowRemoteMediaForSession, blockedRemoteMediaPlaceholder, blockedRemoteMediaUrl, forgetRemoteMediaForSession } from '../../utils/mediaPolicy'
 // Memoization for the global renderers (Mermaid, KaTeX) must be installed before
 // any block renders — see `installRenderCaches`.
 installRenderCaches()
@@ -527,7 +528,36 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     [compact, isDesktop],
   )
 
-  return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop}>
+  /** Blocked remote media renders as a local `data:` placeholder whose fragment
+   *  carries the original URL. Clicking it is the per-image opt-in: the reader
+   *  names ONE image, so no other host is contacted on their behalf. Consent is
+   *  session-scoped (mediaPolicy), and only the rendered `src` changes — the
+   *  document keeps the remote URL, so there is no undo entry and no markdown
+   *  sync. Every render of the same URL is updated so the note cannot show one
+   *  loaded copy next to a blocked one. */
+  const onEditorClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (!(target instanceof HTMLImageElement)) return
+    const url = blockedRemoteMediaUrl(target.getAttribute('src'))
+    if (!url) return
+    allowRemoteMediaForSession(url)
+    const placeholder = blockedRemoteMediaPlaceholder(url)
+    // `lib` has DOM but not DOM.Iterable, so a NodeList is not iterable — copy
+    // it into an array before iterating.
+    const images = editor.domElement ? Array.from(editor.domElement.querySelectorAll('img')) : []
+    for (const img of images) {
+      if (blockedRemoteMediaUrl(img.getAttribute('src')) !== url) continue
+      /** A host that is down leaves the reader with a broken-image icon; drop the
+       *  opt-in and put the placeholder back so the click can be retried. */
+      img.addEventListener('error', () => {
+        forgetRemoteMediaForSession(url)
+        img.src = placeholder
+      }, { once: true })
+      img.src = url
+    }
+  }, [editor])
+
+  return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop} onClick={onEditorClick}>
     {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
      *  built-in block-anchored AIMenuController is intentionally not rendered. */}
     <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />

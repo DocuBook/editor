@@ -286,19 +286,23 @@ export function isSafeImageUrl(url: string): boolean {
  * - Tauri: reads the file via IPC (path-traversal protected) and returns a
  *   base64 data: URL — no asset protocol, no whole-filesystem webview access.
  * - Web:   `/api/file?path=…` (server endpoint, behind the same auth gate).
+ *
+ *  The path stays vault-relative on the wire: the URL must not disclose the
+ *  server's filesystem layout, and the server resolves it against the active
+ *  vault anyway.
  */
-export async function fileUrl(vaultPath: string, relPath: string): Promise<string> {
+export async function fileUrl(relPath: string): Promise<string> {
   if (isTauri) {
     const b64 = await invoke<string>('read_file_binary', { path: relPath })
     return `data:${mimeFromPath(relPath)};base64,${b64}`
   }
-  return webFileUrl(vaultPath, relPath)
+  return webFileUrl(relPath)
 }
 
 /** The web counterpart of `read_file_binary`: a same-origin URL the browser
  *  fetches itself, behind the shared auth gate. */
-function webFileUrl(vaultPath: string, relPath: string): string {
-  return `/api/file?path=${encodeURIComponent(`${vaultPath}/${relPath}`)}`
+function webFileUrl(relPath: string): string {
+  return `/api/file?path=${encodeURIComponent(relPath)}`
 }
 
 /** Mirrors `vault::MAX_FILE_BYTES` on the server (16 MiB). Kept as a literal so
@@ -317,10 +321,10 @@ export function mediaErrorMessage(error: unknown): string {
  *  <img> error with no status. One HEAD request, issued only from the failure
  *  path, distinguishes missing / outside-vault / oversized instead of leaving a
  *  generic placeholder that hides which one it was. */
-export async function mediaFailureReason(vaultPath: string, relPath: string): Promise<string> {
+export async function mediaFailureReason(relPath: string): Promise<string> {
   if (isTauri) return 'Could not load preview'
   try {
-    const res = await fetch(webFileUrl(vaultPath, relPath), {
+    const res = await fetch(webFileUrl(relPath), {
       method: 'HEAD',
       credentials: 'same-origin',
     })

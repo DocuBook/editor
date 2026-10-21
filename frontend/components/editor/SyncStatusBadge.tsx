@@ -1,6 +1,7 @@
 import { AlertTriangle, CloudOff, RefreshCw } from 'lucide-react'
 
-import { useSyncStore } from '../../stores/sync'
+import { useSyncStore, isSyncRecordInScope } from '../../stores/sync'
+import { useVaultStore } from '../../stores/vault'
 
 /** Always-visible sync state: pending offline writes and unresolved conflicts.
  *
@@ -10,23 +11,30 @@ import { useSyncStore } from '../../stores/sync'
  *  that still needs a decision. Renders nothing when everything is in sync, so
  *  the normal case stays free of chrome. */
 export default function SyncStatusBadge() {
-  const pending = useSyncStore(s => s.queue.length)
-  const conflicts = useSyncStore(s => s.conflicts.length)
-  const failures = useSyncStore(s => s.failures.length)
+  const queue = useSyncStore(s => s.queue)
+  const conflicts = useSyncStore(s => s.conflicts)
+  const failures = useSyncStore(s => s.failures)
   const draining = useSyncStore(s => s.draining)
+  const vaultPath = useVaultStore(s => s.vaultPath)
 
-  if (pending === 0 && conflicts === 0 && failures === 0) return null
+  // Count only the open vault's records: another vault's relative paths name
+  // different files, so surfacing them here would be misleading.
+  const pending = queue.filter(q => isSyncRecordInScope(q, vaultPath)).length
+  const conflictCount = conflicts.filter(c => isSyncRecordInScope(c, vaultPath)).length
+  const failureCount = failures.filter(f => isSyncRecordInScope(f, vaultPath)).length
 
-  if (failures > 0) {
+  if (pending === 0 && conflictCount === 0 && failureCount === 0) return null
+
+  if (failureCount > 0) {
     return (
       <div role="status" data-testid="sync-badge" className="flex items-center gap-1.5 border-b border-border-subtle bg-danger px-3 py-1 text-[11px] text-on-danger">
         <AlertTriangle size={12} className="shrink-0" />
-        <span>{failures === 1 ? '1 change could not be synced' : `${failures} changes could not be synced`} — your edits are retained; fix or retry them.</span>
+        <span>{failureCount === 1 ? '1 change could not be synced' : `${failureCount} changes could not be synced`} — your edits are retained; fix or retry them.</span>
       </div>
     )
   }
 
-  if (conflicts > 0) {
+  if (conflictCount > 0) {
     return (
       <div
         role="status"
@@ -35,7 +43,7 @@ export default function SyncStatusBadge() {
       >
         <AlertTriangle size={12} className="shrink-0" />
         <span>
-          {conflicts === 1 ? '1 file needs conflict resolution' : `${conflicts} files need conflict resolution`} — your
+          {conflictCount === 1 ? '1 file needs conflict resolution' : `${conflictCount} files need conflict resolution`} — your
           edits are kept, nothing was overwritten.
         </span>
       </div>

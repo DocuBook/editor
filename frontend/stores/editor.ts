@@ -5,7 +5,8 @@ import { toast } from 'sonner'
 import { undoDepth, redoDepth } from '@tiptap/pm/history'
 import { isBinaryPath } from '../utils/fileKind'
 import { logger } from '../utils/logger'
-import { useSyncStore, contentVersion, isRetryableError } from './sync'
+import { mapWithConcurrency } from '../utils/concurrency'
+import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope } from './sync'
 
 export interface Tab {
   path: string
@@ -105,6 +106,9 @@ const normalizeVersion = (value: string | null): string | null => {
   return current
 }
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
+/** Concurrent tab reloads after a branch switch (see `reloadAllTabs`). */
+const TAB_RELOAD_CONCURRENCY = 6
 
 export const useEditorStore = create<EditorState>()(
   persist(
@@ -362,12 +366,14 @@ export const useEditorStore = create<EditorState>()(
     }
   },
 
-  /** After a branch switch: flush, then re-read every non-dirty text tab. */
+  /** After a branch switch: flush, then re-read every non-dirty text tab.
+   *  Reads are independent, so a small fixed fan-out beats a serial loop — a
+   *  branch with many open tabs would otherwise pay one round trip at a time.
+   *  The cap keeps a large session from flooding IPC. */
   reloadAllTabs: async () => {
     await get().flushEditor()
-    const tabs = get().tabs
-    for (const t of tabs) {
-      if (t.dirty || isBinaryPath(t.path)) continue
+    const candidates = get().tabs.filter(t => !t.dirty && !isBinaryPath(t.path))
+    await mapWithConcurrency(candidates, TAB_RELOAD_CONCURRENCY, async (t) => {
       try {
         const raw = await invoke<string>('read_file', { path: t.path })
         const version = await invoke<string | null>('file_version', { path: t.path }).catch(() => null)
@@ -377,7 +383,7 @@ export const useEditorStore = create<EditorState>()(
       } catch {
         get().setTabDeleted(t.path, true)
       }
-    }
+    })
   },
 
   /** Flush WYSIWYG then write every dirty tab to disk — used on app close. */
@@ -395,7 +401,7 @@ export const useEditorStore = create<EditorState>()(
 
   /** Take the disk version as the truth: reload the tab from what won on disk. */
   applyConflictTheirs: async (path) => {
-    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path)
+    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path && isSyncRecordInScope(c))
     if (!conflict) return
     // Prefer the exact bytes captured at conflict time. Re-reading could take yet
     // another writer's version and quietly discard the one the user just chose.
@@ -406,7 +412,7 @@ export const useEditorStore = create<EditorState>()(
 
   /** Push the local edit over the disk version, then rebase the tab baseline. */
   applyConflictMine: async (path) => {
-    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path)
+    const conflict = useSyncStore.getState().conflicts.find(c => c.path === path && isSyncRecordInScope(c))
     if (!conflict) return
     const resolved = await useSyncStore.getState().resolveKeepMine(path)
     if (!resolved) return

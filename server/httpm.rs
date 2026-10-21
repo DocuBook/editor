@@ -64,10 +64,11 @@ pub(crate) async fn health_route(state: State<AppState>) -> Response {
 }
 
 /**
- * Serve a vault file (images, etc) to the browser. Path must live under the
- * data dir; auth is handled by the shared auth_mw (the /api route gate). Binary files
- * can't go through the JSON read_file command, so this is the web counterpart
- * of Tauri's asset protocol.
+ * Serve a vault file (images, etc) to the browser. `path` is VAULT-RELATIVE:
+ * the URL never carries the server's filesystem layout, and the vault root is
+ * resolved server-side from the active session. Auth is handled by the shared
+ * auth_mw (the /api route gate). Binary files can't go through the JSON
+ * read_file command, so this is the web counterpart of the desktop IPC path.
  */
 pub(crate) async fn file_route(
     state: State<AppState>,
@@ -77,6 +78,16 @@ pub(crate) async fn file_route(
     let Some(path) = params.get("path") else {
         return (StatusCode::BAD_REQUEST, "missing path").into_response();
     };
+    // Reject absolute, rooted, prefixed, and parent-traversal inputs before any
+    // filesystem work: a rooted path would replace the vault root in `join` on
+    // some platforms, and `..` has no legitimate use from this endpoint.
+    let rel = std::path::Path::new(path);
+    if rel.is_absolute()
+        || rel.has_root()
+        || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return (StatusCode::BAD_REQUEST, "path must be vault-relative").into_response();
+    }
     let root = match state.vault.lock().expect("lock").as_ref() {
         Some(vault) => vault.root().to_path_buf(),
         None => return (StatusCode::BAD_REQUEST, "no vault open").into_response(),
@@ -84,7 +95,9 @@ pub(crate) async fn file_route(
     let Ok(root) = root.canonicalize() else {
         return (StatusCode::NOT_FOUND, "vault not found").into_response();
     };
-    let Ok(abs) = std::path::Path::new(path).canonicalize() else {
+    // Canonicalize the joined path as well: symlinks inside the vault must not
+    // become a way out of it.
+    let Ok(abs) = root.join(rel).canonicalize() else {
         return (StatusCode::NOT_FOUND, "not found").into_response();
     };
     if !abs.starts_with(&root) || !abs.is_file() {
