@@ -417,6 +417,54 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(requests[0].tools.map((tool: any) => tool.function.name)).toEqual(['applyDocumentOperations', 'mcp_lookup'])
   })
 
+  it('reads paged MCP results on a separate budget from regular context tools', async () => {
+    usePathA()
+    useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
+    const pageReads = 6
+    const contextCalls: any[] = []
+    let askCount = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      const request = JSON.parse(String(init?.body ?? '{}'))
+      if (String(url).includes('/api/context_tools')) {
+        return Response.json({ result: [
+          { name: 'mcp_0', description: 'Lookup', input_schema: { type: 'object' }, read_only: true },
+          { name: 'read_context_result', description: 'Page', input_schema: { type: 'object' }, read_only: true },
+        ] })
+      }
+      if (String(url).includes('/api/call_context_tool')) {
+        contextCalls.push(request)
+        return Response.json({ result: JSON.stringify({ type: 'untrusted_reference_data', truncated: true, page: { handle: 'h', next_offset: contextCalls.length }, content: 'page' }) })
+      }
+      const id = String(request.requestId ?? '')
+      askCount++
+      const [toolName, input] = askCount === 1
+        ? ['mcp_0', '{"query":"report"}']
+        : askCount <= 1 + pageReads
+          ? ['read_context_result', `{"handle":"h","offset":${askCount - 1}}`]
+          : ['applyDocumentOperations', '{"operations":[{"type":"update","id":"b1$","block":"<p>Summary of the report.</p>"}]}']
+      return new Response(sseStream([
+        'event: ai:tool_call\n',
+        `data: {"requestId":"${id}","toolCallId":"tool-0","providerToolCallId":"provider-${askCount}","toolName":"${toolName}","input":${input}}\n\n`,
+        'event: ai:tools_done\n', `data: {"requestId":"${id}"}\n\n`,
+        'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    const stream = await createAiTransport({ getEditor: editor, discoverContextTools: true }).sendMessages({
+      messages: [{ role: 'user', content: 'Summarize the long report' }],
+      body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit', inputSchema: {} } } },
+    })
+    const reader = stream.getReader()
+    const parts: any[] = []
+    for (;;) {
+      const result = await reader.read()
+      if (result.done) break
+      parts.push(result.value)
+    }
+    expect(parts.some(part => part.type === 'error')).toBe(false)
+    expect(contextCalls.map(call => call.name)).toEqual(['mcp_0', ...Array(pageReads).fill('read_context_result')])
+    expect(parts.find(part => part.type === 'tool-input-available')?.toolName).toBe('applyDocumentOperations')
+  })
+
   it('does not start a model request if stopped during MCP discovery', async () => {
     usePathA()
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
