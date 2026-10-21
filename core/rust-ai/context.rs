@@ -37,7 +37,6 @@ static MCP_SESSION_GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<
 static NEXT_JSONRPC_ID: AtomicU64 = AtomicU64::new(1);
 static CONFIGURED_SERVERS: OnceLock<Mutex<Option<Vec<ContextServer>>>> = OnceLock::new();
 static STORED_RESULTS: OnceLock<Mutex<ResultStore>> = OnceLock::new();
-static NEXT_RESULT_HANDLE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 struct ResultStore {
@@ -93,14 +92,11 @@ fn stored_results() -> MutexGuard<'static, ResultStore> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Unguessable handle: in server mode several users share this process, so a
-/// handle must not let one request read another request's stored result.
+/// Random handle so callers sharing a process cannot feasibly guess each other's results.
 fn new_result_handle() -> String {
-    use std::hash::BuildHasher;
-    let counter = NEXT_RESULT_HANDLE.fetch_add(1, Ordering::Relaxed);
-    let high = std::collections::hash_map::RandomState::new().hash_one((counter, 0u8));
-    let low = std::collections::hash_map::RandomState::new().hash_one((counter, 1u8));
-    format!("{high:016x}{low:016x}")
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).expect("operating system random source is unavailable");
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 /// Set runtime-provided MCP configuration. Environment configuration remains
@@ -881,7 +877,7 @@ fn read_stored_page(input: &Value) -> Result<String, String> {
     let handle = input
         .get("handle")
         .and_then(Value::as_str)
-        .filter(|handle| handle.len() == 32 && handle.bytes().all(|b| b.is_ascii_hexdigit()))
+        .filter(|handle| handle.len() == 64 && handle.bytes().all(|b| b.is_ascii_hexdigit()))
         .ok_or_else(|| "Invalid context result handle".to_string())?;
     let offset = input
         .get("offset")
