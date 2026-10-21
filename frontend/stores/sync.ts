@@ -37,6 +37,9 @@ import { logger } from '../utils/logger'
 export interface PendingWrite {
   /** Vault-relative path. */
   path: string
+  /** Absolute path of the vault this write belongs to. Records written before
+   *  vault scoping existed have no value here; see `isSyncRecordInScope`. */
+  vaultPath?: string
   /** Full file content (frontmatter + body) to write. */
   content: string
   /** Hash of the content this edit was based on; null when the file was new. */
@@ -54,6 +57,8 @@ export interface Conflict {
   /** Stable identity for dismissal/UI tracking. */
   id: string
   path: string
+  /** Absolute path of the vault this conflict belongs to. */
+  vaultPath?: string
   /** What the user was trying to save. */
   mine: string
   /** What is on disk now — the winning side until the user decides. */
@@ -68,6 +73,8 @@ export interface Conflict {
 export interface SyncFailure {
   id: string
   path: string
+  /** Absolute path of the vault this failure belongs to. */
+  vaultPath?: string
   content: string
   baseVersion: string | null
   error: string
@@ -99,11 +106,11 @@ interface SyncState {
   lastError: string
 
   /** Record a conflict detected by a direct (non-queued) write. */
-  addConflict: (c: Omit<Conflict, 'id' | 'detectedAt'>) => void
+  addConflict: (c: Omit<Conflict, 'id' | 'detectedAt' | 'vaultPath'>) => void
   /** Persist a failed write for later. Supersedes any earlier queued write for
    *  the same path — only the newest content matters, and replaying stale writes
    *  in order would just thrash the disk. */
-  enqueue: (write: Omit<PendingWrite, 'seq' | 'queuedAt' | 'contentVersion'>) => void
+  enqueue: (write: Omit<PendingWrite, 'seq' | 'queuedAt' | 'contentVersion' | 'vaultPath'>) => void
   /** Drop a queued write without applying it (user discarded the change). */
   discard: (path: string) => void
   retryFailure: (path: string) => void
@@ -119,6 +126,9 @@ interface SyncState {
   drain: () => Promise<void>
   /** Queue depth — drives the "N changes pending" indicator. */
   pendingCount: () => number
+  /** Drop every record and cancel retries. Called on logout so one account's
+   *  note contents never survive into the next session. */
+  reset: () => void
 }
 
 /** Stable content hash matching the Rust `content_version` (FNV-1a, 64-bit).
@@ -172,6 +182,51 @@ export function persistedSyncState(state: SyncState): { queue: PendingWrite[]; c
   return { queue: state.queue, conflicts: state.conflicts, failures: state.failures }
 }
 
+/** The vault whose records the store may touch. Set by the vault store on every
+ *  open/close so queued writes, conflicts, and failures can never be applied to
+ *  (or shown for) a different vault — a relative path such as `notes/a.md` means
+ *  different files in different vaults. */
+let activeVaultPath = ''
+
+/** Bumped whenever the scope is reset, so an in-flight drain cannot write state
+ *  that belongs to the previous session back into a cleared store. */
+let generation = 0
+const inFlightWrites = new Set<Promise<unknown>>()
+
+/** Wait until writes already dispatched to the active backend have settled. */
+export async function waitForSyncWrites(): Promise<void> {
+  await Promise.allSettled(inFlightWrites)
+}
+
+function invokeTrackedWrite(args: Record<string, unknown>): Promise<string> {
+  const write = invoke<string>('write_file_checked', args)
+  inFlightWrites.add(write)
+  void write.then(() => inFlightWrites.delete(write), () => inFlightWrites.delete(write))
+  return write
+}
+
+export function setSyncVaultScope(vaultPath: string): void {
+  if (vaultPath === activeVaultPath) return
+  activeVaultPath = vaultPath
+  // A drain in flight against the old vault must not publish its results here.
+  generation++
+}
+
+export function syncVaultScope(): string {
+  return activeVaultPath
+}
+
+/** Whether a persisted record belongs to the given vault.
+ *
+ *  Records created before vault scoping have no `vaultPath`. They are treated as
+ *  in scope rather than discarded: an offline edit is unrecoverable work, so the
+ *  upgrade path keeps it available in whichever vault is opened next. New
+ *  records are always stamped, so cross-vault leakage is impossible going
+ *  forward (and logout clears the legacy ones anyway). */
+export function isSyncRecordInScope(record: { vaultPath?: string }, vaultPath = activeVaultPath): boolean {
+  return record.vaultPath === undefined || record.vaultPath === vaultPath
+}
+
 export const useSyncStore = create<SyncState>()(
   persist(
     (set, get) => {
@@ -180,6 +235,9 @@ export const useSyncStore = create<SyncState>()(
 
       const scheduleRetry = () => {
         if (backoffTimer) return
+        // Nothing for THIS vault to flush — a retry would just spin on records
+        // that belong to a vault that is no longer open.
+        if (!get().queue.some(q => isSyncRecordInScope(q))) return
         const { attempts } = get()
         const delay = Math.min(BASE_BACKOFF_MS * 2 ** attempts, MAX_BACKOFF_MS)
         backoffTimer = setTimeout(() => {
@@ -188,19 +246,24 @@ export const useSyncStore = create<SyncState>()(
         }, delay)
       }
 
-      const conflictPaths = () => new Set(get().conflicts.map(c => c.path))
+      const conflictPaths = () => new Set(get().conflicts.filter(c => isSyncRecordInScope(c)).map(c => c.path))
 
       /** Write one queued item; returns true when it should leave the queue. */
-      const flushOne = async (item: PendingWrite): Promise<boolean> => {
+      const flushOne = async (item: PendingWrite, gen: number): Promise<boolean> => {
+        /** True once the record no longer belongs to the session that started
+         *  the drain: either the vault changed or the store was reset. Results
+         *  are dropped instead of published into the new scope. */
+        const abandoned = () => gen !== generation || !isSyncRecordInScope(item)
         let outcome: WriteOutcome
         try {
-          const raw = await invoke<string>('write_file_checked', {
+          const raw = await invokeTrackedWrite({
             path: item.path,
             content: item.content,
             baseVersion: item.baseVersion,
           })
           outcome = JSON.parse(raw) as WriteOutcome
         } catch (error) {
+          if (abandoned()) return true
           if (isRetryableError(error)) {
             logger.warn('write_deferred', { path: item.path, error })
             return false
@@ -211,14 +274,17 @@ export const useSyncStore = create<SyncState>()(
           logger.error('queued_write_failed', { error, path: item.path })
           set({
             queue: get().queue.filter(q => q.seq !== item.seq),
-            failures: [...get().failures.filter(f => f.path !== item.path), {
-              id: createId('failure'), path: item.path, content: item.content, baseVersion: item.baseVersion,
+            failures: [...get().failures.filter(f => !(f.path === item.path && isSyncRecordInScope(f))), {
+              id: createId('failure'), path: item.path, vaultPath: item.vaultPath,
+              content: item.content, baseVersion: item.baseVersion,
               error: error instanceof Error ? error.message : String(error), detectedAt: Date.now(),
             }],
             lastError: String(error),
           })
           return true
         }
+
+        if (abandoned()) return true
 
         if (outcome.status === 'written') {
           set({ queue: get().queue.filter(q => q.seq !== item.seq) })
@@ -256,47 +322,58 @@ export const useSyncStore = create<SyncState>()(
 
         addConflict: (c) => {
           // One conflict per path: a later detection supersedes an earlier one
-          // rather than stacking a second dialog for the same file.
-          set({ conflicts: [...get().conflicts.filter(x => x.path !== c.path), { ...c, id: createId('conflict'), detectedAt: Date.now() }] })
+          // rather than stacking a second dialog for the same file. Supersession
+          // is scoped too — the same relative path in another vault is a
+          // different file and must keep its own record.
+          set({ conflicts: [...get().conflicts.filter(x => !(x.path === c.path && isSyncRecordInScope(x))), {
+            ...c, vaultPath: activeVaultPath, id: createId('conflict'), detectedAt: Date.now(),
+          }] })
         },
 
         enqueue: (write) => {
           const item: PendingWrite = {
             ...write,
+            vaultPath: activeVaultPath,
             seq: ++seqCounter,
             queuedAt: Date.now(),
             contentVersion: contentVersion(write.content),
           }
           // Drop older queued writes for this path — replaying an intermediate
           // state only risks a spurious conflict against our own history.
-          const rest = get().queue.filter(q => q.path !== write.path)
+          const rest = get().queue.filter(q => !(q.path === write.path && isSyncRecordInScope(q)))
           set({ queue: [...rest, item] })
         },
 
         discard: (path) => {
-          set({ queue: get().queue.filter(q => q.path !== path), conflicts: get().conflicts.filter(c => c.path !== path), failures: get().failures.filter(f => f.path !== path) })
+          set({
+            queue: get().queue.filter(q => !(q.path === path && isSyncRecordInScope(q))),
+            conflicts: get().conflicts.filter(c => !(c.path === path && isSyncRecordInScope(c))),
+            failures: get().failures.filter(f => !(f.path === path && isSyncRecordInScope(f))),
+          })
         },
 
         retryFailure: (path) => {
-          const failure = get().failures.find(f => f.path === path)
+          const failure = get().failures.find(f => f.path === path && isSyncRecordInScope(f))
           if (!failure) return
-          set({ failures: get().failures.filter(f => f.path !== path) })
+          set({ failures: get().failures.filter(f => f.id !== failure.id) })
           get().enqueue({ path, content: failure.content, baseVersion: failure.baseVersion })
           void get().drain()
         },
 
-        discardFailure: (path) => set({ failures: get().failures.filter(f => f.path !== path) }),
+        discardFailure: (path) => set({
+          failures: get().failures.filter(f => !(f.path === path && isSyncRecordInScope(f))),
+        }),
 
         hasConflict: (path) => conflictPaths().has(path),
 
         resolveKeepMine: async (path) => {
-          const conflict = get().conflicts.find(c => c.path === path)
+          const conflict = get().conflicts.find(c => c.path === path && isSyncRecordInScope(c))
           if (!conflict) return false
           // Re-base on the current disk version so this write is allowed through:
           // the user has explicitly seen the other side and chosen to overwrite it.
           let raw: string
           try {
-            raw = await invoke<string>('write_file_checked', {
+            raw = await invokeTrackedWrite({
               path,
               content: conflict.mine,
               baseVersion: conflict.theirsVersion,
@@ -310,13 +387,13 @@ export const useSyncStore = create<SyncState>()(
           }
           const outcome = JSON.parse(raw) as WriteOutcome
           if (outcome.status === 'written') {
-            set({ conflicts: get().conflicts.filter(c => c.path !== path) })
+            set({ conflicts: get().conflicts.filter(c => c.id !== conflict.id) })
             return true
           }
           // Someone changed it again mid-resolution. Keep the conflict open and
           // refresh "theirs" to the newest disk state instead of looping.
           set({
-            conflicts: get().conflicts.map(c => c.path === path
+            conflicts: get().conflicts.map(c => c.id === conflict.id
               ? { ...c, id: createId('conflict'), theirs: outcome.disk, theirsVersion: outcome.version, detectedAt: Date.now() }
               : c),
           })
@@ -326,14 +403,20 @@ export const useSyncStore = create<SyncState>()(
         resolveKeepTheirs: (path) => {
           // Disk already holds the winning content — resolution is purely
           // dropping our local edit, so there is nothing to write.
-          set({ conflicts: get().conflicts.filter(c => c.path !== path) })
+          const conflict = get().conflicts.find(c => c.path === path && isSyncRecordInScope(c))
+          if (!conflict) return
+          set({ conflicts: get().conflicts.filter(c => c.id !== conflict.id) })
         },
 
 
         drain: async () => {
           const state = get()
           if (state.draining) return
-          if (state.queue.length === 0) {
+          const gen = generation
+          // Only this vault's records may touch disk: the backend's path space
+          // is the vault that is currently open.
+          const pending = state.queue.filter(q => isSyncRecordInScope(q))
+          if (pending.length === 0) {
             set({ attempts: 0, lastError: '' })
             return
           }
@@ -343,15 +426,24 @@ export const useSyncStore = create<SyncState>()(
           let progressed = false
           let failed = false
           try {
-            for (const item of [...get().queue]) {
+            for (const item of pending) {
+              // The vault changed or the store was reset while this pass ran.
+              if (gen !== generation) break
               // A newer edit for the same path already replaced this one.
               if (!get().queue.some(q => q.seq === item.seq)) continue
-              const done = await flushOne(item)
+              const done = await flushOne(item, gen)
               if (done) progressed = true
               else { failed = true; break }
             }
           } finally {
             set({ draining: false })
+          }
+          if (gen !== generation) {
+            // The vault changed (or the store was reset) mid-pass. If the new
+            // scope has work, it still needs a pass — the caller's own drain may
+            // have been skipped because `draining` was set.
+            scheduleRetry()
+            return
           }
           if (failed) {
             const attempts = get().attempts + 1
@@ -362,11 +454,19 @@ export const useSyncStore = create<SyncState>()(
             scheduleRetry()
           } else if (progressed) {
             set({ attempts: 0, lastError: '' })
-            if (get().queue.length > 0) scheduleRetry()
           }
+          // Anything left for this vault still needs a pass — either a write was
+          // superseded mid-drain or new work arrived while it ran.
+          if (!failed && get().queue.some(q => isSyncRecordInScope(q))) scheduleRetry()
         },
 
-        pendingCount: () => get().queue.length,
+        pendingCount: () => get().queue.filter(q => isSyncRecordInScope(q)).length,
+
+        reset: () => {
+          generation++
+          if (backoffTimer) { clearTimeout(backoffTimer); backoffTimer = null }
+          set({ queue: [], conflicts: [], failures: [], draining: false, attempts: 0, lastError: '' })
+        },
       }
     },
     {

@@ -22,10 +22,12 @@ import { AIExtension } from './aiExtension'
 import { getAIDictionary } from './aiMenu'
 import { mathDollarToMathML } from './mathMarkdown'
 import { fileUrl, isAbsoluteUrl, isSafeImageUrl } from '../lib/ipc'
+import { blockedRemoteMediaPlaceholder, canUseImagePlaceholder, isRemoteMediaAllowedForSession, isRemoteMediaUrl, normalizeRemoteMediaUrl } from './mediaPolicy'
 import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { syntaxHighlighting } from './codeHighlighting'
 import { createAiTransport } from './aiTransport'
 import { createSelectionAwareDocumentStateBuilder } from './aiBlocks'
+import { handleEditorLinkClick } from './linkClickPolicy'
 import { getEditorCache, peekEditorCache } from './editorCache'
 import type { WysiwygSnapshot } from './wysiwygSnapshot'
 
@@ -123,9 +125,24 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
     schema: getSchema(),
     dictionary: { ...baseDict, ai: getAIDictionary(), math: mathLocales.en, diagram: diagramLocales.en },
 
+    /** Link clicks are handled here, not by BlockNote's default `window.open`: a
+     *  note may contain any scheme its URL check accepts, and only the app's
+     *  allowlist (http/https/mailto/tel) may be handed to the OS. See
+     *  `linkClickPolicy`. */
+    links: { onClick: handleEditorLinkClick },
+
     resolveFileUrl: async (url: string) => {
       if (!isSafeImageUrl(url)) return ''
-      return !vaultPath || isAbsoluteUrl(url) ? url : await fileUrl(vaultPath, url)
+      // Remote images never load until the reader asks for that ONE image:
+      // opening a note must not contact a third-party host on their behalf. The
+      // placeholder rendered in the note is the opt-in (see WysiwygEditor);
+      // local vault files and inline `data:` images are unaffected. Only
+      // image-shaped URLs get it — see `canUseImagePlaceholder`.
+      if (isRemoteMediaUrl(url) && canUseImagePlaceholder(url)) {
+        const remote = normalizeRemoteMediaUrl(url)
+        return isRemoteMediaAllowedForSession(remote) ? remote : blockedRemoteMediaPlaceholder(remote)
+      }
+      return !vaultPath || isAbsoluteUrl(url) ? url : await fileUrl(url)
     },
     extensions: [
       AIExtension({

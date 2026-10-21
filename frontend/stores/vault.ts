@@ -3,7 +3,8 @@ import { persist } from 'zustand/middleware'
 import { invoke, openDir } from '../lib/ipc'
 import { toast } from 'sonner'
 import { useEditorStore } from './editor'
-import { useSyncStore } from './sync'
+import { useSyncStore, setSyncVaultScope, waitForSyncWrites } from './sync'
+import { invalidateMentionIndex } from '../utils/mentionIndex'
 import { logger } from '../utils/logger'
 
 /** File or directory info from the vault tree. */
@@ -47,12 +48,18 @@ export const useVaultStore = create<VaultState>()(
         if (transitionId !== id) return false
         try {
           await useEditorStore.getState().persistAllDirty()
+          // The backend resolves relative write paths against its active vault.
+          // Quiesce dispatched sync writes before closing or opening a vault.
+          setSyncVaultScope('')
+          await waitForSyncWrites()
           if (get().isOpen) await invoke('close_vault')
           // Explicit vault changes close tabs by design. Startup resume keeps the
           // persisted tab identities so they can be re-read after the vault opens.
           if (!preserveTabs) useEditorStore.getState().closeAllTabs()
           treeRequestId++
           set({ ...emptyTreeState(), loading: true })
+          // Offline records are vault-relative: the store must stop touching
+          // them the moment the vault they belong to is gone.
           return true
         } catch (error) {
           logger.error('vault_switch_save_failed', { error })
@@ -87,6 +94,7 @@ export const useVaultStore = create<VaultState>()(
           // screen, so there is nothing to dismiss — and clearing `openingPath`
           // here would wrongly wipe a flag an interleaved `openRecent` owns.
           set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
+          setSyncVaultScope(path)
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
@@ -106,6 +114,7 @@ export const useVaultStore = create<VaultState>()(
           const path = parent.replace(/\/+$/, '') + '/' + name
           if (transitionId !== id) return
           set({ name: d.name, vaultPath: path, isOpen: true, expanded: {} })
+          setSyncVaultScope(path)
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
@@ -126,6 +135,7 @@ export const useVaultStore = create<VaultState>()(
           const d = JSON.parse(res)
           if (transitionId !== id) { set({ openingPath: null }); return }
           set({ name: d.name, vaultPath: d.path, isOpen: true, expanded: {}, openingPath: null })
+          setSyncVaultScope(d.path)
           pushRecent(d.path)
           await get().loadTree()
           finishTransition(id)
@@ -160,6 +170,7 @@ export const useVaultStore = create<VaultState>()(
           const d = JSON.parse(res)
           if (transitionId !== id) { set({ openingPath: null }); return }
           set({ name: d.name, vaultPath: path, isOpen: true, expanded: {}, openingPath: null })
+          setSyncVaultScope(path)
           pushRecent(path)
           await get().loadTree()
           finishTransition(id)
@@ -169,6 +180,7 @@ export const useVaultStore = create<VaultState>()(
         } catch {
           // Vault can't be reopened (deleted/moved) — drop from recent + clear last vault so welcome shows next time
           set({ vaultPath: '', recent: get().recent.filter(r => r.path !== path), openingPath: null })
+          setSyncVaultScope('')
           toast.error('Vault not found — removed from recent')
           finishTransition(id)
         }
@@ -200,6 +212,9 @@ export const useVaultStore = create<VaultState>()(
         if (requestId !== treeRequestId || get().vaultPath !== vaultPath) return
         set({ tree, childrenCache: cc })
         set({ visibleItems: get().flattenTree(tree, 0) })
+        // The mention picker indexes the same tree; a reload is the moment its
+        // cached walk can be stale.
+        invalidateMentionIndex()
       },
       /** Toggle folder expansion, fetching children on first open. */
       toggleFolder: async (item: FileInfo) => {

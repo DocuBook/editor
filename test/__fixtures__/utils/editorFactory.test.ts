@@ -23,7 +23,7 @@ vi.mock('@blocknote/math-block', () => ({ locales: { en: {} } }))
 vi.mock('@blocknote/diagram-block', () => ({ locales: { en: {} } }))
 vi.mock('../../../frontend/lib/ipc', () => ({
   fileUrl: vi.fn(async () => ''),
-  isAbsoluteUrl: () => false,
+  isAbsoluteUrl: (url: string) => /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(url),
   isSafeImageUrl: () => true,
 }))
 vi.mock('../../../frontend/components/editor/setup', () => ({ getSchema: () => ({}), wikilinkStyler: {} }))
@@ -38,6 +38,9 @@ vi.mock('../../../frontend/utils/aiTransport', () => ({
 
 import { KeepAliveCache, createBlockEditor, getCachedEditor } from '../../../frontend/utils/editorFactory'
 import { clearEditorCache } from '../../../frontend/utils/editorCache'
+import { BlockNoteEditor } from '@blocknote/core'
+import { handleEditorLinkClick } from '../../../frontend/utils/linkClickPolicy'
+import { blockedRemoteMediaUrl } from '../../../frontend/utils/mediaPolicy'
 
 /** The keep-alive cache is the pure, testable core of tab switching: one
  *  entry per path, created lazily, reused on every later lookup. The BlockNote
@@ -61,6 +64,30 @@ describe('createBlockEditor AI transport wiring', () => {
     expect(captured.transports[0].filePath).toBe('notes/a.md')
     // getEditor resolves the SAME instance returned to the tab cache.
     expect(captured.transports[0].getEditor()).toBe(cached.editor)
+  })
+
+  /** BlockNote's default link click opens `window.open(href)` for any scheme its
+   *  own check accepts (custom protocols included). The editor installs the
+   *  app's allowlist policy instead, through the supported `links.onClick`
+   *  option — see linkClickPolicy. */
+  it('installs the app link-click policy on the editor', () => {
+    createBlockEditor('/vault', 'notes/a.md')
+
+    const options = (BlockNoteEditor.create as any).mock.calls.at(-1)[0]
+    expect(options.links?.onClick).toBe(handleEditorLinkClick)
+  })
+
+  /** The blocked-media placeholder is an SVG image. Only image-shaped URLs may
+   *  get it: a video/audio/file block would render it as a broken player/link. */
+  it('gates remote images behind the placeholder but leaves media files alone', async () => {
+    createBlockEditor('/vault', 'notes/a.md')
+    const resolve = (BlockNoteEditor.create as any).mock.calls.at(-1)[0].resolveFileUrl
+
+    const image = await resolve('https://cdn.example.com/a.png')
+    expect(blockedRemoteMediaUrl(image)).toBe('https://cdn.example.com/a.png')
+
+    expect(await resolve('https://cdn.example.com/a.mp4')).toBe('https://cdn.example.com/a.mp4')
+    expect(await resolve('https://cdn.example.com/a.mp3')).toBe('https://cdn.example.com/a.mp3')
   })
 })
 

@@ -9,16 +9,17 @@ import SystemSettings from './SystemSettings'
 import AppearanceSettings from './AppearanceSettings'
 import SettingsSection from './settings/SettingsSection'
 import ProviderForm from './settings/ProviderForm'
+import { addMcpServer, editMcpServer, removeMcpServer, timeoutsValid, type McpServer } from '../utils/mcpSettings'
 
-function McpSettings({ servers, envManaged, ready, loading, error, retry, defaultTimeoutSeconds, maxTimeoutSeconds }: { servers: Array<{name:string;url:string;timeoutSeconds?:number|null;hasToken:boolean;token?:string}>; envManaged: boolean; ready: boolean; loading: boolean; error: string | null; retry: () => Promise<void>; defaultTimeoutSeconds: number; maxTimeoutSeconds: number }) {
+function McpSettings({ servers, envManaged, ready, loading, error, retry, defaultTimeoutSeconds, maxTimeoutSeconds }: { servers: McpServer[]; envManaged: boolean; ready: boolean; loading: boolean; error: string | null; retry: () => Promise<void>; defaultTimeoutSeconds: number; maxTimeoutSeconds: number }) {
   const [draft, setDraft] = useState<{name:string;url:string;timeoutSeconds:string;token:string}>({name:'',url:'',timeoutSeconds:'',token:''})
   const [saving, setSaving] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<{url:string;timeoutSeconds:string;token:string;removeToken:boolean}>({url:'',timeoutSeconds:'',token:'',removeToken:false})
   const disabled = !ready || envManaged || saving
-  const save = async (next: any[]) => {
+  const save = async (next: McpServer[]) => {
     if (!ready || envManaged || saving) return
-    if (next.some(server => server.timeoutSeconds != null && (!Number.isInteger(server.timeoutSeconds) || server.timeoutSeconds < 1 || server.timeoutSeconds > maxTimeoutSeconds))) {
+    if (!timeoutsValid(next, maxTimeoutSeconds)) {
       toast.error(`Timeout must be 1–${maxTimeoutSeconds} seconds`)
       return
     }
@@ -46,9 +47,9 @@ function McpSettings({ servers, envManaged, ready, loading, error, retry, defaul
         <label className="block text-xs font-medium">Replace bearer token (optional)</label><input disabled={disabled} type="password" autoComplete="new-password" value={editDraft.token} onChange={e=>setEditDraft({...editDraft,token:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
         <p className="text-[10px] text-muted">Sent as Authorization: Bearer for protected remote servers. Leave blank to keep the saved token, or use Remove saved token below.</p>
         {server.hasToken && <label className="flex items-center gap-2 text-xs"><input disabled={disabled} type="checkbox" checked={editDraft.removeToken} onChange={e=>setEditDraft({...editDraft,removeToken:e.target.checked,token:''})} />Remove saved token</label>}
-        <div className="flex gap-2"><button disabled={disabled} onClick={() => void save(servers.map(item => item.name === server.name ? {...item,url:editDraft.url,timeoutSeconds:editDraft.timeoutSeconds.trim() ? Number(editDraft.timeoutSeconds) : null,...(editDraft.removeToken ? {token:'',removeToken:true} : editDraft.token ? {token:editDraft.token} : {})} : item))} className="text-xs">Save</button><button disabled={disabled} onClick={() => setEditing(null)} className="text-xs">Cancel</button></div>
+        <div className="flex gap-2"><button disabled={disabled} onClick={() => void save(editMcpServer(servers, server.name, editDraft))} className="text-xs">Save</button><button disabled={disabled} onClick={() => setEditing(null)} className="text-xs">Cancel</button></div>
       </> : <>
-        <div className="flex items-center justify-between"><strong className="text-xs">{server.name}</strong><div className="flex gap-2"><button disabled={disabled} onClick={() => {setEditDraft({url:server.url,timeoutSeconds:server.timeoutSeconds == null ? '' : String(server.timeoutSeconds),token:'',removeToken:false});setEditing(server.name)}} className="text-xs bg-transparent border-0 cursor-pointer disabled:opacity-40">Edit</button><button disabled={disabled} onClick={() => void save(servers.filter(item => item.name !== server.name))} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove</button></div></div>
+        <div className="flex items-center justify-between"><strong className="text-xs">{server.name}</strong><div className="flex gap-2"><button disabled={disabled} onClick={() => {setEditDraft({url:server.url,timeoutSeconds:server.timeoutSeconds == null ? '' : String(server.timeoutSeconds),token:'',removeToken:false});setEditing(server.name)}} className="text-xs bg-transparent border-0 cursor-pointer disabled:opacity-40">Edit</button><button disabled={disabled} onClick={() => void save(removeMcpServer(servers, server.name))} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove</button></div></div>
         <div className="text-[10px] text-muted break-all">{server.url}</div>
         <div className="text-[10px] text-muted">Timeout: {server.timeoutSeconds ?? defaultTimeoutSeconds}s{server.timeoutSeconds == null ? ' (default)' : ' (override)'} · {server.hasToken ? 'bearer token saved' : 'no bearer token'}</div>
       </>}
@@ -58,7 +59,7 @@ function McpSettings({ servers, envManaged, ready, loading, error, retry, defaul
     <label className="block text-xs font-medium">Request timeout override (seconds; default {defaultTimeoutSeconds}, max {maxTimeoutSeconds})</label><input disabled={disabled} type="number" min="1" max={maxTimeoutSeconds} step="1" value={draft.timeoutSeconds} onChange={e=>setDraft({...draft,timeoutSeconds:e.target.value})} placeholder={String(defaultTimeoutSeconds)} className="w-full bg-background border border-border rounded px-3 py-2 text-xs" />
     <label className="block text-xs font-medium">Bearer token (optional)</label><input disabled={disabled} type="password" autoComplete="new-password" value={draft.token} onChange={e=>setDraft({...draft,token:e.target.value})} className="w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono" />
     <p className="text-[10px] text-muted">Sent as Authorization: Bearer for protected remote servers. Leave blank if the server does not require bearer authentication.</p>
-    <button disabled={disabled || !draft.name || !draft.url} onClick={() => void save([...servers, {name:draft.name,url:draft.url,timeoutSeconds:draft.timeoutSeconds.trim() ? Number(draft.timeoutSeconds) : null,token:draft.token}])} className="px-3 py-2 rounded bg-accent text-on-accent border-0 text-xs cursor-pointer disabled:opacity-40">{saving ? 'Saving…' : 'Add remote'}</button>
+    <button disabled={disabled || !draft.name || !draft.url} onClick={() => void save(addMcpServer(servers, draft))} className="px-3 py-2 rounded bg-accent text-on-accent border-0 text-xs cursor-pointer disabled:opacity-40">{saving ? 'Saving…' : 'Add remote'}</button>
   </div>
 }
 
@@ -110,7 +111,7 @@ export default function SettingsPane() {
     if (storeSection === 'ai-provider' && !useAiSettings.getState().provider) useAiSettings.getState().setProvider(CUSTOM_PROVIDER_ID)
   }, [storeSection])
 
-  const [mcpServers, setMcpServers] = useState<Array<{name:string;url:string;timeoutSeconds?:number|null;hasToken:boolean;token?:string}>>([])
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([])
   const [mcpEnvManaged, setMcpEnvManaged] = useState(false)
   const [mcpDefaultTimeout, setMcpDefaultTimeout] = useState(10)
   const [mcpMaxTimeout, setMcpMaxTimeout] = useState(120)

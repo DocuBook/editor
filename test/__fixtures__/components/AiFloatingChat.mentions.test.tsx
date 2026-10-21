@@ -16,6 +16,7 @@ vi.mock('../../../frontend/lib/ipc', () => ({
 }))
 
 import AiFloatingChat from '../../../frontend/components/editor/AiFloatingChat'
+import { invalidateMentionIndex } from '../../../frontend/utils/mentionIndex'
 import { useAiChat } from '../../../frontend/stores/aiChat'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useEditorStore } from '../../../frontend/stores/editor'
@@ -66,6 +67,9 @@ function listTreeCalls() {
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
   root = createRoot(document.getElementById('root')!)
+  // The index cache is module state shared across picker openings; each test
+  // owns a different tree, so it must not inherit the previous walk.
+  invalidateMentionIndex()
   tree = {
     '': [folder('docs'), folder('assets'), ...files(['CHANGELOG.md'])],
     docs: [folder('notes'), ...files(['guide.md', 'CHANGELOG-old.md'])],
@@ -292,6 +296,41 @@ describe('composer @mention picker', () => {
     await settle()
 
     expect(listTreeCalls()).toBe(afterFirst)
+  })
+
+  /** Reopening the picker used to re-walk every folder. The walk is cached per
+   *  vault, so a second `@` in the same session is served from memory. */
+  it('reuses the vault index across picker openings', async () => {
+    render()
+    act(() => typeInto(textarea(), '@c'))
+    await settle()
+    const firstWalk = listTreeCalls()
+    expect(firstWalk).toBeGreaterThan(0)
+
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+
+    act(() => typeInto(textarea(), '@ch'))
+    await settle()
+
+    expect(options().length).toBeGreaterThan(0)
+    expect(listTreeCalls()).toBe(firstWalk)
+  })
+
+  /** A tree reload (create/rename/delete, external refresh) must be reflected
+   *  the next time the picker opens. */
+  it('re-walks after the index is invalidated', async () => {
+    render()
+    act(() => typeInto(textarea(), '@c'))
+    await settle()
+    const firstWalk = listTreeCalls()
+
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
+    invalidateMentionIndex()
+    act(() => typeInto(textarea(), '@ch'))
+    await settle()
+
+    expect(listTreeCalls()).toBeGreaterThan(firstWalk)
   })
 
   it('never opens the picker while typing an email address', async () => {

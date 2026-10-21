@@ -565,20 +565,25 @@ mod api_tests {
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
 
-        let allowed = format!(
-            "/api/file?path={}",
-            vault.join("image.png").to_string_lossy()
-        );
-        let (status, _, body) = get_with(&app, &allowed, Some(&cookie)).await;
+        let allowed = "/api/file?path=image.png";
+        let (status, _, body) = get_with(&app, allowed, Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(body, "png-data");
 
-        let secret = format!(
+        // The URL is vault-relative only: an absolute path from the client is
+        // rejected even when it points inside the vault, so the endpoint never
+        // accepts (or echoes) the server's filesystem layout.
+        let absolute = format!(
             "/api/file?path={}",
-            data_dir.join("keys.json").to_string_lossy()
+            vault.join("image.png").to_string_lossy()
         );
-        let (status, _, body) = get_with(&app, &secret, Some(&cookie)).await;
-        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _, _) = get_with(&app, &absolute, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // Traversal out of the vault is rejected as malformed, not resolved.
+        let secret = "/api/file?path=../keys.json";
+        let (status, _, body) = get_with(&app, secret, Some(&cookie)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
         assert!(!body.contains("api-secret"));
     }
 
@@ -681,11 +686,8 @@ mod api_tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        let path = format!(
-            "/api/file?path={}",
-            vault.join("large.bin").to_string_lossy()
-        );
-        let (status, _, body) = get_with(&app, &path, Some(&cookie)).await;
+        let path = "/api/file?path=large.bin";
+        let (status, _, body) = get_with(&app, path, Some(&cookie)).await;
         assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
         assert_eq!(body, "file too large");
     }
@@ -713,12 +715,9 @@ mod api_tests {
         )
         .await;
         assert_eq!(status, StatusCode::OK, "{body}");
-        let url = format!(
-            "/api/file?path={}",
-            vault.join("image.png").to_string_lossy()
-        );
+        let url = "/api/file?path=image.png";
 
-        let (status, headers, _) = get_with(&app, &url, Some(&cookie)).await;
+        let (status, headers, _) = get_with(&app, url, Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK);
         let etag = headers
             .get(header::ETAG)
@@ -739,7 +738,7 @@ mod api_tests {
             .oneshot(
                 Request::builder()
                     .method("HEAD")
-                    .uri(&url)
+                    .uri(url)
                     .header(header::COOKIE, &cookie)
                     .body(Body::empty())
                     .unwrap(),
@@ -757,7 +756,7 @@ mod api_tests {
         // Same content hash → 304 with no body: the browser keeps its copy.
         let req = Request::builder()
             .method("GET")
-            .uri(&url)
+            .uri(url)
             .header(header::COOKIE, &cookie)
             .header(header::IF_NONE_MATCH, &etag)
             .body(Body::empty())

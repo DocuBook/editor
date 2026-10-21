@@ -9,14 +9,14 @@ import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
 import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
-import { invoke } from '../../lib/ipc'
 import { parseMentions } from '../../utils/aiMentions'
+import { loadMentionIndex, type MentionEntry } from '../../utils/mentionIndex'
 import { observeMobileToolbar } from '../../utils/mobileToolbar'
 import { fetchProviderModels, type DiscoveredModel } from '../../utils/modelDiscovery'
 import { PROVIDERS } from '../../data/providers'
 import { CUSTOM_PROVIDER_ID } from '../../stores/aiSettings'
 
-type TreeEntry = { path: string; name: string; type: string }
+type TreeEntry = MentionEntry
 
 /** Dropdown cap — the picker is a filter over the vault, not a browser. */
 const MENTION_LIST_LIMIT = 40
@@ -42,9 +42,6 @@ const USER_SCROLL_WINDOW = 300
  *  `compositionend`, so the key arrives with `isComposing` already false. Long
  *  enough to swallow that, far shorter than the pause before a user leaves. */
 const POST_COMPOSITION_ESCAPE_MS = 250
-/** Concurrent list_tree calls. Serial recursion made the dropdown wait for the
- *  whole vault; unbounded fan-out would flood the IPC. */
-const MENTION_LIST_CONCURRENCY = 6
 
 /** Stable option ids for aria-activedescendant (vault paths are not valid ids). */
 const optionId = (position: number) => `mention-option-${position}`
@@ -91,46 +88,6 @@ const modelRowClass = (selected: boolean) =>
  *  row, exactly as mentionMetaClass flips text for the dropdown surface. */
 const modelBadgeClass = (selected: boolean) =>
   'shrink-0 text-[9px] font-semibold ' + (selected ? 'text-on-accent opacity-80' : 'text-accent')
-
-/** Recursive vault listing for the mention picker.
- *
- *  A folder that cannot be listed (deleted/renamed mid-walk, permissions) only
- *  skips its own subtree — the previous implementation rejected the whole walk
- *  and blanked the dropdown, which is what made files "disappear" from the
- *  suggestions. Returns the count so the UI can say so instead of pretending
- *  the vault is empty. */
-async function listVaultEntries(): Promise<{ entries: TreeEntry[]; unreadable: number }> {
-  const entries: TreeEntry[] = []
-  let unreadable = 0
-  let queue = ['']
-  while (queue.length > 0) {
-    const batch = queue.splice(0, MENTION_LIST_CONCURRENCY)
-    const results = await Promise.all(batch.map(async (subpath): Promise<{ subpath: string; children: TreeEntry[] } | null> => {
-      try {
-        const value = await invoke<string>('list_tree', { subpath })
-        const children = (typeof value === 'string' ? JSON.parse(value) : value) as TreeEntry[]
-        return { subpath, children: Array.isArray(children) ? children : [] }
-      } catch {
-        unreadable += 1
-        return null
-      }
-    }))
-    const next: string[] = []
-    for (const result of results) {
-      if (!result) continue
-      for (const child of result.children) {
-        const path = result.subpath ? `${result.subpath}/${child.name}` : child.name
-        // Folders stay selectable: a folder mention reads it recursively.
-        if (child.type === '1') { entries.push({ ...child, path }); next.push(path) }
-        else if (/\.(md|mdx)$/i.test(child.name)) entries.push({ ...child, path })
-      }
-    }
-    queue = queue.concat(next)
-  }
-  /** Folders first (as in the file tree), then files, each alphabetical. */
-  entries.sort((a, b) => (a.type === b.type ? a.path.localeCompare(b.path) : a.type === '1' ? -1 : 1))
-  return { entries, unreadable }
-}
 
 /** True while BlockNote's mobile formatting toolbar (0.55) is up — the strip
  *  above the on-screen keyboard that shares the composer's bottom edge. */
@@ -354,7 +311,8 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     const vault = vaultPath ?? ''
     const requestId = ++indexRequest.current
     let active = true
-    listVaultEntries().then((result) => {
+    // Reuses the last walk for this vault; only the first opening pays for it.
+    loadMentionIndex(vault).then((result) => {
       if (!active || indexRequest.current !== requestId) return
       if (import.meta.env.DEV) console.debug('[mention] vault index', { files: result.entries.length, unreadable: result.unreadable })
       setIndex({ vault, ...result })

@@ -28,3 +28,35 @@ export function openWikilink(title: string): void {
     .then(path => { if (path) useEditorStore.getState().openFile(path, path.split('/').pop() || path) })
     .catch(() => {})
 }
+
+/** True when a markdown link target points at a vault note rather than the web:
+ *  no URL scheme, and not protocol-relative (`//host`). Covers plain names,
+ *  `./` and `../` (relative to the ACTIVE file's folder), and `/` (vault root).
+ *
+ *  Absolute filesystem paths carry a scheme or a leading `/`, so they never
+ *  reach the vault branch; the backend's own path guard is the second line of
+ *  defense. */
+export const isVaultLinkUrl = (url: string): boolean =>
+  !!url && !/^[a-z][a-z0-9+.-]*:/i.test(url) && !url.startsWith('//')
+
+/** Resolve a vault link target against the file that contains it, or null when
+ *  it resolves to nothing (an anchor-only link).
+ *
+ *  Obsidian semantics: `/path` is vault-rooted, `./` and `../` are relative to
+ *  the active file's folder, and `#anchor` / `?query` suffixes are stripped
+ *  because they address a position inside the target, not another file. */
+export function resolveVaultLinkTarget(url: string, activeFile: string): string | null {
+  const target = url.split('#')[0].split('?')[0]
+  if (!target) return null
+  const curDir = activeFile.includes('/') ? activeFile.slice(0, activeFile.lastIndexOf('/')) : ''
+  const raw = target.startsWith('/')
+    ? target.replace(/^\/+/, '')
+    : [curDir, target].filter(Boolean).join('/')
+  const parts: string[] = []
+  for (const seg of raw.split('/')) {
+    if (seg === '..') parts.pop()
+    else if (seg === '.' || seg === '') continue
+    else parts.push(seg)
+  }
+  return parts.join('/') || null
+}

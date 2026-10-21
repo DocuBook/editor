@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeLink, resolveLinkInput } from '../../../frontend/utils/linkInput'
+import { looksLikeLink, resolveLinkInput, safeExternalUrl } from '../../../frontend/utils/linkInput'
 
 /** Mirrors what `wiki_suggest` returns: the picked row contributes only its
  *  title, which the caller wraps as `[[title]]`. */
@@ -76,5 +76,41 @@ describe('resolveLinkInput', () => {
   it('never picks a suggestion for link-looking input', () => {
     expect(resolveLinkInput('https://example.com', hits, 0)).toEqual({ kind: 'link', target: 'https://example.com' })
     expect(resolveLinkInput('#anchor', hits, 0)).toEqual({ kind: 'link', target: '#anchor' })
+  })
+})
+
+describe('safeExternalUrl', () => {
+  it('allows ordinary web and contact links', () => {
+    expect(safeExternalUrl('https://example.com/a?b=1#c')).toBe('https://example.com/a?b=1#c')
+    expect(safeExternalUrl('http://example.com')).toBe('http://example.com/')
+    expect(safeExternalUrl('mailto:me@example.com')).toBe('mailto:me@example.com')
+    expect(safeExternalUrl('tel:+123')).toBe('tel:+123')
+  })
+
+  it('trims surrounding whitespace', () => {
+    expect(safeExternalUrl('  https://example.com  ')).toBe('https://example.com/')
+  })
+
+  /** A note is untrusted content: these schemes are code/navigation primitives,
+   *  not links, and must never reach the OS opener. */
+  it('rejects script, data, file and app-specific schemes', () => {
+    expect(safeExternalUrl('javascript:alert(1)')).toBeNull()
+    expect(safeExternalUrl('JavaScript:alert(1)')).toBeNull()
+    expect(safeExternalUrl('data:text/html,<script>alert(1)</script>')).toBeNull()
+    expect(safeExternalUrl('file:///etc/passwd')).toBeNull()
+    expect(safeExternalUrl('obsidian://open?vault=x')).toBeNull()
+  })
+
+  it('rejects empty input and non-URL text', () => {
+    expect(safeExternalUrl('')).toBeNull()
+    expect(safeExternalUrl('   ')).toBeNull()
+    expect(safeExternalUrl('example.com')).toBeNull()
+  })
+
+  /** `//host` is a valid web URL but would be a bare path on desktop and would
+   *  resolve against the app origin in a browser — pin it to https. */
+  it('pins protocol-relative links to https', () => {
+    expect(safeExternalUrl('//example.com/x')).toBe('https://example.com/x')
+    expect(safeExternalUrl('//evil.example/javascript:alert(1)')).toBe('https://evil.example/javascript:alert(1)')
   })
 })

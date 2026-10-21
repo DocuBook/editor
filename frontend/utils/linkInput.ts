@@ -47,3 +47,25 @@ export const resolveLinkInput = (
   const hit = looksLikeLink(target) ? undefined : results[selected]
   return hit ? { kind: 'wikilink', title: hit.title } : { kind: 'link', target }
 }
+
+/** Schemes a note may hand to the OS opener or a browser tab. Notes are
+ *  untrusted content: `javascript:`, `data:`, `file:` and custom app handlers
+ *  are navigation/execution primitives, not links. */
+const SAFE_EXTERNAL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:'])
+
+/** Normalize a URL for external opening, or null when it must not be opened.
+ *
+ *  Protocol-relative links (`//host/path`) are valid web URLs but arrive at the
+ *  OS opener as a bare path and resolve against the app origin in a browser, so
+ *  they are pinned to https instead of being passed through. The parsed form is
+ *  returned (not the raw input) so callers cannot accidentally forward an
+ *  unchecked string. */
+export function safeExternalUrl(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const candidate = trimmed.startsWith('//') ? `https:${trimmed}` : trimmed
+  let parsed: URL
+  try { parsed = new URL(candidate) } catch { return null }
+  if (!SAFE_EXTERNAL_PROTOCOLS.has(parsed.protocol)) return null
+  return parsed.href
+}
