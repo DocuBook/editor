@@ -53,9 +53,10 @@ function cleanId(id: unknown) {
 /** Apply tool operations and report every block the agent wrote, in operation
  *  order — the reveal walks them and the caret is parked at the last one
  *  (the `agentCursor` contract). */
-function applyOperations(editor: any, input: any): string[] {
+function applyOperations(editor: any, input: any): { written: string[]; changed: boolean } {
   if (!Array.isArray(input?.operations)) throw new Error('AI tool input must contain operations')
   const written: string[] = []
+  let changed = false
   editor.transact(() => {
     for (const operation of input.operations) {
       if (operation?.type === 'update') {
@@ -65,6 +66,7 @@ function applyOperations(editor: any, input: any): string[] {
         if (!blocks.length) throw new Error('AI returned invalid HTML block')
         editor.updateBlock(id, { ...blocks[0], id: undefined, children: undefined })
         written.push(id)
+        changed = true
       } else if (operation?.type === 'add') {
         const id = cleanId(operation.referenceId)
         if (!id || !editor.getBlock(id)) throw new Error('Referenced document block is no longer available')
@@ -72,15 +74,17 @@ function applyOperations(editor: any, input: any): string[] {
         if (blocks.length) {
           const inserted = editor.insertBlocks(blocks, id, operation.position) || []
           for (const block of inserted) written.push(block.id)
+          changed ||= inserted.length > 0
         }
       } else if (operation?.type === 'delete') {
         const id = cleanId(operation.id)
         if (!id || !editor.getBlock(id)) throw new Error('Referenced document block is no longer available')
         editor.removeBlocks([id])
+        changed = true
       }
     }
   })
-  return written
+  return { written, changed }
 }
 
 /** Character-reveal pacing for freshly written AI content. The document is
@@ -173,12 +177,15 @@ function readPart(value: any) {
   return partOfType(value, 'tool-input-available')?.input
 }
 
+type AiSession = { options: InvokeOptions; controller: AbortController; before: any[]; retries: number; pendingInputs: any[]; streamComplete: boolean }
+
 const extensionFactory = ({ editor, options }: any) => {
   const store = createStore<{ aiMenuState: AiMenuState }>({ aiMenuState: 'closed' })
   const agentCursor = options?.agentCursor ?? {}
-  let session: { options: InvokeOptions; controller: AbortController; before: any[]; retries: number } | undefined
+  let session: AiSession | undefined
   /** Live position of the streaming caret, or null when nothing is being written. */
   let writingPos: number | null = null
+  const hasAttachedView = () => !(editor as any).headless && !!(editor as any).prosemirrorView
   /** Non-null while freshly written content is being revealed character by
    *  character; `budget` counts revealed characters across `spans`. */
   let reveal: RevealState | null = null
@@ -209,7 +216,7 @@ const extensionFactory = ({ editor, options }: any) => {
   const startReveal = (ids: string[]) => {
     if (reveal) cancelReveal()
     const doc = (editor as any).prosemirrorView?.state.doc
-    if (!doc || prefersReducedMotion() || document.hidden) return
+    if (!hasAttachedView() || !doc || prefersReducedMotion() || document.hidden) return
     const spans = ids
       .map((id) => blockContentRange(doc, id))
       .filter((span): span is RevealSpan => !!span && span.to > span.from)
@@ -250,8 +257,9 @@ const extensionFactory = ({ editor, options }: any) => {
   /** Decorations recompute only on transactions, so an empty one is dispatched
    *  whenever the caret moves or disappears. */
   const refreshDecorations = () => {
+    if (!hasAttachedView()) return
     const view = (editor as any).prosemirrorView
-    if (view) view.dispatch(view.state.tr)
+    view.dispatch(view.state.tr)
   }
 
   const moveWritingCursor = (blockId: string | null | undefined) => {
@@ -300,8 +308,20 @@ const extensionFactory = ({ editor, options }: any) => {
   }
 
   const reject = () => {
-    if (session?.before) editor.replaceBlocks(editor.document.map((block: any) => block.id), session.before)
+    if (session?.before && hasAttachedView()) editor.replaceBlocks(editor.document.map((block: any) => block.id), session.before)
     close(true)
+  }
+
+  const completeReview = async (current: AiSession) => {
+    await waitForReveal()
+    if (session === current && !current.controller.signal.aborted) setStatus('user-reviewing')
+  }
+
+  const applyInput = (input: any) => {
+    const { written, changed } = applyOperations(editor, input)
+    if (changed) options?.onDocumentChange?.()
+    moveWritingCursor(written[written.length - 1] ?? null)
+    startReveal(written)
   }
 
   return {
@@ -338,6 +358,17 @@ const extensionFactory = ({ editor, options }: any) => {
     closeAIMenu: () => close(),
     acceptChanges: () => close(true),
     rejectChanges: reject,
+    attach() {
+      const current = session
+      if (!current || !hasAttachedView()) return
+      try {
+        for (const input of current.pendingInputs.splice(0)) applyInput(input)
+      } catch (error) {
+        setStatus({ status: 'error', error, retriesLeft: Math.max(0, MAX_AI_RETRIES - current.retries) })
+        return
+      }
+      if (current.streamComplete && current.pendingInputs.length === 0) void completeReview(current)
+    },
     async abort(reason?: any) {
       if (!session) return
       session.controller.abort(reason)
@@ -365,7 +396,8 @@ const extensionFactory = ({ editor, options }: any) => {
       if (state === 'closed') return
       const controller = new AbortController()
       const before = editor.document.map((block: any) => ({ ...block, children: block.children?.map((child: any) => ({ ...child })) || [] }))
-      session = { options: invokeOptions, controller, before, retries }
+      const current: AiSession = { options: invokeOptions, controller, before, retries, pendingInputs: [], streamComplete: false }
+      session = current
       setStatus('thinking')
       try {
         if (invokeOptions.useSelection && hasAISelection(editor) && !restoreAISelection(editor)) throw new Error('Text selection is no longer available')
@@ -396,13 +428,12 @@ const extensionFactory = ({ editor, options }: any) => {
           if (!input) continue
           toolInput = input
           setStatus('ai-writing')
-          const written = applyOperations(editor, input)
-          moveWritingCursor(written[written.length - 1] ?? null)
-          startReveal(written)
+          if (hasAttachedView()) applyInput(input)
+          else current.pendingInputs.push(input)
         }
         if (!toolInput) throw new Error('AI returned no document operations')
-        await waitForReveal()
-        setStatus('user-reviewing')
+        current.streamComplete = true
+        if (current.pendingInputs.length === 0) await completeReview(current)
       } catch (error) {
         if (controller.signal.aborted) return
         /** `retriesLeft` drives the Retry button state: rust-ai renders the error

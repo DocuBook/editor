@@ -27,6 +27,9 @@ import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { syntaxHighlighting } from './codeHighlighting'
 import { createAiTransport } from './aiTransport'
 import { createSelectionAwareDocumentStateBuilder } from './aiBlocks'
+import { serializeMarkdown } from './markdownSerialization'
+import { writeWysiwygSnapshot } from './wysiwygSnapshot'
+import { useEditorStore } from '../stores/editor'
 import { handleEditorLinkClick } from './linkClickPolicy'
 import { getEditorCache, peekEditorCache } from './editorCache'
 import type { WysiwygSnapshot } from './wysiwygSnapshot'
@@ -107,8 +110,8 @@ export function seedCachedEditor(cached: CachedEditor, markdown: string, snapsho
 }
 
 /** Create a fresh editor instance bound to the vault + file path.
- *  The AI transport closes over THIS instance. Active streams are settled by
- *  WysiwygEditor's exit hook before a tab switch detaches its view.
+ *  transport closes over THIS instance. Its per-file AI stream survives view
+ *  detach; tool operations are applied when that same page is mounted again.
  *  NOTE: only construct INSIDE a live app (mount) — creating a BlockNote
  *  editor headless (jsdom) touches module-level SideMenu state and throws.
  *
@@ -121,6 +124,7 @@ export function seedCachedEditor(cached: CachedEditor, markdown: string, snapsho
  *  formatting Markdown drops. It is otherwise ignored (see `loadSnapshotIntoEditor`). */
 export function createBlockEditor(vaultPath: string, filePath: string, markdown?: string, snapshot?: WysiwygSnapshot | null): CachedEditor {
   let editor!: BlockNoteEditor<any, any, any>
+  let cached!: CachedEditor
   editor = BlockNoteEditor.create({
     schema: getSchema(),
     dictionary: { ...baseDict, ai: getAIDictionary(), math: mathLocales.en, diagram: diagramLocales.en },
@@ -151,12 +155,20 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
           (await import('./aiBlocks')).buildHtmlDocumentState(request.editor, !!request.selectedBlocks?.length),
         ),
         agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
+        onDocumentChange: () => {
+          const markdown = serializeMarkdown(editor)
+          if (markdown === null) return
+          cached.loadedMarkdown = markdown
+          useEditorStore.getState().setEditedContent(filePath, markdown)
+          useEditorStore.getState().setTabDirty(filePath, true)
+          writeWysiwygSnapshot(filePath, markdown, editor.document)
+        },
       }),
       wikilinkStyler,
       syntaxHighlighting,
     ],
   })
-  const cached: CachedEditor = { editor, loaded: false, loadedMarkdown: null };
+  cached = { editor, loaded: false, loadedMarkdown: null }
   if (markdown !== undefined) seedCachedEditor(cached, markdown, snapshot)
   return cached;
 }

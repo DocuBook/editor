@@ -126,6 +126,12 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>, sig
   return data as T
 }
 
+/** Cancel exactly one Rust AI stream; an empty ID means cancel every stream. */
+export function cancelAiRequest(requestId: string | null | undefined): void {
+  if (!requestId) return
+  void invoke('cancel_ai', { requestId }).catch(() => {})
+}
+
 let anonymousContextRequest = 0
 
 /** In-flight ask_ai streams, grouped by request id. Concurrent turns (an AI

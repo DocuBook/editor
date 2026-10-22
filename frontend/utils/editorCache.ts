@@ -3,10 +3,25 @@ import { KeepAliveCache } from './keepAliveCache'
 let cache: KeepAliveCache<unknown> | null = null
 let cacheVaultPath: string | null = null
 
+type CachedEditor = {
+  editor?: {
+    getExtension?: (name: 'ai') => { abort?: (reason?: string) => unknown } | undefined
+  }
+}
+
+function abortAi(cached: unknown, reason: string) {
+  const extension = (cached as CachedEditor | null)?.editor?.getExtension?.('ai')
+  try {
+    void Promise.resolve(extension?.abort?.(reason)).catch(error => console.error('Failed to abort AI stream', error))
+  } catch (error) {
+    console.error('Failed to abort AI stream', error)
+  }
+}
+
 /** Get the shared cache without importing any editor dependency. */
 export function getEditorCache<T>(vaultPath: string, create: (path: string) => T): KeepAliveCache<T> {
   if (!cache || cacheVaultPath !== vaultPath) {
-    cache?.clear()
+    clearEditorCache()
     cache = new KeepAliveCache(create)
     cacheVaultPath = vaultPath
   }
@@ -15,9 +30,18 @@ export function getEditorCache<T>(vaultPath: string, create: (path: string) => T
 
 /** Clear cached BlockNote instances when their vault scope ends. */
 export function clearEditorCache() {
+  cache?.forEach(editor => abortAi(editor, 'vault closed'))
   cache?.clear()
   cache = null
   cacheVaultPath = null
+}
+
+/** Stop and release one page's cached editor when its owning tab is closed. */
+export function closeCachedEditor(path: string) {
+  const editor = cache?.peek(path)
+  if (!editor) return
+  abortAi(editor, 'tab closed')
+  cache?.delete(path)
 }
 
 /** Cache hit for a vault+path WITHOUT creating anything — a pure read, so a

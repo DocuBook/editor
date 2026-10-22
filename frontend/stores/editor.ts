@@ -7,6 +7,7 @@ import { isBinaryPath } from '../utils/fileKind'
 import { logger } from '../utils/logger'
 import { mapWithConcurrency } from '../utils/concurrency'
 import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope } from './sync'
+import { clearEditorCache, closeCachedEditor } from '../utils/editorCache'
 
 export interface Tab {
   path: string
@@ -42,10 +43,7 @@ interface EditorState {
   blockEditor: any | null
   canUndo: boolean; canRedo: boolean
   _flushEditor: (() => void | Promise<void>) | null
-  /** True while the rust-ai extension is streaming — autosave must not persist a
-   *  half-written document (guard 2). Set by WysiwygEditor on AI state change. */
-  _aiWriting: boolean
-  setAiWriting: (writing: boolean) => void
+
   setBlockEditor: (e: any) => void
   setUndoRedoState: () => void
   flushEditor: () => Promise<void>
@@ -178,16 +176,13 @@ export const useEditorStore = create<EditorState>()(
     if (t) clearTimeout(t)
     autoSaveTimers.set(path, setTimeout(() => {
       autoSaveTimers.delete(path)
-      const s = get()
-      if (s._aiWriting) return
-      s.persistAllDirty().catch(() => toast.error('Auto-save failed — check disk access'))
+      get().persistAllDirty().catch(() => toast.error('Auto-save failed — check disk access'))
     }, AUTOSAVE_DELAY_MS))
   }
   let flushPromise: Promise<void> | null = null
   return {
-  tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null, _aiWriting: false,
+  tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null,
   setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
-  setAiWriting: (writing) => { set({ _aiWriting: writing }) },
   setUndoRedoState: () => {
     const state = get().blockEditor?.prosemirrorState
     set({ canUndo: !!state && undoDepth(state) > 0, canRedo: !!state && redoDepth(state) > 0 })
@@ -302,6 +297,11 @@ export const useEditorStore = create<EditorState>()(
     }
     const currentTabs = get().tabs
     const closingIndex = currentTabs.findIndex(t => t.path === path)
+    if (closingIndex === -1) return
+    closeCachedEditor(path)
+    const autoSaveTimer = autoSaveTimers.get(path)
+    if (autoSaveTimer) clearTimeout(autoSaveTimer)
+    autoSaveTimers.delete(path)
     const tabs = currentTabs.filter(t => t.path !== path)
     let activeTab = get().activeTab
     if (activeTab === path) {
@@ -314,6 +314,7 @@ export const useEditorStore = create<EditorState>()(
   },
 
   closeAllTabs: () => {
+    clearEditorCache()
     autoSaveTimers.clear()
     set({ tabs: [], activeTab: null, blockEditor: null, _flushEditor: null, canUndo: false, canRedo: false })
   },

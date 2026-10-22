@@ -16,7 +16,7 @@
  */
 import { readFileSync } from 'node:fs'
 
-import { runSuite, mockAiSettings, mockAskAi, openNote, PORTS } from './lib.mjs'
+import { runSuite, mockAiSettings, mockAskAi, openNote, PORTS, sseFrames } from './lib.mjs'
 
 const ORIGINAL_MARKDOWN = '# _Notes_\n\nhello world'
 /* Both are produced by the transport mocks in `setup` and read by the body. */
@@ -25,7 +25,10 @@ let aiState
 
 await runSuite('ai-debug', {
   port: PORTS.aiDebug,
-  seed: [{ path: 'notes.md', content: ORIGINAL_MARKDOWN }],
+  seed: [
+    { path: 'notes.md', content: ORIGINAL_MARKDOWN },
+    { path: 'other.md', content: '# Other page\n\nseparate content' },
+  ],
   setup: async ({ page, vaultPath }) => {
     /** Mock Path B text output and Path A tool calls at browser fetch level. */
     askAiHits = await mockAskAi(page, request => {
@@ -143,4 +146,124 @@ await runSuite('ai-debug', {
   const bodyNoOp = await page.locator('body').innerText()
   ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
+
+  // Reset the editor after Path A so its save/conflict UI and no-op toast do not
+  // intercept pointer actions in the independent SSE lifecycle scenarios.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await openNote(page)
+
+  // Keep the frontend fetch pending so this suite can verify page-owned stream
+  // lifetime: switching preserves it, while each explicit close/Stop cancels it.
+  await page.unroute('**/api/ask_ai')
+  const holds = []
+  const failedRequestIds = new Set()
+  page.on('requestfailed', request => {
+    if (!request.url().endsWith('/api/ask_ai')) return
+    try { failedRequestIds.add(String(request.postDataJSON()?.requestId ?? '')) } catch {}
+  })
+  const holdNextAsk = () => {
+    let markStarted
+    let releaseResponse
+    const hold = {
+      requestId: '',
+      started: new Promise(resolve => { markStarted = resolve }),
+      response: new Promise(resolve => { releaseResponse = resolve }),
+      markStarted: () => markStarted(),
+      release: () => releaseResponse(),
+    }
+    holds.push(hold)
+    return hold
+  }
+  await page.route('**/api/ask_ai', async route => {
+    const request = route.request().postDataJSON() || {}
+    const hold = holds.shift()
+    if (!hold) throw new Error('Unexpected ask_ai request in lifecycle scenario')
+    hold.requestId = String(request.requestId || '')
+    hold.markStarted()
+    await hold.response
+    const ids = [...String(request.messages || '').matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/gi)]
+    const blockId = ids[0]?.[0] || 'missing'
+    const events = typeof request.tools === 'string' && request.tools.length > 0
+      ? [
+          ['ai:tool_call', { toolCallId: 'lifecycle-tool', toolName: 'applyDocumentOperations', input: { operations: [{ type: 'update', id: `${blockId}$`, block: '<p>Lifecycle result</p>' }] } }],
+          ['ai:tools_done', {}],
+          ['ai:done', { provider: 'mock', truncated: false }],
+        ]
+      : [
+          ['ai:token', { token: '<content>## Lifecycle result</content>' }],
+          ['ai:tools_done', {}],
+          ['ai:done', { provider: 'mock', truncated: false }],
+        ]
+    try {
+      await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sseFrames(hold.requestId, events) })
+    } catch (error) {
+      if (!route.request().failure()) throw error
+    }
+  })
+  const waitForAbort = async hold => {
+    for (let i = 0; i < 100 && !failedRequestIds.has(hold.requestId); i++) await page.waitForTimeout(50)
+    return failedRequestIds.has(hold.requestId)
+  }
+  const sendHeldRequest = async (hold, promptText) => {
+    const box = page.locator('textarea[aria-label="AI prompt"]')
+    await box.fill(promptText)
+    await page.keyboard.press('Enter')
+    await hold.started
+  }
+
+  const background = holdNextAsk()
+  await sendHeldRequest(background, 'keep running in the background')
+  await page.getByText('other', { exact: true }).first().click()
+  await page.locator('[data-tab-path="other.md"]').waitFor()
+  await page.waitForTimeout(250)
+  ok('switching to another file keeps the owner SSE alive', !failedRequestIds.has(background.requestId))
+  await page.locator('[data-tab-path="notes.md"]').click()
+  await page.getByRole('button', { name: 'Stop' }).waitFor()
+  background.release()
+  await page.getByText('Accept', { exact: true }).waitFor()
+  ok('the background page receives its completed AI result', true)
+  await page.getByText('Revert', { exact: true }).click()
+
+  const stopped = holdNextAsk()
+  await sendHeldRequest(stopped, 'stop this request')
+  await page.getByRole('button', { name: 'Stop' }).click()
+  const stopAborted = await waitForAbort(stopped)
+  stopped.release()
+  ok('Stop cancels the active page SSE', stopAborted, stopped.requestId)
+
+  const closingTab = holdNextAsk()
+  await sendHeldRequest(closingTab, 'close only this page request')
+  await page.getByText('other', { exact: true }).first().click()
+  await page.locator('[data-tab-path="other.md"]').waitFor()
+  await page.getByRole('button', { name: 'Keep my version' }).click()
+  await page.getByRole('alertdialog', { name: 'Resolve file conflict' }).waitFor({ state: 'detached' })
+  const neighbour = holdNextAsk()
+  await sendHeldRequest(neighbour, 'keep the neighbouring page request')
+  await page.locator('[data-tab-path="notes.md"]').click()
+  await page.getByRole('button', { name: 'Close notes.md' }).click()
+  await page.locator('[data-tab-path="notes.md"]').waitFor({ state: 'detached' })
+  const tabAborted = await waitForAbort(closingTab)
+  await page.waitForTimeout(250)
+  const neighbourSurvived = !failedRequestIds.has(neighbour.requestId)
+  closingTab.release()
+  neighbour.release()
+  ok('closing a tab cancels only its own SSE', tabAborted && neighbourSurvived, `owner=${closingTab.requestId}, neighbour=${neighbour.requestId}`)
+  await page.getByText('Accept', { exact: true }).waitFor()
+  await page.getByText('Revert', { exact: true }).click()
+
+  const vaultPageA = holdNextAsk()
+  await sendHeldRequest(vaultPageA, 'close vault cancels all pages')
+  await page.getByText('notes', { exact: true }).first().click()
+  await page.locator('[data-tab-path="notes.md"]').waitFor()
+  const vaultPageB = holdNextAsk()
+  await sendHeldRequest(vaultPageB, 'second page in the same vault')
+  await page.getByRole('button', { name: 'Switch vault' }).click()
+  await page.getByRole('button', { name: 'Close Vault', exact: true }).click()
+  await page.getByRole('alertdialog', { name: 'Close vault' }).getByRole('button', { name: 'Close', exact: true }).click()
+  const vaultAbortedA = await waitForAbort(vaultPageA)
+  const vaultAbortedB = await waitForAbort(vaultPageB)
+  vaultPageA.release()
+  vaultPageB.release()
+  ok('closing the vault cancels every page SSE', vaultAbortedA && vaultAbortedB, `A=${vaultAbortedA}, B=${vaultAbortedB}`)
 })

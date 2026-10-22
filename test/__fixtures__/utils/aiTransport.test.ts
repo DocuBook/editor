@@ -422,6 +422,7 @@ describe('createAiTransport tools-to-text fallback', () => {
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
     const pageReads = 6
     const contextCalls: any[] = []
+    const askRequestIds: string[] = []
     let askCount = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
       const request = JSON.parse(String(init?.body ?? '{}'))
@@ -436,6 +437,7 @@ describe('createAiTransport tools-to-text fallback', () => {
         return Response.json({ result: JSON.stringify({ type: 'untrusted_reference_data', truncated: true, page: { handle: 'h', next_offset: contextCalls.length }, content: 'page' }) })
       }
       const id = String(request.requestId ?? '')
+      askRequestIds.push(id)
       askCount++
       const [toolName, input] = askCount === 1
         ? ['mcp_0', '{"query":"report"}']
@@ -462,7 +464,36 @@ describe('createAiTransport tools-to-text fallback', () => {
     }
     expect(parts.some(part => part.type === 'error')).toBe(false)
     expect(contextCalls.map(call => call.name)).toEqual(['mcp_0', ...Array(pageReads).fill('read_context_result')])
+    expect(contextCalls.map(call => call.requestId)).toEqual(askRequestIds.slice(0, contextCalls.length))
     expect(parts.find(part => part.type === 'tool-input-available')?.toolName).toBe('applyDocumentOperations')
+  })
+
+  it('does not start an AI request if cancelled while resolving mentions', async () => {
+    let finishMentions!: (response: Response) => void
+    let markMentionsStarted!: () => void
+    const mentionsStarted = new Promise<void>(resolve => { markMentionsStarted = resolve })
+    const mentions = new Promise<Response>(resolve => { finishMentions = resolve })
+    const fetchMock = vi.fn((url: string) => {
+      if (String(url).includes('/api/resolve_mentions')) {
+        markMentionsStarted()
+        return mentions
+      }
+      return Promise.reject(new Error(`Unexpected request: ${url}`))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const controller = new AbortController()
+    const stream = await createAiTransport({ getEditor: () => null }).sendMessages({
+      messages: [{ role: 'user', content: '@notes.md edit this' }],
+      body: {},
+      abortSignal: controller.signal,
+    })
+
+    await mentionsStarted
+    controller.abort()
+    finishMentions(Response.json({ result: [] }))
+    await stream.getReader().read().catch(() => undefined)
+
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ask_ai'))).toBe(false)
   })
 
   it('does not start a model request if stopped during MCP discovery', async () => {

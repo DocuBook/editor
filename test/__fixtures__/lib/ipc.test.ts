@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { invoke, listen, isAbsoluteUrl, isSafeImageUrl, trashPermissionError } from '../../../frontend/lib/ipc'
+import { cancelAiRequest, invoke, listen, isAbsoluteUrl, isSafeImageUrl, trashPermissionError } from '../../../frontend/lib/ipc'
 
 function sseStream(chunks: Array<string | Uint8Array>) {
   const encoder = new TextEncoder()
@@ -181,6 +181,28 @@ describe('web IPC bridge', () => {
     expect(aborted).toBeUndefined()
 
     await invoke('cancel_ai', { requestId: 'turn-2' })
+    await expect(settled).resolves.toBe('aborted')
+  })
+
+  it('ignores an empty AI cancel id instead of cancelling every stream', async () => {
+    let aborted = false
+    vi.stubGlobal('fetch', vi.fn((url: string, init: any) => {
+      if (!String(url).includes('ask_ai')) return Promise.resolve(new Response('{}'))
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener?.('abort', () => {
+          aborted = true
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+    }))
+
+    const settled = invoke('ask_ai', { messages: '[]', requestId: 'keep-this-stream' }).catch(() => 'aborted')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    cancelAiRequest('')
+    expect(aborted).toBe(false)
+
+    cancelAiRequest('keep-this-stream')
     await expect(settled).resolves.toBe('aborted')
   })
 
