@@ -1,7 +1,7 @@
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { createAiTransport } from './aiTransport'
-import { buildHtmlDocumentState, hasAISelection, releaseAISelection, restoreAISelection } from './aiBlocks'
+import { buildHtmlDocumentState, captureAISelection, hasAISelection, releaseAISelection, replaceAISelectionInlineContent, restoreAISelection } from './aiBlocks'
 import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
@@ -64,7 +64,11 @@ function applyOperations(editor: any, input: any): { written: string[]; changed:
         if (!id || !editor.getBlock(id)) throw new Error('Referenced document block is no longer available')
         const blocks = editor.tryParseHTMLToBlocks(operation.block)
         if (!blocks.length) throw new Error('AI returned invalid HTML block')
-        editor.updateBlock(id, { ...blocks[0], id: undefined, children: undefined })
+        const selectionResult = replaceAISelectionInlineContent(editor, id, blocks[0].content)
+        if (selectionResult === false) throw new Error('Text selection is no longer available')
+        if (selectionResult === null) {
+          editor.updateBlock(id, { ...blocks[0], id: undefined, children: undefined })
+        }
         written.push(id)
         changed = true
       } else if (operation?.type === 'add') {
@@ -400,11 +404,16 @@ const extensionFactory = ({ editor, options }: any) => {
       session = current
       setStatus('thinking')
       try {
-        if (invokeOptions.useSelection && hasAISelection(editor) && !restoreAISelection(editor)) throw new Error('Text selection is no longer available')
+        if (invokeOptions.useSelection && hasAISelection(editor)) {
+          if (!restoreAISelection(editor)) throw new Error('Text selection is no longer available')
+          captureAISelection(editor)
+        }
         /** rust-ai: the canonical document state comes from the injected
          *  builder (selection-aware, windowed) — the local HTML builder is only
          *  the fallback when no builder was configured. */
-        const selectedBlocks = invokeOptions.useSelection ? (editor.getSelection?.()?.blocks ?? []) : []
+        const selectedBlocks = invokeOptions.useSelection
+          ? (editor.getSelectionCutBlocks?.()?.blocks ?? editor.getSelection?.()?.blocks ?? [])
+          : []
         const documentState = options?.documentStateBuilder
           ? await options.documentStateBuilder({ editor, selectedBlocks })
           : await buildHtmlDocumentState(editor, invokeOptions.useSelection)

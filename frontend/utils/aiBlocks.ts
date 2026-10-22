@@ -55,6 +55,52 @@ export function hasAISelection(editor: any): boolean {
   return !!liveAISelection(editor) || !!getAISelectionSnapshot(editor)?.length;
 }
 
+/** Replace an AI result inside the captured single-block text range. BlockNote's
+ *  updateBlock replaces the whole block, so selection prompts use its inline
+ *  insertion API instead and leave text on either side untouched. */
+export function replaceAISelectionInlineContent(
+  editor: any,
+  blockId: string,
+  content: any,
+): boolean | null {
+  const snapshot = editor && typeof editor === "object"
+    ? aiSelectionSnapshots.get(editor)
+    : undefined;
+  const view = editor?.prosemirrorView;
+  if (
+    !snapshot ||
+    snapshot.blocks.length !== 1 ||
+    snapshot.blocks[0]?.id !== blockId
+  ) return null;
+  if (
+    !view ||
+    view.state.doc !== snapshot.doc ||
+    !editor.insertInlineContent ||
+    !(typeof content === "string" || Array.isArray(content)) ||
+    content.length === 0
+  ) return false;
+
+  try {
+    return !!editor.transact((tr: any) => {
+      const selection = TextSelection.create(
+        tr.doc,
+        tr.mapping.map(snapshot.anchor, -1),
+        tr.mapping.map(snapshot.head, 1),
+      );
+      if (
+        selection.empty ||
+        !selection.$from.parent.inlineContent ||
+        selection.$from.parent !== selection.$to.parent
+      ) return false;
+      tr.setSelection(selection);
+      editor.insertInlineContent(content);
+      return true;
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** BlockNote-level check: is a text/block range selected right now? Unlike
  *  `hasAISelection` this does not need a live ProseMirror range, so it stays
  *  correct for the formatting-toolbar popover (which takes focus off the
@@ -106,7 +152,7 @@ export function restoreAISelection(editor: any): boolean {
       snapshot.head,
     );
     view.dispatch(view.state.tr.setSelection(selection));
-    return !!editor.getSelectionCutBlocks?.(true)?.blocks?.length;
+    return !!editor?.getSelectionCutBlocks?.()?.blocks?.length;
   } catch {
     return false;
   }
@@ -136,7 +182,7 @@ export async function buildHtmlDocumentState(editor: any, useSelection = false):
   const documentBlocks = flatten(Array.isArray(editor?.document) ? editor.document : [])
   const emptyDocument = isEmptyDocument(editor, documentBlocks)
   if (useSelection) {
-    const selected = editor?.getSelectionCutBlocks?.(true)?.blocks || editor?.getSelection?.()?.blocks || []
+    const selected = editor?.getSelectionCutBlocks?.()?.blocks || editor?.getSelection?.()?.blocks || []
     return {
       isEmptyDocument: emptyDocument,
       selection: true,
