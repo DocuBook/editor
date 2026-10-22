@@ -105,6 +105,8 @@ describe('responsive tabs', () => {
       'notes/last.md',
     ])
     const activeTab = document.querySelector<HTMLElement>('[data-tab-path="notes/active-document-with-a-long-name.md"]')!
+    expect(document.querySelector('.editor-tab-bar-track')?.hasAttribute('data-tauri-drag-region')).toBe(true)
+    expect(document.querySelector('.tab-strip')?.hasAttribute('data-tauri-drag-region')).toBe(true)
     expect(document.querySelector('.tab-strip')).not.toBeNull()
     // No right edge on the last tab: the strip draws boundaries between tabs only.
     expect(document.querySelector<HTMLElement>('[data-tab-path="notes/last.md"]')!.classList.contains('border-r')).toBe(false)

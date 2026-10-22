@@ -13,7 +13,7 @@ export function TopBarShell({ dragRegion, className, children }: {
 }) {
   return (
     <div data-tauri-drag-region={dragRegion ? true : undefined} className="editor-tab-bar relative z-30 h-12 shrink-0">
-      <div className={'editor-tab-bar-track ui-shell h-full flex items-center flex-nowrap text-xs ' + (className ?? '')}>
+      <div data-tauri-drag-region={dragRegion ? true : undefined} className={'editor-tab-bar-track ui-shell h-full flex items-center flex-nowrap text-xs ' + (className ?? '')}>
         {children}
       </div>
     </div>
