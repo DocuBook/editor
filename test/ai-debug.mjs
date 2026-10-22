@@ -236,6 +236,8 @@ await runSuite('ai-debug', {
   await sendHeldRequest(closingTab, 'close only this page request')
   await page.getByText('other', { exact: true }).first().click()
   await page.locator('[data-tab-path="other.md"]').waitFor()
+  await page.getByRole('button', { name: 'Keep my version' }).click()
+  await page.getByRole('alertdialog', { name: 'Resolve file conflict' }).waitFor({ state: 'detached' })
   const neighbour = holdNextAsk()
   await sendHeldRequest(neighbour, 'keep the neighbouring page request')
   await page.getByRole('button', { name: 'Close notes.md' }).click()
