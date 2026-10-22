@@ -425,7 +425,7 @@ export function sseFrames(requestId, events) {
   return events.flatMap(([name, payload]) => {
     const tagged = payload.requestId ? payload : { requestId, ...payload }
     return [`event: ${name}`, `data: ${JSON.stringify(tagged)}`, '']
-  }).join('\n')
+  }).join('\n') + '\n'
 }
 
 /**
