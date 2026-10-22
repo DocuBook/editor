@@ -148,6 +148,11 @@ await runSuite('ai-debug', {
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))
   await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
+  // Reset the editor after Path A so its save/conflict UI and no-op toast do not
+  // intercept pointer actions in the independent SSE lifecycle scenarios.
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await openNote(page)
+
   // Keep the frontend fetch pending so this suite can verify page-owned stream
   // lifetime: switching preserves it, while each explicit close/Stop cancels it.
   await page.unroute('**/api/ask_ai')
