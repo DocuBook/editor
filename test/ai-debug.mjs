@@ -240,6 +240,7 @@ await runSuite('ai-debug', {
   await page.getByRole('alertdialog', { name: 'Resolve file conflict' }).waitFor({ state: 'detached' })
   const neighbour = holdNextAsk()
   await sendHeldRequest(neighbour, 'keep the neighbouring page request')
+  await page.locator('[data-tab-path="notes.md"]').click()
   await page.getByRole('button', { name: 'Close notes.md' }).click()
   await page.locator('[data-tab-path="notes.md"]').waitFor({ state: 'detached' })
   const tabAborted = await waitForAbort(closingTab)
