@@ -146,6 +146,7 @@ await runSuite('ai-debug', {
   const bodyNoOp = await page.locator('body').innerText()
   ok('Path A: semantic no-op rejected', /AI made no document changes/i.test(bodyNoOp), bodyNoOp.slice(-260))
   ok('Path A: no-op hides Accept/Revert', !/\bAccept\b|\bRevert\b/i.test(bodyNoOp), bodyNoOp.slice(-160))
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
   // Keep the frontend fetch pending so this suite can verify page-owned stream
   // lifetime: switching preserves it, while each explicit close/Stop cancels it.
