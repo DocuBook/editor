@@ -505,22 +505,13 @@ body .mobile-sidebar-drawer-body > aside {
     border: 1px solid var(--color-border);
 }
 
+.ProseMirror .bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type=codeBlock]) {
+    margin: 32px 0;
+}
 .ProseMirror .bn-block-content[data-content-type=codeBlock] {
-    /* BlockNote ships `.bn-block-content { display: flex }` as a ROW. The vanilla
-       code block never notices: its only in-flow child is the `pre` and the
-       language select is absolutely positioned. Our header is a normal in-flow
-       child, so without an explicit column it lands beside the code instead of
-       above it. */
     flex-direction: column;
-    /* `.bn-block-content` ships `padding: 3px 0`, which showed nothing while the
-       block and its `pre` shared a background. With a tinted header it becomes a
-       3px band of block background above it, reading as stray margin. */
     padding: 0;
-    /* Zeroing that padding is also what left this frame flush against its
-       neighbours — every other block still carries its 3px. Give the frame the
-       same 12px rhythm as `.ProseMirror pre`, so the tinted border never reads
-       as colliding with the paragraph above or below it. */
-    margin: 12px 0;
+    margin: 8px 0;
     color: var(--color-foreground);
     background-color: var(--color-surface);
     border: 1px solid var(--color-border);
