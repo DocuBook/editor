@@ -6,7 +6,7 @@ import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
 export type AiMenuState =
-  | { blockId: string; status: 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any; retriesLeft?: number }
+  | { blockId: string; status: 'user-input' | 'thinking' | 'generating' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any; retriesLeft?: number }
   | 'closed'
 
 type InvokeOptions = { userPrompt: string; useSelection?: boolean }
@@ -387,11 +387,11 @@ const extensionFactory = ({ editor, options }: any) => {
         while (true) {
           const next = await reader.read()
           if (next.done) break
-          /** The provider started emitting tool-call arguments: the document is
-           *  being written now, even though the completed operations only arrive at
-           *  end of stream. Reflect that instead of staying in "thinking" until the
-           *  client-side reveal begins. */
-          if (partOfType(next.value, 'writing-started')) setStatus('ai-writing')
+          /** The provider started emitting output, but nothing is in the editor yet:
+           *  the completed operations only arrive at end of stream (and Path A may
+           *  still retry or fall back). 'generating' is honest about that; 'ai-writing'
+           *  is reserved for when operations are actually applied below. */
+          if (partOfType(next.value, 'writing-started')) setStatus('generating')
           const input = readPart(next.value)
           if (!input) continue
           toolInput = input

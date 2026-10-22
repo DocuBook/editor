@@ -386,7 +386,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
       const ai = (editor as any).getExtension?.('ai')
       const isStreaming = () => {
         const state = ai?.store?.state?.aiMenuState
-        return state !== 'closed' && (state?.status === 'thinking' || state?.status === 'ai-writing')
+        return state !== 'closed' && (state?.status === 'thinking' || state?.status === 'generating' || state?.status === 'ai-writing')
       }
       if (isStreaming()) {
         let resolveSettled!: () => void
