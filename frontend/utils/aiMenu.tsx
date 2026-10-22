@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react'
 import { ArrowDownAZ, Check, Languages, ListEnd, ListTodo, PenLine, RefreshCw, Sparkles, Trash2, WandSparkles } from 'lucide-react'
 
-export type AiMenuStatus = 'user-input' | 'thinking' | 'ai-writing' | 'user-reviewing' | 'error' | 'closed'
+export type AiMenuStatus = 'user-input' | 'thinking' | 'generating' | 'ai-writing' | 'user-reviewing' | 'error' | 'closed'
 /** Mirrors BlockNote's `DefaultReactSuggestionItem`:
  *  `icon` is a rendered element (not a component) because the formatting-toolbar
  *  popover passes the item straight to `SuggestionMenu.Item`, which renders

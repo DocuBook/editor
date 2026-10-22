@@ -201,6 +201,7 @@ describe('AI floating composer', () => {
   })
 
   it.each([
+    [{ blockId: 'b1', status: 'generating' }, 'Stop'],
     [{ blockId: 'b1', status: 'ai-writing' }, 'Stop'],
     [{ blockId: 'b1', status: 'user-reviewing' }, 'Accept'],
     [{ blockId: 'b1', status: 'user-reviewing' }, 'Revert'],
@@ -636,7 +637,7 @@ describe('scroll-direction reveal', () => {
     expect(visible()).toBe(true)
   })
 
-  it.each(['thinking', 'ai-writing', 'user-reviewing', 'error'])('stays visible while an AI run is %s', (status) => {
+  it.each(['thinking', 'generating', 'ai-writing', 'user-reviewing', 'error'])('stays visible while an AI run is %s', (status) => {
     const { ai, scrollTo, visible } = renderComposer()
     act(() => ai.setMenuState({ blockId: 'b1', status, error: new Error('boom') }))
 
