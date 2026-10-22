@@ -12,7 +12,7 @@
  *  Prompt policy and context assembly live in aiPrompt.ts; document operation
  *  helpers stay in aiBlocks.ts so this streaming sequence remains orchestration.
  */
-import { invoke, listen } from "../lib/ipc";
+import { cancelAiRequest, invoke, listen } from "../lib/ipc";
 import { toast } from "sonner";
 import { useAiChat } from "../stores/aiChat";
 import { useAiSettings } from "../stores/aiSettings";
@@ -267,12 +267,11 @@ async function runSendMessages(
           });
         }
       });
-      /** Propagate a rust-ai abort → Rust cancel (stops the in-flight reqwest stream).
-       *  The id keeps Stop bound to this turn: if a retry already took over, the
-       *  newer request must not be cancelled by the older signal. */
-      abortSignal?.addEventListener?.("abort", () => {
-        invoke("cancel_ai", { requestId: currentRequestId }).catch(() => {});
-      });
+      /** All UI cancellation paths (Stop, tab close, vault close) converge here.
+       *  Never pass an empty id: Rust interprets it as cancel-all. */
+      const cancelCurrentRequest = () => cancelAiRequest(currentRequestId);
+      if (abortSignal?.aborted) cancelCurrentRequest();
+      else abortSignal?.addEventListener?.("abort", cancelCurrentRequest, { once: true });
       try {
         /** Mutable: flipped to false once a text fallback turn is warranted. The
          *  prompt, capabilities and streaming behaviour all derive from it. */
@@ -380,6 +379,7 @@ async function runSendMessages(
                 attempt: attempts + 1,
               });
             }
+            if (abortSignal?.aborted) return;
             requestStartedAt = performance.now();
             firstTokenAt = 0;
             currentRequestId = uuid();
@@ -391,6 +391,9 @@ async function runSendMessages(
               baseUrl: providerInfo?.api || config.baseUrl,
               requestId: currentRequestId,
             });
+            if (abortSignal?.aborted) return;
+            // Keep the id through context-tool execution so Rust can associate
+            // and cancel those calls with this AI turn.
             /** Truncated = the same cap applies on retry — no point re-asking. */
             if (streamTruncated) break;
             const contextCalls = useTools
@@ -676,6 +679,8 @@ async function runSendMessages(
         unsubToolsDone();
         unsubGenerating();
         unsubDone();
+        abortSignal?.removeEventListener?.("abort", cancelCurrentRequest);
+        currentRequestId = "";
         try {
           controller.close();
         } catch {}

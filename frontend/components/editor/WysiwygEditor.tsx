@@ -4,7 +4,8 @@
  *  Keep-alive host: the `cached` editor INSTANCE is created once per file
  *  (utils/editorFactory) and survives tab switches — only the view
  *  (BlockNoteView) remounts. Markdown is parsed once; undo history persists.
- *  In-flight AI is settled and serialized before any view detaches. */
+ *  In-flight AI stays with the cached page and defers tool application until its
+ *  view is attached again. */
 import { useCallback, useEffect, useRef, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react'
 import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
@@ -216,11 +217,9 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   useEffect(() => {
     setWikilinkStylerPaused(isAiWriting)
     setPreviewRenderingPaused(isAiWriting)
-    /** Autosave gate (store-level): never persist while AI streams. Dirty is
-     *  re-set when writing ends → a fresh autosave writes the full result. */
-    useEditorStore.getState().setAiWriting(isAiWriting)
+    /** Re-mark the completed document dirty once the atomic AI transaction ends. */
     if (!isAiWriting) refreshCodeHighlighting((editor as any).prosemirrorView)
-    return () => { setWikilinkStylerPaused(false); setPreviewRenderingPaused(false); useEditorStore.getState().setAiWriting(false) }
+    return () => { setWikilinkStylerPaused(false); setPreviewRenderingPaused(false) }
   }, [isAiWriting, editor])
   const followRef = useRef(true)
   const exitingRef = useRef(false)
@@ -364,43 +363,15 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
 
   useEffect(() => {
     setBlockEditor(editor)
-    return () => {
-      setBlockEditor(null)
-      /** Cancel in-flight AI before the view detaches. The streamed tool
-       *  execution touches the ProseMirror view (transact/domAtPos); running
-       *  it against an unmounted editor throws "editor view is not available"
-       *  and crashes the tree (keep-alive keeps the INSTANCE alive, so the
-       *  stream would otherwise complete into a detached view). Abort is a
-       *  no-op unless the AI is actually thinking/ai-writing. */
-      try {
-        ;(editor as any).getExtension?.('ai')?.abort?.('view detached')
-      } catch {}
-    }
+    ;(editor as any).getExtension?.('ai')?.attach?.()
+    return () => setBlockEditor(null)
   }, [editor, setBlockEditor])
 
-  /** Register atomic exit: settle AI, serialize, sync cache/store, mark dirty. */
+  /** Flush this page's current document without tying its AI stream to the view. */
   useEffect(() => {
     const sync = async () => {
       exitingRef.current = true
       try {
-      const ai = (editor as any).getExtension?.('ai')
-      const isStreaming = () => {
-        const state = ai?.store?.state?.aiMenuState
-        return state !== 'closed' && (state?.status === 'thinking' || state?.status === 'generating' || state?.status === 'ai-writing')
-      }
-      if (isStreaming()) {
-        let resolveSettled!: () => void
-        const settled = new Promise<void>(resolve => { resolveSettled = resolve })
-        const checkSettled = () => { if (!isStreaming()) resolveSettled() }
-        const unsubscribe = ai.store.subscribe(checkSettled)
-        try {
-          await ai.abort('editor exit')
-          checkSettled()
-          await settled
-        } finally {
-          unsubscribe()
-        }
-      }
 
       /** Only flush content when there are real WYSIWYG edits — serialization is
        *  not idempotent. Cursor capture still runs on every mode/tab switch. */
@@ -446,7 +417,10 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
    *  flushed on exit), so the instance is not re-parsed — undo history and
    *  cursor survive. */
   useEffect(() => {
-    if (loadedRef.current && loadedMarkdownRef.current === markdown) return
+    if (loadedRef.current && (loadedMarkdownRef.current === markdown || cached.loadedMarkdown === markdown)) {
+      loadedMarkdownRef.current = markdown
+      return
+    }
     loadedRef.current = true
     loadedMarkdownRef.current = markdown
     /** Re-parse must not mark the tab dirty: gate onChange until the load

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useEditorStore } from '../../../frontend/stores/editor'
 import { useSyncStore } from '../../../frontend/stores/sync'
 import { invoke } from '../../../frontend/lib/ipc'
+import { clearEditorCache, getEditorCache, peekEditorCache } from '../../../frontend/utils/editorCache'
 
 vi.mock('../../../frontend/lib/ipc', () => ({
   invoke: vi.fn().mockResolvedValue(''),
@@ -38,10 +39,11 @@ function mockGuardedWrites() {
 
 describe('editor store tab persistence', () => {
   beforeEach(() => {
+    clearEditorCache()
     vi.clearAllMocks()
     vi.mocked(invoke).mockResolvedValue(written())
     useSyncStore.setState({ queue: [], conflicts: [], draining: false, attempts: 0, lastError: '' })
-    useEditorStore.setState({ tabs: [], activeTab: null, _flushEditor: null, _aiWriting: false })
+    useEditorStore.setState({ tabs: [], activeTab: null, _flushEditor: null })
   })
 
   it('does not write unchanged files or auto-save when switching tabs', async () => {
@@ -112,6 +114,8 @@ describe('editor store tab persistence', () => {
   })
 
   it('keeps a dirty tab open and reports when its save fails', async () => {
+    const abort = vi.fn()
+    getEditorCache('vault', () => ({ editor: { getExtension: () => ({ abort }) } })).get('a.md')
     vi.mocked(invoke).mockRejectedValueOnce(new Error('disk full'))
     useEditorStore.setState({
       tabs: [{ path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'changed', dirty: true, deleted: false }],
@@ -122,6 +126,7 @@ describe('editor store tab persistence', () => {
 
     expect(useEditorStore.getState().tabs).toHaveLength(1)
     expect(useEditorStore.getState().activeTab).toBe('a.md')
+    expect(abort).not.toHaveBeenCalled()
   })
 
   it('rejects persistAllDirty when any dirty file cannot be saved', async () => {
@@ -132,6 +137,59 @@ describe('editor store tab persistence', () => {
     })
 
     await expect(useEditorStore.getState().persistAllDirty()).rejects.toThrow('Could not save a.md')
+  })
+
+  it('aborts and releases only the editor for the tab that is actually closed', async () => {
+    const abortA = vi.fn()
+    const abortB = vi.fn()
+    getEditorCache('vault', path => ({ editor: { getExtension: () => ({ abort: path === 'a.md' ? abortA : abortB }) } }))
+      .get('a.md')
+    getEditorCache('vault', path => ({ editor: { getExtension: () => ({ abort: path === 'a.md' ? abortA : abortB }) } }))
+      .get('b.md')
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'a', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'b.md',
+    })
+
+    await useEditorStore.getState().closeTab('a.md')
+
+    expect(abortA).toHaveBeenCalledWith('tab closed')
+    expect(abortB).not.toHaveBeenCalled()
+    expect(peekEditorCache('vault', 'a.md')).toBeNull()
+    expect(peekEditorCache('vault', 'b.md')).not.toBeNull()
+  })
+
+  it('aborts every cached page when all tabs are closed', () => {
+    const abortA = vi.fn()
+    const abortB = vi.fn()
+    const create = (path: string) => ({ editor: { getExtension: () => ({ abort: path === 'a.md' ? abortA : abortB }) } })
+    const cache = getEditorCache('vault', create)
+    cache.get('a.md')
+    cache.get('b.md')
+
+    useEditorStore.getState().closeAllTabs()
+
+    expect(abortA).toHaveBeenCalledWith('vault closed')
+    expect(abortB).toHaveBeenCalledWith('vault closed')
+  })
+
+  it('does not abort page AI when switching tabs', async () => {
+    const abort = vi.fn()
+    getEditorCache('vault', () => ({ editor: { getExtension: () => ({ abort }) } })).get('a.md')
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'a', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'a.md',
+    })
+
+    await useEditorStore.getState().switchTab('b.md')
+
+    expect(abort).not.toHaveBeenCalled()
   })
 
   it('does not save a dirty inactive tab when it is closed', async () => {
@@ -189,21 +247,17 @@ describe('editor store tab persistence', () => {
     } finally { vi.useRealTimers() }
   })
 
-  it('holds autosave while the AI is writing (guard 2), then saves after it ends', async () => {
+  it('autosaves an AI result for an inactive page while another page is active', async () => {
     vi.useFakeTimers()
     try {
       useEditorStore.setState({
-        tabs: [{ path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'ai result', dirty: false, deleted: false }],
-        activeTab: 'a.md',
-        _aiWriting: true,
+        tabs: [
+          { path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'ai result', dirty: false, deleted: false },
+          { path: 'b.md', name: 'b.md', content: 'other', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+        ],
+        activeTab: 'b.md',
       })
 
-      useEditorStore.getState().setTabDirty('a.md', true)
-      await vi.advanceTimersByTimeAsync(5000)
-      expect(invoke).not.toHaveBeenCalledWith('write_file', expect.anything())
-
-      // AI ends → WysiwygEditor re-sets dirty → a fresh autosave writes the full result
-      useEditorStore.getState().setAiWriting(false)
       useEditorStore.getState().setTabDirty('a.md', true)
       await vi.advanceTimersByTimeAsync(2000)
 

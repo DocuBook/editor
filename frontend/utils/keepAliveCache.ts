@@ -34,6 +34,14 @@ export class KeepAliveCache<T> {
     return this.entries.has(key) ? this.entries.get(key)! : null
   }
 
+  delete(key: string) {
+    if (this.entries.delete(key)) this.report()
+  }
+
+  forEach(callback: (value: T, key: string) => void) {
+    this.entries.forEach(callback)
+  }
+
   clear() {
     this.entries.clear()
     this.report()
