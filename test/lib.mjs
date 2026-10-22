@@ -230,7 +230,7 @@ export async function runSuite(name, opts, body) {
     if (setup) await setup(ctx)
     await body(ctx)
   } catch (error) {
-    results.push(['FAIL', 'setup/run', String(error).split('\n')[0]])
+    results.push(['FAIL', 'setup/run', error instanceof Error ? error.stack || error.message : String(error)])
     process.exitCode = 1
   }
 
