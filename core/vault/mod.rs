@@ -522,6 +522,7 @@ impl Vault {
  *  otherwise silently reuse (or, on a case-sensitive server, shadow) the first.
  *  Only that folder is consulted — the same name in another folder is fine. */
     pub fn create_file(&self, path: &str) -> Result<String, String> {
+        let _write_guard = self.checked_write_lock.lock().map_err(|_| "Write lock poisoned".to_string())?;
         let f = self.safe_path(path)?;
         let name = file_name_of(&f);
         if let Some(p) = f.parent() { ensure_free_name(p, &name)?; }
@@ -537,6 +538,7 @@ impl Vault {
 /** Create an empty directory (and parents). Like `create_file`, a name already
  *  taken in the destination folder is refused case-insensitively. */
     pub fn create_directory(&self, path: &str) -> Result<(), String> {
+        let _write_guard = self.checked_write_lock.lock().map_err(|_| "Write lock poisoned".to_string())?;
         let d = self.safe_path(path)?;
         let name = file_name_of(&d);
         let Some(parent) = d.parent() else { return Err("Invalid folder name".to_string()) };
