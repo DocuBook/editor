@@ -234,6 +234,144 @@ describe('responsive tabs', () => {
     expect(document.body.textContent).not.toContain('Push')
   })
 
+  it('lists every open tab behind the compact count badge and switches to the chosen one', () => {
+    renderTabBar(false)
+
+    const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
+    expect(badge).not.toBeNull()
+    expect(badge.textContent).toBe('3')
+    expect(badge.getAttribute('aria-expanded')).toBe('false')
+
+    act(() => badge.click())
+    expect(badge.getAttribute('aria-expanded')).toBe('true')
+
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    expect(rows.map(row => row.textContent)).toEqual([
+      'first.md',
+      'active-document-with-a-long-name.md',
+      'last.md',
+    ])
+    // The tab already open is the one marked — the switcher never hides where you are.
+    const checked = rows.filter(row => row.getAttribute('aria-checked') === 'true')
+    expect(checked).toHaveLength(1)
+    expect(checked[0].textContent).toBe('active-document-with-a-long-name.md')
+
+    act(() => rows[2].click())
+    expect(editorState.switchTab).toHaveBeenCalledWith('notes/last.md')
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('drives the compact tab switcher from the keyboard', () => {
+    renderTabBar(false)
+
+    const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
+    act(() => badge.click())
+    const rows = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    const press = (key: string) => act(() => {
+      rows().find(row => row === document.activeElement)!
+        .dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    })
+
+    // Opens on the tab you are looking at, and the trigger points at the popover.
+    expect(document.activeElement).toBe(rows()[1])
+    expect(badge.getAttribute('aria-controls')).toBe('editor-tab-switcher')
+
+    press('ArrowDown')
+    expect(document.activeElement).toBe(rows()[2])
+    // Wraps at the end instead of falling out of the list.
+    press('ArrowDown')
+    expect(document.activeElement).toBe(rows()[0])
+    press('ArrowUp')
+    expect(document.activeElement).toBe(rows()[2])
+    press('Home')
+    expect(document.activeElement).toBe(rows()[0])
+    press('End')
+    expect(document.activeElement).toBe(rows()[2])
+
+    // Escape dismisses and hands focus back to the trigger that opened it.
+    press('Escape')
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(badge)
+  })
+
+  it('dismisses the compact tab switcher on an outside press', () => {
+    renderTabBar(false)
+
+    const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
+    act(() => badge.click())
+    expect(document.querySelector('[role="menu"]')).not.toBeNull()
+
+    // The menu is a sibling of the trigger, so an outside press is the only
+    // thing that closes it without picking a tab.
+    act(() => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })) })
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(badge.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('does not render the count badge on desktop or with a single tab', () => {
+    renderTabBar(true)
+    expect(document.querySelector('[aria-label^="Open tabs"]')).toBeNull()
+    act(() => root!.unmount())
+
+    const original = editorState.tabs
+    editorState.tabs = [original[1]]
+    try {
+      renderTabBar(false)
+      expect(document.querySelector('[aria-label^="Open tabs"]')).toBeNull()
+    } finally {
+      editorState.tabs = original
+    }
+  })
+
+  it('returns focus to the trigger after picking a tab from the switcher', () => {
+    renderTabBar(false)
+
+    const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
+    act(() => badge.click())
+    const rows = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    act(() => rows()[2].click())
+
+    expect(editorState.switchTab).toHaveBeenCalledWith('notes/last.md')
+    // The chosen row is unmounted with the popover; focus must not fall to body.
+    expect(document.activeElement).toBe(badge)
+  })
+
+  it('opens the compact switcher with the arrow keys from the badge', () => {
+    renderTabBar(false)
+
+    const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
+    const rows = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    const pressOnBadge = (key: string) => act(() => {
+      badge.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
+    })
+
+    pressOnBadge('ArrowDown')
+    expect(badge.getAttribute('aria-expanded')).toBe('true')
+    // Down opens on the tab already open, so Enter keeps you there.
+    expect(document.activeElement).toBe(rows()[1])
+
+    act(() => {
+      document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    })
+    expect(document.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(badge)
+
+    // Up enters the list from the bottom.
+    pressOnBadge('ArrowUp')
+    expect(document.activeElement).toBe(rows()[2])
+  })
+
+  it('marks the open tab in the switcher beyond the check icon', () => {
+    renderTabBar(false)
+
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!.click())
+    const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+
+    // A tinted row is visible at a glance; the check is the semantic marker.
+    expect(rows[1].className).toContain('bg-surface-active')
+    expect(rows[0].className).toContain('bg-transparent')
+  })
+
   it('reveals a close button on every tab and closes the hovered inactive tab', () => {
     renderTabBar(true)
 

@@ -132,6 +132,16 @@ export function cancelAiRequest(requestId: string | null | undefined): void {
   void invoke('cancel_ai', { requestId }).catch(() => {})
 }
 
+/** Close the desktop window through the normal close request, so the graceful
+ *  shutdown path (flush + save, then `app_ready_to_close`) runs exactly as it
+ *  does from the window button. No-op in the web runtime, where the window is
+ *  the browser tab. */
+export async function closeWindow(): Promise<void> {
+  if (!isTauri) return
+  const { getCurrentWindow } = await import('@tauri-apps/api/window')
+  await getCurrentWindow().close()
+}
+
 let anonymousContextRequest = 0
 
 /** In-flight ask_ai streams, grouped by request id. Concurrent turns (an AI
