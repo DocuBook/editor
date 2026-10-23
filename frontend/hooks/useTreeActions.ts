@@ -92,7 +92,12 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
       setNewName('')
       setCreating(null)
       if (creating === 'file') onNavigate()
-    } catch(e) { console.error(e); toast.error('Failed to create') }
+    } catch(e) {
+      console.error(e)
+      /* The vault refuses a name already taken in the target folder, and its
+       * message says which — more useful than a generic failure. */
+      toast.error((e instanceof Error ? e.message : String(e)) || 'Failed to create')
+    }
     finally { createBusyRef.current = false }
   }
 

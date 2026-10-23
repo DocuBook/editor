@@ -516,18 +516,38 @@ impl Vault {
             current = dir.parent().map(Path::to_path_buf);
         }
     }
-/** Create an empty file, creating parent directories if needed. */
+/** Create an empty file, creating parent directories if needed. A name already
+ *  taken in the destination folder is refused, ignoring case: the tree must
+ *  never hold two entries a user reads as one, and a second create would
+ *  otherwise silently reuse (or, on a case-sensitive server, shadow) the first.
+ *  Only that folder is consulted — the same name in another folder is fine. */
     pub fn create_file(&self, path: &str) -> Result<String, String> {
+        let _write_guard = self.checked_write_lock.lock().map_err(|_| "Write lock poisoned".to_string())?;
         let f = self.safe_path(path)?;
+        let name = file_name_of(&f);
+        if let Some(p) = f.parent() { ensure_free_name(p, &name)?; }
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
-        if !f.exists() { std::fs::write(&f, "").map_err(|e| e.to_string())?; }
+        // `create_new` keeps the check honest under a race: two creates for the
+        // same name can both pass `ensure_free_name`, but only one gets the file.
+        std::fs::OpenOptions::new().write(true).create_new(true).open(&f)
+            .map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { already_exists(&name) } else { e.to_string() })?;
         self.invalidate_caches();
         Ok(path.to_string())
     }
 
-/** Create an empty directory (and parents). */
+/** Create an empty directory (and parents). Like `create_file`, a name already
+ *  taken in the destination folder is refused case-insensitively. */
     pub fn create_directory(&self, path: &str) -> Result<(), String> {
-        std::fs::create_dir_all(self.safe_path(path)?).map_err(|e| format!("Create dir: {}", e))?;
+        let _write_guard = self.checked_write_lock.lock().map_err(|_| "Write lock poisoned".to_string())?;
+        let d = self.safe_path(path)?;
+        let name = file_name_of(&d);
+        let Some(parent) = d.parent() else { return Err("Invalid folder name".to_string()) };
+        ensure_free_name(parent, &name)?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Create dir: {}", e))?;
+        // `create_dir` (not `create_dir_all`) fails when the entry already
+        // exists, so a concurrent create cannot be mistaken for success.
+        std::fs::create_dir(&d)
+            .map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { already_exists(&name) } else { format!("Create dir: {}", e) })?;
         self.invalidate_caches();
         Ok(())
     }
@@ -738,6 +758,29 @@ impl Vault {
         self.invalidate_caches();
         Ok(landed)
     }
+}
+
+/** The final path component, or an empty string when the path has none. */
+fn file_name_of(path: &Path) -> String {
+    path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+}
+
+/** The error a create reports when its name is already taken. */
+fn already_exists(name: &str) -> String {
+    format!("\"{name}\" already exists in this folder")
+}
+
+/** Refuse a create whose name is already taken in `parent`, ignoring case.
+ *  Scoped to that one folder: the same name in another folder is allowed, and a
+ *  parent that does not exist yet cannot hold a collision. */
+fn ensure_free_name(parent: &Path, name: &str) -> Result<(), String> {
+    if name.is_empty() { return Err("Invalid name".to_string()); }
+    if !parent.is_dir() { return Ok(()); }
+    let wanted = name.to_lowercase();
+    if dir_names(parent)?.contains(&wanted) {
+        return Err(already_exists(name));
+    }
+    Ok(())
 }
 
 /** Lowercased names inside `dir` — the collision set copy and move both check.
@@ -1012,6 +1055,82 @@ mod tests {
         let v = Vault::new(dir.to_str().unwrap()).unwrap();
         assert!(v.move_path("note.md", "archive").is_err());
         assert!(dir.join("note.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /** A create must not add a second row the user reads as the first: on the
+     *  desktop the vault is case-insensitive, on the server it is not, so the
+     *  check has to be explicit or the two runtimes disagree. */
+    #[test]
+    fn create_file_refuses_a_name_taken_in_the_same_folder() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-file-dup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("README.md"), "kept").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        let error = v.create_file("readme.md").unwrap_err();
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+        // Neither overwritten nor duplicated.
+        assert_eq!(std::fs::read_to_string(dir.join("README.md")).unwrap(), "kept");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /** The guard is scoped to the destination folder: the same name elsewhere is
+     *  a different entry, not a duplicate. */
+    #[test]
+    fn create_file_allows_the_same_name_in_another_folder() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-file-other-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("a")).unwrap();
+        std::fs::create_dir_all(dir.join("b")).unwrap();
+        std::fs::write(dir.join("a/README.md"), "x").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert_eq!(v.create_file("b/readme.md").unwrap(), "b/readme.md");
+        assert!(dir.join("b/readme.md").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_directory_refuses_a_name_taken_in_the_same_folder() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-dir-dup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Docs")).unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        let error = v.create_directory("docs").unwrap_err();
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_directory_allows_the_same_name_in_another_folder() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-dir-other-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        v.create_directory("a/Docs").unwrap();
+        v.create_directory("b/docs").unwrap();
+        assert!(dir.join("a/Docs").is_dir());
+        assert!(dir.join("b/docs").is_dir());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /** A folder and a file sharing one name would also render as a single row. */
+    #[test]
+    fn create_refuses_a_name_taken_by_the_other_kind() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-kind-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("Notes")).unwrap();
+        std::fs::write(dir.join("archive.md"), "x").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        assert!(v.create_file("notes").is_err());
+        assert!(v.create_directory("ARCHIVE.md").is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
