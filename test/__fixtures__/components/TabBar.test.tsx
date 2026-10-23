@@ -240,10 +240,23 @@ describe('responsive tabs', () => {
     const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
     expect(badge).not.toBeNull()
     expect(badge.textContent).toBe('3')
+    // Count alone — no icon competing with the number.
+    expect(badge.querySelector('svg')).toBeNull()
+    expect(badge.className).not.toContain('bg-accent-subtle')
     expect(badge.getAttribute('aria-expanded')).toBe('false')
 
     act(() => badge.click())
     expect(badge.getAttribute('aria-expanded')).toBe('true')
+    // Tinted while its switcher is open.
+    expect(badge.className).toContain('bg-accent-subtle')
+    expect(badge.className).toContain('text-accent')
+
+    const menu = document.querySelector<HTMLElement>('[role="menu"]')!
+    // dvh cap shrinks with the IME; 60vh is the no-dvh fallback.
+    expect(menu.className).toContain('max-h-[60vh]')
+    expect(menu.className).toContain('supports-[height:100dvh]:max-h-[min(60vh,calc(100dvh-6rem))]')
+    expect(menu.className).toContain('overflow-y-auto')
+    expect(menu.className).toContain('overscroll-contain')
 
     const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
     expect(rows.map(row => row.textContent)).toEqual([
@@ -259,6 +272,21 @@ describe('responsive tabs', () => {
     act(() => rows[2].click())
     expect(editorState.switchTab).toHaveBeenCalledWith('notes/last.md')
     expect(document.querySelector('[role="menu"]')).toBeNull()
+  })
+
+  it('gives the compact count badge a finger-sized tap target', () => {
+    renderTabBar(false)
+
+    const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
+    // Pill stays 24px tall so the bar does not look heavy.
+    expect(badge.className).toContain('h-6')
+    expect(badge.className).toContain('rounded-xl')
+    // ::after pads the hit area to 44x44 (10px above/below, 16px left).
+    expect(badge.className).toContain('after:absolute')
+    expect(badge.className).toContain('after:-inset-y-2.5')
+    expect(badge.className).toContain('after:-left-4')
+    // Stops at the row gap so the close button keeps its own taps.
+    expect(badge.className).toContain('after:-right-1')
   })
 
   it('drives the compact tab switcher from the keyboard', () => {
