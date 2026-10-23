@@ -13,6 +13,10 @@ pub(crate) use docubook_core::{agent, git, markdown, rust_ai, search, vault, wik
 // Desktop-only: OS keychain access (never compiled into the web server).
 mod keychain;
 
+// Desktop-only: the application menu — Cmd+W closes the active tab, not the
+// window (Tauri's default menu binds it to Close Window).
+mod menu;
+
 // Command layer — one module per responsibility. Files live in `lib/`;
 // the module is named `commands` because `lib` collides with the crate root
 // (lib.rs). Commands are referenced by full path in `generate_handler!`
@@ -40,6 +44,22 @@ pub(crate) struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .menu(menu::build)
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            // The frontend owns the tab list, so it decides what Cmd+W closes;
+            // Close Window keeps its own explicit shortcut.
+            menu::CLOSE_TAB => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.emit("app:close-tab", ());
+                }
+            }
+            menu::CLOSE_WINDOW => {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.close();
+                }
+            }
+            _ => {}
+        })
         .setup(|app| {
             let _ = commands::agent::initialize_mcp_settings(app.handle());
             if let Some(w) = app.get_webview_window("main") {

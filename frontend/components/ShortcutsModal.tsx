@@ -35,6 +35,7 @@ const SHORTCUTS = [
   { category: 'Editor', items: [
     { keys: '\u2318Z', desc: 'Undo' },
     { keys: '\u2318\u21E7Z / \u2318Y', desc: 'Redo' },
+    { keys: '\u2318W', desc: 'Close tab' },
     { keys: '\u2318\u21E7E', desc: 'Toggle WYSIWYG / Markdown' },
   ]},
   { category: 'AI & Settings', items: [

@@ -83,6 +83,7 @@
     "allow-read-wysiwyg-snapshot",
     "allow-write-wysiwyg-snapshot",
     "opener:default",
+    "core:window:allow-close",
     "core:window:allow-set-theme",
     "core:window:allow-start-dragging"
   ]

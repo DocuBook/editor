@@ -15,7 +15,7 @@ import { useVaultStore } from './stores/vault'
 import { useSyncStore, installSyncListeners, isSyncRecordInScope } from './stores/sync'
 import ConflictDialog from './components/ConflictDialog'
 import SyncStatusBadge from './components/editor/SyncStatusBadge'
-import { listen, invoke } from './lib/ipc'
+import { listen, invoke, closeWindow } from './lib/ipc'
 import { useAuth, useAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
 import Login from './components/Login'
@@ -188,6 +188,21 @@ export default function App() {
         logger.error('app_close_failed', { error })
         toast.error('App stayed open because changes could not be saved. Check disk access and try closing again.')
       }
+    }).then(u => { if (!cancelled) unsub = u })
+    return () => { cancelled = true; unsub?.() }
+  }, [])
+
+  /** Cmd+W arrives as a menu event: the native menu no longer closes the
+   *  window, it lets the frontend decide. Close the active tab, and only fall
+   *  back to closing the window once no tab is left — otherwise the shortcut
+   *  would silently become dead. */
+  useEffect(() => {
+    let unsub: (() => void) | undefined
+    let cancelled = false
+    listen('app:close-tab', () => {
+      const { activeTab, closeTab } = useEditorStore.getState()
+      if (activeTab) { void closeTab(activeTab); return }
+      void closeWindow().catch(error => logger.error('app_close_failed', { error }))
     }).then(u => { if (!cancelled) unsub = u })
     return () => { cancelled = true; unsub?.() }
   }, [])
