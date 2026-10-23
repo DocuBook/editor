@@ -1,4 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { Pencil } from 'lucide-react'
+import { toast } from 'sonner'
+import { invoke } from '../lib/ipc'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide from './OnboardingGuide'
@@ -27,6 +30,9 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
    *  (in the rail) and pins itself to the viewport, so it watches this element
    *  to know the scroll direction for its hide-on-scroll-down reveal. */
   const [editorScroll, setEditorScroll] = useState<HTMLDivElement | null>(null)
+  const [creatingNote, setCreatingNote] = useState(false)
+  const [noteName, setNoteName] = useState('')
+  const noteInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     clearEditorCache()
@@ -63,6 +69,23 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     }
   })
 
+  useEffect(() => { if (creatingNote) noteInputRef.current?.focus() }, [creatingNote])
+
+  const createNote = async () => {
+    const name = noteName.trim()
+    if (!name || !vaultOpen) return
+    const path = /\.\w{1,10}$/i.test(name) ? name : name + '.md'
+    try {
+      const createdPath = await invoke<string>('create_file', { path })
+      setCreatingNote(false)
+      setNoteName('')
+      await useEditorStore.getState().openFile(createdPath, path.split('/').pop() ?? path)
+    } catch (error) {
+      console.error(error)
+      toast.error('Failed to create')
+    }
+  }
+
   if (!file) {
     if (!onboardingDone && vaultOpen) {
       return (
@@ -78,7 +101,21 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
-        <div className="flex-1 flex items-center justify-center text-foreground-subtle text-sm italic">Select a file from the sidebar</div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-foreground-subtle text-sm">
+          {creatingNote ? (
+            <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void createNote() }}>
+              <input ref={noteInputRef} autoFocus value={noteName} onChange={e => setNoteName(e.target.value)} placeholder="Filename..." aria-label="Filename"
+                className="w-48 bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none"
+                onKeyDown={e => { if (e.key === 'Escape') { setCreatingNote(false); setNoteName('') } }} />
+              <button type="submit" disabled={!noteName.trim()} className="px-3 py-1.5 rounded bg-accent text-white text-[13px] cursor-pointer disabled:opacity-50">Create</button>
+            </form>
+          ) : <>
+            <span className="italic">Select a file from the sidebar</span>
+            {!isDesktop && <button type="button" onClick={() => setCreatingNote(true)} className="inline-flex items-center gap-2 rounded px-3 py-2 text-foreground-secondary hover:bg-surface-active cursor-pointer">
+              <Pencil size={15} /> New note
+            </button>}
+          </>}
+        </div>
       </div>
     )
   }
