@@ -82,7 +82,9 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
       await useEditorStore.getState().openFile(createdPath, path.split('/').pop() ?? path)
     } catch (error) {
       console.error(error)
-      toast.error('Failed to create')
+      /* The vault refuses a name already taken in the target folder; show why
+       * instead of a generic failure. */
+      toast.error((error instanceof Error ? error.message : String(error)) || 'Failed to create')
     }
   }
 
