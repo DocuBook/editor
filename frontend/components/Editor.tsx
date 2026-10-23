@@ -101,17 +101,17 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
     return (
       <div className="flex-1 flex flex-col min-w-0 min-h-0">
         <TabBar sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
-        <div className="flex-1 flex flex-col items-center justify-center gap-3 text-foreground-subtle text-sm">
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 px-4 text-foreground-subtle text-sm">
           {creatingNote ? (
             <form className="flex items-center gap-2" onSubmit={e => { e.preventDefault(); void createNote() }}>
               <input ref={noteInputRef} autoFocus value={noteName} onChange={e => setNoteName(e.target.value)} placeholder="Filename..." aria-label="Filename"
                 className="w-48 bg-background text-foreground text-[13px] px-2.5 py-1.5 rounded border border-accent outline-none"
                 onKeyDown={e => { if (e.key === 'Escape') { setCreatingNote(false); setNoteName('') } }} />
-              <button type="submit" disabled={!noteName.trim()} className="px-3 py-1.5 rounded bg-accent text-white text-[13px] cursor-pointer disabled:opacity-50">Create</button>
+              <button type="submit" disabled={!noteName.trim()} className="px-3 py-1.5 rounded-md bg-accent text-on-accent border-none text-[13px] font-medium cursor-pointer hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed">Create</button>
             </form>
           ) : <>
-            <span className="italic">Select a file from the sidebar</span>
-            {!isDesktop && <button type="button" onClick={() => setCreatingNote(true)} className="inline-flex items-center gap-2 rounded px-3 py-2 text-foreground-secondary hover:bg-surface-active cursor-pointer">
+            {isDesktop && <span className="italic">Select a file from the sidebar</span>}
+            {!isDesktop && <button type="button" onClick={() => setCreatingNote(true)} className="inline-flex items-center gap-2 rounded-md border border-border bg-transparent px-4 py-2.5 text-[13px] font-medium text-foreground cursor-pointer hover:bg-surface-active transition-colors">
               <Pencil size={15} /> New note
             </button>}
           </>}

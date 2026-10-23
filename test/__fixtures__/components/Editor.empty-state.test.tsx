@@ -60,8 +60,11 @@ describe('Editor empty state', () => {
 
   it('shows New note on compact screens and opens an inline filename input', () => {
     render(false)
+    expect(container.textContent).not.toContain('Select a file from the sidebar')
     const button = Array.from(container.querySelectorAll('button')).find(node => node.textContent?.includes('New note'))!
     expect(button).toBeDefined()
+    expect(button.className).toContain('border-border')
+    expect(button.className).toContain('bg-transparent')
     act(() => button.click())
     expect(container.querySelector('input[aria-label="Filename"]')).not.toBeNull()
   })
