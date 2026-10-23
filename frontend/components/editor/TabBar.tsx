@@ -17,16 +17,11 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [actionsOpen, setActionsOpen] = useState(false)
-  /** Compact tab switcher: below 640px only the active tab is rendered, so the
-   *  count badge on it is the only way to reach another open tab. */
   const [tabsOpen, setTabsOpen] = useState(false)
   const badgeRef = useRef<HTMLButtonElement>(null)
   const tabsMenuRef = useRef<HTMLDivElement>(null)
-  /** Which row takes focus when the switcher opens: the open tab for a click,
-   *  the last row for ArrowUp (menu-button pattern). */
   const initialFocusRef = useRef<'checked' | 'first' | 'last'>('checked')
-  /** The menu is a sibling of the trigger (it spans the bar, not the tab), so
-   *  dismissing on an outside press needs both elements, not one ref. */
+
   useEffect(() => {
     if (!tabsOpen) return
     const onMouseDown = (e: MouseEvent) => {
@@ -38,28 +33,15 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
     window.addEventListener('mousedown', onMouseDown)
     return () => window.removeEventListener('mousedown', onMouseDown)
   }, [tabsOpen])
-  /** Detected editors are cached per file path, so a slow response for the
-   *  previous tab can never paint under the current one. */
+
   const [detected, setDetected] = useState<{ forPath: string | null; list: EditorApp[] }>({ forPath: null, list: [] })
   const actionsRef = useRef<HTMLSpanElement>(null)
   useClickOutside(actionsRef, () => setActionsOpen(false))
   const file = useEditorStore(s => s.tabs.find(t => t.path === s.activeTab))
-  /** Compact web (<640px, Docker/web only — native macOS untouched):
-   *  single row keeps [panel|search] + tabs + Actions; undo/redo + mode
-   *  toggle move into the Actions menu. Every other layout uses the same menu
-   *  behind an icon trigger. Git actions live in Changes. */
   const compact = !isTauri && !isDesktop
-  /** Trigger presentation is pure viewport width, independent of runtime: below
-   *  640px the menu stays the compact text trigger, at/above it becomes the
-   *  icon trigger. `compact` still owns the web-only layout changes. */
   const compactTrigger = !isDesktop
   const visibleTabs = compact ? tabs.filter(tab => tab.path === activeTab) : tabs
-  /** Compact renders exactly one row, so the row is keyed by a constant: the
-   *  node (and the focused badge inside it) survives a tab switch instead of
-   *  being replaced, which would drop focus on the body. */
   const tabRowKey = (path: string) => (compact ? 'compact-active-tab' : path)
-  /** A single tab needs no switcher — the badge would only list the tab you are
-   *  already looking at. */
   const showTabCount = compact && tabs.length > 1
 
   /** The last extra tab closing (Cmd+W) must not leave a switcher for a list
@@ -112,8 +94,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   const filePath = file?.path
   const fileDeleted = !!file?.deleted
   const editors = detected.forPath === filePath ? detected.list : []
-  /** Fetch on open, not in an effect: the menu is the only consumer, and a
-   *  failure just falls back to the generic "Open in editor" row. */
+
   const toggleActions = () => {
     const next = !actionsOpen
     setActionsOpen(next)
@@ -123,11 +104,8 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       .catch(() => setDetected({ forPath: filePath, list: [] }))
   }
   const closeActions = () => setActionsOpen(false)
-  /** Only .md files can toggle Editor ↔ Code; a read-only diff tab cannot. */
   const toggleable = file ? editorFileKind(file.path) === 'wysiwyg' && file.view !== 'diff' : false
 
-  /** External editor reads the file from disk, so pending autosave edits must
-   *  land first — otherwise the editor opens a stale document. */
   const openInEditor = async (app?: string) => {
     if (!file) return
     try {
@@ -155,10 +133,6 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   /** Subscribe to activeTab separately for tab-switch effect */
   const curTab = useEditorStore(s => s.activeTab)
 
-  /** Keep the active tab visible — when switching to a tab beyond the visible
-   *  edge (overflow-x), auto-scroll it into view instead of forcing the user
-   *  to manually scroll the tab strip. A small end-margin keeps the tab from
-   *  sitting flush against the strip edge. */
   const tabStripRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const strip = tabStripRef.current
@@ -178,9 +152,6 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
   }, [curTab])
 
   return (
-    /** The bar is the full-width chrome strip (background + hairline + drag
-     *  region); `-track` inside is the layout row, so the background spans edge
-     *  to edge on wide displays where the row itself is centred and capped. */
     <TopBarShell dragRegion={isMacTauri} className={(compact ? 'gap-2 pl-4 pr-4 ' : 'gap-3 pr-6 ') + (!compact && isMacTauri && !sidebarOpen ? 'pl-20' : !compact ? 'pl-6' : '')}>
       <SidebarToggle sidebarOpen={sidebarOpen} isDesktop={isDesktop} sidebarToggleRef={sidebarToggleRef} onToggleSidebar={onToggleSidebar} onOpenSearch={onOpenSearch} />
       {!compactTrigger && (
@@ -205,18 +176,23 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
                     setTabsOpen(true)
                   }
                 }} aria-label={`Open tabs (${tabs.length})`} aria-haspopup="menu" aria-expanded={tabsOpen} aria-controls={tabsOpen ? TABS_MENU_ID : undefined} title={`${tabs.length} open tabs`}
-                className="flex h-5 min-w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border-subtle bg-background px-1.5 text-[10px] font-semibold text-foreground-secondary transition-colors hover:border-border hover:text-foreground">{tabs.length}</button>
+                className={'relative flex h-6 min-w-6 shrink-0 cursor-pointer items-center justify-center px-2 text-[11px] font-semibold tabular-nums rounded-xl border transition-colors ' +
+                  // ::after pads the 24px pill to a ~44px tap target, stopping short on the right so a tap meant for the close button never hits it.
+                  'after:absolute after:-left-4 after:-right-1 after:-inset-y-2.5 after:content-[""] ' +
+                  (tabsOpen
+                    ? 'border-accent bg-accent-subtle text-accent'
+                    : 'border-border-subtle bg-background text-foreground-secondary hover:border-border hover:text-foreground active:bg-surface-active')}>
+                {tabs.length}
+              </button>
             )}
             <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} aria-label={'Close ' + tab.name} style={compact ? { opacity: 1, pointerEvents: 'auto' } : undefined} className={'tab-close-btn border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity ' + (compact ? 'shrink-0' : 'absolute right-1')}><X size={14} /></button>
           </div>
         ))}
       </div>
 
-      {/* Anchored to the bar, not the badge: a menu pinned to the tab would run
-          off the edge of a 320px screen, while the bar is always on screen. */}
       {showTabCount && tabsOpen && (
         <div ref={tabsMenuRef} id={TABS_MENU_ID} role="menu" aria-label="Open tabs" onKeyDown={onTabsMenuKeyDown}
-          className="ui-popover absolute inset-x-4 top-full z-100 mt-1 max-h-[60vh] overflow-y-auto p-1">
+          className="ui-popover absolute inset-x-4 top-full z-100 mt-1 max-h-[60vh] overflow-y-auto overscroll-contain p-1 supports-[height:100dvh]:max-h-[min(60vh,calc(100dvh-6rem))]">
           {tabs.map(open => (
             <button key={open.path} role="menuitemradio" aria-checked={open.path === activeTab} tabIndex={-1}
               onClick={() => selectTab(open.path)}
