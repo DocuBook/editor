@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type RefObject } from 'react'
-import { X, ChevronDown, ChevronLeft, ChevronRight, Share } from 'lucide-react'
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type RefObject } from 'react'
+import { X, Check, ChevronDown, ChevronLeft, ChevronRight, Share } from 'lucide-react'
 import { toast } from 'sonner'
 import { useEditorStore } from '../../stores/editor'
 import { invoke, isMacTauri, isTauri } from '../../lib/ipc'
@@ -10,10 +10,34 @@ import { TopBarShell } from '../TopBarShell'
 import { EditorActionsMenu } from './editorActions'
 import { buildEditorActions, type EditorApp } from './editorActionItems'
 
+/** Ties the count badge to the popover it expands (`aria-controls`). */
+const TABS_MENU_ID = 'editor-tab-switcher'
+
 export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSidebar, onOpenSearch }: { sidebarOpen: boolean; isDesktop: boolean; sidebarToggleRef: RefObject<HTMLButtonElement | null>; onToggleSidebar: () => void; onOpenSearch: () => void }) {
   const { undo, redo, canUndo, canRedo } = useEditorStore()
   const { activeTab, tabs, switchTab, closeTab, editMode } = useEditorStore()
   const [actionsOpen, setActionsOpen] = useState(false)
+  /** Compact tab switcher: below 640px only the active tab is rendered, so the
+   *  count badge on it is the only way to reach another open tab. */
+  const [tabsOpen, setTabsOpen] = useState(false)
+  const badgeRef = useRef<HTMLButtonElement>(null)
+  const tabsMenuRef = useRef<HTMLDivElement>(null)
+  /** Which row takes focus when the switcher opens: the open tab for a click,
+   *  the last row for ArrowUp (menu-button pattern). */
+  const initialFocusRef = useRef<'checked' | 'first' | 'last'>('checked')
+  /** The menu is a sibling of the trigger (it spans the bar, not the tab), so
+   *  dismissing on an outside press needs both elements, not one ref. */
+  useEffect(() => {
+    if (!tabsOpen) return
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as Node | null
+      if (!target) return
+      if (tabsMenuRef.current?.contains(target) || badgeRef.current?.contains(target)) return
+      setTabsOpen(false)
+    }
+    window.addEventListener('mousedown', onMouseDown)
+    return () => window.removeEventListener('mousedown', onMouseDown)
+  }, [tabsOpen])
   /** Detected editors are cached per file path, so a slow response for the
    *  previous tab can never paint under the current one. */
   const [detected, setDetected] = useState<{ forPath: string | null; list: EditorApp[] }>({ forPath: null, list: [] })
@@ -30,6 +54,60 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
    *  icon trigger. `compact` still owns the web-only layout changes. */
   const compactTrigger = !isDesktop
   const visibleTabs = compact ? tabs.filter(tab => tab.path === activeTab) : tabs
+  /** Compact renders exactly one row, so the row is keyed by a constant: the
+   *  node (and the focused badge inside it) survives a tab switch instead of
+   *  being replaced, which would drop focus on the body. */
+  const tabRowKey = (path: string) => (compact ? 'compact-active-tab' : path)
+  /** A single tab needs no switcher — the badge would only list the tab you are
+   *  already looking at. */
+  const showTabCount = compact && tabs.length > 1
+
+  /** The last extra tab closing (Cmd+W) must not leave a switcher for a list
+   *  that no longer exists. */
+  /* oxlint-disable react/set-state-in-effect -- closes the switcher with its list */
+  useEffect(() => { if (!showTabCount) setTabsOpen(false) }, [showTabCount])
+  /* oxlint-enable react/set-state-in-effect */
+
+  /** Open on the tab you are looking at, so the first Enter keeps you there
+   *  instead of jumping somewhere else. `scrollIntoView` is absent in jsdom. */
+  useEffect(() => {
+    const menu = tabsMenuRef.current
+    if (!tabsOpen || !menu) return
+    const rows = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    const checked = rows.find(row => row.getAttribute('aria-checked') === 'true')
+    const target = initialFocusRef.current === 'last' ? rows[rows.length - 1]
+      : initialFocusRef.current === 'first' ? rows[0]
+      : checked ?? rows[0]
+    initialFocusRef.current = 'checked'
+    target?.focus()
+    target?.scrollIntoView?.({ block: 'nearest' })
+  }, [tabsOpen])
+
+  /** Picking a tab closes the switcher, which would otherwise drop focus on the
+   *  body; hand it back to the trigger that opened it. */
+  const selectTab = (path: string) => {
+    void switchTab(path)
+    setTabsOpen(false)
+    badgeRef.current?.focus()
+  }
+
+  /** Arrow keys are part of the menu pattern the popover already claims. Without
+   *  them the switcher — the only way to reach another tab below 640px — could
+   *  not be driven from the keyboard at all. */
+  const onTabsMenuKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const rows = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'))
+    if (rows.length === 0) return
+    const current = rows.indexOf(document.activeElement as HTMLButtonElement)
+    const focusAt = (index: number) => rows[(index + rows.length) % rows.length].focus()
+    switch (e.key) {
+      case 'ArrowDown': e.preventDefault(); focusAt(current + 1); break
+      case 'ArrowUp': e.preventDefault(); focusAt(current - 1); break
+      case 'Home': e.preventDefault(); focusAt(0); break
+      case 'End': e.preventDefault(); focusAt(rows.length - 1); break
+      case 'Escape': e.preventDefault(); setTabsOpen(false); badgeRef.current?.focus(); break
+      case 'Tab': setTabsOpen(false); break
+    }
+  }
 
   const filePath = file?.path
   const fileDeleted = !!file?.deleted
@@ -113,13 +191,42 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
       )}
       <div ref={tabStripRef} data-tauri-drag-region={isMacTauri ? true : undefined} className={'tab-strip flex-1 min-w-0 flex items-stretch h-full overflow-y-hidden scrollbar-none ' + (compact ? 'overflow-hidden' : 'overflow-x-auto')}>
         {tabs.length === 0 ? <span className="text-foreground-subtle italic self-center">No file open</span> : visibleTabs.map(tab => (
-          <div key={tab.path} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
-            className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-4 pr-8 ' : 'whitespace-nowrap shrink-0 px-8 ') + (activeTab === tab.path ? 'tab-active text-foreground' : 'tab-inactive text-foreground-subtle')}>
-            <span title={compact ? tab.name : undefined} className={(compact ? 'min-w-0 truncate ' : '') + (tab.deleted ? 'line-through opacity-50' : '')}>{tab.name}</span>
-            <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} aria-label={'Close ' + tab.name} style={compact ? { opacity: 1, pointerEvents: 'auto' } : undefined} className="tab-close-btn absolute right-1 border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity"><X size={14} /></button>
+          <div key={tabRowKey(tab.path)} data-tab-path={tab.path} onClick={() => switchTab(tab.path)}
+            className={'tab-item flex items-center justify-center relative cursor-pointer ' + (compact ? 'flex-1 min-w-0 pl-4 pr-1 gap-1 ' : 'whitespace-nowrap shrink-0 px-8 ') + (activeTab === tab.path ? 'tab-active text-foreground' : 'tab-inactive text-foreground-subtle')}>
+            <span title={compact ? tab.name : undefined} className={(compact ? 'min-w-0 flex-1 truncate ' : '') + (tab.deleted ? 'line-through opacity-50' : '')}>{tab.name}</span>
+            {showTabCount && (
+              <button ref={badgeRef} type="button" onClick={e => { e.stopPropagation(); setTabsOpen(value => !value) }}
+                onKeyDown={e => {
+                  if (e.key === 'Escape') { setTabsOpen(false); return }
+                  // A menu button also opens on the arrow keys that navigate it.
+                  if (!tabsOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                    e.preventDefault()
+                    initialFocusRef.current = e.key === 'ArrowUp' ? 'last' : 'checked'
+                    setTabsOpen(true)
+                  }
+                }} aria-label={`Open tabs (${tabs.length})`} aria-haspopup="menu" aria-expanded={tabsOpen} aria-controls={tabsOpen ? TABS_MENU_ID : undefined} title={`${tabs.length} open tabs`}
+                className="flex h-5 min-w-5 shrink-0 cursor-pointer items-center justify-center rounded-full border border-border-subtle bg-background px-1.5 text-[10px] font-semibold text-foreground-secondary transition-colors hover:border-border hover:text-foreground">{tabs.length}</button>
+            )}
+            <button onClick={e => { e.stopPropagation(); closeTab(tab.path) }} aria-label={'Close ' + tab.name} style={compact ? { opacity: 1, pointerEvents: 'auto' } : undefined} className={'tab-close-btn border-none bg-transparent cursor-pointer p-1 rounded text-foreground-subtle transition-opacity ' + (compact ? 'shrink-0' : 'absolute right-1')}><X size={14} /></button>
           </div>
         ))}
       </div>
+
+      {/* Anchored to the bar, not the badge: a menu pinned to the tab would run
+          off the edge of a 320px screen, while the bar is always on screen. */}
+      {showTabCount && tabsOpen && (
+        <div ref={tabsMenuRef} id={TABS_MENU_ID} role="menu" aria-label="Open tabs" onKeyDown={onTabsMenuKeyDown}
+          className="ui-popover absolute inset-x-4 top-full z-100 mt-1 max-h-[60vh] overflow-y-auto p-1">
+          {tabs.map(open => (
+            <button key={open.path} role="menuitemradio" aria-checked={open.path === activeTab} tabIndex={-1}
+              onClick={() => selectTab(open.path)}
+              className={'flex w-full cursor-pointer items-center gap-2 rounded border-none px-2.5 py-1.5 text-left text-[13px] hover:bg-surface-active ' + (open.path === activeTab ? 'bg-surface-active text-foreground' : 'bg-transparent text-foreground-secondary')}>
+              <span className={'min-w-0 flex-1 truncate ' + (open.deleted ? 'line-through opacity-50' : '')}>{open.name}</span>
+              {open.path === activeTab && <Check size={13} aria-hidden="true" className="shrink-0 text-accent" />}
+            </button>
+          ))}
+        </div>
+      )}
 
       <span className="relative shrink-0" ref={actionsRef}>
         <button onClick={toggleActions} aria-label="More actions" title="More actions" aria-expanded={actionsOpen}
