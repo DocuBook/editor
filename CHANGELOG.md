@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.4.0 — 2026-10-24
+
+
+### 🚀 Features
+
+* **auth:** enforce password policy with live setup checklist ([#315](https://github.com/DocuBook/editor/issues/315)) ([6230c19](https://github.com/DocuBook/editor/commit/6230c192d391aa6f603c690e8bb1fbc281ab24a3))
+* **editor:** add compact empty-state new note action ([#313](https://github.com/DocuBook/editor/issues/313)) ([7053e01](https://github.com/DocuBook/editor/commit/7053e0199399440efb98113f110fc7cbd4b9b65f))
+* **rust-ai:** page large MCP context results instead of rejecting them ([cff32c1](https://github.com/DocuBook/editor/commit/cff32c126ddfc0b1840d4cff0a98fcaabaae359c))
+
+
+### 🐛 Bug Fixes
+
+* **ai:** preserve text outside selected range ([#309](https://github.com/DocuBook/editor/issues/309)) ([7d2737a](https://github.com/DocuBook/editor/commit/7d2737a9ab2306ec1c40841e870c4d5a2b8a438c))
+* **ai:** scope SSE cancellation to page lifecycle ([#307](https://github.com/DocuBook/editor/issues/307)) ([27319e4](https://github.com/DocuBook/editor/commit/27319e4ca0265c73fc8c0a0bfbe892aabdcdfc34))
+* **ai:** show "Generating…" until operations reach the editor ([#306](https://github.com/DocuBook/editor/issues/306)) ([03f8139](https://github.com/DocuBook/editor/commit/03f81394ce3b1f3c583f4714a53d48e58f3fedf6))
+* **editor:** close the active tab on cmd+w and polish the compact switcher ([#310](https://github.com/DocuBook/editor/issues/310)) ([d8e7a09](https://github.com/DocuBook/editor/commit/d8e7a095ae914c46706f7090024234cb2011f5c7))
+* **editor:** enlarge compact tab badge tap target and ime-aware switcher ([#312](https://github.com/DocuBook/editor/issues/312)) ([96f83f9](https://github.com/DocuBook/editor/commit/96f83f947f9598b78f0b3ee0ca6b487948301fa1))
+* **editor:** hide compact empty-state prompt and outline the new note action ([e0841be](https://github.com/DocuBook/editor/commit/e0841be105ebb94fcbce77ebcb1e1030452013ad))
+* **frontend:** adjust code block spacing ([0922460](https://github.com/DocuBook/editor/commit/092246043f768be5530da1d661a499d579fac6c3))
+* **rust-ai:** honor Stop during stalled streams and poisoned locks ([#301](https://github.com/DocuBook/editor/issues/301)) ([cf4c632](https://github.com/DocuBook/editor/commit/cf4c6321a2eaa06000d14d3ae600e1ee4b62e8cd))
+* **rust-ai:** use secure context result handles ([58945eb](https://github.com/DocuBook/editor/commit/58945eb30482722ee131d95f631d4aa48640c02a))
+* **settings:** render MCP edit Save/Cancel as real buttons ([#316](https://github.com/DocuBook/editor/issues/316)) ([00fab85](https://github.com/DocuBook/editor/commit/00fab854ad20492bf04c2cdc604825a4507c3129))
+* **tauri:** extend macOS overlay drag region ([#308](https://github.com/DocuBook/editor/issues/308)) ([2969616](https://github.com/DocuBook/editor/commit/29696168513af420060576850c63957b83187ff0))
+* **vault:** prevent duplicate names on creation ([#314](https://github.com/DocuBook/editor/issues/314)) ([2d2cf39](https://github.com/DocuBook/editor/commit/2d2cf39645b7fb930e9a7e21bfa37d391c077915))
+
+
+### 🛡️ Security
+
+* **editor:** harden note content surfaces and scope sync per vault ([#304](https://github.com/DocuBook/editor/issues/304)) ([bfde2c4](https://github.com/DocuBook/editor/commit/bfde2c4119cb36d272b7862ea581f97bf9e3f2d3))
+
 ## v0.3.0 — 2026-10-20
 
 
