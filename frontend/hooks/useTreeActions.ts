@@ -141,7 +141,11 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
        * folder (A -> Z then new file lands in A/). */
       if (renaming.type === '1') remapFolder(renaming.path, newPath)
       await loadTree()
-    } catch(err) { console.error(err); toast.error('Failed to rename') }
+    } catch(err) {
+      console.error(err)
+      // The vault refuses a name another entry holds and says which.
+      toast.error((err instanceof Error ? err.message : String(err)) || 'Failed to rename')
+    }
     setRenaming(null)
   }
 
