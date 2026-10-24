@@ -675,6 +675,16 @@ impl Vault {
         let _snapshot_guard = self.snapshot_lock.lock().map_err(|_| "Snapshot lock poisoned".to_string())?;
         let src = self.safe_path(from)?;
         let dst = self.safe_path(to)?;
+        // `std::fs::rename` silently replaces its target, so refuse any other entry
+        // that holds the name (ignoring case, as create and move do). The entry
+        // itself may still be renamed onto its own name or only re-cased.
+        if let Some(parent) = dst.parent().filter(|p| p.is_dir()) {
+            let wanted = file_name_of(&dst).to_lowercase();
+            let clash = std::fs::read_dir(parent).map_err(|e| format!("Rename: {e}"))?
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().to_lowercase() == wanted && !same_entry(&entry.path(), &src));
+            if clash { return Err(already_exists(&file_name_of(&dst))); }
+        }
         let is_dir = std::fs::symlink_metadata(&src).map(|m| m.file_type().is_dir()).unwrap_or(false);
         if let Some(p) = dst.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
         std::fs::rename(&src, &dst).map_err(|e| format!("Rename: {}", e))?;
@@ -763,6 +773,23 @@ impl Vault {
 /** The final path component, or an empty string when the path has none. */
 fn file_name_of(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+}
+
+/** Whether `a` and `b` name the same directory entry. Compares inodes on unix;
+ *  elsewhere, a case-only match within one folder. */
+fn same_entry(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match (std::fs::symlink_metadata(a), std::fs::symlink_metadata(b)) {
+            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+            _ => false,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        a.parent() == b.parent() && file_name_of(a).eq_ignore_ascii_case(&file_name_of(b))
+    }
 }
 
 /** The error a create reports when its name is already taken. */
@@ -1557,5 +1584,36 @@ mod tests {
             content_version("# Title\n\nbody with émoji 🎉".as_bytes()),
             "92709619a2fcf94b"
         );
+    }
+
+    #[test]
+    fn rename_refuses_to_overwrite_another_entry() {
+        let dir = std::env::temp_dir().join(format!("docubook-rename-clash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.md"), "mine").unwrap();
+        std::fs::write(dir.join("b.md"), "theirs").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        let error = v.rename_file("a.md", "b.md").unwrap_err();
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+        // Nothing was replaced.
+        assert_eq!(std::fs::read_to_string(dir.join("a.md")).unwrap(), "mine");
+        assert_eq!(std::fs::read_to_string(dir.join("b.md")).unwrap(), "theirs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_allows_a_case_only_change_of_the_same_entry() {
+        let dir = std::env::temp_dir().join(format!("docubook-rename-case-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("note.md"), "body").unwrap();
+
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+        v.rename_file("note.md", "Note.md").unwrap();
+        assert!(std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name() == "Note.md"));
+        assert_eq!(std::fs::read_to_string(dir.join("Note.md")).unwrap(), "body");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
