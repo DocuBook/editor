@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { Pencil } from 'lucide-react'
 import { toast } from 'sonner'
-import { invoke } from '../lib/ipc'
+import { createEntry } from '../utils/createEntry'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore } from '../stores/vault'
 import OnboardingGuide from './OnboardingGuide'
@@ -74,12 +74,10 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   const createNote = async () => {
     const name = noteName.trim()
     if (!name || !vaultOpen) return
-    const path = /\.\w{1,10}$/i.test(name) ? name : name + '.md'
     try {
-      const createdPath = await invoke<string>('create_file', { path })
+      await createEntry('file', name)
       setCreatingNote(false)
       setNoteName('')
-      await useEditorStore.getState().openFile(createdPath, path.split('/').pop() ?? path)
     } catch (error) {
       console.error(error)
       /* The vault refuses a name already taken in the target folder; show why

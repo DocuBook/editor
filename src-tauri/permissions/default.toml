@@ -15,8 +15,7 @@ permissions = [
   "allow-call-context-tool",
   "allow-close-vault",
   "allow-copy-path",
-  "allow-create-directory",
-  "allow-create-file",
+  "allow-create-entry",
   "allow-create-vault",
   "allow-custom-ai-config",
   "allow-delete-api-key",
@@ -194,24 +193,14 @@ description = "Denies the copy_path command."
 commands.deny = ["copy_path"]
 
 [[permission]]
-identifier = "allow-create-directory"
-description = "Enables the create_directory command."
-commands.allow = ["create_directory"]
+identifier = "allow-create-entry"
+description = "Enables the create_entry command."
+commands.allow = ["create_entry"]
 
 [[permission]]
-identifier = "deny-create-directory"
-description = "Denies the create_directory command."
-commands.deny = ["create_directory"]
-
-[[permission]]
-identifier = "allow-create-file"
-description = "Enables the create_file command."
-commands.allow = ["create_file"]
-
-[[permission]]
-identifier = "deny-create-file"
-description = "Denies the create_file command."
-commands.deny = ["create_file"]
+identifier = "deny-create-entry"
+description = "Denies the create_entry command."
+commands.deny = ["create_entry"]
 
 [[permission]]
 identifier = "allow-create-vault"
