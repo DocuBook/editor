@@ -409,7 +409,7 @@ mod api_tests {
         // Limiter blocks when count > MAX_ATTEMPTS(5) — 6 bad requests pass,
         // the 7th is rate-limited (429). Matches auth.rs limiter semantics.
         for i in 0..7 {
-            // invalid email "x" → 400 + limiter.fail; 7th must be blocked
+            // invalid email "x" → 400, counted by limiter.check; 7th must be blocked
             let (s, _, _) = post(
                 &app,
                 "/api/setup_admin",
