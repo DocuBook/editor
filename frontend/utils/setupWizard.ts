@@ -2,6 +2,8 @@
  *  token-gate fix is unit-testable without rendering the component (node env,
  *  no jsdom). Behavior is identical to the inline code it replaces. */
 
+import { passwordError } from './passwordPolicy'
+
 export interface SetupInput {
   email: string
   password: string
@@ -11,10 +13,11 @@ export interface SetupInput {
 }
 
 /** Returns an error message, or null when the input is valid. Order matters:
- *  email → password length → confirm match → setup token (server-gated). */
+ *  email → password policy → confirm match → setup token (server-gated). */
 export function validateSetupInput({ email, password, confirm, token, tokenRequired }: SetupInput): string | null {
   if (!email.includes('@')) return 'Enter a valid email'
-  if (password.length < 8) return 'Password must be at least 8 characters'
+  const pwErr = passwordError(password)
+  if (pwErr) return pwErr
   if (password !== confirm) return 'Passwords do not match'
   if (tokenRequired && !token.trim()) return 'Setup token is required — check the server env (DB_SETUP_TOKEN)'
   return null

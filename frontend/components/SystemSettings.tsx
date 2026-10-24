@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { invoke, isTauri } from '../lib/ipc'
 import { useAuth } from '../stores/auth'
 import PasswordInput from './PasswordInput'
+import PasswordRequirements from './PasswordRequirements'
+import { passwordError } from '../utils/passwordPolicy'
 import { toast } from 'sonner'
 
 interface ConfigView {
@@ -29,7 +31,8 @@ export default function SystemSettings() {
   const changePw = async (e: React.FormEvent) => {
     e.preventDefault()
     setPwMsg('')
-    if (newPw.length < 8) { setPwMsg('Password must be at least 8 characters'); return }
+    const pwErr = passwordError(newPw)
+    if (pwErr) { setPwMsg(pwErr); return }
     if (newPw !== confirmPw) { setPwMsg('Passwords do not match'); return }
     setBusy(true)
     try {
@@ -78,6 +81,7 @@ export default function SystemSettings() {
                 <div className="flex-1">
                   <label className={label}>New password</label>
                   <PasswordInput value={newPw} onChange={setNewPw} className={input} />
+                  <PasswordRequirements password={newPw} />
                 </div>
                 <div className="flex-1">
                   <label className={label}>Confirm</label>

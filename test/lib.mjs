@@ -150,7 +150,7 @@ export async function runSuite(name, opts, body) {
     context = {},
     dataDir = `/tmp/docubook-e2e-${name}`,
     vaultPath = `${dataDir}/vaults/myva`,
-    admin = { email: `${name}@test.dev`, password: 'password1' },
+    admin = { email: `${name}@test.dev`, password: 'Password1!' },
     seed = [],
     setup,
     allow = [],

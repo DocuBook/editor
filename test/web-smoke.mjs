@@ -9,7 +9,7 @@
  */
 import { runSuite, PORTS } from './lib.mjs'
 
-const ADMIN = { email: 'e2e@test.dev', password: 'password1' }
+const ADMIN = { email: 'e2e@test.dev', password: 'Password1!' }
 const SETUP_TOKEN = 'web-smoke-setup-token'
 const click = (name) => `button:has-text("${name}")`
 /** The post-auth shell: setup done and a vault prompt is showing. */
@@ -42,7 +42,7 @@ await runSuite('web-smoke', {
   })
   ok('setup contract: config cannot bypass admin creation', configBeforeSetup.status === 401, String(configBeforeSetup.status))
   await page.fill('input[type="email"]', ADMIN.email)
-  await page.fill('input[placeholder="Password (min 8 chars)"]', ADMIN.password)
+  await page.fill('input[placeholder="Password"]', ADMIN.password)
   await page.fill('input[placeholder="Confirm password"]', ADMIN.password)
   await page.fill('input[placeholder="Setup token (DB_SETUP_TOKEN)"]', SETUP_TOKEN)
   await page.locator(click('Create admin account')).click()
