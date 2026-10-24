@@ -241,7 +241,7 @@ describe('SidebarContextMenu in the Sidebar', () => {
     act(() => pressEnter(inlineInput()))
     await flush()
 
-    expect(ipc.invoke).toHaveBeenCalledWith('create_file', { path: 'notes/launch.md' })
+    expect(ipc.invoke).toHaveBeenCalledWith('create_entry', { kind: 'file', path: 'notes/launch' })
   })
 
   /** A folder row targets that folder, and expanding it is what keeps the new
@@ -262,7 +262,7 @@ describe('SidebarContextMenu in the Sidebar', () => {
     act(() => pressEnter(inlineInput()))
     await flush()
 
-    expect(ipc.invoke).toHaveBeenCalledWith('create_directory', { path: 'notes/drafts' })
+    expect(ipc.invoke).toHaveBeenCalledWith('create_entry', { kind: 'folder', path: 'notes/drafts' })
   })
 
   /** Paste is not always active: it reads the app's file clipboard

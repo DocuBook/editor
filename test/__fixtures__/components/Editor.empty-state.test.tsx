@@ -8,6 +8,7 @@ import Editor from '../../../frontend/components/Editor'
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   openFile: vi.fn(),
+  loadTree: vi.fn(),
   vaultOpen: true,
 }))
 
@@ -16,7 +17,7 @@ vi.mock('../../../frontend/stores/editor', () => ({
   useEditorStore: Object.assign((selector: ((state: unknown) => unknown) | undefined) => selector ? selector({ editMode: 'editor', tabs: [], activeTab: null }) : ({ editMode: 'editor', tabs: [], activeTab: null }), { getState: () => ({ openFile: mocks.openFile }) }),
 }))
 vi.mock('../../../frontend/stores/vault', () => ({
-  useVaultStore: (selector: (state: unknown) => unknown) => selector({ isOpen: mocks.vaultOpen, vaultPath: '/vault' }),
+  useVaultStore: Object.assign((selector: (state: unknown) => unknown) => selector({ isOpen: mocks.vaultOpen, vaultPath: '/vault' }), { getState: () => ({ loadTree: mocks.loadTree }) }),
 }))
 vi.mock('../../../frontend/hooks/useKeyboard', () => ({ useKeyboard: () => {} }))
 vi.mock('../../../frontend/utils/onboarding', () => ({ isOnboardingDone: () => true, markOnboardingDone: () => {} }))
@@ -83,7 +84,9 @@ describe('Editor empty state', () => {
     await act(async () => {
       input.closest('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     })
-    expect(mocks.invoke).toHaveBeenCalledWith('create_file', { path: 'Draft.md' })
+    expect(mocks.invoke).toHaveBeenCalledWith('create_entry', { kind: 'file', path: 'Draft' })
     expect(mocks.openFile).toHaveBeenCalledWith('Draft.md', 'Draft.md')
+    // The sidebar tree is a snapshot; a new file only shows up after a reload.
+    expect(mocks.loadTree).toHaveBeenCalledTimes(1)
   })
 })

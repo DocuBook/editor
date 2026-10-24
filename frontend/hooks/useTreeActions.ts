@@ -4,6 +4,7 @@ import { invoke } from '../lib/ipc'
 import { useEditorStore } from '../stores/editor'
 import { useVaultStore, type FileInfo } from '../stores/vault'
 import { MARKDOWN_EXTENSIONS } from '../utils/fileKind'
+import { createEntry } from '../utils/createEntry'
 import { clearClipboardItem, copyItem, cutItem, peekClipboardItem } from '../utils/fileClipboard'
 import { useClickOutside } from './useClickOutside'
 
@@ -29,7 +30,6 @@ interface TreeActionsOptions {
  *  input in the tree rather than in this hook, so they return state, not JSX. */
 export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, onDeleted }: TreeActionsOptions) {
   const { isOpen, loading, vaultPath, toggleFolder, loadTree } = useVaultStore()
-  const { openFile } = useEditorStore()
 
   const [creating, setCreating] = useState<'file' | 'folder' | null>(null)
   const [newName, setNewName] = useState('')
@@ -78,17 +78,8 @@ export function useTreeActions({ registerSearchFolder, onNavigate = () => {}, on
     createBusyRef.current = true
     const targetVaultPath = vaultPath
     try {
-      let name = newName.trim()
-      if (creating === 'file' && !/\.\w{1,10}$/i.test(name)) name = name + '.md'
-      const fullPath = currentFolder ? (name.startsWith(currentFolder + '/') ? name : currentFolder + '/' + name) : name
-      if (creating === 'folder') {
-        await invoke('create_directory', { path: fullPath })
-      } else {
-        const p = await invoke<string>('create_file', { path: fullPath })
-        await openFile(p, name)
-      }
+      await createEntry(creating, newName.trim(), currentFolder)
       if (useVaultStore.getState().vaultPath !== targetVaultPath || !useVaultStore.getState().isOpen) return
-      await loadTree()
       setNewName('')
       setCreating(null)
       if (creating === 'file') onNavigate()

@@ -91,6 +91,30 @@ struct TrashMetadata {
     deleted_at: u64,
 }
 
+/** What a create makes: a note or a folder. */
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind { File, Folder }
+
+impl EntryKind {
+    pub fn parse(kind: &str) -> Option<Self> {
+        match kind {
+            "file" => Some(Self::File),
+            "folder" => Some(Self::Folder),
+            _ => None,
+        }
+    }
+}
+
+/// `.md` unless the last path segment already ends in an extension of 1–10 word characters.
+fn with_default_extension(path: &str) -> String {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let has_extension = name.rfind('.').is_some_and(|dot| {
+        let ext = &name[dot + 1..];
+        (1..=10).contains(&ext.len()) && ext.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    });
+    if has_extension { path.to_string() } else { format!("{path}.md") }
+}
+
 /// Filesystem-based vault that wraps a directory path.
 #[derive(Debug)]
 pub struct Vault {
@@ -521,6 +545,17 @@ impl Vault {
  *  never hold two entries a user reads as one, and a second create would
  *  otherwise silently reuse (or, on a case-sensitive server, shadow) the first.
  *  Only that folder is consulted — the same name in another folder is fine. */
+    /** The one create path behind every new note and folder, whichever surface
+     *  asked for it. A note name without an extension gets `.md`. Returns the
+     *  vault-relative path the entry landed at. */
+    pub fn create_entry(&self, kind: EntryKind, path: &str) -> Result<String, String> {
+        if path.rsplit('/').next().unwrap_or("").trim().is_empty() { return Err("Name is required".to_string()); }
+        match kind {
+            EntryKind::File => self.create_file(&with_default_extension(path)),
+            EntryKind::Folder => self.create_directory(path).map(|_| path.to_string()),
+        }
+    }
+
     pub fn create_file(&self, path: &str) -> Result<String, String> {
         let _write_guard = self.checked_write_lock.lock().map_err(|_| "Write lock poisoned".to_string())?;
         let f = self.safe_path(path)?;
@@ -1615,5 +1650,42 @@ mod tests {
         assert!(std::fs::read_dir(&dir).unwrap().flatten().any(|e| e.file_name() == "Note.md"));
         assert_eq!(std::fs::read_to_string(dir.join("Note.md")).unwrap(), "body");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_entry_adds_md_only_when_the_name_has_no_extension() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-entry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+
+        assert_eq!(v.create_entry(EntryKind::File, "Draft").unwrap(), "Draft.md");
+        assert_eq!(v.create_entry(EntryKind::File, "notes/todo.txt").unwrap(), "notes/todo.txt");
+        // A dot in a folder name is not an extension for the note.
+        assert_eq!(v.create_entry(EntryKind::File, "v1.2/readme").unwrap(), "v1.2/readme.md");
+        assert!(dir.join("Draft.md").is_file() && dir.join("notes/todo.txt").is_file() && dir.join("v1.2/readme.md").is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn create_entry_creates_folders_and_refuses_a_taken_name() {
+        let dir = std::env::temp_dir().join(format!("docubook-create-entry-clash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let v = Vault::new(dir.to_str().unwrap()).unwrap();
+
+        assert_eq!(v.create_entry(EntryKind::Folder, "docs").unwrap(), "docs");
+        assert!(dir.join("docs").is_dir());
+        v.create_entry(EntryKind::File, "idea").unwrap();
+        let error = v.create_entry(EntryKind::File, "idea").unwrap_err();
+        assert!(error.contains("already exists"), "unexpected error: {error}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn entry_kind_parses_only_known_kinds() {
+        assert_eq!(EntryKind::parse("file"), Some(EntryKind::File));
+        assert_eq!(EntryKind::parse("folder"), Some(EntryKind::Folder));
+        assert_eq!(EntryKind::parse("note"), None);
     }
 }

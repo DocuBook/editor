@@ -235,20 +235,15 @@ pub fn write_wysiwyg_snapshot(path: &str, content: &str, state: State<AppState>)
     }
 }
 
+/** Every new note and folder goes through here; `kind` is "file" or "folder". */
 #[tauri::command]
-pub fn create_file(path: &str, state: State<AppState>) -> Result<String, String> {
+pub fn create_entry(kind: &str, path: &str, state: State<AppState>) -> Result<String, String> {
+    let kind = crate::vault::EntryKind::parse(kind).ok_or_else(|| format!("Unknown entry kind: {kind}"))?;
     let r = match state.vault.lock().expect("lock").as_ref() {
-        Some(v) => v.create_file(path), None => Err("No vault".to_string())
+        Some(v) => v.create_entry(kind, path), None => Err("No vault".to_string())
     };
     if r.is_ok() { rescan_wiki(&state); }
     r
-}
-
-#[tauri::command]
-pub fn create_directory(path: &str, state: State<AppState>) -> Result<(), String> {
-    match state.vault.lock().expect("lock").as_ref() {
-        Some(v) => v.create_directory(path), None => Err("No vault".to_string())
-    }
 }
 
 /** Copy a file or directory into a destination folder. The vault resolves name

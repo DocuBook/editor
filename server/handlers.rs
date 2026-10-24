@@ -155,8 +155,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "write_file_checked" => sync(state, cmd, args),
         "read_wysiwyg_snapshot" => sync(state, cmd, args),
         "write_wysiwyg_snapshot" => sync(state, cmd, args),
-        "create_file" => sync(state, cmd, args),
-        "create_directory" => sync(state, cmd, args),
+        "create_entry" => sync(state, cmd, args),
         "copy_path" => sb(state, cmd, args).await,
         "move_path" => sb(state, cmd, args).await,
         "delete_file" => sb(state, cmd, args).await,
@@ -393,9 +392,11 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 .map(|_| "null".into()),
             None => Err("No vault".into()),
         },
-        "create_file" => {
+        "create_entry" => {
             let r = match state.vault.lock().expect("lock").as_ref() {
-                Some(v) => v.create_file(&s("path")),
+                Some(v) => docubook_core::vault::EntryKind::parse(&s("kind"))
+                    .ok_or_else(|| "Unknown entry kind".to_string())
+                    .and_then(|kind| v.create_entry(kind, &s("path"))),
                 None => Err("No vault".into()),
             };
             if r.is_ok() {
@@ -403,10 +404,6 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
             r
         }
-        "create_directory" => match state.vault.lock().expect("lock").as_ref() {
-            Some(v) => v.create_directory(&s("path")).map(|_| "null".into()),
-            None => Err("No vault".into()),
-        },
         "copy_path" => {
             // Copying a folder walks the whole subtree — kept off the async
             // thread like delete, for the same reason.
