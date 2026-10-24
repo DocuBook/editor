@@ -325,6 +325,22 @@ fn remove_session(key: &str, session: &str) {
     }
 }
 
+/// Terminate a session held for a server that is no longer configured and drop
+/// it from the cache. The reconfiguration's cleanup task only sees sessions that
+/// were cached when it ran, so a session created or cached alongside it is ours
+/// to release; leaving it cached would hand a re-added identical server a stale id.
+async fn retire_session(server: &ContextServer, key: &str, session: &str, version: &str) {
+    match terminate_session(server, session, version).await {
+        Ok(()) => remove_session(key, session),
+        Err(error) => tracing::warn!(
+            event = "mcp_session_cleanup_failed",
+            server = %server.name,
+            error = %error,
+            "MCP session of a retired server was not terminated"
+        ),
+    }
+}
+
 fn tool_is_read_only(server: &ContextServer, tool: &RemoteTool) -> bool {
     // Remote annotations are hints only; authorization comes from local configuration.
     let qualified = format!("{}:{}", server.name, tool.name);
@@ -573,7 +589,7 @@ async fn post_with(
         });
         if !is_configured(&key) {
             if let Some(session) = session.as_deref() {
-                let _ = terminate_session(server, session, &protocol_version).await;
+                retire_session(server, &key, session, &protocol_version).await;
             }
             return Err(RETIRED_SERVER.into());
         }
@@ -611,7 +627,12 @@ async fn post_with(
         (session, protocol_version)
     };
 
+    // The session may have been cached after the reconfiguration snapshotted the
+    // cache, so release it here rather than leave it to the cleanup task.
     if !is_configured(&key) {
+        if let Some(sid) = session.as_deref() {
+            retire_session(server, &key, sid, &protocol_version).await;
+        }
         return Err(RETIRED_SERVER.into());
     }
     let call_id = next_jsonrpc_id();
@@ -645,7 +666,7 @@ async fn post_with(
     };
     if !is_configured(&key) {
         if let Some(sid) = response.0.as_deref().or(session.as_deref()) {
-            let _ = terminate_session(server, sid, &protocol_version).await;
+            retire_session(server, &key, sid, &protocol_version).await;
         }
         return Err(RETIRED_SERVER.into());
     }
