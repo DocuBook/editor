@@ -14,7 +14,7 @@ export default function PasswordRequirements({ password }: { password: string })
           className={`flex items-start gap-1.5 text-[11px] leading-tight ${met ? 'text-success' : 'text-muted'}`}
         >
           {met ? <Check size={12} className="mt-0.5 shrink-0" /> : <X size={12} className="mt-0.5 shrink-0" />}
-          <span>{label}</span>
+          <span>{label} <span className="sr-only">{met ? 'Met' : 'Not met'}</span></span>
         </li>
       ))}
     </ul>
