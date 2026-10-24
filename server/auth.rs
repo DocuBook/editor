@@ -36,6 +36,27 @@ pub fn verify_password(hash: &str, pw: &str) -> bool {
         .unwrap_or(false)
 }
 
+/** Shared password policy — must stay in step with
+ *  `frontend/utils/passwordPolicy.ts`, which drives the live setup checklist.
+ *  Returns the first unmet rule's user-facing message, in the same order the
+ *  frontend shows them, or `None` when the password is acceptable. */
+pub fn password_error(pw: &str) -> Option<&'static str> {
+    let has_lower = pw.chars().any(|c| c.is_ascii_lowercase());
+    let has_upper = pw.chars().any(|c| c.is_ascii_uppercase());
+    if !(has_lower && has_upper) {
+        return Some("Password must include both upper and lower case letters");
+    }
+    if pw.encode_utf16().count() < 8 {
+        return Some("Password must be at least 8 characters");
+    }
+    let has_digit = pw.chars().any(|c| c.is_ascii_digit());
+    let has_special = pw.chars().any(|c| !c.is_ascii_alphanumeric());
+    if !(has_digit && has_special) {
+        return Some("Password must include numbers and special characters");
+    }
+    None
+}
+
 pub struct Sessions {
     map: Mutex<HashMap<String, SystemTime>>, // sha256(token) → expiry
     base_dir: PathBuf,
@@ -199,6 +220,38 @@ mod tests {
         let h = hash_password("hunter2!").unwrap();
         assert!(verify_password(&h, "hunter2!"));
         assert!(!verify_password(&h, "hunter2?"));
+    }
+
+    #[test]
+    fn password_policy_matches_frontend_rules() {
+        assert_eq!(password_error("Password1!"), None);
+        assert_eq!(
+            password_error("Abcdefg1"),
+            Some("Password must include numbers and special characters")
+        );
+        assert_eq!(
+            password_error("password1!"),
+            Some("Password must include both upper and lower case letters")
+        );
+        assert_eq!(
+            password_error("PASSWORD1!"),
+            Some("Password must include both upper and lower case letters")
+        );
+        assert_eq!(
+            password_error("Pa1!"),
+            Some("Password must be at least 8 characters")
+        );
+        assert_eq!(
+            password_error("Password!"),
+            Some("Password must include numbers and special characters")
+        );
+        assert_eq!(
+            password_error("Password1"),
+            Some("Password must include numbers and special characters")
+        );
+        // Non-ASCII letters are not ASCII upper/lower case, matching the
+        // frontend's `[a-z]` / `[A-Z]` tests.
+        assert!(password_error("Éééééé1!").is_some());
     }
 
     #[test]

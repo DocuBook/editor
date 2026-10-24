@@ -41,7 +41,7 @@ function type(input: HTMLInputElement, value: string) {
 
 function fillAllPasswords() {
   const [current, next, confirm] = passwordFields()
-  act(() => { type(current, 'old-secret'); type(next, 'new-secret-1'); type(confirm, 'new-secret-1') })
+  act(() => { type(current, 'old-secret'); type(next, 'New-secret-1'); type(confirm, 'New-secret-1') })
 }
 
 beforeEach(() => {
@@ -71,9 +71,9 @@ describe('SystemSettings — change password', () => {
     const [current, next, confirm] = passwordFields()
     act(() => type(current, 'old-secret'))
     expect(button.disabled).toBe(true)
-    act(() => type(next, 'new-secret-1'))
+    act(() => type(next, 'New-secret-1'))
     expect(button.disabled).toBe(true)
-    act(() => type(confirm, 'new-secret-1'))
+    act(() => type(confirm, 'New-secret-1'))
     expect(button.disabled).toBe(false)
   })
 
@@ -88,7 +88,7 @@ describe('SystemSettings — change password', () => {
       act(() => button.click())
       await flush()
 
-      expect(invoke).toHaveBeenCalledWith('change_password', { old: 'old-secret', new: 'new-secret-1' })
+      expect(invoke).toHaveBeenCalledWith('change_password', { old: 'old-secret', new: 'New-secret-1' })
       expect(passwordFields().every(input => input.value === '')).toBe(true)
       expect(document.body.textContent).toContain('Password updated')
       // Inside the hand-off delay: the button stays disabled (no double submit)

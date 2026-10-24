@@ -225,12 +225,60 @@ mod api_tests {
     }
 
     #[tokio::test]
+    async fn setup_admin_rejects_weak_passwords() {
+        // The server must enforce the same policy as the setup wizard's live
+        // checklist, so an API caller cannot bypass it.
+        let (app, _) = router();
+        for password in [
+            "password1!", // no upper case
+            "PASSWORD1!", // no lower case
+            "Password!",  // no digit
+            "Password1",  // no special character
+            "Pa1!",       // too short
+        ] {
+            let (s, _, b) = post(
+                &app,
+                "/api/setup_admin",
+                json!({ "email": "a@b.c", "password": password }),
+            )
+            .await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "unexpected response: {b}");
+        }
+        let (_, _, b) = post(&app, "/api/setup_status", json!({})).await;
+        assert_eq!(result_json(&b)["setupRequired"], true, "{b}");
+    }
+
+    #[tokio::test]
+    async fn password_change_rejects_weak_new_password() {
+        let (app, _) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({ "email": "a@b.c", "password": "Password1!" }),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+
+        let (status, _, body) = post_with(
+            &app,
+            "/api/change_password",
+            json!({ "old": "Password1!", "new": "password2" }),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        // A rejected change must not revoke the current session.
+        let (status, _, _) = post_with(&app, "/api/account_get", json!({}), Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn setup_admin_creates_admin_and_cookie() {
         let (app, _) = router();
         let (s, h, b) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK, "{b}");
@@ -247,7 +295,7 @@ mod api_tests {
         let (s, _, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "x@y.z", "password": "password1"}),
+            json!({"email": "x@y.z", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::BAD_REQUEST);
@@ -267,7 +315,7 @@ mod api_tests {
         let (_, h, _) = post(
             &app,
             "/api/setup_admin",
-            json!({ "email": "a@b.c", "password": "password1" }),
+            json!({ "email": "a@b.c", "password": "Password1!" }),
         )
         .await;
         let cookie = session_cookie(&h);
@@ -327,8 +375,8 @@ mod api_tests {
         // missing / wrong token → rejected, admin never created
         for token in [None, Some("wrong")] {
             let body = match token {
-                Some(t) => json!({"email": "a@b.c", "password": "password1", "token": t}),
-                None => json!({"email": "a@b.c", "password": "password1"}),
+                Some(t) => json!({"email": "a@b.c", "password": "Password1!", "token": t}),
+                None => json!({"email": "a@b.c", "password": "Password1!"}),
             };
             let (s, _, _) = post(&app, "/api/setup_admin", body).await;
             assert_eq!(
@@ -348,7 +396,7 @@ mod api_tests {
         let (s, h, b) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1", "token": "tok-secret-1"}),
+            json!({"email": "a@b.c", "password": "Password1!", "token": "tok-secret-1"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK, "{b}");
@@ -365,7 +413,7 @@ mod api_tests {
             let (s, _, _) = post(
                 &app,
                 "/api/setup_admin",
-                json!({"email": "x", "password": "password1"}),
+                json!({"email": "x", "password": "Password1!"}),
             )
             .await;
             if i < 6 {
@@ -382,7 +430,7 @@ mod api_tests {
         let (s, _, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK);
@@ -400,7 +448,7 @@ mod api_tests {
         let (s, h, b) = post(
             &app,
             "/api/login",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK, "{b}");
@@ -416,7 +464,7 @@ mod api_tests {
         let (s, _, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK);
@@ -441,7 +489,7 @@ mod api_tests {
         let (s, _, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK);
@@ -467,7 +515,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
@@ -489,7 +537,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
@@ -526,14 +574,14 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
         let (status, _, body) = post_with(
             &app,
             "/api/change_password",
-            json!({"old": "password1", "new": "password2"}),
+            json!({"old": "Password1!", "new": "Password2!"}),
             Some(&cookie),
         )
         .await;
@@ -548,7 +596,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
@@ -597,7 +645,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
@@ -667,7 +715,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
@@ -700,7 +748,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = session_cookie(&headers);
@@ -772,7 +820,7 @@ mod api_tests {
         let (s, h, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         assert_eq!(s, StatusCode::OK);
@@ -831,7 +879,7 @@ mod api_tests {
         let (_, headers, _) = post(
             &app,
             "/api/setup_admin",
-            json!({"email": "a@b.c", "password": "password1"}),
+            json!({"email": "a@b.c", "password": "Password1!"}),
         )
         .await;
         let cookie = headers

@@ -376,8 +376,8 @@ impl Config {
         if email.is_empty() || !email.contains('@') {
             return Err("Enter a valid email address".into());
         }
-        if password.len() < 8 {
-            return Err("Password must be at least 8 characters".into());
+        if let Some(err) = super::auth::password_error(password) {
+            return Err(err.into());
         }
         let hash = super::auth::hash_password(password)?;
         self.admin = Some(Admin {
@@ -393,8 +393,8 @@ impl Config {
         if !super::auth::verify_password(&existing.password_hash, old) {
             return Err("Current password is incorrect".into());
         }
-        if new.len() < 8 {
-            return Err("New password must be at least 8 characters".into());
+        if let Some(err) = super::auth::password_error(new) {
+            return Err(err.into());
         }
         let hash = super::auth::hash_password(new)?;
         // admin is guaranteed Some above; write without unwrap so this can't
@@ -637,8 +637,10 @@ mod tests {
     /// indistinguishable from a real hard-coded credential, and it would report
     /// the same finding the rule exists to catch in production. The fixtures are
     /// therefore derived from runtime entropy (counter + pid + clock) with no
-    /// literal flowing into `setup_admin` / `change_password`. Distinct callers
-    /// get distinct values, so an equality check can never pass by accident.
+    /// password-shaped literal flowing into `setup_admin` / `change_password`.
+    /// Distinct callers get distinct values, so an equality check can never pass
+    /// by accident. The fixed `Aa1!` prefix exists only so the entropy digest
+    /// satisfies the password policy and reaches the hashing path.
     fn cred() -> String {
         static SEQ: AtomicUsize = AtomicUsize::new(0);
         let n = SEQ.fetch_add(1, Ordering::Relaxed) as u64;
@@ -649,14 +651,19 @@ mod tests {
         let seed = n.wrapping_mul(0x9e37_79b9_7f4a_7c15)
             ^ nanos.rotate_left(17)
             ^ ((std::process::id() as u64) << 29);
-        (0..24)
+        let hex: String = (0..24)
             .map(|i| {
                 format!(
                     "{:02x}",
                     (seed >> ((i % 8) * 8)) as u8 ^ (i as u64).wrapping_mul(31) as u8
                 )
             })
-            .collect()
+            .collect();
+        // Entropy alone does not guarantee the password policy (the hex digest
+        // has no uppercase or special character). Prefix a fixed
+        // policy-satisfying fragment so the fixture exercises hashing and not
+        // the validation rejection path.
+        format!("Aa1!{hex}")
     }
 
     #[test]
