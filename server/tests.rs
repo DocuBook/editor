@@ -242,7 +242,7 @@ mod api_tests {
                 json!({ "email": "a@b.c", "password": password }),
             )
             .await;
-            assert_eq!(s, StatusCode::BAD_REQUEST, "{password}: {b}");
+            assert_eq!(s, StatusCode::BAD_REQUEST, "unexpected response: {b}");
         }
         let (_, _, b) = post(&app, "/api/setup_status", json!({})).await;
         assert_eq!(result_json(&b)["setupRequired"], true, "{b}");
