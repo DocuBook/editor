@@ -393,13 +393,14 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             None => Err("No vault".into()),
         },
         "create_entry" => {
+            let kind = docubook_core::vault::EntryKind::parse(&s("kind"))
+                .ok_or_else(|| "Unknown entry kind".to_string())?;
             let r = match state.vault.lock().expect("lock").as_ref() {
-                Some(v) => docubook_core::vault::EntryKind::parse(&s("kind"))
-                    .ok_or_else(|| "Unknown entry kind".to_string())
-                    .and_then(|kind| v.create_entry(kind, &s("path"))),
+                Some(v) => v.create_entry(kind, &s("path")),
                 None => Err("No vault".into()),
             };
-            if r.is_ok() {
+            // An empty folder can't add or remove a wiki link; only a new note needs the rescan.
+            if r.is_ok() && kind == docubook_core::vault::EntryKind::File {
                 cmds::rescan_wiki(state);
             }
             r

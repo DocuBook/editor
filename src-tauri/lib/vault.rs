@@ -242,7 +242,8 @@ pub fn create_entry(kind: &str, path: &str, state: State<AppState>) -> Result<St
     let r = match state.vault.lock().expect("lock").as_ref() {
         Some(v) => v.create_entry(kind, path), None => Err("No vault".to_string())
     };
-    if r.is_ok() { rescan_wiki(&state); }
+    // An empty folder can't add or remove a wiki link; only a new note needs the rescan.
+    if r.is_ok() && kind == crate::vault::EntryKind::File { rescan_wiki(&state); }
     r
 }
 
