@@ -182,20 +182,14 @@ impl Config {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Cannot create {}: {}", parent.display(), e))?;
         }
-        std::fs::write(
-            &self.path,
-            serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?,
-        )
-        .map_err(|e| {
+        let json = serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?;
+        write_atomic(&self.path, json.as_bytes()).map_err(|e| {
             format!(
                 "Cannot write {}: {} — check the /data volume ownership",
                 self.path.display(),
                 e
             )
-        })?;
-        #[cfg(unix)]
-        let _ = std::fs::set_permissions(&self.path, std::fs::Permissions::from_mode(0o600));
-        Ok(())
+        })
     }
 
     /** Record which provider the UI selected. Selection never changes a configured
@@ -591,9 +585,33 @@ fn chrono_now() -> String {
     }
 }
 
+/// Replace `path` by writing a sibling temp file and renaming it over the target:
+/// a crash or a concurrent reader sees the old file or the new one, never a partial write.
+fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let tmp = path.with_extension("json.tmp");
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    // Owner-only from creation: the file holds the admin password hash.
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut file = options.open(&tmp)?;
+    file.write_all(contents)?;
+    file.sync_all()?;
+    drop(file);
+    // `mode` is ignored for a temp file left behind by an earlier failed save.
+    #[cfg(unix)]
+    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    std::fs::rename(&tmp, path)
+}
+
 /** Convenience handle: config + sessions + limiter behind one Mutex-free split. */
 pub struct AuthState {
     pub config: Mutex<Config>,
+    /// Held across each handler-side config write (AI selection, MCP servers),
+    /// including its rollback, so a rollback restores the state that write read.
+    /// Always taken before `config`, never after.
+    pub config_writes: Mutex<()>,
     pub sessions: super::auth::Sessions,
     pub limiter: super::auth::LoginLimiter,
     pub secure_cookie: bool,
@@ -603,6 +621,7 @@ impl AuthState {
     pub fn new(data_dir: &Path) -> Self {
         Self {
             config: Mutex::new(Config::load(data_dir)),
+            config_writes: Mutex::new(()),
             sessions: super::auth::Sessions::new(data_dir),
             limiter: super::auth::LoginLimiter::new(),
             secure_cookie: std::env::var("DB_SECURE_COOKIE")
@@ -841,6 +860,15 @@ mod tests {
         assert_eq!(endpoint.model, "model-a");
         assert_eq!(endpoint.base_url, "https://api.example/v1");
         let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn save_leaves_no_temp_file_behind() {
+        let dir = tmp();
+        let mut c = Config::load(&dir);
+        c.set_endpoint("opencode-go", "m", "https://opencode.ai/zen/go/v1").unwrap();
+        assert!(!dir.join("config.json.tmp").exists());
+        assert_eq!(Config::load(&dir).ai.active, "opencode-go");
     }
 
     #[test]

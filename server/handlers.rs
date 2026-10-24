@@ -577,6 +577,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "set_api_key" => {
+            let _writes = state.auth.config_writes.lock().expect("lock");
             let provider = s("provider");
             let key = s("key");
             let base_url = s("baseUrl");
@@ -629,6 +630,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "set_custom_endpoint" => {
+            let _writes = state.auth.config_writes.lock().expect("lock");
             if probe::custom_env_base_url().is_some() {
                 return Err("Custom endpoint is controlled by DB_OPENAI_COMPAT_BASE_URL — remove the env var to edit in the UI".into());
             }
@@ -668,6 +670,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "delete_api_key" => {
+            let _writes = state.auth.config_writes.lock().expect("lock");
             // Total revoke: remove the key and endpoint together. If config
             // persistence fails after the key is deleted, restore both the key
             // and the in-memory/on-disk endpoint so no half-revoked state remains.
@@ -782,6 +785,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok(out.to_string())
         }
         "set_ai_settings" => {
+            let _writes = state.auth.config_writes.lock().expect("lock");
             // Selection only: the endpoint itself is created by `set_api_key` /
             // `set_custom_endpoint`, so switching providers cannot invent one.
             let provider = s("provider");
@@ -852,6 +856,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             .view(&state.data_dir)
             .to_string()),
         "config_set" => {
+            let _writes = state.auth.config_writes.lock().expect("lock");
             let key = s("key");
             let value = args.get("value").cloned().unwrap_or(Value::Null);
             if key == "mcp" {

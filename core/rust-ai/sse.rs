@@ -115,6 +115,18 @@ async fn cancel_requested(cancel: &AtomicBool) {
     }
 }
 
+/// Send `event` unless the request is cancelled first, including while the
+/// channel is full. `false` means the stream should stop.
+async fn send_if_live(tx: &EventSender, event: AiEvent, cancel: &AtomicBool) -> bool {
+    if cancel.load(Ordering::SeqCst) {
+        return false;
+    }
+    tokio::select! {
+        result = tx.send(Ok(event)) => result.is_ok(),
+        _ = cancel_requested(cancel) => false,
+    }
+}
+
 pub async fn stream_chat(
     response: Response,
     provider: String,
@@ -269,21 +281,18 @@ pub async fn stream_chat(
     for (index, tool_call) in summary.tool_calls.iter().enumerate() {
         if !tool_call.provider_id.is_empty() && !tool_call.name.is_empty() {
             let input = serde_json::from_str(&tool_call.arguments).unwrap_or(Value::Null);
-            if tx
-                .send(Ok(AiEvent::ToolCall {
-                    tool_call_id: super::events::local_tool_call_id(index),
-                    provider_tool_call_id: tool_call.provider_id.clone(),
-                    tool_name: tool_call.name.clone(),
-                    input,
-                }))
-                .await
-                .is_err()
-            {
+            let event = AiEvent::ToolCall {
+                tool_call_id: super::events::local_tool_call_id(index),
+                provider_tool_call_id: tool_call.provider_id.clone(),
+                tool_name: tool_call.name.clone(),
+                input,
+            };
+            if !send_if_live(&tx, event, &cancel).await {
                 return;
             }
         }
     }
-    if tx.send(Ok(AiEvent::ToolsDone)).await.is_err() {
+    if !send_if_live(&tx, AiEvent::ToolsDone, &cancel).await {
         return;
     }
     if summary.text.is_empty() && summary.tool_calls.is_empty() {
@@ -299,12 +308,15 @@ pub async fn stream_chat(
         body_bytes = summary.text.len(),
         error_category = "none"
     );
-    let _ = tx
-        .send(Ok(AiEvent::Done {
+    let _ = send_if_live(
+        &tx,
+        AiEvent::Done {
             provider: summary.provider,
             truncated: summary.truncated,
-        }))
-        .await;
+        },
+        &cancel,
+    )
+    .await;
 }
 
 async fn send_error(tx: &EventSender, message: impl Into<String>) {
@@ -798,5 +810,26 @@ mod tests {
             Some(Err(BodyError::TooLarge))
         ));
         assert!(bounded.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn blocked_send_gives_up_when_the_request_is_cancelled() {
+        // A full channel blocks the send; Stop must release it instead of
+        // letting the event through after the cancel.
+        let (tx, _rx) = mpsc::channel(1);
+        let _ = tx.send(Ok(AiEvent::ToolsDone)).await;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let canceller = Arc::clone(&cancel);
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            canceller.store(true, Ordering::SeqCst);
+        });
+        let sent = tokio::time::timeout(
+            Duration::from_secs(2),
+            send_if_live(&tx, AiEvent::ToolsDone, &cancel),
+        )
+        .await
+        .expect("send must not stay blocked after cancel");
+        assert!(!sent);
     }
 }
