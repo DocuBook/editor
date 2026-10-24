@@ -645,4 +645,46 @@ describe('SettingsPane — MCP settings loading', () => {
     expect(saved[0]).toMatchObject({ name: 'research', url: 'https://mcp.example.com/mcp', timeoutSeconds: 25 })
     expect(saved[0]).not.toHaveProperty('readOnlyTools')
   })
+
+  /** Save and Cancel must read as buttons, not text links: the edit form used to
+   *  render them with only `text-xs`, so they looked (and hit-tested) like bare
+   *  text. They keep `type="button"` so they can never submit a surrounding form. */
+  it('renders Save and Cancel as real buttons in the edit form', async () => {
+    useSettings.setState({ open: true, section: 'ai-mcp-server' })
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'mcp_settings') return JSON.stringify({
+        servers: [{ name: 'research', url: 'https://mcp.example.com/mcp' }],
+        envManaged: false,
+        defaultTimeoutSeconds: 10,
+        maxTimeoutSeconds: 120,
+      })
+      if (command === 'ai_settings') return JSON.stringify(backend)
+      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
+      return ''
+    })
+    await render()
+
+    clickText('Edit')
+    await settle()
+
+    /** The AI page also renders three provider forms whose own Save buttons
+     *  precede the MCP card in document order, so scope to the MCP section. */
+    const mcp = document.querySelector<HTMLElement>('[data-settings-section]#ai-mcp-server')!
+    const save = Array.from(mcp.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Save')
+    const cancel = Array.from(mcp.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Cancel')
+    expect(save, 'Save is not a <button>').toBeDefined()
+    expect(cancel, 'Cancel is not a <button>').toBeDefined()
+    expect(save!.getAttribute('type')).toBe('button')
+    expect(cancel!.getAttribute('type')).toBe('button')
+    // Real button affordances: padding + a background/border, not bare text.
+    expect(save!.className).toContain('px-3')
+    expect(save!.className).toContain('bg-accent')
+    expect(cancel!.className).toContain('border')
+
+    act(() => cancel!.click())
+    await settle()
+    // Cancel leaves the edit form without saving anything.
+    expect(document.body.textContent).not.toContain('Replace bearer token')
+    expect(invoke.mock.calls.map(call => call[0])).not.toContain('config_set')
+  })
 })
