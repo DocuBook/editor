@@ -170,27 +170,21 @@ impl LoginLimiter {
         }
     }
 
+    /// Reserve one attempt for `ip`, before its password is checked. Counting at
+    /// start (not on failure) keeps overlapping attempts from all passing the limit.
     pub fn check(&self, ip: &str) -> Result<(), String> {
         let mut map = self.map.lock().expect("lock");
         let now = Instant::now();
         map.retain(|_, (_, until)| *until > now);
-        if let Some((count, until)) = map.get(ip) {
-            if *count > MAX_ATTEMPTS && *until > now {
-                return Err("Too many attempts — try again in a minute".into());
-            }
+        let e = map.entry(ip.to_string()).or_insert((0, now + LOCKOUT));
+        if e.0 > MAX_ATTEMPTS {
+            return Err("Too many attempts — try again in a minute".into());
         }
-        Ok(())
-    }
-
-    pub fn fail(&self, ip: &str) {
-        let mut map = self.map.lock().expect("lock");
-        let e = map
-            .entry(ip.to_string())
-            .or_insert((0, Instant::now() + LOCKOUT));
         e.0 += 1;
         if e.0 > MAX_ATTEMPTS {
-            e.1 = Instant::now() + LOCKOUT;
+            e.1 = now + LOCKOUT;
         }
+        Ok(())
     }
 
     pub fn clear(&self, ip: &str) {
@@ -305,16 +299,23 @@ mod tests {
     }
 
     #[test]
-    fn limiter_blocks_after_5_failures() {
+    fn limiter_blocks_after_6_attempts() {
         let l = LoginLimiter::new();
-        for _ in 0..MAX_ATTEMPTS {
-            l.fail("1.2.3.4");
+        for _ in 0..=MAX_ATTEMPTS {
             assert!(l.check("1.2.3.4").is_ok());
         }
-        l.fail("1.2.3.4");
         assert!(l.check("1.2.3.4").is_err());
         assert!(l.check("9.9.9.9").is_ok());
         l.clear("1.2.3.4");
         assert!(l.check("1.2.3.4").is_ok());
+    }
+
+    #[test]
+    fn attempts_are_counted_when_they_start() {
+        // Password checks are slow, so attempts overlap. Nothing has failed yet
+        // for them to count against, so the limit must bind at check time.
+        let l = LoginLimiter::new();
+        let allowed = (0..100).filter(|_| l.check("1.2.3.4").is_ok()).count();
+        assert_eq!(allowed, MAX_ATTEMPTS as usize + 1);
     }
 }
