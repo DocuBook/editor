@@ -48,7 +48,6 @@ pub(crate) async fn login(
     if !admin.email.eq_ignore_ascii_case(&email)
         || !auth::verify_password(&admin.password_hash, &password)
     {
-        state.auth.limiter.fail(&ip);
         tracing::warn!(event = "auth_login_failure", reason = "invalid_credentials", client_ip = %ip);
         return err_response("Invalid email or password");
     }
@@ -145,7 +144,6 @@ pub(crate) async fn setup_admin(
                 .into_response()
         }
         Err(e) => {
-            state.auth.limiter.fail(&ip);
             tracing::warn!(event = "auth_setup_failure", reason = "validation", client_ip = %ip);
             err_response(&e)
         }

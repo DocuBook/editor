@@ -30,11 +30,12 @@ type DiscoveryCache = Option<(String, Vec<ContextTool>)>;
 type SessionCache = HashMap<String, (Option<String>, String)>;
 
 static DISCOVERY_CACHE: OnceLock<Mutex<DiscoveryCache>> = OnceLock::new();
-static CONTEXT_CALLS: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
+static CONTEXT_CALLS: OnceLock<Mutex<HashMap<String, Arc<watch::Sender<bool>>>>> = OnceLock::new();
 static MCP_SESSIONS: OnceLock<Mutex<SessionCache>> = OnceLock::new();
 static MCP_SESSION_GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> =
     OnceLock::new();
 static NEXT_JSONRPC_ID: AtomicU64 = AtomicU64::new(1);
+const RETIRED_SERVER: &str = "MCP server configuration changed; request not sent";
 static CONFIGURED_SERVERS: OnceLock<Mutex<Option<Vec<ContextServer>>>> = OnceLock::new();
 static STORED_RESULTS: OnceLock<Mutex<ResultStore>> = OnceLock::new();
 
@@ -194,14 +195,14 @@ pub fn validate_configured_servers(servers: &[ContextServer]) -> Result<(), Stri
 /// Lock the active-call registry, recovering from poisoning. The map only ever
 /// holds whole entries, so a recovered guard is still sound; returning an error
 /// here would silently disable Stop for an already-running request.
-fn calls() -> MutexGuard<'static, HashMap<String, watch::Sender<bool>>> {
+fn calls() -> MutexGuard<'static, HashMap<String, Arc<watch::Sender<bool>>>> {
     CONTEXT_CALLS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), String> {
+fn register_call(request_id: &str, sender: Arc<watch::Sender<bool>>) -> Result<(), String> {
     let mut calls = calls();
     if calls.contains_key(request_id) {
         return Err("Context-tool request is already active".into());
@@ -210,9 +211,13 @@ fn register_call(request_id: &str, sender: watch::Sender<bool>) -> Result<(), St
     Ok(())
 }
 
-fn remove_call(request_id: &str) -> Result<(), String> {
-    calls().remove(request_id);
-    Ok(())
+/// Forget `request_id` only while it still maps to `sender`: a cancelled call
+/// that finishes late must not evict a newer call that reused the id.
+fn remove_call(request_id: &str, sender: &Arc<watch::Sender<bool>>) {
+    let mut calls = calls();
+    if calls.get(request_id).is_some_and(|current| Arc::ptr_eq(current, sender)) {
+        calls.remove(request_id);
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -317,6 +322,22 @@ fn remove_session(key: &str, session: &str) {
         {
             sessions.remove(key);
         }
+    }
+}
+
+/// Terminate a session held for a server that is no longer configured and drop
+/// it from the cache. The reconfiguration's cleanup task only sees sessions that
+/// were cached when it ran, so a session created or cached alongside it is ours
+/// to release; leaving it cached would hand a re-added identical server a stale id.
+async fn retire_session(server: &ContextServer, key: &str, session: &str, version: &str) {
+    match terminate_session(server, session, version).await {
+        Ok(()) => remove_session(key, session),
+        Err(error) => tracing::warn!(
+            event = "mcp_session_cleanup_failed",
+            server = %server.name,
+            error = %error,
+            "MCP session of a retired server was not terminated"
+        ),
     }
 }
 
@@ -529,6 +550,11 @@ async fn post_with(
     } else {
         gate.lock().await
     };
+    // A reconfiguration may have retired this server since the caller read its
+    // config: never send it the old URL or token.
+    if !is_configured(&key) {
+        return Err(RETIRED_SERVER.into());
+    }
     let existing = MCP_SESSIONS
         .get_or_init(|| Mutex::new(HashMap::new()))
         .lock()
@@ -561,6 +587,12 @@ async fn post_with(
         let notification = json!({
             "jsonrpc": "2.0", "method": "notifications/initialized", "params": {}
         });
+        if !is_configured(&key) {
+            if let Some(session) = session.as_deref() {
+                retire_session(server, &key, session, &protocol_version).await;
+            }
+            return Err(RETIRED_SERVER.into());
+        }
         if let (Some(session), Some(version)) = (session.as_ref(), Some(&protocol_version)) {
             MCP_SESSIONS
                 .get_or_init(|| Mutex::new(HashMap::new()))
@@ -595,6 +627,14 @@ async fn post_with(
         (session, protocol_version)
     };
 
+    // The session may have been cached after the reconfiguration snapshotted the
+    // cache, so release it here rather than leave it to the cleanup task.
+    if !is_configured(&key) {
+        if let Some(sid) = session.as_deref() {
+            retire_session(server, &key, sid, &protocol_version).await;
+        }
+        return Err(RETIRED_SERVER.into());
+    }
     let call_id = next_jsonrpc_id();
     let call = json!({"jsonrpc":"2.0","id":call_id.clone(),"method":method,"params":params});
     let response = request_cancellable(
@@ -624,6 +664,12 @@ async fn post_with(
             return Err(error);
         }
     };
+    if !is_configured(&key) {
+        if let Some(sid) = response.0.as_deref().or(session.as_deref()) {
+            retire_session(server, &key, sid, &protocol_version).await;
+        }
+        return Err(RETIRED_SERVER.into());
+    }
     if let Some(sid) = response.0.as_ref().or(session.as_ref()) {
         MCP_SESSIONS
             .get_or_init(|| Mutex::new(HashMap::new()))
@@ -641,7 +687,8 @@ pub async fn discover(request_id: &str) -> Result<Vec<ContextTool>, String> {
         return Err("Context-tool request id is required".into());
     }
     let (cancel, mut cancelled) = watch::channel(false);
-    register_call(request_id, cancel)?;
+    let cancel = Arc::new(cancel);
+    register_call(request_id, Arc::clone(&cancel))?;
     let result = async {
         let servers = server_config()?;
         let key = serde_json::to_string(&servers)
@@ -651,7 +698,7 @@ pub async fn discover(request_id: &str) -> Result<Vec<ContextTool>, String> {
             .map(|tools| (key, tools))
     }
     .await;
-    remove_call(request_id)?;
+    remove_call(request_id, &cancel);
     match result {
         Ok((key, tools)) => {
             *DISCOVERY_CACHE
@@ -665,15 +712,35 @@ pub async fn discover(request_id: &str) -> Result<Vec<ContextTool>, String> {
     }
 }
 
+fn configured_servers() -> Result<Vec<ContextServer>, String> {
+    Ok(CONFIGURED_SERVERS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .map_err(|_| "MCP configuration is unavailable".to_string())?
+        .clone()
+        .unwrap_or_default())
+}
+
+/// Whether the active configuration still contains the server under `key`. A
+/// request that began before a reconfiguration must not reach a retired server.
+fn is_configured(key: &str) -> bool {
+    let raw = std::env::var("DOCUBOOK_MCP_SERVERS").unwrap_or_default();
+    let servers = if raw.is_empty() {
+        configured_servers()
+    } else {
+        serde_json::from_str::<Vec<ContextServer>>(&raw).map_err(|_| String::new())
+    };
+    servers.is_ok_and(|servers| {
+        servers
+            .iter()
+            .any(|server| serde_json::to_string(server).is_ok_and(|k| k == key))
+    })
+}
+
 fn server_config() -> Result<Vec<ContextServer>, String> {
     let raw = std::env::var("DOCUBOOK_MCP_SERVERS").unwrap_or_default();
     if raw.is_empty() {
-        return Ok(CONFIGURED_SERVERS
-            .get_or_init(|| Mutex::new(None))
-            .lock()
-            .map_err(|_| "MCP configuration is unavailable".to_string())?
-            .clone()
-            .unwrap_or_default());
+        return configured_servers();
     }
     let servers: Vec<ContextServer> = serde_json::from_str(&raw)
         .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?;
@@ -904,7 +971,8 @@ pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String
         return read_stored_page(&input);
     }
     let (cancel, mut cancelled) = watch::channel(false);
-    register_call(request_id, cancel)?;
+    let cancel = Arc::new(cancel);
+    register_call(request_id, Arc::clone(&cancel))?;
     let result = async {
         let servers = server_config()?;
         let tools = cached_discover(servers.clone(), &mut cancelled).await?;
@@ -929,7 +997,7 @@ pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String
         frame_result(&response)
     }
     .await;
-    remove_call(request_id)?;
+    remove_call(request_id, &cancel);
     result
 }
 
@@ -1188,11 +1256,12 @@ mod tests {
     #[tokio::test]
     async fn duplicate_context_requests_do_not_replace_cancellation_sender() {
         let (first, _receiver) = watch::channel(false);
-        register_call("same-request", first).unwrap();
+        let first = Arc::new(first);
+        register_call("same-request", Arc::clone(&first)).unwrap();
         let (second, _receiver) = watch::channel(false);
-        assert!(register_call("same-request", second).is_err());
+        assert!(register_call("same-request", Arc::new(second)).is_err());
         cancel("same-request");
-        remove_call("same-request").unwrap();
+        remove_call("same-request", &first);
     }
 
     #[test]
@@ -1204,9 +1273,42 @@ mod tests {
         assert!(poisoned.is_err());
 
         let (sender, mut receiver) = watch::channel(false);
-        register_call("poison-recovery", sender).unwrap();
+        let sender = Arc::new(sender);
+        register_call("poison-recovery", Arc::clone(&sender)).unwrap();
         cancel("poison-recovery");
         assert!(*receiver.borrow_and_update());
-        remove_call("poison-recovery").unwrap();
+        remove_call("poison-recovery", &sender);
+    }
+
+    #[test]
+    fn late_finish_of_cancelled_call_does_not_evict_its_replacement() {
+        // Stop cancels request "reused" and frees its slot. A retry reuses the id
+        // before the stopped call has unwound; that call's late cleanup must not
+        // remove the retry's cancel sender, or the retry can no longer be stopped.
+        let (stale, _stale_rx) = watch::channel(false);
+        let stale = Arc::new(stale);
+        register_call("reused", Arc::clone(&stale)).unwrap();
+        cancel("reused");
+        let (fresh, mut fresh_rx) = watch::channel(false);
+        let fresh = Arc::new(fresh);
+        register_call("reused", Arc::clone(&fresh)).unwrap();
+        remove_call("reused", &stale);
+        cancel("reused");
+        assert!(*fresh_rx.borrow_and_update());
+        remove_call("reused", &fresh);
+    }
+
+    #[tokio::test]
+    async fn request_is_not_sent_to_a_server_that_is_no_longer_configured() {
+        // Not in the active configuration, so the check fails before any network call.
+        let server = ContextServer {
+            name: "retired-server".into(),
+            url: "https://retired.example/mcp".into(),
+            timeout_seconds: None,
+            token: Some("old-token".into()),
+            read_only_tools: Vec::new(),
+        };
+        let error = post_with(&server, "tools/list", json!({}), None).await.unwrap_err();
+        assert_eq!(error, RETIRED_SERVER);
     }
 }
