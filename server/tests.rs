@@ -1048,8 +1048,11 @@ mod api_tests {
         assert!(with_admin.auth.config.lock().unwrap().setup_token.is_none());
     }
 
+    /// The liveness short-circuit covers GET/HEAD only. (With a session the
+    /// static GET route answers 405, so the detailed `health` command is never
+    /// reached either way.)
     #[tokio::test]
-    async fn detailed_health_command_needs_a_session() {
+    async fn post_health_is_not_a_public_path() {
         let app = build_router(test_state(), std::env::temp_dir());
         let (status, _, _) = post(&app, "/api/health", json!({})).await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);

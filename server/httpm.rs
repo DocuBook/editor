@@ -59,8 +59,9 @@ pub(crate) async fn static_cache(req: Request, next: Next) -> Response {
     res
 }
 
-/// Public liveness probe for the Docker HEALTHCHECK. Says nothing about the
-/// version or the open vault; the detailed `health` command needs a session.
+/// Public liveness probe for the Docker HEALTHCHECK. Liveness only: version and
+/// vault state are not exposed over HTTP (this static route also answers
+/// `POST /api/health` with 405, so the `health` command is never dispatched).
 pub(crate) async fn health_route() -> Response {
     Json(json!({ "result": json!({ "status": "ok" }).to_string() })).into_response()
 }
@@ -169,7 +170,7 @@ pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: N
     if !path.starts_with("/api/") {
         return next.run(req).await;
     }
-    // Liveness only; the POST `health` command is the detailed one and is gated.
+    // Liveness only; version and vault state are not exposed over HTTP.
     if path == "/api/health" && matches!(*req.method(), axum::http::Method::GET | axum::http::Method::HEAD) {
         return next.run(req).await;
     }

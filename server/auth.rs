@@ -41,6 +41,12 @@ impl TrustedProxy {
     }
 }
 
+impl std::fmt::Display for TrustedProxy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}/{}", self.net, self.prefix)
+    }
+}
+
 impl std::str::FromStr for TrustedProxy {
     type Err = ();
 
@@ -140,14 +146,35 @@ pub(crate) fn is_local_client(peer: IpAddr, headers: &HeaderMap) -> bool {
         && !headers.contains_key("x-real-ip")
 }
 
-/// DB_TRUSTED_PROXY: comma-separated addresses or CIDR ranges. Entries that do
-/// not parse are ignored.
+/// DB_TRUSTED_PROXY: comma-separated addresses or CIDR ranges. An entry that
+/// does not parse is dropped with a `trusted_proxy_invalid` warning: a silently
+/// dropped proxy puts every visitor behind it back in one login bucket, which
+/// is the lockout the setting exists to prevent.
 pub(crate) fn parse_trusted_proxies(value: Option<&str>) -> Vec<TrustedProxy> {
-    value
-        .unwrap_or_default()
+    let Some(value) = value else {
+        return Vec::new();
+    };
+    let proxies: Vec<TrustedProxy> = value
         .split(',')
-        .filter_map(|v| v.parse().ok())
-        .collect()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .filter_map(|v| match v.parse() {
+            Ok(proxy) => Some(proxy),
+            Err(()) => {
+                tracing::warn!(
+                    event = "trusted_proxy_invalid",
+                    entry = %v,
+                    "DB_TRUSTED_PROXY entry is not an address or CIDR range and was ignored"
+                );
+                None
+            }
+        })
+        .collect();
+    tracing::info!(
+        event = "trusted_proxy_configured",
+        proxies = ?proxies.iter().map(ToString::to_string).collect::<Vec<_>>()
+    );
+    proxies
 }
 
 #[cfg(unix)]
@@ -525,7 +552,7 @@ mod tests {
         let t = |s: &str| s.parse::<TrustedProxy>().unwrap();
         assert_eq!(parse_trusted_proxies(None), Vec::<TrustedProxy>::new());
         assert_eq!(
-            parse_trusted_proxies(Some("10.0.0.5, nope , ::ffff:172.18.0.2, 172.18.0.0/16, 10.0.0.0/40")),
+            parse_trusted_proxies(Some("10.0.0.5, nope , ::ffff:172.18.0.2, 172.18.0.0/16, 10.0.0.0/40, ,")),
             vec![t("10.0.0.5"), t("172.18.0.2"), t("172.18.0.0/16")]
         );
     }

@@ -68,7 +68,7 @@ The container sees the proxy's Docker network address, not `127.0.0.1`. Look up 
   `docker network inspect coolify --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`, then set e.g. `DB_TRUSTED_PROXY=10.0.1.0/24` in the app's environment.
 - **VPS, proxy in a container:** the subnet of the network the proxy shares with the app, with the same command.
 - **VPS, proxy on the host** with the app published by `-p`: the Docker bridge gateway, `docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'` (usually `172.17.0.1`).
-- **Cloudflare proxied domain:** also add Cloudflare's ranges from <https://www.cloudflare.com/ips/>, comma-separated. Unlisted, the Cloudflare edge address is used instead: coarser, but not spoofable.
+- **Cloudflare proxied domain:** also add Cloudflare's ranges from <https://www.cloudflare.com/ips/>, comma-separated. Unlisted, the Cloudflare edge address is used instead: coarser, but not spoofable. When the ranges are listed, lock the origin to your zone with Authenticated Origin Pulls or a Cloudflare Tunnel (see [SECURITY.md](SECURITY.md)).
 
 nginx must append to the header: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and `proxy_set_header X-Forwarded-Proto $scheme;`. Traefik and Caddy do this by default. See [SECURITY.md](SECURITY.md) for the per-proxy details.
 
