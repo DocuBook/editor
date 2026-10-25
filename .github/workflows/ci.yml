@@ -268,9 +268,14 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # `target` (singular) is the input name: the old `targets` was ignored
+      # with an "Unexpected input" warning. With rust-toolchain.toml present
+      # the action runs `rustup target add` for the pinned toolchain — arm64
+      # runners install only the native target, so this is what adds
+      # x86_64-apple-darwin for the cross-compiled job.
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
-          targets: ${{ matrix.target }}
+          target: ${{ matrix.target }}
       - name: Cache cargo (release targets, ${{ matrix.target }})
         uses: actions/cache@v6
         with:
@@ -285,10 +290,6 @@ jobs:
           key: cargo-macos15-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-macos15-${{ matrix.target }}-
-      # arm64 runners (macos-15) install only the native target by default —
-      # ensure the matrix target is present for the x86_64 job.
-      - name: Ensure target
-        run: rustup target add ${{ matrix.target }}
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
