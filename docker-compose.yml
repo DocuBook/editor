@@ -32,6 +32,9 @@ services:
       DB_SESSION_TTL_HOURS: "168"  # session lifetime in hours (1–8760)
       # DB_SECURE_COOKIE: "1"      # optional: force the Secure flag on session cookies;
       #                               # unset follows X-Forwarded-Proto from your proxy
+      # DB_TRUSTED_PROXY: "10.0.1.0/24"  # reverse proxy address(es) or CIDR, comma-separated;
+      #                               # its X-Forwarded-For names the client for the login
+      #                               # rate limit. Coolify: docker network inspect coolify
       # ── Custom OpenAI-compatible provider (optional env override) ──
       # Provision/override the "openai-compatible" custom provider from env;
       # when BASE_URL is set the UI shows it READ-ONLY ("from env" badge).

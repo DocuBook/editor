@@ -17,8 +17,7 @@ fn resolve_base_url(state: &AppState, provider: &str, browser_base_url: &str) ->
     let configured = state
         .auth
         .config
-        .lock()
-        .expect("lock")
+        .lock().unwrap_or_else(|e| e.into_inner())
         .ai
         .endpoints
         .get(provider)
@@ -35,8 +34,7 @@ fn resolve_model(state: &AppState, provider: &str, browser_model: &str) -> Strin
     state
         .auth
         .config
-        .lock()
-        .expect("lock")
+        .lock().unwrap_or_else(|e| e.into_inner())
         .ai
         .endpoints
         .get(provider)
@@ -94,8 +92,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                     let url = state
                         .auth
                         .config
-                        .lock()
-                        .expect("lock")
+                        .lock().unwrap_or_else(|e| e.into_inner())
                         .ai
                         .endpoints
                         .get(p)

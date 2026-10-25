@@ -10,9 +10,11 @@
 //!   DB_SESSION_TTL_HOURS                → session lifetime
 //!   DB_SECURE_COOKIE=1|0                → force the Secure flag on/off (default: follows X-Forwarded-Proto)
 //!   DB_SETUP_TOKEN                      → fixed setup token (default: one-time token printed at boot)
+//!   DB_TRUSTED_PROXY                    → proxy addresses/CIDRs whose X-Forwarded-For names the client
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_PROBE_PROVIDERS: usize = 32;
 const MAX_PROBE_MODELS_PER_PROVIDER: usize = 128;
@@ -571,16 +573,36 @@ fn parse_probe_map(value: Option<&serde_json::Value>) -> std::collections::BTree
         .unwrap_or_default()
 }
 
-/** Timestamp without pulling chrono — RFC3339-ish for the config file. */
+/** Current UTC time as RFC 3339 for the config file. Computed in-process, so
+ *  there is no `date` lookup on PATH and no chrono dependency. */
 fn chrono_now() -> String {
-    let s = std::process::Command::new("date")
-        .arg("-u")
-        .arg("+%Y-%m-%dT%H:%M:%SZ")
-        .output();
-    match s {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).trim().to_string(),
-        _ => String::new(),
-    }
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format_utc(secs)
+}
+
+/** `YYYY-MM-DDTHH:MM:SSZ` for seconds since the Unix epoch (civil-from-days,
+ *  H. Hinnant's algorithm). */
+fn format_utc(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 /// Replace `path` by writing a sibling temp file and renaming it over the target:
@@ -614,6 +636,8 @@ pub struct AuthState {
     pub limiter: super::auth::LoginLimiter,
     /// `Some` when DB_SECURE_COOKIE forces the flag; `None` follows the request scheme.
     pub secure_cookie: Option<bool>,
+    /// Proxy addresses whose forwarded headers name the real client (DB_TRUSTED_PROXY).
+    pub trusted_proxies: Vec<super::auth::TrustedProxy>,
 }
 
 /// Where the setup token the wizard asks for comes from: the operator's
@@ -647,6 +671,7 @@ impl AuthState {
             sessions: super::auth::Sessions::new(data_dir),
             limiter: super::auth::LoginLimiter::new(),
             secure_cookie: secure_cookie_setting(std::env::var("DB_SECURE_COOKIE").ok().as_deref()),
+            trusted_proxies: super::auth::parse_trusted_proxies(std::env::var("DB_TRUSTED_PROXY").ok().as_deref()),
         }
     }
 
@@ -654,7 +679,7 @@ impl AuthState {
     /// print it, so the wizard can require one without any env setup. Memory only,
     /// so it changes on every restart until the admin exists.
     pub fn ensure_setup_token(&self) {
-        let mut cfg = self.config.lock().expect("lock");
+        let mut cfg = self.config.lock().unwrap_or_else(|e| e.into_inner());
         if cfg.admin.is_some() || cfg.setup_token.is_some() {
             return;
         }
@@ -669,7 +694,7 @@ impl AuthState {
     }
 
     pub fn session_ttl(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(self.config.lock().expect("lock").session_ttl_hours * 3600)
+        std::time::Duration::from_secs(self.config.lock().unwrap_or_else(|e| e.into_inner()).session_ttl_hours * 3600)
     }
 }
 
@@ -1128,5 +1153,12 @@ mod tests {
         assert_eq!(setup_token_source(Some(""), true), Some("log"));
         assert_eq!(setup_token_source(None, true), Some("log"));
         assert_eq!(setup_token_source(None, false), None);
+    }
+
+    #[test]
+    fn format_utc_matches_known_timestamps() {
+        assert_eq!(format_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(format_utc(951_782_400), "2000-02-29T00:00:00Z");
+        assert_eq!(format_utc(1_700_000_000), "2023-11-14T22:13:20Z");
     }
 }

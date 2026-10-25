@@ -24,7 +24,7 @@ await runSuite('web-smoke', {
 }, async ({ page, ok, base, restart, vaultPath }) => {
   // ── Health ──
   const h = await (await fetch(`${base}/api/health`)).json()
-  ok('health: returns JSON', h && typeof h.result === 'string' && h.result.includes('version'))
+  ok('health: returns JSON liveness', h && typeof h.result === 'string' && h.result.includes('"status":"ok"'))
 
   // ── Setup wizard ──
   await page.goto(base, { waitUntil: 'domcontentloaded' })

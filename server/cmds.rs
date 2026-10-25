@@ -13,9 +13,9 @@ pub(crate) fn open_vault(state: &AppState, path: &str) -> Result<String, String>
         git_repository = std::path::Path::new(path).join(".git").exists()
     );
     let g = git::Git::open(path);
-    *state.vault.lock().expect("lock") = Some(v);
-    *state.wiki.lock().expect("lock") = Some(w);
-    *state.git.lock().expect("lock") = Some(g);
+    *state.vault.lock().unwrap_or_else(|e| e.into_inner()) = Some(v);
+    *state.wiki.lock().unwrap_or_else(|e| e.into_inner()) = Some(w);
+    *state.git.lock().unwrap_or_else(|e| e.into_inner()) = Some(g);
     Ok(json!({ "name": name }).to_string())
 }
 
@@ -37,11 +37,11 @@ fn valid_vault_name(name: &str) -> bool {
  *  vault command. */
 pub(crate) fn rescan_wiki(state: &AppState) {
     let files = {
-        let vault = state.vault.lock().expect("lock");
+        let vault = state.vault.lock().unwrap_or_else(|e| e.into_inner());
         let Some(v) = vault.as_ref() else { return };
         v.markdown_files()
     };
-    if let Some(w) = state.wiki.lock().expect("lock").as_mut() {
+    if let Some(w) = state.wiki.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
         w.scan(files);
     }
 }
@@ -64,27 +64,27 @@ pub(crate) fn git_clone(state: &AppState, url: &str, parent: &str) -> Result<Str
 }
 
 pub(crate) fn search_vault(state: &AppState, query: &str) -> Result<String, String> {
-    let vault = state.vault.lock().expect("lock");
+    let vault = state.vault.lock().unwrap_or_else(|e| e.into_inner());
     let Some(v) = vault.as_ref() else { return Ok("[]".to_string()) };
     serde_json::to_string(&search::search_vault(v, query)).map_err(|e| e.to_string())
 }
 
 pub(crate) fn git_diff_summary(state: &AppState) -> Result<String, String> {
-    match state.git.lock().expect("lock").as_ref() {
+    match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) if g.is_repo() => Ok(g.diff_summary()?),
         _ => Ok(String::new()),
     }
 }
 
 pub(crate) fn git_diff_file(state: &AppState, path: &str, staged: bool) -> Result<String, String> {
-    match state.git.lock().expect("lock").as_ref() {
+    match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) if g.is_repo() => g.diff_file(path, staged),
         _ => Ok(r#"{"old":"","new":""}"#.to_string()),
     }
 }
 
 pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
@@ -92,7 +92,7 @@ pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, Stri
 }
 
 pub(crate) fn git_push_only(state: &AppState, remote: Option<&str>) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
@@ -103,7 +103,7 @@ pub(crate) fn git_push_only(state: &AppState, remote: Option<&str>) -> Result<St
 /** Initialize the vault repository on `branch` (empty = configured default).
  *  Existing repositories are reported, never re-initialized. */
 pub(crate) fn git_init(state: &AppState, branch: &str) -> Result<String, String> {
-    match state.git.lock().expect("lock").as_ref() {
+    match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => serde_json::to_string(&g.init(branch)?).map_err(|e| e.to_string()),
         None => Err("No vault".into()),
     }
@@ -111,7 +111,7 @@ pub(crate) fn git_init(state: &AppState, branch: &str) -> Result<String, String>
 
 /** Connect to a remote and report reachability/default branch without fetching. */
 pub(crate) fn git_remote_probe(state: &AppState, name: &str) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -120,7 +120,7 @@ pub(crate) fn git_remote_probe(state: &AppState, name: &str) -> Result<String, S
 
 /** Fetch a remote's branches into the `refs/remotes/<name>` namespace. */
 pub(crate) fn git_fetch(state: &AppState, name: &str) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -134,7 +134,7 @@ pub(crate) fn git_pull(
     state: &AppState,
     request: git::sync::GitPullRequest,
 ) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -144,7 +144,7 @@ pub(crate) fn git_pull(
 /** Reconcile the current branch with `<name>/<branch>` (fast-forward, adopt, or
  *  merge commit). Never force-pushes; conflicts come back to the UI. */
 pub(crate) fn git_remote_merge(state: &AppState, name: &str, branch: &str) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -155,7 +155,7 @@ pub(crate) fn git_remote_merge(state: &AppState, name: &str, branch: &str) -> Re
 /** Rebase the current branch onto `<name>/<branch>` (`branch` empty = the
  *  remote's default). Conflicts come back to the UI as data. */
 pub(crate) fn git_rebase(state: &AppState, name: &str, branch: &str) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -165,7 +165,7 @@ pub(crate) fn git_rebase(state: &AppState, name: &str, branch: &str) -> Result<S
 
 /** Resume a stopped rebase after its conflicts were resolved and staged. */
 pub(crate) fn git_rebase_continue(state: &AppState) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -175,7 +175,7 @@ pub(crate) fn git_rebase_continue(state: &AppState) -> Result<String, String> {
 
 /** Undo an in-progress rebase. */
 pub(crate) fn git_rebase_abort(state: &AppState) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -186,7 +186,7 @@ pub(crate) fn git_rebase_abort(state: &AppState) -> Result<String, String> {
 
 /** Abandon an in-progress merge (discards the conflicting local changes). */
 pub(crate) fn git_merge_abort(state: &AppState) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
@@ -196,7 +196,7 @@ pub(crate) fn git_merge_abort(state: &AppState) -> Result<String, String> {
 }
 
 pub(crate) fn git_branches(state: &AppState) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Ok("[]".to_string()),
     };
@@ -205,7 +205,7 @@ pub(crate) fn git_branches(state: &AppState) -> Result<String, String> {
 }
 
 pub(crate) fn git_create_branch(state: &AppState, branch: &str) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".to_string()),
     };
@@ -213,7 +213,7 @@ pub(crate) fn git_create_branch(state: &AppState, branch: &str) -> Result<String
 }
 
 pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Result<String, String> {
-    let repo_path = match state.git.lock().expect("lock").as_ref() {
+    let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".to_string()),
     };
@@ -224,7 +224,7 @@ pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Resu
 
 pub(crate) fn git_settings(state: &AppState) -> Result<String, String> {
     let default_branch = git::repo::configured_initial_branch();
-    match state.git.lock().expect("lock").as_ref() {
+    match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) if g.is_repo() => {
             let (name, email) = g.identity()?;
             let remotes = g.remotes()?;
@@ -282,11 +282,10 @@ pub(crate) fn web_vaults(state: &AppState) -> Result<String, String> {
 }
 
 pub(crate) fn health(state: &AppState) -> String {
-    let vault_open = state.vault.lock().expect("lock").is_some();
+    let vault_open = state.vault.lock().unwrap_or_else(|e| e.into_inner()).is_some();
     let git_repo = state
         .git
-        .lock()
-        .expect("lock")
+        .lock().unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .map(|g| g.is_repo())
         .unwrap_or(false);

@@ -145,7 +145,8 @@ mod api_tests {
         let (status, headers, body) = get(&app, "/api/health").await;
         assert_eq!(status, StatusCode::OK);
         assert!(headers.get(&REQUEST_ID_HEADER).is_some());
-        assert_eq!(result_json(&body)["vaultOpen"], false, "{body}");
+        // Public probe: liveness only, no version or vault state.
+        assert_eq!(result_json(&body), json!({ "status": "ok" }), "{body}");
     }
 
     #[tokio::test]
@@ -1045,5 +1046,161 @@ mod api_tests {
         });
         with_admin.auth.ensure_setup_token();
         assert!(with_admin.auth.config.lock().unwrap().setup_token.is_none());
+    }
+
+    /// The liveness short-circuit covers GET/HEAD only. (With a session the
+    /// static GET route answers 405, so the detailed `health` command is never
+    /// reached either way.)
+    #[tokio::test]
+    async fn post_health_is_not_a_public_path() {
+        let app = build_router(test_state(), std::env::temp_dir());
+        let (status, _, _) = post(&app, "/api/health", json!({})).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn poisoned_config_lock_does_not_take_the_server_down() {
+        let state = test_state();
+        let auth = state.auth.clone();
+        // A handler panicking while it holds the config lock poisons it.
+        let _ = std::thread::spawn(move || {
+            let _guard = auth.config.lock().unwrap();
+            panic!("poison the config lock");
+        })
+        .join();
+        assert!(state.auth.config.is_poisoned());
+        let app = build_router(state, std::env::temp_dir());
+        let (status, _, body) = post(&app, "/api/setup_status", json!({})).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+
+    /// Sends a request from `peer` with optional headers, for the client-address rules.
+    async fn send_from(
+        app: &Router,
+        peer: [u8; 4],
+        uri: &str,
+        body: Value,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, String) {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri(uri)
+            .header(header::CONTENT_TYPE, "application/json");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let app = app.clone().layer(MockConnectInfo(SocketAddr::from((peer, 0))));
+        let resp = app
+            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    #[tokio::test]
+    async fn proxied_remote_client_cannot_claim_admin_without_a_token() {
+        // Reverse proxy on localhost forwarding a remote client: the setup gate must not treat it as local.
+        let app = build_router(test_state(), std::env::temp_dir());
+        let body = json!({"email": "a@b.c", "password": "Password1!"});
+        let (status, b) = send_from(
+            &app,
+            [127, 0, 0, 1],
+            "/api/setup_admin",
+            body,
+            &[("x-forwarded-for", "198.51.100.9")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{b}");
+        assert!(b.contains("DB_SETUP_TOKEN") || b.contains("setup token"), "{b}");
+    }
+
+    #[tokio::test]
+    async fn login_limit_is_per_forwarded_client_behind_a_trusted_proxy() {
+        let mut state = test_state();
+        // Only a listed proxy may name the client: bucket by the forwarded client, not the proxy.
+        Arc::get_mut(&mut state.auth)
+            .expect("sole owner of the auth state")
+            .trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+        let app = build_router(state, std::env::temp_dir());
+        let (s, _) = send_from(
+            &app,
+            [127, 0, 0, 1],
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "Password1!"}),
+            &[],
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+
+        let bad = json!({"email": "a@b.c", "password": "wrong"});
+        // Client A exhausts its bucket (7th attempt is blocked)...
+        for _ in 0..7 {
+            send_from(&app, [127, 0, 0, 1], "/api/login", bad.clone(), &[("x-forwarded-for", "203.0.113.1")]).await;
+        }
+        let (blocked, _) = send_from(&app, [127, 0, 0, 1], "/api/login", bad.clone(), &[("x-forwarded-for", "203.0.113.1")]).await;
+        assert_eq!(blocked, StatusCode::TOO_MANY_REQUESTS);
+        // ...while client B, behind the same proxy, still gets a normal answer.
+        let (other, _) = send_from(&app, [127, 0, 0, 1], "/api/login", bad, &[("x-forwarded-for", "203.0.113.2")]).await;
+        assert_eq!(other, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn forwarded_loopback_client_still_needs_a_token_at_setup() {
+        // A proxy on this machine forwarding a client that claims loopback is not local.
+        let app = build_router(test_state(), std::env::temp_dir());
+        let (status, _) = send_from(
+            &app,
+            [127, 0, 0, 1],
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "Password1!"}),
+            &[("x-forwarded-for", "127.0.0.1")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn rate_limit_uses_the_rightmost_hop_across_forwarded_lines() {
+        let mut state = test_state();
+        Arc::get_mut(&mut state.auth)
+            .expect("sole owner of the auth state")
+            .trusted_proxies = vec!["127.0.0.1".parse().unwrap()];
+        let app = build_router(state, std::env::temp_dir());
+        let (s, _) = send_from(
+            &app,
+            [127, 0, 0, 1],
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "Password1!"}),
+            &[],
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK);
+
+        // The client adds a decoy line; the proxy appends the real client on its own line.
+        let bad = json!({"email": "a@b.c", "password": "wrong"});
+        let forged = [("x-forwarded-for", "203.0.113.1"), ("x-forwarded-for", "203.0.113.2")];
+        for _ in 0..7 {
+            send_from(&app, [127, 0, 0, 1], "/api/login", bad.clone(), &forged).await;
+        }
+        // The real client's bucket (203.0.113.2) is exhausted...
+        let (blocked, _) = send_from(&app, [127, 0, 0, 1], "/api/login", bad.clone(), &[("x-forwarded-for", "203.0.113.2")]).await;
+        assert_eq!(blocked, StatusCode::TOO_MANY_REQUESTS);
+        // ...but the decoy address was never the bucket, so it is still free.
+        let (free, _) = send_from(&app, [127, 0, 0, 1], "/api/login", bad, &[("x-forwarded-for", "203.0.113.1")]).await;
+        assert_eq!(free, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn head_health_probe_is_public() {
+        // Uptime monitors often probe with HEAD; it must not need a session.
+        let app = build_router(test_state(), std::env::temp_dir())
+            .layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))));
+        let resp = app
+            .oneshot(Request::builder().method("HEAD").uri("/api/health").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

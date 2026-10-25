@@ -59,8 +59,11 @@ pub(crate) async fn static_cache(req: Request, next: Next) -> Response {
     res
 }
 
-pub(crate) async fn health_route(state: State<AppState>) -> Response {
-    Json(json!({ "result": super::cmds::health(&state) })).into_response()
+/// Public liveness probe for the Docker HEALTHCHECK. Liveness only: version and
+/// vault state are not exposed over HTTP (this static route also answers
+/// `POST /api/health` with 405, so the `health` command is never dispatched).
+pub(crate) async fn health_route() -> Response {
+    Json(json!({ "result": json!({ "status": "ok" }).to_string() })).into_response()
 }
 
 /**
@@ -88,7 +91,7 @@ pub(crate) async fn file_route(
     {
         return (StatusCode::BAD_REQUEST, "path must be vault-relative").into_response();
     }
-    let root = match state.vault.lock().expect("lock").as_ref() {
+    let root = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(vault) => vault.root().to_path_buf(),
         None => return (StatusCode::BAD_REQUEST, "no vault open").into_response(),
     };
@@ -167,15 +170,16 @@ pub(crate) async fn auth_mw(State(state): State<AppState>, req: Request, next: N
     if !path.starts_with("/api/") {
         return next.run(req).await;
     }
-    let setup_required = state.auth.config.lock().expect("lock").admin.is_none();
+    // Liveness only; version and vault state are not exposed over HTTP.
+    if path == "/api/health" && matches!(*req.method(), axum::http::Method::GET | axum::http::Method::HEAD) {
+        return next.run(req).await;
+    }
+    let setup_required = state.auth.config.lock().unwrap_or_else(|e| e.into_inner()).admin.is_none();
     let always_public = matches!(
         path.as_str(),
-        "/api/setup_status" | "/api/login" | "/api/logout" | "/api/setup_admin" | "/api/health"
+        "/api/setup_status" | "/api/login" | "/api/logout" | "/api/setup_admin"
     );
-    let setup_public = matches!(
-        path.as_str(),
-        "/api/setup_status" | "/api/setup_admin" | "/api/health"
-    );
+    let setup_public = matches!(path.as_str(), "/api/setup_status" | "/api/setup_admin");
     if (setup_required && setup_public) || (!setup_required && always_public) {
         return next.run(req).await;
     }

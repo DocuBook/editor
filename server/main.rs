@@ -132,6 +132,9 @@ fn main() {
 
     let auth = Arc::new(AuthState::new(Path::new(&data_dir)));
     auth.ensure_setup_token();
+    if std::env::var("DB_KEYS_PASSPHRASE").map_or(true, |v| v.is_empty()) {
+        warn!(event = "keys_plaintext", "API keys are stored in plaintext; set DB_KEYS_PASSPHRASE to encrypt keys.json");
+    }
     let state = AppState {
         vault: Arc::new(Mutex::new(None)),
         wiki: Arc::new(Mutex::new(None)),
@@ -148,7 +151,7 @@ fn main() {
     if !migrated.is_empty() {
         // One guard, one batch: config.json is written once per moved URL instead
         // of once per entry, and no second lock is taken while it is held.
-        let mut cfg = state.auth.config.lock().expect("lock");
+        let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
         let mut moved = Vec::new();
         for (provider, url) in migrated {
             // Never clobber a URL already in config.json — that one was written
