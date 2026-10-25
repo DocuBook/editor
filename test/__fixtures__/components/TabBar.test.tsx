@@ -280,7 +280,7 @@ describe('responsive tabs', () => {
     const badge = document.querySelector<HTMLButtonElement>('[aria-label="Open tabs (3)"]')!
     // Pill stays 24px tall so the bar does not look heavy.
     expect(badge.className).toContain('h-6')
-    expect(badge.className).toContain('rounded-xl')
+    expect(badge.className).toContain('rounded-md')
     // ::after pads the hit area to 44x44 (10px above/below, 16px left).
     expect(badge.className).toContain('after:absolute')
     expect(badge.className).toContain('after:-inset-y-2.5')

@@ -176,7 +176,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
                     setTabsOpen(true)
                   }
                 }} aria-label={`Open tabs (${tabs.length})`} aria-haspopup="menu" aria-expanded={tabsOpen} aria-controls={tabsOpen ? TABS_MENU_ID : undefined} title={`${tabs.length} open tabs`}
-                className={'relative flex h-6 min-w-6 shrink-0 cursor-pointer items-center justify-center px-2 text-[11px] font-semibold tabular-nums rounded-xl border transition-colors ' +
+                className={'relative flex h-6 min-w-6 shrink-0 cursor-pointer items-center justify-center px-2 text-[11px] font-semibold tabular-nums rounded-md border transition-colors ' +
                   // ::after pads the 24px pill to a ~44px tap target, stopping short on the right so a tap meant for the close button never hits it.
                   'after:absolute after:-left-4 after:-right-1 after:-inset-y-2.5 after:content-[""] ' +
                   (tabsOpen
