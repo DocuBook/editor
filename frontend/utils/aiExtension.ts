@@ -1,7 +1,7 @@
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { createAiTransport } from './aiTransport'
-import { buildHtmlDocumentState, captureAISelection, forgetAISelection, hasAISelection, releaseAISelection, replaceAISelectionInlineContent, restoreAISelection } from './aiBlocks'
+import { buildHtmlDocumentState, captureAISelection, hasAISelection, releaseAISelection, replaceAISelectionInlineContent, restoreAISelection } from './aiBlocks'
 import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
@@ -323,12 +323,17 @@ const extensionFactory = ({ editor, options }: any) => {
 
   const applyInput = (input: any) => {
     const { written, changed } = applyOperations(editor, input)
-    /** The selected range has been rewritten, so its snapshot is spent: a
-     *  follow-up prompt during review runs in cursor mode at the menu's block
-     *  instead of failing against the old range (and closing the review). A
-     *  failed apply throws above and keeps the snapshot for Retry. */
+    /** The selected range has been rewritten, so the selection is spent: both
+     *  the snapshot and the live range are released, so a follow-up prompt
+     *  during review runs in cursor mode at the menu's block instead of
+     *  targeting the old range — where it failed (single block: the snapshot's
+     *  doc is stale) or silently replaced the reviewed blocks (multi-block
+     *  `updateBlock` and `add` ops map the live range through and leave it
+     *  non-empty, which `hasAISelection` and the text-only path still read as
+     *  "the selection"). A failed apply throws above and keeps the selection
+     *  for Retry. */
     if (changed) {
-      forgetAISelection(editor)
+      releaseAISelection(editor)
       options?.onDocumentChange?.()
     }
     moveWritingCursor(written[written.length - 1] ?? null)

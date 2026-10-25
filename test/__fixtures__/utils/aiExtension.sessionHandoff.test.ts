@@ -32,15 +32,26 @@ function mountEditor() {
   return editor as any
 }
 
-function selectText(ed: any, blockId: string, text: string) {
+function textPos(ed: any, blockId: string, text: string) {
   let blockPos = -1
   ed.prosemirrorView.state.doc.descendants((node: any, pos: number) => {
     if (node.attrs?.id !== blockId) return true
     blockPos = pos
     return false
   })
-  const start = blockPos + 2 + ed.prosemirrorView.state.doc.nodeAt(blockPos).firstChild.textContent.indexOf(text)
+  return blockPos + 2 + ed.prosemirrorView.state.doc.nodeAt(blockPos).firstChild.textContent.indexOf(text)
+}
+
+function selectText(ed: any, blockId: string, text: string) {
+  const start = textPos(ed, blockId, text)
   ed.transact((tr: any) => tr.setSelection(TextSelection.create(tr.doc, start, start + text.length)))
+}
+
+/** From `text` in one block through `text` in a later one: a multi-block range. */
+function selectAcross(ed: any, from: [string, string], to: [string, string]) {
+  const start = textPos(ed, from[0], from[1])
+  const end = textPos(ed, to[0], to[1]) + to[1].length
+  ed.transact((tr: any) => tr.setSelection(TextSelection.create(tr.doc, start, end)))
 }
 
 /** Each provider call stays pending until the test answers it, so requests can
@@ -118,6 +129,7 @@ describe('AI session hand-off between prompts', () => {
     expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
     // The written range is gone, so nothing may still claim to be "the selection".
     expect(getAISelectionSnapshot(ed)).toBeUndefined()
+    expect(hasAISelection(ed)).toBe(false)
 
     // Regression: the stale snapshot forced this prompt into selection mode,
     // where it failed ("Text selection is no longer available"), closed the
@@ -135,6 +147,51 @@ describe('AI session hand-off between prompts', () => {
     // Like any follow-up, Revert undoes this turn on top of the previous result.
     ai.rejectChanges()
     expect(await markdown(ed)).toBe('alpha BETA gamma\n\nsecond paragraph')
+  })
+
+  /** Regression: only the single-block inline replace collapsed the live range.
+   *  Multi-block `updateBlock` and `add` ops map it through the change and
+   *  leave it non-empty, so `hasAISelection` still reported "the selection"
+   *  and the follow-up silently rewrote the reviewed blocks. */
+  it.each<[string, any[], string]>([
+    ['two update ops', [
+      { type: 'update', id: 'a$', block: '<p>ALPHA BETA GAMMA</p>' },
+      { type: 'update', id: 'b$', block: '<p>SECOND</p>' },
+    ], 'ALPHA BETA GAMMA\n\nSECOND'],
+    ['an update and an add op', [
+      { type: 'update', id: 'a$', block: '<p>ALPHA BETA GAMMA</p>' },
+      { type: 'add', referenceId: 'b$', position: 'after', blocks: ['<p>added</p>'] },
+    ], 'ALPHA BETA GAMMA\n\nsecond paragraph\n\nadded'],
+  ])('runs a follow-up in cursor mode after a multi-block selection result applied with %s', async (_label, operations, result) => {
+    const ed = mountEditor()
+    const provider = deferredTransport()
+    const ai = attachAi(ed, provider.transport)
+
+    selectAcross(ed, ['a', 'beta'], ['b', 'paragraph'])
+    expect(ed.getSelection().blocks.map((block: any) => block.id)).toEqual(['a', 'b'])
+    captureAISelection(ed)
+    openAIMenuAtAnchor(ed)
+    const first = ai.invokeAI({ userPrompt: 'Improve writing', useSelection: true })
+    await until(() => provider.calls.length === 1)
+    provider.answer(0, operations)
+    await first
+    expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
+    expect(await markdown(ed)).toBe(result)
+    // The live range is collapsed, not just the snapshot dropped.
+    expect(ed.prosemirrorView.state.selection.empty).toBe(true)
+    expect(hasAISelection(ed)).toBe(false)
+
+    expect(submitFromComposer(ed, ai, 'Add an introduction')).toBe('cursor')
+    await until(() => provider.calls.length === 2)
+    expect(provider.calls[1].messages[0].metadata.documentState).toEqual({ selection: false })
+
+    provider.answer(1, [{ type: 'add', referenceId: 'a$', position: 'before', blocks: ['<p>intro</p>'] }])
+    await until(() => ai.store.state.aiMenuState.status === 'user-reviewing')
+    expect(await markdown(ed)).toBe(`intro\n\n${result}`)
+
+    // The reviewed blocks were never re-targeted: Revert leaves the first result.
+    ai.rejectChanges()
+    expect(await markdown(ed)).toBe(result)
   })
 
   it('keeps the selection when the result could not be applied, so Retry still targets it', async () => {
