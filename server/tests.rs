@@ -1219,4 +1219,28 @@ mod api_tests {
         assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
         assert!(body.contains("Unknown command: health"), "{body}");
     }
+
+    #[tokio::test]
+    async fn env_pinned_web_tools_saves_keep_the_persisted_provider() {
+        use docubook_core::rust_ai::web::WebToolsSettings;
+        let state = test_state();
+        // What the pane sends back on an env-pinned deployment: the env
+        // provider it was shown, which config.json never held.
+        let submitted = WebToolsSettings {
+            search_provider: "tavily".into(),
+            searxng_url: String::new(),
+            fetch_enabled: true,
+            max_results: 7,
+        };
+        crate::web_tools::persist_settings(&state, submitted, true).unwrap();
+        let saved = crate::config::Config::load(&state.data_dir).web_tools;
+        assert_eq!(saved.search_provider, "off");
+        assert!(saved.fetch_enabled);
+        assert_eq!(saved.max_results, 7);
+        // Without the pin the provider is stored as submitted.
+        let unpinned = WebToolsSettings { search_provider: "tavily".into(), ..saved };
+        crate::web_tools::persist_settings(&state, unpinned, false).unwrap();
+        assert_eq!(crate::config::Config::load(&state.data_dir).web_tools.search_provider, "tavily");
+        let _ = std::fs::remove_dir_all(&state.data_dir);
+    }
 }

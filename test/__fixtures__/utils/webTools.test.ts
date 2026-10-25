@@ -7,6 +7,11 @@ describe('web tools helpers', () => {
       .toEqual(['https://a.example/x', 'https://b.example/y', 'http://c.example/z?q=1'])
   })
 
+  it('keeps balanced parentheses inside URLs', () => {
+    expect(extractUrls('(see https://en.wikipedia.org/wiki/Rust_(programming_language)). Or https://a.example/f(x)?!'))
+      .toEqual(['https://en.wikipedia.org/wiki/Rust_(programming_language)', 'https://a.example/f(x)'])
+  })
+
   it('seeds only from the user\'s messages and document state', () => {
     const urls = collectUrlSources([
       { role: 'assistant', parts: [{ type: 'text', text: 'model said https://model.example/' }] },

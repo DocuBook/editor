@@ -215,7 +215,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl"), &s("apiKey")).await,
         "context_tools" => {
             configure_mcp(state)?;
-            web_tools::configure(state)?;
+            web_tools::configure_or_disable(state);
             let url_sources = web_tools::url_sources(&args);
             Ok(
                 serde_json::to_string(&rust_ai::context::discover(&s("requestId"), &url_sources).await?)
@@ -256,7 +256,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         "call_context_tool" => {
             configure_mcp(state)?;
-            web_tools::configure(state)?;
+            web_tools::configure_or_disable(state);
             let request_id = s("requestId");
             let context_id = s("contextId");
             let name = s("name");

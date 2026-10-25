@@ -39,6 +39,18 @@ pub fn configure(state: &AppState) -> Result<(), String> {
     rust_ai::web::set_config(config)
 }
 
+/// `configure` for the tool-dispatch paths (`context_tools`, `call_context_tool`).
+///
+/// A broken environment variable or config block only switches the web tools
+/// off (and is logged), so MCP discovery and calls through the same dispatch
+/// keep working instead of failing on a setting that is not theirs.
+pub fn configure_or_disable(state: &AppState) {
+    if let Err(error) = configure(state) {
+        tracing::warn!(event = "web_tools_config_rejected", "web tools disabled: {error}");
+        let _ = rust_ai::web::set_config(Default::default());
+    }
+}
+
 /// Settings for the dashboard; the key is reported, never returned.
 pub fn settings_json(state: &AppState) -> Result<String, String> {
     let mut settings = state.auth.config.lock().unwrap_or_else(|e| e.into_inner()).web_tools.clone();
@@ -61,11 +73,21 @@ pub fn settings_json(state: &AppState) -> Result<String, String> {
 pub fn set_settings(state: &AppState, args: &Value) -> Result<String, String> {
     let settings: WebToolsSettings = serde_json::from_value(args.get("settings").cloned().unwrap_or(Value::Null))
         .map_err(|_| "Invalid web tools settings".to_string())?;
-    settings.validate()?;
+    persist_settings(state, settings, env_managed())
+}
+
+/// `pinned` means the environment owns the provider: the pane sends back the
+/// env-derived provider and URL it was shown, and persisting those would keep
+/// searching against them after the variable is removed. Only `fetch_enabled`
+/// and `max_results` are taken from the request in that case.
+pub(crate) fn persist_settings(state: &AppState, mut settings: WebToolsSettings, pinned: bool) -> Result<String, String> {
+    let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
     let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
-    if env_managed() && settings.search_provider != cfg.web_tools.search_provider {
-        return Err(format!("The search provider is controlled by {SEARXNG_ENV} / {TAVILY_ENV}"));
+    if pinned {
+        settings.search_provider = cfg.web_tools.search_provider.clone();
+        settings.searxng_url = cfg.web_tools.searxng_url.clone();
     }
+    settings.validate()?;
     let previous = std::mem::replace(&mut cfg.web_tools, settings);
     if let Err(error) = cfg.save() {
         cfg.web_tools = previous;
@@ -90,6 +112,9 @@ pub fn set_key(state: &AppState, args: &Value) -> Result<String, String> {
     if key.is_empty() || key.len() > MAX_KEY_LEN || key.chars().any(char::is_control) {
         return Err("Enter a valid Tavily API key".into());
     }
+    // keys.json is an unlocked load-modify-save; `config_writes` serialises it
+    // with the API-key and MCP-token writers in handlers.rs.
+    let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
     keys::set_key(&state.data_dir, TAVILY_KEY_ACCOUNT, key)?;
     configure(state).map(|_| "null".into())
 }
@@ -99,6 +124,7 @@ pub fn delete_key(state: &AppState) -> Result<String, String> {
     if env(TAVILY_ENV).is_some() {
         return Err(format!("The Tavily key is controlled by {TAVILY_ENV}"));
     }
+    let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
     if keys::get_key(&state.data_dir, TAVILY_KEY_ACCOUNT).is_ok() {
         keys::delete_key(&state.data_dir, TAVILY_KEY_ACCOUNT)?;
     }

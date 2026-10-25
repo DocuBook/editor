@@ -27,7 +27,26 @@ export const DEFAULT_WEB_TOOLS: WebToolsSettings = { searchProvider: 'off', sear
 /** URLs seeded per prompt turn; the backend applies the same cap. */
 const MAX_URL_SOURCES = 200
 const URL_PATTERN = /https?:\/\/[^\s<>"'`\\^{}|[\]]+/g
-const TRAILING_PUNCTUATION = /[.,;:!?)*_]+$/
+const TRAILING_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?', '*', '_'])
+
+/** Strip sentence punctuation the URL pattern swallowed. A trailing `)` only
+ *  goes while it is unbalanced, so `Rust_(programming_language)` survives; the
+ *  backend ledger (`core/rust-ai/web/ledger.rs`) applies the same rule. */
+function trimTrailingPunctuation(url: string): string {
+  while (url) {
+    const last = url[url.length - 1]
+    const unbalanced = last === ')' && count(url, ')') > count(url, '(')
+    if (!TRAILING_PUNCTUATION.has(last) && !unbalanced) break
+    url = url.slice(0, -1)
+  }
+  return url
+}
+
+function count(text: string, char: string): number {
+  let n = 0
+  for (const c of text) if (c === char) n++
+  return n
+}
 
 /** Parse a `web_tools_settings` reply, filling defaults for missing fields. */
 export function parseWebToolsState(raw: unknown): WebToolsState {
@@ -57,7 +76,7 @@ export function describeWebTools(state: WebToolsState): string {
 export function extractUrls(text: string): string[] {
   const seen = new Set<string>()
   for (const match of text.match(URL_PATTERN) ?? []) {
-    seen.add(match.replace(TRAILING_PUNCTUATION, ''))
+    seen.add(trimTrailingPunctuation(match))
     if (seen.size >= MAX_URL_SOURCES) break
   }
   return [...seen]

@@ -1,8 +1,16 @@
 //! URL-provenance ledger: `web_fetch` may only open URLs that already appeared
 //! in the current prompt turn (prompt, document, earlier web results).
 //!
-//! A prompt-injected page can then only point the model at URLs it already
-//! contains; it cannot make the model compose an exfiltration URL.
+//! Within one turn, a prompt-injected page can only point the model at URLs it
+//! already contains; it cannot make the model compose an exfiltration URL.
+//!
+//! Across turns the guarantee is weaker: the document is part of the seed, and
+//! the model writes to the document through `applyDocumentOperations`. A URL the
+//! model wrote in turn N (and the user kept) is an allowed seed in turn N+1, so
+//! an injection can plant a URL and have a later turn fetch it. The cost is one
+//! accepted edit and a second prompt, which is why it is accepted rather than
+//! narrowed (seeding only from prompt text would break "read the link in this
+//! note"); the Settings copy says the document's own links count.
 
 use regex::Regex;
 use reqwest::Url;
@@ -12,8 +20,11 @@ use std::time::{Duration, Instant};
 
 /// Prompt turns tracked at once; the oldest is dropped beyond this.
 const MAX_CONTEXTS: usize = 64;
-/// URLs remembered per prompt turn.
-const MAX_URLS_PER_CONTEXT: usize = 500;
+/// URLs remembered per prompt turn. Above the most a turn can record (the seed
+/// plus the transport's 8 tool calls, each at most one source of
+/// `MAX_URLS_PER_SOURCE` and a final URL), so search hits are never dropped
+/// after a few link-heavy pages.
+const MAX_URLS_PER_CONTEXT: usize = 2000;
 /// URLs taken from one source (seed list, search results, one page).
 pub const MAX_URLS_PER_SOURCE: usize = 200;
 /// A turn that has been quiet this long is forgotten.
@@ -95,11 +106,33 @@ pub fn extract_urls(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     pattern
         .find_iter(text)
-        .map(|found| found.as_str().trim_end_matches(['.', ',', ';', ':', '!', '?', ')', '*', '_']))
+        .map(|found| trim_trailing_punctuation(found.as_str()))
         .filter(|url| seen.insert(*url))
         .take(MAX_URLS_PER_SOURCE)
         .map(str::to_string)
         .collect()
+}
+
+/// Strip sentence punctuation that the URL pattern swallowed.
+///
+/// A trailing `)` is only dropped while it is unbalanced, so a wrapped
+/// `(https://a.example/x)` loses it and Wikipedia's `Rust_(programming_language)`
+/// keeps it. `frontend/utils/webTools.ts` applies the same rule to the seed.
+fn trim_trailing_punctuation(mut url: &str) -> &str {
+    loop {
+        let Some(last) = url.chars().next_back() else {
+            return url;
+        };
+        let strip = match last {
+            '.' | ',' | ';' | ':' | '!' | '?' | '*' | '_' => true,
+            ')' => url.matches(')').count() > url.matches('(').count(),
+            _ => false,
+        };
+        if !strip {
+            return url;
+        }
+        url = &url[..url.len() - last.len_utf8()];
+    }
 }
 
 #[cfg(test)]
@@ -127,6 +160,12 @@ mod tests {
     fn extracts_urls_from_prose_without_trailing_punctuation() {
         let urls = extract_urls("See https://a.example/x, (https://b.example/y). Also https://a.example/x again and http://c.example/z?q=1.");
         assert_eq!(urls, ["https://a.example/x", "https://b.example/y", "http://c.example/z?q=1"]);
+    }
+
+    #[test]
+    fn keeps_balanced_parentheses_inside_urls() {
+        let urls = extract_urls("(see https://en.wikipedia.org/wiki/Rust_(programming_language)). Or https://a.example/f(x)?!");
+        assert_eq!(urls, ["https://en.wikipedia.org/wiki/Rust_(programming_language)", "https://a.example/f(x)"]);
     }
 
     #[test]

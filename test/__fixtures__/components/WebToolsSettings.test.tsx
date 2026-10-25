@@ -92,6 +92,26 @@ describe('WebToolsSettings', () => {
     expect(host.innerHTML).not.toContain('tvly-secret')
   })
 
+  it('keeps an unsaved provider choice while the key is saved', async () => {
+    await render()
+    change(select(), 'tavily')
+    change(host.querySelector<HTMLInputElement>('#web-search-key')!, 'tvly-secret')
+    act(() => button('Save key')!.click())
+    await settle()
+
+    // The key is stored, the draft still says Tavily, and Save is waiting for the user.
+    expect(backend.hasTavilyKey).toBe(true)
+    expect(select().value).toBe('tavily')
+    expect(host.textContent).toContain('API key saved')
+    expect(button('Save')!.disabled).toBe(false)
+    expect(invoke).not.toHaveBeenCalledWith('set_web_tools_settings', expect.anything())
+
+    act(() => button('Save')!.click())
+    await settle()
+    expect(backend.settings).toMatchObject({ searchProvider: 'tavily' })
+    expect(host.textContent).toContain('Enabled: Tavily search')
+  })
+
   it('locks the provider when the environment manages it', async () => {
     backend = { ...backend, envManaged: true, hasTavilyKey: true, settings: { ...backend.settings, searchProvider: 'tavily' } }
     await render()

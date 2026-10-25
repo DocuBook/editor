@@ -92,7 +92,9 @@ impl WebToolsSettings {
         if !(1..=MAX_RESULTS_LIMIT).contains(&self.max_results) {
             return Err(format!("Web search results must be between 1 and {MAX_RESULTS_LIMIT}"));
         }
-        if self.search_provider == "searxng" || !self.searxng_url.is_empty() {
+        // Only `into_config` reads the URL, and only for searxng: a half-typed
+        // URL left behind after switching provider must not block the save.
+        if self.search_provider == "searxng" {
             validate_searxng_url(&self.searxng_url)?;
         }
         Ok(())
@@ -356,6 +358,8 @@ mod tests {
         assert!(settings("off", "").validate().is_ok());
         assert!(settings("tavily", "").validate().is_ok());
         assert!(settings("searxng", "").validate().is_err());
+        assert!(settings("searxng", "not a url").validate().is_err());
+        assert!(settings("tavily", "not a url").validate().is_ok());
         assert!(settings("bing", "").validate().is_err());
         let mut too_many = settings("off", "");
         too_many.max_results = MAX_RESULTS_LIMIT + 1;

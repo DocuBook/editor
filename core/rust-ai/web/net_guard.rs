@@ -14,6 +14,9 @@ use super::ToolError;
 
 /// Longest URL accepted from the model.
 pub const MAX_URL_LEN: usize = 2048;
+/// Bound on the blocking `getaddrinfo` call; a hostile resolver must not hold
+/// the fetch (or outlive a Stop) for the system resolver's own timeout.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(5);
 /// Only the default web ports: anything else is far more likely an internal service.
 const ALLOWED_PORTS: [u16; 2] = [80, 443];
 /// Host names that must never be resolved, whatever DNS says.
@@ -147,8 +150,9 @@ pub async fn resolve_public(url: &Url) -> Result<(String, Vec<SocketAddr>), Tool
     let port = url.port_or_known_default().unwrap_or(443);
     let addrs: Vec<SocketAddr> = match host.parse::<IpAddr>() {
         Ok(ip) => vec![SocketAddr::new(ip, port)],
-        Err(_) => tokio::net::lookup_host((host.as_str(), port))
+        Err(_) => tokio::time::timeout(RESOLVE_TIMEOUT, tokio::net::lookup_host((host.as_str(), port)))
             .await
+            .map_err(|_| ToolError::url_not_accessible("host name could not be resolved in time"))?
             .map_err(|_| ToolError::url_not_accessible("host name could not be resolved"))?
             .collect(),
     };

@@ -15,12 +15,14 @@ export default function WebToolsSettings() {
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const refresh = useCallback(async () => {
+  /** Reload from the backend. `keepDraft` leaves unsaved edits alone: saving a
+   *  Tavily key must not snap a not-yet-saved provider choice back to "off". */
+  const refresh = useCallback(async (keepDraft = false) => {
     try {
       const next = parseWebToolsState(await invoke<string>('web_tools_settings'))
       setError(null)
       setState(next)
-      setDraft(next.settings)
+      if (!keepDraft) setDraft(next.settings)
     } catch (err) {
       setError(String(err))
     }
@@ -30,11 +32,11 @@ export default function WebToolsSettings() {
   /* oxlint-enable react/set-state-in-effect */
 
   /** Run one backend change, then reload so the pane shows what was applied. */
-  const run = async (command: string, args: Record<string, unknown>, success: string) => {
+  const run = async (command: string, args: Record<string, unknown>, success: string, keepDraft = false) => {
     setSaving(true)
     try {
       await invoke(command, args)
-      await refresh()
+      await refresh(keepDraft)
       toast.success(success)
       return true
     } catch (err) {
@@ -56,7 +58,7 @@ export default function WebToolsSettings() {
   const dirty = JSON.stringify(draft) !== JSON.stringify(state.settings)
 
   return <div className="space-y-3" data-testid="web-tools-settings">
-    <p className="text-xs text-muted leading-relaxed">Let the AI look things up before it edits your document. Results are treated as untrusted reference data, and pages can only be read from URLs in your prompt, the document, or earlier search results.</p>
+    <p className="text-xs text-muted leading-relaxed">Let the AI look things up before it edits your document. Results are treated as untrusted reference data, and pages can only be read from URLs in your prompt, the document (including links the AI added to it in an earlier turn), or earlier search results.</p>
     <p role="status" className="text-xs font-medium">{describeWebTools(state)}</p>
     {state.envManaged && <p className="text-xs text-warning">The search provider is controlled by DOCUBOOK_SEARXNG_URL / DOCUBOOK_TAVILY_API_KEY.</p>}
 
@@ -70,11 +72,11 @@ export default function WebToolsSettings() {
     {draft.searchProvider === 'tavily' && <div className="rounded border border-border-subtle p-3 space-y-2">
       <p className="text-[10px] text-muted">Tavily's terms allow it to use queries to improve its service, and queries can contain text from your notes. The free plan includes 1,000 searches a month.</p>
       {state.hasTavilyKey
-        ? <div className="flex items-center justify-between text-xs"><span>API key saved</span>{!state.envManaged && <button type="button" disabled={disabled} onClick={() => void run('delete_web_search_key', {}, 'Tavily key removed')} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove key</button>}</div>
+        ? <div className="flex items-center justify-between text-xs"><span>API key saved</span>{!state.envManaged && <button type="button" disabled={disabled} onClick={() => void run('delete_web_search_key', {}, 'Tavily key removed', true)} className="text-xs text-danger bg-transparent border-0 cursor-pointer disabled:opacity-40">Remove key</button>}</div>
         : <>
           <label className="block text-xs font-medium" htmlFor="web-search-key">Tavily API key</label>
           <input id="web-search-key" disabled={disabled} type="password" autoComplete="new-password" value={key} onChange={e => setKey(e.target.value)} placeholder="tvly-…" className={INPUT_CLASS} />
-          <button type="button" disabled={disabled || !key.trim()} onClick={() => void run('set_web_search_key', { key }, 'Tavily key saved').then(ok => { if (ok) setKey('') })} className={BUTTON_CLASS}>{saving ? 'Saving…' : 'Save key'}</button>
+          <button type="button" disabled={disabled || !key.trim()} onClick={() => void run('set_web_search_key', { key }, 'Tavily key saved', true).then(ok => { if (ok) setKey('') })} className={BUTTON_CLASS}>{saving ? 'Saving…' : 'Save key'}</button>
         </>}
     </div>}
 
