@@ -117,8 +117,10 @@ export function hasTextSelection(editor: any): boolean {
 /** Drop the AI session's remembered selection and collapse the live range it
  *  left behind.
  *
- *  Accept/reject rewrites the blocks the request was about, so the old range is
- *  stale — and BlockNote keys its formatting toolbar on any non-empty
+ *  Applying a result rewrites the blocks the request was about, so the old
+ *  range is stale: kept, it would pull the NEXT prompt (a follow-up typed while
+ *  the result is under review) into selection mode against the rewritten
+ *  blocks. And BlockNote keys its formatting toolbar on any non-empty
  *  selection. Left in place, that selection re-arms the toolbar (the
  *  text-selection popover) the moment the AI menu closes and the caret returns
  *  to the editor. Collapsing hands the caret back to the document without
