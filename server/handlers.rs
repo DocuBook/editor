@@ -212,7 +212,6 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "change_password" => sync(state, cmd, args),
         "config_get" => sync(state, cmd, args),
         "config_set" => sync(state, cmd, args),
-        "health" => Ok(cmds::health(state).to_string()),
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl"), &s("apiKey")).await,
         "context_tools" => {
             configure_mcp(state)?;

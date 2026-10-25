@@ -1,4 +1,4 @@
-// Vault / git / search / health command handlers (isolated).
+// Vault / git / search command handlers (isolated).
 use super::*;
 
 pub(crate) fn open_vault(state: &AppState, path: &str) -> Result<String, String> {
@@ -279,21 +279,5 @@ pub(crate) fn web_vaults(state: &AppState) -> Result<String, String> {
         }
     }
     serde_json::to_string(&out).map_err(|e| e.to_string())
-}
-
-pub(crate) fn health(state: &AppState) -> String {
-    let vault_open = state.vault.lock().unwrap_or_else(|e| e.into_inner()).is_some();
-    let git_repo = state
-        .git
-        .lock().unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-        .map(|g| g.is_repo())
-        .unwrap_or(false);
-    json!({
-        "version": env!("CARGO_PKG_VERSION"),
-        "vaultOpen": vault_open,
-        "gitRepo": git_repo,
-    })
-    .to_string()
 }
 

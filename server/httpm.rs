@@ -60,8 +60,8 @@ pub(crate) async fn static_cache(req: Request, next: Next) -> Response {
 }
 
 /// Public liveness probe for the Docker HEALTHCHECK. Liveness only: version and
-/// vault state are not exposed over HTTP (this static route also answers
-/// `POST /api/health` with 405, so the `health` command is never dispatched).
+/// vault state are not exposed over HTTP; the desktop `health` command has no
+/// web counterpart, and `POST /api/health` gets 405 from this static route.
 pub(crate) async fn health_route() -> Response {
     Json(json!({ "result": json!({ "status": "ok" }).to_string() })).into_response()
 }

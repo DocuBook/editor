@@ -55,6 +55,7 @@ const DESKTOP_ONLY = new Map([
   ["list_editors", "enumerates local editor apps via LaunchServices, desktop only"],
   ["open_in_editor", "opens a local GUI editor, desktop window only"],
   ["reveal_in_finder", "reveals a local path in the OS file manager, desktop only"],
+  ["health", "diagnostics with version and vault state; web exposes only GET /api/health liveness"],
 ]);
 
 /** Web-only: server features that do not exist on desktop. */
