@@ -62,6 +62,7 @@ pub fn run() {
         })
         .setup(|app| {
             let _ = commands::agent::initialize_mcp_settings(app.handle());
+            let _ = commands::web_tools::initialize_web_tools(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 eprintln!("[docubook] window theme at startup: {:?}", w.theme());
             }
@@ -161,6 +162,10 @@ pub fn run() {
             commands::agent::list_models,
             commands::agent::context_tools,
             commands::agent::call_context_tool,
+            commands::web_tools::web_tools_settings,
+            commands::web_tools::set_web_tools_settings,
+            commands::web_tools::set_web_search_key,
+            commands::web_tools::delete_web_search_key,
             commands::app::health,
             commands::app::app_ready_to_close,
             commands::vault::open_system_settings,

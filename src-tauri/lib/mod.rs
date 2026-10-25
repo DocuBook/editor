@@ -8,4 +8,5 @@ pub(crate) mod git;     // git: clone/init/settings/remote/identity/stage/push/s
 pub(crate) mod markdown;// preview & safe-HTML rendering commands
 pub(crate) mod search;  // vault file search
 pub(crate) mod vault;   // vault lifecycle + file operations
+pub(crate) mod web_tools; // rust-ai web_search/web_fetch settings + Tavily key
 pub(crate) mod wiki;    // wikilink suggest/backlinks/resolve

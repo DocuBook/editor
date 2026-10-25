@@ -581,6 +581,7 @@ describe('SettingsPane — MCP settings loading', () => {
     useSettings.setState({ open: true, section: 'ai-mcp-server' })
     invoke.mockImplementation(async (command: string) => {
       if (command === 'mcp_settings') throw new Error('offline')
+      if (command === 'web_tools_settings') return JSON.stringify({ settings: {}, hasTavilyKey: false, envManaged: false, maxResultsLimit: 10 })
       if (command === 'ai_settings') return JSON.stringify(backend)
       if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
       return ''
@@ -594,6 +595,7 @@ describe('SettingsPane — MCP settings loading', () => {
 
     invoke.mockImplementation(async (command: string) => {
       if (command === 'mcp_settings') return JSON.stringify({ servers: [], envManaged: false })
+      if (command === 'web_tools_settings') return JSON.stringify({ settings: {}, hasTavilyKey: false, envManaged: false, maxResultsLimit: 10 })
       if (command === 'ai_settings') return JSON.stringify(backend)
       if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
       return ''

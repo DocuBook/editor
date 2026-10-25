@@ -9,6 +9,7 @@ import SystemSettings from './SystemSettings'
 import AppearanceSettings from './AppearanceSettings'
 import SettingsSection from './settings/SettingsSection'
 import ProviderForm from './settings/ProviderForm'
+import WebToolsSettings from './settings/WebToolsSettings'
 import { addMcpServer, editMcpServer, removeMcpServer, timeoutsValid, type McpServer } from '../utils/mcpSettings'
 
 function McpSettings({ servers, envManaged, ready, loading, error, retry, defaultTimeoutSeconds, maxTimeoutSeconds }: { servers: McpServer[]; envManaged: boolean; ready: boolean; loading: boolean; error: string | null; retry: () => Promise<void>; defaultTimeoutSeconds: number; maxTimeoutSeconds: number }) {
@@ -199,6 +200,7 @@ export default function SettingsPane() {
           <ProviderForm provider="opencode-go" />
           <ProviderForm provider="deepseek" />
         </SettingsSection>
+        <SettingsSection id="ai-web-tools" title="Web Tools"><WebToolsSettings /></SettingsSection>
         <SettingsSection id="ai-mcp-server" title="MCP Server"><McpSettings servers={mcpServers} envManaged={mcpEnvManaged} loading={mcpLoading} error={mcpError} retry={refreshMcpSettings} ready={!mcpLoading && !mcpError} defaultTimeoutSeconds={mcpDefaultTimeout} maxTimeoutSeconds={mcpMaxTimeout} /></SettingsSection>
       </>
     ),

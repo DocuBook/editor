@@ -4,8 +4,8 @@
  * SettingsNav — the sidebar settings tree.
  *
  * One menu shape: every menu (General, Git, AI) expands straight to its page's
- * section anchors and opens its OWN page. The AI menu's page has two sections:
- * Provider (whose content is the three provider forms) and MCP Server. The tree
+ * section anchors and opens its OWN page. The AI menu's page has three sections:
+ * Provider (whose content is the three provider forms), Web Tools and MCP Server. The tree
  * is the ONLY navigation surface for the editor-container settings pane, so its
  * ids must match the pane's section ids.
  */
@@ -69,12 +69,13 @@ describe('SettingsNav — structure', () => {
       'git-identity',
       'git-remotes',
       'ai-provider',
+      'ai-web-tools',
       'ai-mcp-server',
     ]
     const owners: Record<string, string> = {
       'general-themes': 'general', 'general-account': 'general',
       'git-identity': 'git', 'git-remotes': 'git',
-      'ai-provider': 'ai', 'ai-mcp-server': 'ai',
+      'ai-provider': 'ai', 'ai-web-tools': 'ai', 'ai-mcp-server': 'ai',
     }
     let open = 'general'
     for (const id of ids) {
@@ -92,17 +93,18 @@ describe('SettingsNav — structure', () => {
 
   /** Provider is ONE row whose content holds the three forms: the forms are not
    *  sidebar rows of their own. */
-  it('lists the AI page sections, Provider then MCP Server', () => {
+  it('lists the AI page sections, Provider then Web Tools then MCP Server', () => {
     useSettings.setState({ section: 'ai-provider' })
     render()
 
     expect(anchor('ai-provider')!.textContent).toContain('Provider')
+    expect(anchor('ai-web-tools')!.textContent).toContain('Web Tools')
     expect(anchor('ai-mcp-server')!.textContent).toContain('MCP Server')
 
     const ai = group('ai')!.parentElement!
     const rows = Array.from(ai.querySelectorAll<HTMLElement>('[data-testid^="settings-nav-section-ai-"]'))
       .map(node => node.getAttribute('data-testid'))
-    expect(rows).toEqual(['settings-nav-section-ai-provider', 'settings-nav-section-ai-mcp-server'])
+    expect(rows).toEqual(['settings-nav-section-ai-provider', 'settings-nav-section-ai-web-tools', 'settings-nav-section-ai-mcp-server'])
   })
 
   it('marks the active section as current', () => {

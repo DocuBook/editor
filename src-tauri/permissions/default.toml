@@ -68,6 +68,10 @@ permissions = [
   "allow-search-vault",
   "allow-set-ai-settings",
   "allow-set-mcp-settings",
+  "allow-web-tools-settings",
+  "allow-set-web-tools-settings",
+  "allow-set-web-search-key",
+  "allow-delete-web-search-key",
   "allow-set-api-key",
   "allow-set-custom-endpoint",
   "allow-set-probe",
@@ -151,6 +155,46 @@ commands.allow = ["set_mcp_settings"]
 identifier = "deny-set-mcp-settings"
 description = "Denies the set_mcp_settings command."
 commands.deny = ["set_mcp_settings"]
+
+[[permission]]
+identifier = "allow-web-tools-settings"
+description = "Enables the web_tools_settings command."
+commands.allow = ["web_tools_settings"]
+
+[[permission]]
+identifier = "deny-web-tools-settings"
+description = "Denies the web_tools_settings command."
+commands.deny = ["web_tools_settings"]
+
+[[permission]]
+identifier = "allow-set-web-tools-settings"
+description = "Enables the set_web_tools_settings command."
+commands.allow = ["set_web_tools_settings"]
+
+[[permission]]
+identifier = "deny-set-web-tools-settings"
+description = "Denies the set_web_tools_settings command."
+commands.deny = ["set_web_tools_settings"]
+
+[[permission]]
+identifier = "allow-set-web-search-key"
+description = "Enables the set_web_search_key command."
+commands.allow = ["set_web_search_key"]
+
+[[permission]]
+identifier = "deny-set-web-search-key"
+description = "Denies the set_web_search_key command."
+commands.deny = ["set_web_search_key"]
+
+[[permission]]
+identifier = "allow-delete-web-search-key"
+description = "Enables the delete_web_search_key command."
+commands.allow = ["delete_web_search_key"]
+
+[[permission]]
+identifier = "deny-delete-web-search-key"
+description = "Denies the delete_web_search_key command."
+commands.deny = ["delete_web_search_key"]
 
 [[permission]]
 identifier = "allow-context-tools"

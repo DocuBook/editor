@@ -55,10 +55,11 @@ export const SETTINGS_GROUPS: NavGroup[] = [
     label: 'AI',
     Icon: Sparkles,
     page: 'ai',
-    /** The ONE AI page has two sections, top to bottom: Provider (whose own
-     *  content is the three provider forms) and MCP Server. */
+    /** The ONE AI page has three sections, top to bottom: Provider (whose own
+     *  content is the three provider forms), Web Tools and MCP Server. */
     items: [
       { id: 'ai-provider', label: 'Provider' },
+      { id: 'ai-web-tools', label: 'Web Tools' },
       { id: 'ai-mcp-server', label: 'MCP Server' },
     ],
   },

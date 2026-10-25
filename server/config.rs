@@ -59,6 +59,8 @@ pub struct Config {
     pub session_ttl_hours: u64,
     pub ai: AiSelection,
     pub mcp: Vec<McpServer>,
+    /** Built-in web tools (non-secret; the Tavily key lives in keys.json). */
+    pub web_tools: docubook_core::rust_ai::web::WebToolsSettings,
     pub setup_token: Option<String>,
     path: PathBuf,
 }
@@ -146,6 +148,13 @@ impl Config {
                     .collect()
             })
             .unwrap_or_default();
+        // An invalid or hand-broken block falls back to "all off" instead of failing the load.
+        let web_tools = v
+            .get("webTools")
+            .cloned()
+            .and_then(|value| serde_json::from_value::<docubook_core::rust_ai::web::WebToolsSettings>(value).ok())
+            .filter(|settings| settings.validate().is_ok())
+            .unwrap_or_default();
         // Env-only, never persisted: optional setup guard for public deployments.
         let setup_token = std::env::var("DB_SETUP_TOKEN")
             .ok()
@@ -155,6 +164,7 @@ impl Config {
             session_ttl_hours,
             ai,
             mcp,
+            web_tools,
             setup_token,
             path: path.to_path_buf(),
         }
@@ -177,6 +187,7 @@ impl Config {
                 }))).collect::<serde_json::Map<_, _>>(),
             },
             "mcp": self.mcp.iter().map(|s| serde_json::json!({"name": s.name, "url": s.url, "timeoutSeconds": s.timeout_seconds, "readOnlyTools": s.read_only_tools})).collect::<Vec<_>>(),
+            "webTools": self.web_tools,
         });
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)
@@ -774,6 +785,29 @@ mod tests {
     }
 
     #[test]
+    fn web_tools_settings_round_trip_and_fall_back_to_off() {
+        let dir = tmp();
+        let mut c = Config::load(&dir);
+        assert_eq!(c.web_tools, Default::default());
+        c.web_tools = docubook_core::rust_ai::web::WebToolsSettings {
+            search_provider: "searxng".into(),
+            searxng_url: "http://searxng:8080".into(),
+            fetch_enabled: true,
+            max_results: 7,
+        };
+        c.save().unwrap();
+        assert_eq!(Config::load(&dir).web_tools, c.web_tools);
+
+        // A hand-broken block must not stop the server from loading its config.
+        let path = dir.join("config.json");
+        let mut raw: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        raw["webTools"] = serde_json::json!({"searchProvider": "bing", "maxResults": 99});
+        std::fs::write(&path, raw.to_string()).unwrap();
+        assert_eq!(Config::load(&dir).web_tools, Default::default());
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn mcp_config_migrates_server_id_to_name_and_reads_timeout() {
         let server = parse_mcp(&serde_json::json!({
             "id": "docs",
@@ -798,6 +832,7 @@ mod tests {
             session_ttl_hours: 24,
             ai: AiSelection::default(),
             mcp: Vec::new(),
+            web_tools: Default::default(),
             setup_token: None,
             path: dir.join("c1.json"),
         };
@@ -812,6 +847,7 @@ mod tests {
             session_ttl_hours: 24,
             ai: AiSelection::default(),
             mcp: Vec::new(),
+            web_tools: Default::default(),
             setup_token: Some(token.clone()),
             path: dir.join("c2.json"),
         };
