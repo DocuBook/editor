@@ -2,7 +2,7 @@
  * Run all e2e suites sequentially — one entry point for local AND CI.
  *
  *   BROWSER=chromium npm run test:e2e   # default
- *   BROWSER=webkit  npm run test:e2e    # CI matrix (macos-14)
+ *   BROWSER=webkit  npm run test:e2e    # CI matrix (macos-15)
  *
  * Each suite spawns its own server on its own port, writes its logs to
  * test/artifacts/, and this runner fails the run (exit 1) if any

@@ -18,7 +18,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -89,7 +89,7 @@ jobs:
           fi
 
   test:
-    runs-on: macos-14
+    runs-on: macos-15
     needs: [lint]
     steps:
       - uses: actions/checkout@v7
@@ -103,9 +103,9 @@ jobs:
             core/target
             src-tauri/target
             server/target
-          key: cargo-macos14-test-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-macos15-test-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-macos14-test-
+            cargo-macos15-test-
       - name: Cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Shared engine test (core)
@@ -179,7 +179,7 @@ jobs:
 
   test-server-linux:
     # Server-only on Linux: exercises cfg(target_os="linux") paths (delete →
-    # .trash server-side trash) that never run on the macos-14 test job.
+    # .trash server-side trash) that never run on the macOS test job.
     runs-on: ubuntu-22.04
     needs: [lint]
     steps:
@@ -251,7 +251,13 @@ jobs:
             arch: arm64
           - target: x86_64-apple-darwin
             arch: amd64
-    runs-on: macos-14
+    # The runner version is only the build host. The app's support floor is
+    # bundle.macOS.minimumSystemVersion (macOS 12, deliberately): rustc takes
+    # the deployment target from MACOSX_DEPLOYMENT_TARGET or its per-target
+    # default (11.0 arm64 / 10.12 x86_64), never from the runner SDK, so the
+    # floor is pinned below and verified on the shipped binary to keep the
+    # executable and the plist in agreement across toolchain changes.
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
         with:
@@ -266,10 +272,14 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             src-tauri/target
-          key: cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          # Keyed on the runner image too: cargo does not fingerprint
+          # MACOSX_DEPLOYMENT_TARGET (rust-lang/rust#118204), so a cache
+          # restored from macos-14 builds would keep registry crates compiled
+          # at rustc's old default floor until Cargo.lock changed.
+          key: cargo-macos15-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            cargo-${{ matrix.target }}-
-      # arm64 runners (macos-14) install only the native target by default —
+            cargo-macos15-${{ matrix.target }}-
+      # arm64 runners (macos-15) install only the native target by default —
       # ensure the matrix target is present for the x86_64 job.
       - name: Ensure target
         run: rustup target add ${{ matrix.target }}
@@ -280,6 +290,13 @@ jobs:
       - run: npm ci
       - name: Build frontend
         run: npm run build
+      # Single source of truth: compile against the same floor the bundle
+      # advertises (LSMinimumSystemVersion), not rustc's per-target default.
+      - name: Pin macOS deployment target
+        run: |
+          MIN=$(node -p "require('./src-tauri/tauri.conf.json').bundle.macOS.minimumSystemVersion")
+          echo "MACOSX_DEPLOYMENT_TARGET=$MIN" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=$MIN"
       - name: Build Tauri (${{ matrix.arch }}, no bundle)
         run: npx tauri build --target ${{ matrix.target }} --no-bundle
       # macOS arm64 binaries are auto-signed `adhoc` by the linker. Apple
@@ -336,6 +353,24 @@ jobs:
               exit 1
             fi
           fi
+      - name: Verify macOS deployment target (${{ matrix.arch }})
+        run: |
+          APP=$(find "src-tauri/target/${{ matrix.target }}/release/bundle/macos" -maxdepth 1 -name '*.app' -print -quit)
+          BIN="$APP/Contents/MacOS/docubook-desktop"
+          MINOS=$(otool -l "$BIN" | awk '/cmd LC_BUILD_VERSION/{f=1} f && $1=="minos"{print $2; exit}')
+          PLIST=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")
+          [ -n "$MINOS" ] || { echo "::error::No LC_BUILD_VERSION minos in $BIN"; exit 1; }
+          # Version compare without sort -V (BSD sort on the runner).
+          above() { awk -v a="$1" -v b="$2" 'BEGIN{split(a,x,".");split(b,y,".");for(i=1;i<=3;i++){if(x[i]+0>y[i]+0)exit 0;if(x[i]+0<y[i]+0)exit 1}exit 1}'; }
+          if above "$MINOS" "$MACOSX_DEPLOYMENT_TARGET"; then
+            echo "::error::$BIN minos $MINOS is above the macOS $MACOSX_DEPLOYMENT_TARGET support floor"
+            exit 1
+          fi
+          if [ "$PLIST" != "$MACOSX_DEPLOYMENT_TARGET" ]; then
+            echo "::error::Info.plist LSMinimumSystemVersion $PLIST != $MACOSX_DEPLOYMENT_TARGET"
+            exit 1
+          fi
+          echo "OK: minos $MINOS, LSMinimumSystemVersion $PLIST (floor $MACOSX_DEPLOYMENT_TARGET)"
       - name: Upload DMG
         uses: actions/upload-artifact@v7
         with:
