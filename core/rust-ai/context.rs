@@ -682,10 +682,46 @@ async fn post_with(
         .ok_or_else(|| "MCP request returned no response".to_string())
 }
 
-pub async fn discover(request_id: &str) -> Result<Vec<ContextTool>, String> {
+/// List the context tools for a prompt turn: ready built-in web tools first,
+/// then configured MCP tools, then the paging tool when any tool can page.
+///
+/// `url_sources` are the URLs of the user's prompt and document; they seed the
+/// turn's provenance ledger so `web_fetch` may open them.
+pub async fn discover(request_id: &str, url_sources: &[String]) -> Result<Vec<ContextTool>, String> {
     if request_id.is_empty() {
         return Err("Context-tool request id is required".into());
     }
+    crate::rust_ai::web::ledger::record(request_id, url_sources.iter().map(String::as_str));
+    let mut tools = builtin_web_tools();
+    match discover_mcp(request_id).await {
+        Ok(mcp) => tools.extend(mcp.into_iter().filter(|tool| tool.name != READ_CONTEXT_RESULT_TOOL)),
+        // Built-in tools must not disappear because a remote MCP server is down.
+        Err(error) if !tools.is_empty() => {
+            tracing::warn!(event = "mcp_discovery_failed", error = %error, "continuing with built-in web tools");
+        }
+        Err(error) => return Err(error),
+    }
+    append_builtin_tools(&mut tools);
+    Ok(tools)
+}
+
+/// Ready built-in web tools as context-tool descriptors.
+fn builtin_web_tools() -> Vec<ContextTool> {
+    crate::rust_ai::web::ready_tools()
+        .into_iter()
+        .map(|tool| ContextTool {
+            server_name: String::new(),
+            name: tool.name.into(),
+            description: tool.description,
+            input_schema: tool.input_schema,
+            read_only: true,
+            remote_name: String::new(),
+        })
+        .collect()
+}
+
+/// Discover configured MCP tools (cached per configuration).
+async fn discover_mcp(request_id: &str) -> Result<Vec<ContextTool>, String> {
     let (cancel, mut cancelled) = watch::channel(false);
     let cancel = Arc::new(cancel);
     register_call(request_id, Arc::clone(&cancel))?;
@@ -963,7 +999,16 @@ fn read_stored_page(input: &Value) -> Result<String, String> {
     frame_page(&entry.handle, &entry.text, offset)
 }
 
-pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String, String> {
+/// Run one context tool for the AI round `request_id`.
+///
+/// `context_id` identifies the whole prompt turn (stable across rounds) and keys
+/// the web tools' URL-provenance ledger; it falls back to `request_id`.
+pub async fn invoke(
+    request_id: &str,
+    context_id: &str,
+    name: &str,
+    input: Value,
+) -> Result<String, String> {
     if request_id.is_empty() {
         return Err("Context-tool request id is required".into());
     }
@@ -973,6 +1018,13 @@ pub async fn invoke(request_id: &str, name: &str, input: Value) -> Result<String
     let (cancel, mut cancelled) = watch::channel(false);
     let cancel = Arc::new(cancel);
     register_call(request_id, Arc::clone(&cancel))?;
+    if crate::rust_ai::web::is_web_tool(name) {
+        let context_id = if context_id.is_empty() { request_id } else { context_id };
+        let outcome = crate::rust_ai::web::invoke(context_id, name, &input, &mut cancelled).await;
+        remove_call(request_id, &cancel);
+        // Tool errors are answers for the model, not request failures.
+        return frame_result(&outcome.unwrap_or_else(|error| error.to_value()));
+    }
     let result = async {
         let servers = server_config()?;
         let tools = cached_discover(servers.clone(), &mut cancelled).await?;
@@ -1158,6 +1210,32 @@ mod tests {
         assert_eq!(some[1].name, READ_CONTEXT_RESULT_TOOL);
         assert!(some[1].read_only);
     }
+    #[tokio::test]
+    async fn discovery_lists_ready_web_tools_with_paging_and_seeds_the_ledger() {
+        use crate::rust_ai::web::{self, SearchProvider, WebToolsConfig};
+        let _guard = web::test_config_lock().await;
+        web::set_config(WebToolsConfig { search: SearchProvider::Tavily { api_key: "k".into() }, fetch_enabled: true, max_results: 5 }).unwrap();
+        let tools = discover("turn-discovery", &["https://seed.example/page".to_string()]).await.unwrap();
+        let names = tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>();
+        assert_eq!(names, [web::WEB_SEARCH_TOOL, web::WEB_FETCH_TOOL, READ_CONTEXT_RESULT_TOOL]);
+        assert!(tools.iter().all(|tool| tool.read_only));
+        assert!(web::ledger::allows("turn-discovery", "https://seed.example/page"));
+        web::set_config(WebToolsConfig::default()).unwrap();
+        assert!(discover("turn-discovery-off", &[]).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn web_tool_errors_are_framed_answers_not_failures() {
+        use crate::rust_ai::web::{self, WebToolsConfig};
+        let _guard = web::test_config_lock().await;
+        web::set_config(WebToolsConfig { fetch_enabled: true, ..WebToolsConfig::default() }).unwrap();
+        let framed = invoke("round-1", "turn-framing", web::WEB_FETCH_TOOL, json!({"url": "https://never.example/"})).await.unwrap();
+        let value: Value = serde_json::from_str(&framed).unwrap();
+        assert_eq!(value["type"], UNTRUSTED_REFERENCE_TYPE);
+        assert_eq!(value["content"]["error"]["code"], "url_not_in_context");
+        web::set_config(WebToolsConfig::default()).unwrap();
+    }
+
     #[test]
     fn context_tool_names_are_provider_safe_aliases() {
         let name = "mcp_0";

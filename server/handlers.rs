@@ -215,8 +215,10 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl"), &s("apiKey")).await,
         "context_tools" => {
             configure_mcp(state)?;
+            web_tools::configure(state)?;
+            let url_sources = web_tools::url_sources(&args);
             Ok(
-                serde_json::to_string(&rust_ai::context::discover(&s("requestId")).await?)
+                serde_json::to_string(&rust_ai::context::discover(&s("requestId"), &url_sources).await?)
                     .map_err(|_| "Could not encode context tools".to_string())?,
             )
         }
@@ -254,13 +256,19 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         "call_context_tool" => {
             configure_mcp(state)?;
+            web_tools::configure(state)?;
             let request_id = s("requestId");
+            let context_id = s("contextId");
             let name = s("name");
             let input = args.get("input").cloned().unwrap_or(Value::Null);
-            rust_ai::context::invoke(&request_id, &name, input)
+            rust_ai::context::invoke(&request_id, &context_id, &name, input)
                 .await
                 .map_err(|error| error.to_string())
         }
+        "web_tools_settings" => web_tools::settings_json(state),
+        "set_web_tools_settings" => web_tools::set_settings(state, &args),
+        "set_web_search_key" => web_tools::set_key(state, &args),
+        "delete_web_search_key" => web_tools::delete_key(state),
         "test_connection" => {
             probe::test_connection(
                 state,

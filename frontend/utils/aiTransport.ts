@@ -34,6 +34,7 @@ import { buildAiPrompt } from "./aiPrompt";
 import { parseMentions } from "./aiMentions";
 import { isTextOnly } from "./aiProbe";
 import { uuid } from "./uuid";
+import { collectUrlSources } from "./webTools";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
  *  document writes while the AI types (smooth instead of janky streaming). */
@@ -136,6 +137,10 @@ async function runSendMessages(
     Record<string, { description: string; inputSchema: any }> | undefined;
   const toolDefs = Object.fromEntries(Object.entries(suppliedToolDefs ?? {}).filter(([name]) => name === "applyDocumentOperations")) as Record<string, { description: string; inputSchema: any }>;
   const contextTools: any[] = [];
+  /** One id for the whole prompt turn: each model round gets a fresh request id,
+   *  but web_fetch's URL-provenance ledger must survive across rounds (a URL a
+   *  search returned in round 1 is fetched in round 2). */
+  const contextId = uuid();
   if (supportsTools && deps.executeContextTool) {
     const trustedTools = new Set(deps.trustedContextTools ?? deps.contextToolAllowlist ?? []);
     for (const [name, definition] of Object.entries(suppliedToolDefs ?? {})) {
@@ -149,7 +154,7 @@ async function runSendMessages(
       }
     }
   } else if (supportsTools && deps.discoverContextTools) {
-    const discovered = await invoke<any>("context_tools", {}, abortSignal).then((value) => {
+    const discovered = await invoke<any>("context_tools", { requestId: contextId, urlSources: collectUrlSources(messages) }, abortSignal).then((value) => {
       try { return typeof value === "string" ? JSON.parse(value) : value } catch { return [] }
     }).catch(() => []);
     if (abortSignal?.aborted) return new ReadableStream();
@@ -441,7 +446,7 @@ async function runSendMessages(
                   try {
                     result = deps.executeContextTool
                       ? await deps.executeContextTool(toolCall.toolName, toolCall.input, abortSignal)
-                      : await invoke<string>("call_context_tool", { requestId: currentRequestId, name: toolCall.toolName, input: toolCall.input }, abortSignal);
+                      : await invoke<string>("call_context_tool", { requestId: currentRequestId, contextId, name: toolCall.toolName, input: toolCall.input }, abortSignal);
                   } catch (error) {
                     if (abortSignal?.aborted) throw error;
                     result = "Context tool execution failed.";

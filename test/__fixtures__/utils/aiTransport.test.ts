@@ -422,11 +422,13 @@ describe('createAiTransport tools-to-text fallback', () => {
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
     const pageReads = 6
     const contextCalls: any[] = []
+    const discoveries: any[] = []
     const askRequestIds: string[] = []
     let askCount = 0
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
       const request = JSON.parse(String(init?.body ?? '{}'))
       if (String(url).includes('/api/context_tools')) {
+        discoveries.push(request)
         return Response.json({ result: [
           { name: 'mcp_0', description: 'Lookup', input_schema: { type: 'object' }, read_only: true },
           { name: 'read_context_result', description: 'Page', input_schema: { type: 'object' }, read_only: true },
@@ -452,7 +454,7 @@ describe('createAiTransport tools-to-text fallback', () => {
       ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
     }))
     const stream = await createAiTransport({ getEditor: editor, discoverContextTools: true }).sendMessages({
-      messages: [{ role: 'user', content: 'Summarize the long report' }],
+      messages: [{ role: 'user', content: 'Summarize the long report at https://example.com/report.' }],
       body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit', inputSchema: {} } } },
     })
     const reader = stream.getReader()
@@ -465,6 +467,12 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(parts.some(part => part.type === 'error')).toBe(false)
     expect(contextCalls.map(call => call.name)).toEqual(['mcp_0', ...Array(pageReads).fill('read_context_result')])
     expect(contextCalls.map(call => call.requestId)).toEqual(askRequestIds.slice(0, contextCalls.length))
+    // The prompt turn keeps ONE context id across rounds (web_fetch's URL
+    // ledger), seeded at discovery with the prompt's URLs.
+    expect(discoveries).toHaveLength(1)
+    expect(discoveries[0].urlSources).toEqual(['https://example.com/report'])
+    expect(new Set(contextCalls.map(call => call.contextId))).toEqual(new Set([discoveries[0].requestId]))
+    expect(askRequestIds).not.toContain(discoveries[0].requestId)
     expect(parts.find(part => part.type === 'tool-input-available')?.toolName).toBe('applyDocumentOperations')
   })
 

@@ -22,6 +22,7 @@ mod handlers;
 mod httpm;
 mod keys;
 mod probe;
+mod web_tools;
 
 use config::AuthState;
 

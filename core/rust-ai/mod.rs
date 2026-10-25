@@ -13,3 +13,4 @@ pub mod request;
 pub mod requests;
 pub mod sse;
 pub mod tool_schema;
+pub mod web;

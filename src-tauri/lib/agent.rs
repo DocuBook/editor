@@ -743,10 +743,13 @@ pub async fn ask_ai(
     Ok(())
 }
 
+/// List context tools for a prompt turn; `url_sources` seeds `web_fetch`'s
+/// URL-provenance ledger with the prompt's and document's URLs.
 #[tauri::command]
-pub async fn context_tools(request_id: String) -> Result<String, String> {
+pub async fn context_tools(request_id: String, url_sources: Option<Vec<String>>) -> Result<String, String> {
     configure_mcp_servers()?;
-    serde_json::to_string(&crate::rust_ai::context::discover(&request_id).await?)
+    let url_sources = url_sources.unwrap_or_default();
+    serde_json::to_string(&crate::rust_ai::context::discover(&request_id, &url_sources).await?)
         .map_err(|_| "Could not encode context tools".into())
 }
 
@@ -911,10 +914,12 @@ pub fn cancel_context_request(request_id: String) {
 #[tauri::command]
 pub async fn call_context_tool(
     request_id: String,
+    context_id: Option<String>,
     name: String,
     input: serde_json::Value,
 ) -> Result<String, String> {
-    crate::rust_ai::context::invoke(&request_id, &name, input).await
+    let context_id = context_id.unwrap_or_default();
+    crate::rust_ai::context::invoke(&request_id, &context_id, &name, input).await
 }
 
 /// Cancel the in-flight AI request identified by `request_id`; an empty id
