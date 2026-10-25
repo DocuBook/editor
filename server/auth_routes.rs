@@ -138,12 +138,14 @@ pub(crate) async fn setup_admin(
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e }))).into_response();
     }
     let mut cfg = state.auth.config.lock().expect("lock");
-    // Without DB_SETUP_TOKEN only a loopback client may claim the account: the
-    // server listens on all interfaces, so anyone else could take it first.
+    // Defense in depth: `ensure_setup_token` mints a token at boot whenever no
+    // admin exists, so this is only reachable if that step was skipped. Without
+    // a token only a loopback client may claim the account — the server listens
+    // on all interfaces, so anyone else could take it first.
     if cfg.setup_token.is_none() && !addr.ip().to_canonical().is_loopback() {
         drop(cfg);
         tracing::warn!(event = "auth_setup_failure", reason = "setup_token_missing", client_ip = %ip);
-        return err_response("Set DB_SETUP_TOKEN before creating the admin account from another machine");
+        return err_response("A setup token is required from another machine — check the server logs / DB_SETUP_TOKEN env");
     }
     let res = cfg.setup_admin(&email, &password, token.as_deref());
     drop(cfg); // never call session_ttl/session_cookie while holding the config lock (std Mutex is not reentrant)

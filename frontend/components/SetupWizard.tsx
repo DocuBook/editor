@@ -7,8 +7,9 @@ import { isPasswordValid } from '../utils/passwordPolicy'
 import PasswordInput from './PasswordInput'
 import PasswordRequirements from './PasswordRequirements'
 
-/** First-run wizard — creates the admin account. DB_SETUP_TOKEN, when set,
- *  must be submitted as a plain secret string (not a JWT). */
+/** First-run wizard — creates the admin account. A setup token is always
+ *  required: DB_SETUP_TOKEN when set, otherwise the one-time token the server
+ *  prints to its log at boot. It is a plain secret string (not a JWT). */
 export default function SetupWizard() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')

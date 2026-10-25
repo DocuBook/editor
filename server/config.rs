@@ -346,9 +346,9 @@ impl Config {
         Ok(())
     }
 
-    /** Create the admin account (wizard). Fails if one already exists, or if a
-     *  setup token is configured (DB_SETUP_TOKEN) and the caller does not present it.
-     *  Backward compatible: no token env → no token required (pre-fix behavior). */
+    /** Create the admin account (wizard). Fails if one already exists, or if the
+     *  caller does not present the setup token: DB_SETUP_TOKEN when set, otherwise
+     *  the one-time token minted by `AuthState::ensure_setup_token` at boot. */
     pub fn setup_admin(
         &mut self,
         email: &str,
