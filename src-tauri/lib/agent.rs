@@ -773,7 +773,9 @@ pub fn purge_legacy_mcp_settings(app: &tauri::AppHandle) {
         let account = format!("mcp:{name}");
         if crate::keychain::get_key(&account).is_ok() {
             if let Err(error) = crate::keychain::delete_key(&account) {
-                eprintln!("[docubook] could not delete legacy MCP token {account}: {error}");
+                // The Keychain account label stays out of the log; the kept
+                // file lists the servers whose tokens are still pending.
+                eprintln!("[docubook] could not delete a legacy MCP token: {error}");
                 // Keep the file so the next launch retries the token.
                 return;
             }

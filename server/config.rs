@@ -475,7 +475,7 @@ fn purge_legacy_mcp(config: &serde_json::Value, data_dir: &Path) -> bool {
         let account = format!("mcp:{name}");
         if super::keys::get_key(data_dir, &account).is_ok() {
             if let Err(error) = super::keys::delete_key(data_dir, &account) {
-                tracing::warn!(event = "legacy_mcp_token_kept", account = %account, error = %error);
+                tracing::warn!(event = "legacy_mcp_token_kept", error = %error);
             }
         }
     }
