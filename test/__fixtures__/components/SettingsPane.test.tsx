@@ -101,15 +101,15 @@ describe('SettingsPane — one page per menu', () => {
   /** The AI page's Provider section holds all three provider forms as content
    *  (no per-provider anchors), and MCP Server follows it — the two rows the
    *  sidebar lists. */
-  it('renders the AI page with the Provider forms and MCP Server', async () => {
+  it('renders the AI page with the Provider forms, Web Tools and MCP Server', async () => {
     useSettings.setState({ open: true, section: 'ai-provider' })
     await render()
 
-    for (const id of ['ai-provider', 'ai-mcp-server']) {
+    for (const id of ['ai-provider', 'ai-web-tools', 'ai-mcp-server']) {
       expect(document.getElementById(id), `missing AI page anchor ${id}`).not.toBeNull()
     }
     // Three provider forms render INSIDE the Provider section (one per provider).
-    const provider = section('ai-mcp-server')!.previousElementSibling as HTMLElement
+    const provider = section('ai-web-tools')!.previousElementSibling as HTMLElement
     expect(provider.querySelectorAll('[data-testid^="provider-form-"]')).toHaveLength(3)
     // No nested per-provider anchors.
     expect(provider.querySelectorAll('[data-settings-section]')).toHaveLength(0)
