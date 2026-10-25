@@ -85,11 +85,34 @@ services:
       - "8080:8080"
     volumes:
       - docubook:/data
+    # Optional: web search for the AI through the searxng service below.
+    # Drop this environment block and the searxng service if you do not use it.
+    environment:
+      DOCUBOOK_SEARXNG_URL: http://searxng:8080
+    restart: unless-stopped
+
+  # Optional: self-hosted search for the AI web tools (see "AI web tools").
+  searxng:
+    image: searxng/searxng
+    volumes:
+      - ./searxng:/etc/searxng   # holds settings.yml below
     restart: unless-stopped
 
 volumes:
   docubook:
     name: docubook
+```
+
+`./searxng/settings.yml` for the optional `searxng` service. JSON output must be enabled, or the AI's searches fail with *"SearXNG refused JSON output"*:
+
+```yaml
+use_default_settings: true
+server:
+  secret_key: "change-me"   # openssl rand -hex 32
+search:
+  formats:
+    - html
+    - json
 ```
 
 The image supports `linux/amd64` and `linux/arm64` and includes a health check at `/api/health`.
@@ -172,34 +195,9 @@ The AI can call two read-only tools before it proposes an edit. Both are **off b
 **Search providers**
 
 - **Tavily** — paste an API key from [tavily.com](https://tavily.com); the free plan includes 1,000 searches a month. The key is stored in the macOS Keychain (desktop) or `keys.json` (web, encrypted with `DB_KEYS_PASSPHRASE` when set) and is only ever sent to `api.tavily.com`.
-- **SearXNG** — point it at your own instance. Local and private addresses are fine (a Compose service, a LAN box); a public instance must use HTTPS. Enable JSON output in its `settings.yml`, or searches fail with *"SearXNG refused JSON output"*.
+- **SearXNG** — point it at your own instance. Local and private addresses are fine (a Compose service, a LAN box); a public instance must use HTTPS. JSON output must be enabled in its `settings.yml` (see **Docker Compose** under Install).
 
-On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` pins the provider (SearXNG wins when both are set) and Settings shows it as managed by the environment.
-
-```yaml
-services:
-  docubook:
-    image: ghcr.io/docubook/editor
-    environment:
-      DOCUBOOK_SEARXNG_URL: http://searxng:8080
-    # ports, volumes and restart as in "Docker Compose" above
-  searxng:
-    image: searxng/searxng
-    volumes:
-      - ./searxng:/etc/searxng   # settings.yml below
-    restart: unless-stopped
-```
-
-```yaml
-# ./searxng/settings.yml
-use_default_settings: true
-server:
-  secret_key: "change-me"   # openssl rand -hex 32
-search:
-  formats:
-    - html
-    - json
-```
+On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` pins the provider (SearXNG wins when both are set) and Settings shows it as managed by the environment. **Docker Compose** under Install includes an optional `searxng` service and its `settings.yml`.
 
 **What the AI can and cannot open**
 
