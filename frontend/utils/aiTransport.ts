@@ -95,7 +95,7 @@ export interface AiTransportDeps {
   getEditor: () => any | null;
   /** Vault-relative file bound to this keep-alive editor instance. */
   filePath?: string
-  /** Enable backend-owned MCP discovery for the normal editor runtime. */
+  /** Enable backend-owned context-tool discovery (built-in web tools) for the normal editor runtime. */
   discoverContextTools?: boolean
   /** Host-owned, read-only context tool executor. Not supplied until a runtime
    *  registers trusted tools; document operations stay on the existing path. */

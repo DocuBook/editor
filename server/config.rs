@@ -58,20 +58,10 @@ pub struct Config {
     pub admin: Option<Admin>,
     pub session_ttl_hours: u64,
     pub ai: AiSelection,
-    pub mcp: Vec<McpServer>,
     /** Built-in web tools (non-secret; the Tavily key lives in keys.json). */
     pub web_tools: docubook_core::rust_ai::web::WebToolsSettings,
     pub setup_token: Option<String>,
     path: PathBuf,
-}
-
-#[derive(Clone, Default)]
-pub struct McpServer {
-    pub name: String,
-    pub url: String,
-    pub timeout_seconds: Option<u64>,
-    pub read_only_tools: Vec<String>,
-    pub has_token: bool,
 }
 
 impl Config {
@@ -130,24 +120,9 @@ impl Config {
             .and_then(|x| x.as_u64())
             .unwrap_or(168);
         let ai = v.get("ai").map(parse_ai).unwrap_or_default();
-        let mcp = v
-            .get("mcp")
-            .and_then(|x| x.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(parse_mcp)
-                    .map(|mut server| {
-                        server.has_token = super::keys::get_key(
-                            path.parent().unwrap_or_else(|| Path::new(".")),
-                            &format!("mcp:{}", server.name),
-                        )
-                        .is_ok();
-                        server
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        // MCP was removed: drop the tokens a previous version stored for its
+        // servers, and re-save below so config.json loses the block too.
+        let legacy_mcp = purge_legacy_mcp(&v, path.parent().unwrap_or_else(|| Path::new(".")));
         // An invalid or hand-broken block falls back to "all off" instead of failing the load.
         let web_tools = v
             .get("webTools")
@@ -159,15 +134,20 @@ impl Config {
         let setup_token = std::env::var("DB_SETUP_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
-        Self {
+        let config = Self {
             admin,
             session_ttl_hours,
             ai,
-            mcp,
             web_tools,
             setup_token,
             path: path.to_path_buf(),
+        };
+        if legacy_mcp {
+            if let Err(error) = config.save() {
+                tracing::warn!(event = "legacy_mcp_block_kept", error = %error, "config.json still lists the removed MCP servers");
+            }
         }
+        config
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -186,7 +166,6 @@ impl Config {
                     "probes": e.probes,
                 }))).collect::<serde_json::Map<_, _>>(),
             },
-            "mcp": self.mcp.iter().map(|s| serde_json::json!({"name": s.name, "url": s.url, "timeoutSeconds": s.timeout_seconds, "readOnlyTools": s.read_only_tools})).collect::<Vec<_>>(),
             "webTools": self.web_tools,
         });
         if let Some(parent) = self.path.parent() {
@@ -437,7 +416,6 @@ impl Config {
                 "data_dir": data_dir.to_string_lossy(),
                 "www_dir": std::env::var("WWW_DIR").unwrap_or_else(|_| "./dist".into()),
             },
-            "mcp": self.mcp.iter().map(|s| serde_json::json!({"name": s.name, "url": s.url, "timeoutSeconds": s.timeout_seconds, "readOnlyTools": s.read_only_tools, "hasToken": s.has_token})).collect::<Vec<_>>(),
         })
     }
 }
@@ -482,39 +460,27 @@ fn parse_ai(value: &serde_json::Value) -> AiSelection {
     migrate_legacy_ai(value)
 }
 
-fn parse_mcp(value: &serde_json::Value) -> Option<McpServer> {
-    let object = value.as_object()?;
-    let name = object
-        .get("name")
-        .or_else(|| object.get("id"))?
-        .as_str()?
-        .to_string();
-    let url = object.get("url")?.as_str()?.to_string();
-    if name.is_empty() || url.is_empty() {
-        return None;
+/// Delete the `mcp:<name>` secrets a pre-removal version stored for the
+/// servers in `config["mcp"]`. Returns whether the retired block was present.
+fn purge_legacy_mcp(config: &serde_json::Value, data_dir: &Path) -> bool {
+    let Some(servers) = config.get("mcp").and_then(serde_json::Value::as_array) else {
+        return config.get("mcp").is_some();
+    };
+    for name in servers.iter().filter_map(|server| {
+        server
+            .get("name")
+            .or_else(|| server.get("id"))
+            .and_then(serde_json::Value::as_str)
+    }) {
+        let account = format!("mcp:{name}");
+        if super::keys::get_key(data_dir, &account).is_ok() {
+            if let Err(error) = super::keys::delete_key(data_dir, &account) {
+                tracing::warn!(event = "legacy_mcp_token_kept", account = %account, error = %error);
+            }
+        }
     }
-    Some(McpServer {
-        name,
-        url,
-        timeout_seconds: object
-            .get("timeoutSeconds")
-            .or_else(|| object.get("timeout_seconds"))
-            .and_then(serde_json::Value::as_u64),
-        read_only_tools: object
-            .get("readOnlyTools")
-            .or_else(|| object.get("read_only_tools"))
-            .and_then(serde_json::Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        has_token: false,
-    })
+    true
 }
-
 /** Legacy `{provider, model, probes: {provider: {model: bool}}}` → endpoints.
  *
  *  The old shape kept ONE model and one probe tree for every provider ever probed,
@@ -639,7 +605,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> std::io::Result<()> {
 /** Convenience handle: config + sessions + limiter behind one Mutex-free split. */
 pub struct AuthState {
     pub config: Mutex<Config>,
-    /// Held across each handler-side config write (AI selection, MCP servers),
+    /// Held across each handler-side config write (AI selection, web tools, keys),
     /// including its rollback, so a rollback restores the state that write read.
     /// Always taken before `config`, never after.
     pub config_writes: Mutex<()>,
@@ -785,6 +751,26 @@ mod tests {
     }
 
     #[test]
+    fn retired_mcp_block_and_its_tokens_are_purged_on_load() {
+        let dir = tmp();
+        std::fs::write(
+            dir.join("config.json"),
+            serde_json::json!({"session_ttl_hours": 24, "mcp": [{"name": "docs", "url": "https://mcp.example.com"}, {"id": "legacy"}]}).to_string(),
+        )
+        .unwrap();
+        super::super::keys::set_key(&dir, "mcp:docs", "secret-token").unwrap();
+        super::super::keys::set_key(&dir, "openai", "kept-key").unwrap();
+
+        let config = Config::load(&dir);
+        assert_eq!(config.session_ttl_hours, 24);
+        assert!(super::super::keys::get_key(&dir, "mcp:docs").is_err(), "MCP token must be deleted");
+        assert_eq!(super::super::keys::get_key(&dir, "openai").unwrap(), "kept-key");
+        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("config.json")).unwrap()).unwrap();
+        assert!(saved.get("mcp").is_none(), "{saved}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn web_tools_settings_round_trip_and_fall_back_to_off() {
         let dir = tmp();
         let mut c = Config::load(&dir);
@@ -808,21 +794,6 @@ mod tests {
     }
 
     #[test]
-    fn mcp_config_migrates_server_id_to_name_and_reads_timeout() {
-        let server = parse_mcp(&serde_json::json!({
-            "id": "docs",
-            "url": "https://example.com/mcp",
-            "timeoutSeconds": 25,
-            "readOnlyTools": ["docs:lookup"]
-        }))
-        .unwrap();
-        assert_eq!(server.name, "docs");
-        assert_eq!(server.timeout_seconds, Some(25));
-        assert_eq!(server.read_only_tools, ["docs:lookup"]);
-        assert_eq!(server.read_only_tools, ["docs:lookup"]);
-    }
-
-    #[test]
     fn setup_admin_token_gate() {
         // Backward compatible: no DB_SETUP_TOKEN → no token required.
         let dir = tmp();
@@ -831,7 +802,6 @@ mod tests {
             admin: None,
             session_ttl_hours: 24,
             ai: AiSelection::default(),
-            mcp: Vec::new(),
             web_tools: Default::default(),
             setup_token: None,
             path: dir.join("c1.json"),
@@ -846,7 +816,6 @@ mod tests {
             admin: None,
             session_ttl_hours: 24,
             ai: AiSelection::default(),
-            mcp: Vec::new(),
             web_tools: Default::default(),
             setup_token: Some(token.clone()),
             path: dir.join("c2.json"),

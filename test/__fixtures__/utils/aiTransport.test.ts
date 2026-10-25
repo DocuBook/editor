@@ -394,12 +394,12 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(output.input.operations[0].block).toContain('Grounded in source data')
   })
 
-  it('discovers MCP tools even when the editor supplies only the document tool', async () => {
+  it('discovers backend context tools even when the editor supplies only the document tool', async () => {
     usePathA()
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
     const requests: any[] = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
-      if (String(url).includes('/api/context_tools')) return Response.json({ result: [{ name: 'mcp_lookup', description: 'Lookup', input_schema: { type: 'object' }, read_only: true }] })
+      if (String(url).includes('/api/context_tools')) return Response.json({ result: [{ name: 'web_search', description: 'Lookup', input_schema: { type: 'object' }, read_only: true }] })
       const request = JSON.parse(String(init?.body ?? '{}'))
       requests.push({ ...request, tools: JSON.parse(request.tools) })
       const id = String(request.requestId ?? '')
@@ -414,10 +414,10 @@ describe('createAiTransport tools-to-text fallback', () => {
       body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit', inputSchema: {} } } },
     })
     await stream.cancel().catch(() => {})
-    expect(requests[0].tools.map((tool: any) => tool.function.name)).toEqual(['applyDocumentOperations', 'mcp_lookup'])
+    expect(requests[0].tools.map((tool: any) => tool.function.name)).toEqual(['applyDocumentOperations', 'web_search'])
   })
 
-  it('reads paged MCP results on a separate budget from regular context tools', async () => {
+  it('reads paged context results on a separate budget from regular context tools', async () => {
     usePathA()
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
     const pageReads = 6
@@ -430,7 +430,7 @@ describe('createAiTransport tools-to-text fallback', () => {
       if (String(url).includes('/api/context_tools')) {
         discoveries.push(request)
         return Response.json({ result: [
-          { name: 'mcp_0', description: 'Lookup', input_schema: { type: 'object' }, read_only: true },
+          { name: 'web_fetch', description: 'Lookup', input_schema: { type: 'object' }, read_only: true },
           { name: 'read_context_result', description: 'Page', input_schema: { type: 'object' }, read_only: true },
         ] })
       }
@@ -442,7 +442,7 @@ describe('createAiTransport tools-to-text fallback', () => {
       askRequestIds.push(id)
       askCount++
       const [toolName, input] = askCount === 1
-        ? ['mcp_0', '{"query":"report"}']
+        ? ['web_fetch', '{"query":"report"}']
         : askCount <= 1 + pageReads
           ? ['read_context_result', `{"handle":"h","offset":${askCount - 1}}`]
           : ['applyDocumentOperations', '{"operations":[{"type":"update","id":"b1$","block":"<p>Summary of the report.</p>"}]}']
@@ -465,7 +465,7 @@ describe('createAiTransport tools-to-text fallback', () => {
       parts.push(result.value)
     }
     expect(parts.some(part => part.type === 'error')).toBe(false)
-    expect(contextCalls.map(call => call.name)).toEqual(['mcp_0', ...Array(pageReads).fill('read_context_result')])
+    expect(contextCalls.map(call => call.name)).toEqual(['web_fetch', ...Array(pageReads).fill('read_context_result')])
     expect(contextCalls.map(call => call.requestId)).toEqual(askRequestIds.slice(0, contextCalls.length))
     // The prompt turn keeps ONE context id across rounds (web_fetch's URL
     // ledger), seeded at discovery with the prompt's URLs.
@@ -504,7 +504,7 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ask_ai'))).toBe(false)
   })
 
-  it('does not start a model request if stopped during MCP discovery', async () => {
+  it('does not start a model request if stopped during context-tool discovery', async () => {
     usePathA()
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })
     const controller = new AbortController()

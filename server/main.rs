@@ -109,6 +109,12 @@ fn main() {
                 .unwrap_or_else(|_| EnvFilter::new("docubook_server=info,tower_http=info")),
         )
         .init();
+    if std::env::var_os("DOCUBOOK_MCP_SERVERS").is_some() {
+        tracing::warn!(
+            event = "mcp_removed",
+            "DOCUBOOK_MCP_SERVERS is no longer supported and is ignored; use DOCUBOOK_SEARXNG_URL or DOCUBOOK_TAVILY_API_KEY for the AI's web tools"
+        );
+    }
 
     let data_dir = std::env::var("DATA_DIR").unwrap_or_else(|_| "./data".into());
     let www_dir = std::env::var("WWW_DIR").unwrap_or_else(|_| "./dist".into());

@@ -14,7 +14,7 @@ export interface NavItem {
 /** A top-level MENU, mirroring the vault tree's expand/collapse rows. A menu owns
  *  ONE page (`page`), whose sections are its `items`: the rows it expands to. A
  *  row opens that page and scrolls to its section — the AI menu, for example,
- *  lists the Provider and MCP Server sections of the ONE AI page. */
+ *  lists the Provider and Web Tools sections of the ONE AI page. */
 export interface NavGroup {
   id: SettingsGroupId
   label: string
@@ -55,12 +55,11 @@ export const SETTINGS_GROUPS: NavGroup[] = [
     label: 'AI',
     Icon: Sparkles,
     page: 'ai',
-    /** The ONE AI page has three sections, top to bottom: Provider (whose own
-     *  content is the three provider forms), Web Tools and MCP Server. */
+    /** The ONE AI page has two sections, top to bottom: Provider (whose own
+     *  content is the three provider forms) and Web Tools. */
     items: [
       { id: 'ai-provider', label: 'Provider' },
       { id: 'ai-web-tools', label: 'Web Tools' },
-      { id: 'ai-mcp-server', label: 'MCP Server' },
     ],
   },
 ]

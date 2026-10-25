@@ -4,7 +4,7 @@ import { create } from 'zustand'
  *  the sidebar tree (which selects one) and the editor-container pane (which
  *  renders every section with a matching `id`), so a nav click can scroll the
  *  pane to its section without prop-drilling a callback through both surfaces. */
-export type SettingsSectionId = 'general-themes' | 'general-account' | 'git-identity' | 'git-remotes' | 'ai-provider' | 'ai-web-tools' | 'ai-mcp-server'
+export type SettingsSectionId = 'general-themes' | 'general-account' | 'git-identity' | 'git-remotes' | 'ai-provider' | 'ai-web-tools'
 
 /** The top-level MENU a section belongs to. A menu owns one PAGE in the sidebar
  *  and expands to that page's section rows. */
@@ -12,7 +12,7 @@ export type SettingsGroupId = 'general' | 'git' | 'ai'
 
 /** The PAGE a section lives on: General, Git, or AI. Every section of a menu's
  *  page is an anchored `#id` target inside it, so the AI page holds both the
- *  Provider and MCP Server sections and the pane scrolls between them. */
+ *  Provider and Web Tools sections and the pane scrolls between them. */
 export type SettingsPageId = 'general' | 'git' | 'ai'
 
 /** Which page a section lives on. The nav click opens this page and the pane

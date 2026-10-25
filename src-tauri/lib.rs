@@ -61,7 +61,7 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
-            let _ = commands::agent::initialize_mcp_settings(app.handle());
+            commands::agent::purge_legacy_mcp_settings(app.handle());
             let _ = commands::web_tools::initialize_web_tools(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 eprintln!("[docubook] window theme at startup: {:?}", w.theme());
@@ -152,8 +152,6 @@ pub fn run() {
             commands::agent::ask_ai,
             commands::agent::cancel_ai,
             commands::agent::cancel_context_request,
-            commands::agent::mcp_settings,
-            commands::agent::set_mcp_settings,
             commands::agent::set_api_key,
             commands::agent::set_custom_endpoint,
             commands::agent::delete_api_key,

@@ -747,163 +747,39 @@ pub async fn ask_ai(
 /// URL-provenance ledger with the prompt's and document's URLs.
 #[tauri::command]
 pub async fn context_tools(request_id: String, url_sources: Option<Vec<String>>) -> Result<String, String> {
-    configure_mcp_servers()?;
     let url_sources = url_sources.unwrap_or_default();
     serde_json::to_string(&crate::rust_ai::context::discover(&request_id, &url_sources).await?)
         .map_err(|_| "Could not encode context tools".into())
 }
 
-#[tauri::command]
-pub fn mcp_settings(app: tauri::AppHandle) -> Result<String, String> {
-    let mut servers = load_mcp_settings(&app);
-    if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
-        servers = std::env::var("DOCUBOOK_MCP_SERVERS")
-            .ok()
-            .and_then(|raw| serde_json::from_str(&raw).ok())
-            .unwrap_or_default();
-    }
-    serde_json::to_string(&serde_json::json!({
-        "servers": servers.iter().map(|server| serde_json::json!({"name":server.name,"url":server.url,"timeoutSeconds":server.timeout_seconds,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty()) || crate::keychain::get_key(&format!("mcp:{}",server.name)).is_ok()})).collect::<Vec<_>>(),
-        "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok(),
-        "defaultTimeoutSeconds": crate::rust_ai::context::DEFAULT_CONTEXT_REQUEST_TIMEOUT_SECS,
-        "maxTimeoutSeconds": crate::rust_ai::context::MAX_CONTEXT_REQUEST_TIMEOUT_SECS
-    })).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn set_mcp_settings(
-    app: tauri::AppHandle,
-    servers: Vec<crate::rust_ai::context::ContextServer>,
-) -> Result<(), String> {
-    crate::rust_ai::context::validate_configured_servers(&servers)?;
-    let old = load_mcp_settings(&app);
-    let clean = servers
-        .iter()
-        .map(|server| crate::rust_ai::context::ContextServer {
-            token: None,
-            ..server.clone()
-        })
-        .collect::<Vec<_>>();
-    let path = mcp_settings_path(&app)?;
-    let previous = std::fs::read(&path).ok();
-    std::fs::write(
-        &path,
-        serde_json::to_vec(&clean).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    let rollback_file = || match &previous {
-        Some(contents) => std::fs::write(&path, contents),
-        None => std::fs::remove_file(&path),
+/// Remove what a pre-removal version stored for MCP servers: their Keychain
+/// tokens (`mcp:<name>`) and `mcp-settings.json`. Runs at startup; a no-op once
+/// the file is gone.
+pub fn purge_legacy_mcp_settings(app: &tauri::AppHandle) {
+    let Ok(dir) = app.path().app_config_dir() else {
+        return;
     };
-    let mut changed_keys: Vec<(String, Option<String>)> = Vec::new();
-    let mut updates = Vec::new();
-    for server in &servers {
-        if let Some(token) = server.token.as_deref() {
-            updates.push((
-                format!("mcp:{}", server.name),
-                (!token.is_empty()).then(|| token.to_owned()),
-            ));
-        }
-    }
-    for server in old
-        .iter()
-        .filter(|old| !servers.iter().any(|server| server.name == old.name))
-    {
-        updates.push((format!("mcp:{}", server.name), None));
-    }
-    for (key, value) in updates {
-        let prior = crate::keychain::get_key(&key).ok();
-        let result = match value.as_deref() {
-            Some(token) => crate::keychain::set_key(&key, token),
-            None => crate::keychain::delete_key(&key),
-        };
-        if let Err(error) = result {
-            for (changed, prior) in changed_keys.into_iter().rev() {
-                match prior.as_deref() {
-                    Some(token) => {
-                        let _ = crate::keychain::set_key(&changed, token);
-                    }
-                    None => {
-                        let _ = crate::keychain::delete_key(&changed);
-                    }
-                }
-            }
-            let _ = rollback_file();
-            return Err(error);
-        }
-        changed_keys.push((key, prior));
-    }
-    let mut runtime = Vec::new();
-    for server in &servers {
-        runtime.push(crate::rust_ai::context::ContextServer {
-            token: crate::keychain::get_key(&format!("mcp:{}", server.name)).ok(),
-            ..server.clone()
-        });
-    }
-    if let Err(error) = crate::rust_ai::context::set_configured_servers(runtime) {
-        for (changed, prior) in changed_keys.into_iter().rev() {
-            match prior.as_deref() {
-                Some(token) => {
-                    let _ = crate::keychain::set_key(&changed, token);
-                }
-                None => {
-                    let _ = crate::keychain::delete_key(&changed);
-                }
+    let path = dir.join("mcp-settings.json");
+    let Ok(raw) = std::fs::read(&path) else {
+        return;
+    };
+    let servers: Vec<serde_json::Value> = serde_json::from_slice(&raw).unwrap_or_default();
+    for name in servers.iter().filter_map(|server| {
+        server
+            .get("name")
+            .or_else(|| server.get("id"))
+            .and_then(serde_json::Value::as_str)
+    }) {
+        let account = format!("mcp:{name}");
+        if crate::keychain::get_key(&account).is_ok() {
+            if let Err(error) = crate::keychain::delete_key(&account) {
+                eprintln!("[docubook] could not delete legacy MCP token {account}: {error}");
+                // Keep the file so the next launch retries the token.
+                return;
             }
         }
-        let _ = rollback_file();
-        return Err(error);
     }
-    Ok(())
-}
-
-fn mcp_settings_path(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
-    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("mcp-settings.json"))
-}
-
-fn load_mcp_settings(app: &tauri::AppHandle) -> Vec<crate::rust_ai::context::ContextServer> {
-    mcp_settings_path(app)
-        .ok()
-        .and_then(|path| std::fs::read(path).ok())
-        .and_then(|raw| serde_json::from_slice(&raw).ok())
-        .unwrap_or_default()
-}
-
-fn configure_mcp_servers() -> Result<(), String> {
-    let raw = std::env::var("DOCUBOOK_MCP_SERVERS").unwrap_or_default();
-    let servers: Vec<crate::rust_ai::context::ContextServer> = if raw.is_empty() {
-        Vec::new()
-    } else {
-        serde_json::from_str(&raw)
-            .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?
-    };
-    if !raw.is_empty() {
-        return crate::rust_ai::context::set_configured_servers(servers);
-    }
-    Ok(())
-}
-
-pub fn initialize_mcp_settings(app: &tauri::AppHandle) -> Result<(), String> {
-    if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
-        return Ok(());
-    }
-    let servers = load_mcp_settings(app);
-    configure_mcp_servers_with_tokens(&servers)
-}
-
-fn configure_mcp_servers_with_tokens(
-    servers: &[crate::rust_ai::context::ContextServer],
-) -> Result<(), String> {
-    let runtime = servers
-        .iter()
-        .map(|server| crate::rust_ai::context::ContextServer {
-            token: crate::keychain::get_key(&format!("mcp:{}", server.name)).ok(),
-            ..server.clone()
-        })
-        .collect();
-    crate::rust_ai::context::set_configured_servers(runtime)
+    let _ = std::fs::remove_file(path);
 }
 
 #[tauri::command]

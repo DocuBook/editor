@@ -51,7 +51,6 @@ docker logs docubook | grep "one-time setup token"
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | unset | Skips the setup wizard when both are set |
 | `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset | Provisions a custom OpenAI-compatible provider |
 | `RUST_LOG` | app defaults | Controls server log filtering |
-| `DOCUBOOK_MCP_SERVERS` | unset | Optional backend-only JSON configuration for MCP Streamable HTTP servers |
 | `DOCUBOOK_SEARXNG_URL` / `DOCUBOOK_TAVILY_API_KEY` | unset | Pins the AI's built-in `web_search` provider (SearXNG wins when both are set); otherwise chosen in Settings → AI → Web Tools |
 
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.

@@ -42,8 +42,8 @@ pub fn configure(state: &AppState) -> Result<(), String> {
 /// `configure` for the tool-dispatch paths (`context_tools`, `call_context_tool`).
 ///
 /// A broken environment variable or config block only switches the web tools
-/// off (and is logged), so MCP discovery and calls through the same dispatch
-/// keep working instead of failing on a setting that is not theirs.
+/// off (and is logged): discovery then lists no web tools and the AI request
+/// carries on without them instead of failing.
 pub fn configure_or_disable(state: &AppState) {
     if let Err(error) = configure(state) {
         tracing::warn!(event = "web_tools_config_rejected", "web tools disabled: {error}");
@@ -113,7 +113,7 @@ pub fn set_key(state: &AppState, args: &Value) -> Result<String, String> {
         return Err("Enter a valid Tavily API key".into());
     }
     // keys.json is an unlocked load-modify-save; `config_writes` serialises it
-    // with the API-key and MCP-token writers in handlers.rs.
+    // with the API-key writers in handlers.rs.
     let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
     keys::set_key(&state.data_dir, TAVILY_KEY_ACCOUNT, key)?;
     configure(state).map(|_| "null".into())

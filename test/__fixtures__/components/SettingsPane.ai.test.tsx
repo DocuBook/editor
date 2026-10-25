@@ -75,7 +75,6 @@ beforeEach(() => {
   invoke.mockImplementation(async (command: string) => {
     if (command === 'ai_settings') return JSON.stringify(backend)
     if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
-    if (command === 'mcp_settings') return JSON.stringify({ servers: [], envManaged: false })
     if (command === 'test_connection') return JSON.stringify({ status: 'ok', tools: true })
     // Model discovery is the ONLY source of a model (no catalog default), so a
     // first-time save/test discovers one from the endpoint.
@@ -573,120 +572,5 @@ describe('SettingsPane — save', () => {
 
     expect(invoke.mock.calls.find(c => c[0] === 'test_connection')![1]).toMatchObject({ model: 'typed-model' })
     expect(invoke.mock.calls.find(c => c[0] === 'set_custom_endpoint')![1]).toMatchObject({ model: 'typed-model' })
-  })
-})
-
-describe('SettingsPane — MCP settings loading', () => {
-  it('blocks changes after a failed load until retry succeeds', async () => {
-    useSettings.setState({ open: true, section: 'ai-mcp-server' })
-    invoke.mockImplementation(async (command: string) => {
-      if (command === 'mcp_settings') throw new Error('offline')
-      if (command === 'web_tools_settings') return JSON.stringify({ settings: {}, hasTavilyKey: false, envManaged: false, maxResultsLimit: 10 })
-      if (command === 'ai_settings') return JSON.stringify(backend)
-      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
-      return ''
-    })
-    await render()
-
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('offline')
-    expect(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')?.disabled).toBe(true)
-    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add remote')?.disabled).toBe(true)
-    expect(invoke.mock.calls.map(call => call[0])).not.toContain('config_set')
-
-    invoke.mockImplementation(async (command: string) => {
-      if (command === 'mcp_settings') return JSON.stringify({ servers: [], envManaged: false })
-      if (command === 'web_tools_settings') return JSON.stringify({ settings: {}, hasTavilyKey: false, envManaged: false, maxResultsLimit: 10 })
-      if (command === 'ai_settings') return JSON.stringify(backend)
-      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
-      return ''
-    })
-    clickText('Retry')
-    await settle()
-
-    expect(document.querySelector('[role="alert"]')).toBeNull()
-    expect(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')?.disabled).toBe(false)
-    expect(Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Add remote')?.disabled).toBe(true)
-    expect(document.body.textContent).toContain('Server Name')
-    expect(document.body.textContent).toContain('default 10')
-    expect(document.body.textContent).toContain('Authorization: Bearer')
-    expect(document.body.textContent).not.toContain('Read-only tool names')
-  })
-
-  it('saves a named remote with a timeout override without a manual tool list', async () => {
-    useSettings.setState({ open: true, section: 'ai-mcp-server' })
-    let configuredServers: Array<Record<string, unknown>> = []
-    invoke.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
-      if (command === 'mcp_settings') return JSON.stringify({
-        servers: configuredServers,
-        envManaged: false,
-        defaultTimeoutSeconds: 10,
-        maxTimeoutSeconds: 120,
-      })
-      if (command === 'ai_settings') return JSON.stringify(backend)
-      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
-      if (command === 'config_set') {
-        configuredServers = (args?.value as Array<Record<string, unknown>>) ?? []
-        return ''
-      }
-      return ''
-    })
-    await render()
-
-    const setValue = (input: HTMLInputElement, value: string) => act(() => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
-      setter.call(input, value)
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    setValue(document.querySelector<HTMLInputElement>('input[placeholder="docs"]')!, 'research')
-    setValue(document.querySelector<HTMLInputElement>('input[placeholder="https://mcp.example.com/mcp"]')!, 'https://mcp.example.com/mcp')
-    setValue(document.querySelector<HTMLInputElement>('input[type="number"]')!, '25')
-    clickText('Add remote')
-    await settle()
-
-    const saved = invoke.mock.calls.find(call => call[0] === 'config_set')?.[1]?.value as Array<Record<string, unknown>>
-    expect(saved[0]).toMatchObject({ name: 'research', url: 'https://mcp.example.com/mcp', timeoutSeconds: 25 })
-    expect(saved[0]).not.toHaveProperty('readOnlyTools')
-  })
-
-  /** Save and Cancel must read as buttons, not text links: the edit form used to
-   *  render them with only `text-xs`, so they looked (and hit-tested) like bare
-   *  text. They keep `type="button"` so they can never submit a surrounding form. */
-  it('renders Save and Cancel as real buttons in the edit form', async () => {
-    useSettings.setState({ open: true, section: 'ai-mcp-server' })
-    invoke.mockImplementation(async (command: string) => {
-      if (command === 'mcp_settings') return JSON.stringify({
-        servers: [{ name: 'research', url: 'https://mcp.example.com/mcp' }],
-        envManaged: false,
-        defaultTimeoutSeconds: 10,
-        maxTimeoutSeconds: 120,
-      })
-      if (command === 'ai_settings') return JSON.stringify(backend)
-      if (command === 'custom_ai_config') return JSON.stringify(backend.custom)
-      return ''
-    })
-    await render()
-
-    clickText('Edit')
-    await settle()
-
-    /** The AI page also renders three provider forms whose own Save buttons
-     *  precede the MCP card in document order, so scope to the MCP section. */
-    const mcp = document.querySelector<HTMLElement>('[data-settings-section]#ai-mcp-server')!
-    const save = Array.from(mcp.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Save')
-    const cancel = Array.from(mcp.querySelectorAll<HTMLButtonElement>('button')).find(button => button.textContent === 'Cancel')
-    expect(save, 'Save is not a <button>').toBeDefined()
-    expect(cancel, 'Cancel is not a <button>').toBeDefined()
-    expect(save!.getAttribute('type')).toBe('button')
-    expect(cancel!.getAttribute('type')).toBe('button')
-    // Real button affordances: padding + a background/border, not bare text.
-    expect(save!.className).toContain('px-3')
-    expect(save!.className).toContain('bg-accent')
-    expect(cancel!.className).toContain('border')
-
-    act(() => cancel!.click())
-    await settle()
-    // Cancel leaves the edit form without saving anything.
-    expect(document.body.textContent).not.toContain('Replace bearer token')
-    expect(invoke.mock.calls.map(call => call[0])).not.toContain('config_set')
   })
 })
