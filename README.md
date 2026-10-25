@@ -21,25 +21,61 @@ docker run -d --name docubook -p 8080:8080 \
   ghcr.io/docubook/editor
 ```
 
-Open [http://localhost:8080](http://localhost:8080) and create the admin account. The setup wizard asks for a one-time token that the server prints at first boot: `docker logs <container> | grep "one-time setup token"`. Setup cannot be skipped.
+Open [http://localhost:8080](http://localhost:8080) and create the admin account. The setup wizard asks for a one-time token that the server prints at first boot:
+
+```bash
+docker logs docubook | grep "one-time setup token"
+```
 
 > [!IMPORTANT]
 > Keep `/data` on a persistent volume. It contains vaults, configuration, and keys; recreating a container without this mount deletes them.
 
-For production, pin an image tag, place the container behind HTTPS (the proxy must send `X-Forwarded-Proto: https`), and back up `/data`. Session cookies are marked `Secure` automatically over HTTPS.
+> [!TIP]
+> **Production behind a domain (Coolify, VPS)**
+> - Put the container behind an HTTPS reverse proxy and pin an image tag.
+> - Set `DB_TRUSTED_PROXY` to the proxy's address or subnet, so the login rate limit applies per visitor. See **Behind a reverse proxy** below.
+> - Set `DB_SECURE_COOKIE=1` when the domain is HTTPS-only.
+> - Set `DB_KEYS_PASSPHRASE` from the first boot to encrypt stored API keys.
+> - Back up `/data`.
 
-| Variable                                                                          | Default      | Purpose                                                                 |
-| --------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
-| `DB_SETUP_TOKEN`    | empty (one-time token printed at first boot) | Optional fixed setup token; `openssl rand -hex 32` |
+<details>
+<summary><strong>Environment variables</strong></summary>
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `DB_SETUP_TOKEN` | one-time token printed at first boot | Fixed setup token instead; `openssl rand -hex 32` |
+| `DB_TRUSTED_PROXY` | unset | Comma-separated addresses or CIDR ranges of your reverse proxies. Their `X-Forwarded-For` names the real client for the login rate limit; unset, every request is limited by the proxy's own address |
 | `DB_SECURE_COOKIE` | auto | `Secure` on session cookies follows `X-Forwarded-Proto`; `1`/`0` forces it |
-| `DB_SESSION_TTL_HOURS`                                                            | `168`        | Session lifetime in hours                                               |
-| `DB_KEYS_PASSPHRASE`                                                              | empty        | Encrypts `keys.json` at rest; losing it makes encrypted keys unreadable |
-| `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`                                            | unset        | Skips the setup wizard when both are set                                |
-| `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset        | Provisions a custom OpenAI-compatible provider                          |
-| `RUST_LOG`                                                                        | app defaults | Controls server log filtering                                           |
-| `DOCUBOOK_MCP_SERVERS`                                                            | unset        | Optional backend-only JSON configuration for MCP Streamable HTTP servers |
+| `DB_KEYS_PASSPHRASE` | empty | Encrypts `keys.json` at rest; losing it makes encrypted keys unreadable |
+| `DB_SESSION_TTL_HOURS` | `168` | Session lifetime in hours |
+| `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | unset | Skips the setup wizard when both are set |
+| `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset | Provisions a custom OpenAI-compatible provider |
+| `RUST_LOG` | app defaults | Controls server log filtering |
+| `DOCUBOOK_MCP_SERVERS` | unset | Optional backend-only JSON configuration for MCP Streamable HTTP servers |
 
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
+
+</details>
+
+<details>
+<summary><strong>Behind a reverse proxy (Coolify, VPS, Cloudflare)</strong></summary>
+
+When the app is reached through a domain, a reverse proxy sits in front of it. Without `DB_TRUSTED_PROXY`, all visitors share the proxy's login limit, and a few failed logins from anyone lock everyone out for a minute.
+
+The container sees the proxy's Docker network address, not `127.0.0.1`. Look up the subnet on the server instead of guessing it:
+
+- **Coolify** (Traefik or Caddy on the `coolify` network):
+  `docker network inspect coolify --format '{{range .IPAM.Config}}{{.Subnet}}{{end}}'`, then set e.g. `DB_TRUSTED_PROXY=10.0.1.0/24` in the app's environment.
+- **VPS, proxy in a container:** the subnet of the network the proxy shares with the app, with the same command.
+- **VPS, proxy on the host** with the app published by `-p`: the Docker bridge gateway, `docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'` (usually `172.17.0.1`).
+- **Cloudflare proxied domain:** also add Cloudflare's ranges from <https://www.cloudflare.com/ips/>, comma-separated. Unlisted, the Cloudflare edge address is used instead: coarser, but not spoofable.
+
+nginx must append to the header: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` and `proxy_set_header X-Forwarded-Proto $scheme;`. Traefik and Caddy do this by default. See [SECURITY.md](SECURITY.md) for the per-proxy details.
+
+</details>
+
+<details>
+<summary><strong>Docker Compose</strong></summary>
 
 ```yaml
 services:
@@ -58,7 +94,10 @@ volumes:
 
 The image supports `linux/amd64` and `linux/arm64` and includes a health check at `/api/health`.
 
-#### Storage
+</details>
+
+<details>
+<summary><strong>Storage and volumes</strong></summary>
 
 All state lives under `/data` (`vaults/`, `config.json`, `keys.json`, `sessions.json`), so the mount destination is always `/data` — the same path as `DATA_DIR`. Change one and you must change the other.
 
@@ -71,15 +110,16 @@ With no mount at all, Docker creates an anonymous volume from the image. Those a
 
 A bind mount must point at a dedicated directory — never a shared parent such as `/data`, `/`, `$HOME`, `/var/www`, or another application's directory. The entrypoint fixes ownership of the mount root only, and never rewrites host files below it. Starting as root (the default) is enough; no manual `chown` needed.
 
-##### Coolify
+**Coolify**
 
-| Type                       | Name           | Source Path          | Destination Path |
-| -------------------------- | -------------- | -------------------- | ---------------- |
+| Type                       | Name            | Source Path          | Destination Path |
+| -------------------------- | --------------- | -------------------- | ---------------- |
 | Volume Mount (recommended) | `docubook-data` | leave empty          | `/data`          |
-| Directory Mount            | —              | `/data/docubook-app` | `/data`          |
+| Directory Mount            | —               | `/data/docubook-app` | `/data`          |
 
 Coolify prefixes volume names with the resource id, so `docubook-data` becomes `<resource-id>-docubook-data` under `/var/lib/docker/volumes/`. A Volume Mount **with** a Source Path and a Directory Mount are both bind mounts, so their source must be a dedicated directory: Coolify keeps its own state in `/data/coolify`, and binding `/data` hands that state to the container. File Mount is for single files only — never for `/data`.
 
+</details>
 
 ### Desktop — macOS
 
