@@ -1203,4 +1203,20 @@ mod api_tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
     }
+
+    #[tokio::test]
+    async fn health_details_are_not_served_through_the_command_dispatch() {
+        let (app, _) = router();
+        let (_, h, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "Password1!"}),
+        )
+        .await;
+        let cookie = session_cookie(&h);
+        // A percent-encoded path skips the static GET route and reaches POST /api/{cmd}.
+        let (status, _, body) = post_with(&app, "/api/%68ealth", json!({}), Some(&cookie)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert!(body.contains("Unknown command: health"), "{body}");
+    }
 }
