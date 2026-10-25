@@ -66,7 +66,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>, sig
     const { invoke } = await import('@tauri-apps/api/core')
     if (cmd === 'context_tools') {
       if (signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError')
-      const requestId = String(args?.requestId ?? `mcp-discovery-${++anonymousContextRequest}`)
+      const requestId = String(args?.requestId ?? `context-discovery-${++anonymousContextRequest}`)
       const onAbort = () => { void invoke('cancel_context_request', { requestId }) }
       signal?.addEventListener('abort', onAbort, { once: true })
       try {
@@ -116,7 +116,7 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>, sig
     }
   }
   if (cmd === 'context_tools') {
-    const requestId = String(args?.requestId ?? `mcp-discovery-${++anonymousContextRequest}`)
+    const requestId = String(args?.requestId ?? `context-discovery-${++anonymousContextRequest}`)
     const onAbort = () => { void post('cancel_context_request', { requestId }).catch(() => {}) }
     signal?.addEventListener('abort', onAbort, { once: true })
     try { return await post(cmd, { ...args, requestId }, signal) as T }

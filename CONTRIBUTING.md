@@ -55,7 +55,7 @@ docker compose up --build
 
 Runtime configuration (admin seeding, setup protection, session TTL, secure cookie) is documented in [`.env.example`](./.env.example).
 
-The optional `DOCUBOOK_MCP_SERVERS` value configures backend-held MCP Streamable HTTP context sources. See the AI context tools section in [README.md](./README.md) for the HTTPS, local read-only allow-list, timeout, credential, and response-bound policies. Provider-native search must fail closed unless explicitly supported by provider capability metadata.
+rust-ai's only context tools are the built-in `web_search` / `web_fetch` (`core/rust-ai/web/`), off until enabled in Settings → AI → Web Tools; `DOCUBOOK_SEARXNG_URL` / `DOCUBOOK_TAVILY_API_KEY` pin the search provider on the server. `web_fetch` must stay behind the SSRF guard (`web/net_guard.rs`) and the per-turn URL-provenance ledger (`web/ledger.rs`). Provider-native search must fail closed unless explicitly supported by provider capability metadata.
 
 ## Project Structure
 

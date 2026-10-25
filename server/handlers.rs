@@ -214,7 +214,6 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "config_set" => sync(state, cmd, args),
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl"), &s("apiKey")).await,
         "context_tools" => {
-            configure_mcp(state)?;
             web_tools::configure_or_disable(state);
             let url_sources = web_tools::url_sources(&args);
             Ok(
@@ -222,40 +221,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
                     .map_err(|_| "Could not encode context tools".to_string())?,
             )
         }
-        "mcp_settings" => {
-            configure_mcp(state)?;
-            let mut view = state
-                .auth
-                .config
-                .lock().unwrap_or_else(|e| e.into_inner())
-                .view(&state.data_dir)["mcp"]
-                .clone();
-            if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
-                let configured: Vec<rust_ai::context::ContextServer> =
-                    std::env::var("DOCUBOOK_MCP_SERVERS")
-                        .ok()
-                        .and_then(|raw| serde_json::from_str(&raw).ok())
-                        .unwrap_or_default();
-                view = Value::Array(configured.iter().map(|server| serde_json::json!({"name":server.name,"url":server.url,"timeoutSeconds":server.timeout_seconds,"readOnlyTools":server.read_only_tools,"hasToken":server.token.as_ref().is_some_and(|token| !token.is_empty())})).collect());
-            }
-            Ok(serde_json::to_string(&serde_json::json!({
-                "servers": view,
-                "envManaged": std::env::var("DOCUBOOK_MCP_SERVERS").is_ok(),
-                "defaultTimeoutSeconds": rust_ai::context::DEFAULT_CONTEXT_REQUEST_TIMEOUT_SECS,
-                "maxTimeoutSeconds": rust_ai::context::MAX_CONTEXT_REQUEST_TIMEOUT_SECS
-            }))
-            .map_err(|e| e.to_string())?)
-        }
-        "set_mcp_settings" => {
-            let servers = args.get("servers").cloned().unwrap_or(Value::Null);
-            sync(
-                state,
-                "config_set",
-                serde_json::json!({"key":"mcp", "value":servers}),
-            )
-        }
         "call_context_tool" => {
-            configure_mcp(state)?;
             web_tools::configure_or_disable(state);
             let request_id = s("requestId");
             let context_id = s("contextId");
@@ -283,30 +249,6 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
     }
 }
 
-fn configure_mcp(state: &AppState) -> Result<(), String> {
-    if let Ok(raw) = std::env::var("DOCUBOOK_MCP_SERVERS") {
-        let servers: Vec<rust_ai::context::ContextServer> = serde_json::from_str(&raw)
-            .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?;
-        return rust_ai::context::set_configured_servers(servers);
-    }
-    let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
-    let servers = cfg
-        .mcp
-        .iter()
-        .map(|server| {
-            Ok(rust_ai::context::ContextServer {
-                name: server.name.clone(),
-                url: server.url.clone(),
-                timeout_seconds: server.timeout_seconds,
-                token: keys::get_key(&state.data_dir, &format!("mcp:{}", server.name)).ok(),
-                read_only_tools: server.read_only_tools.clone(),
-            })
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    rust_ai::context::set_configured_servers(servers)
-}
-
-/** Run a cheap sync command body on the current thread. */
 fn restore_key(data_dir: &std::path::Path, provider: &str, key: Option<&str>) {
     match key {
         Some(key) => {
@@ -865,147 +807,12 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
             let key = s("key");
             let value = args.get("value").cloned().unwrap_or(Value::Null);
-            if key == "mcp" {
-                if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
-                    return Err("MCP servers are controlled by DOCUBOOK_MCP_SERVERS".into());
-                }
-                let servers = value.as_array().ok_or("mcp must be an array")?;
-                let mut out = Vec::new();
-                let mut tokens = Vec::new();
-                for server in servers {
-                    let name = server
-                        .get("name")
-                        .or_else(|| server.get("id"))
-                        .and_then(Value::as_str)
-                        .ok_or("MCP server name is required")?
-                        .to_string();
-                    let url = server
-                        .get("url")
-                        .and_then(Value::as_str)
-                        .ok_or("MCP server URL is required")?
-                        .to_string();
-                    let timeout_seconds = match server
-                        .get("timeoutSeconds")
-                        .or_else(|| server.get("timeout_seconds"))
-                    {
-                        None | Some(Value::Null) => None,
-                        Some(value) => Some(
-                            value
-                                .as_u64()
-                                .ok_or("MCP timeout must be an integer number of seconds")?,
-                        ),
-                    };
-                    let read_only_tools = server
-                        .get("readOnlyTools")
-                        .or_else(|| server.get("read_only_tools"))
-                        .and_then(Value::as_array)
-                        .map(|items| {
-                            items
-                                .iter()
-                                .filter_map(|item| item.as_str().map(str::to_owned))
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let token = server
-                        .get("token")
-                        .and_then(Value::as_str)
-                        .filter(|token| !token.is_empty())
-                        .map(str::to_owned);
-                    let remove_token = server
-                        .get("removeToken")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false);
-                    out.push(config::McpServer {
-                        name,
-                        url,
-                        timeout_seconds,
-                        read_only_tools,
-                        has_token: false,
-                    });
-                    tokens.push((token, remove_token));
-                }
-                let validation_servers = out
-                    .iter()
-                    .map(|server| rust_ai::context::ContextServer {
-                        name: server.name.clone(),
-                        url: server.url.clone(),
-                        timeout_seconds: server.timeout_seconds,
-                        token: None,
-                        read_only_tools: server.read_only_tools.clone(),
-                    })
-                    .collect::<Vec<_>>();
-                rust_ai::context::validate_configured_servers(&validation_servers)?;
-                let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
-                let previous_config = cfg.mcp.clone();
-                let mut previous_keys = std::collections::HashMap::new();
-                for name in previous_config
-                    .iter()
-                    .map(|server| server.name.as_str())
-                    .chain(out.iter().map(|server| server.name.as_str()))
-                {
-                    let key = format!("mcp:{name}");
-                    previous_keys
-                        .entry(key.clone())
-                        .or_insert_with(|| keys::get_key(&state.data_dir, &key).ok());
-                }
-                for (server, (token, remove_token)) in out.iter_mut().zip(tokens.iter()) {
-                    let key_id = format!("mcp:{}", server.name);
-                    let key_result = if let Some(token) = token {
-                        keys::set_key(&state.data_dir, &key_id, token)
-                    } else if *remove_token {
-                        keys::delete_key(&state.data_dir, &key_id)
-                    } else {
-                        Ok(())
-                    };
-                    if let Err(error) = key_result {
-                        for (key, prior) in &previous_keys {
-                            restore_key(&state.data_dir, key, prior.as_deref());
-                        }
-                        return Err(error);
-                    }
-                    server.has_token = (token.is_some() && !remove_token)
-                        || keys::get_key(&state.data_dir, &key_id).is_ok();
-                }
-                let new_names: std::collections::HashSet<String> =
-                    out.iter().map(|server| server.name.clone()).collect();
-                for old in cfg.mcp.iter().filter(|old| !new_names.contains(&old.name)) {
-                    if let Err(error) =
-                        keys::delete_key(&state.data_dir, &format!("mcp:{}", old.name))
-                    {
-                        for (key, prior) in &previous_keys {
-                            restore_key(&state.data_dir, key, prior.as_deref());
-                        }
-                        return Err(error);
-                    }
-                }
-                cfg.mcp = out;
-                if let Err(error) = cfg.save() {
-                    cfg.mcp = previous_config.clone();
-                    for (key, prior) in &previous_keys {
-                        restore_key(&state.data_dir, key, prior.as_deref());
-                    }
-                    return Err(error);
-                }
-                drop(cfg);
-                if let Err(error) = configure_mcp(state) {
-                    let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
-                    cfg.mcp = previous_config;
-                    let _ = cfg.save();
-                    drop(cfg);
-                    for (key, prior) in &previous_keys {
-                        restore_key(&state.data_dir, key, prior.as_deref());
-                    }
-                    return Err(error);
-                }
-                Ok("null".into())
-            } else {
-                state
-                    .auth
-                    .config
-                    .lock().unwrap_or_else(|e| e.into_inner())
-                    .set(&key, &value)
-                    .map(|_| "null".into())
-            }
+            state
+                .auth
+                .config
+                .lock().unwrap_or_else(|e| e.into_inner())
+                .set(&key, &value)
+                .map(|_| "null".into())
         }
         _ => Err(format!("Unknown command: {cmd}")),
     }

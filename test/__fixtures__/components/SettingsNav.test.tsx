@@ -5,7 +5,7 @@
  *
  * One menu shape: every menu (General, Git, AI) expands straight to its page's
  * section anchors and opens its OWN page. The AI menu's page has three sections:
- * Provider (whose content is the three provider forms), Web Tools and MCP Server. The tree
+ * Provider (whose content is the three provider forms) and Web Tools. The tree
  * is the ONLY navigation surface for the editor-container settings pane, so its
  * ids must match the pane's section ids.
  */
@@ -51,7 +51,7 @@ describe('SettingsNav — structure', () => {
   })
 
   it('expands the menu that owns the selected section', () => {
-    useSettings.setState({ section: 'ai-mcp-server' })
+    useSettings.setState({ section: 'ai-web-tools' })
     render()
 
     expect(group('ai')!.getAttribute('aria-expanded')).toBe('true')
@@ -70,12 +70,11 @@ describe('SettingsNav — structure', () => {
       'git-remotes',
       'ai-provider',
       'ai-web-tools',
-      'ai-mcp-server',
     ]
     const owners: Record<string, string> = {
       'general-themes': 'general', 'general-account': 'general',
       'git-identity': 'git', 'git-remotes': 'git',
-      'ai-provider': 'ai', 'ai-web-tools': 'ai', 'ai-mcp-server': 'ai',
+      'ai-provider': 'ai', 'ai-web-tools': 'ai',
     }
     let open = 'general'
     for (const id of ids) {
@@ -93,18 +92,17 @@ describe('SettingsNav — structure', () => {
 
   /** Provider is ONE row whose content holds the three forms: the forms are not
    *  sidebar rows of their own. */
-  it('lists the AI page sections, Provider then Web Tools then MCP Server', () => {
+  it('lists the AI page sections, Provider then Web Tools', () => {
     useSettings.setState({ section: 'ai-provider' })
     render()
 
     expect(anchor('ai-provider')!.textContent).toContain('Provider')
     expect(anchor('ai-web-tools')!.textContent).toContain('Web Tools')
-    expect(anchor('ai-mcp-server')!.textContent).toContain('MCP Server')
 
     const ai = group('ai')!.parentElement!
     const rows = Array.from(ai.querySelectorAll<HTMLElement>('[data-testid^="settings-nav-section-ai-"]'))
       .map(node => node.getAttribute('data-testid'))
-    expect(rows).toEqual(['settings-nav-section-ai-provider', 'settings-nav-section-ai-web-tools', 'settings-nav-section-ai-mcp-server'])
+    expect(rows).toEqual(['settings-nav-section-ai-provider', 'settings-nav-section-ai-web-tools'])
   })
 
   it('marks the active section as current', () => {
@@ -151,7 +149,7 @@ describe('SettingsNav — collapse/expand', () => {
     act(() => group('ai')!.click())
 
     expect(anchor('ai-provider')).toBeNull()
-    expect(anchor('ai-mcp-server')).toBeNull()
+    expect(anchor('ai-web-tools')).toBeNull()
     expect(group('ai')!.getAttribute('aria-expanded')).toBe('false')
   })
 })
@@ -191,12 +189,12 @@ describe('SettingsNav — a row opens its page and expands', () => {
     expect(group('ai')!.getAttribute('aria-current')).toBeNull()
   })
 
-  it('marks the AI menu active for its provider and MCP sections alike', () => {
+  it('marks the AI menu active for its provider and web tools sections alike', () => {
     useSettings.setState({ section: 'ai-provider' })
     render()
     expect(group('ai')!.getAttribute('aria-current')).toBe('true')
 
-    act(() => useSettings.setState({ section: 'ai-mcp-server' }))
+    act(() => useSettings.setState({ section: 'ai-web-tools' }))
     expect(group('ai')!.getAttribute('aria-current')).toBe('true')
   })
 })
@@ -207,10 +205,10 @@ describe('SettingsNav — anchors drive the store', () => {
     render()
     expect(useSettings.getState().open).toBe(false)
 
-    act(() => anchor('ai-mcp-server')!.click())
+    act(() => anchor('ai-web-tools')!.click())
 
     expect(useSettings.getState().open).toBe(true)
-    expect(useSettings.getState().section).toBe('ai-mcp-server')
+    expect(useSettings.getState().section).toBe('ai-web-tools')
   })
 
   it('keeps the anchor navigation in-app instead of a native fragment jump', () => {

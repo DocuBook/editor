@@ -51,7 +51,6 @@ permissions = [
   "allow-list-tree",
   "allow-markdown-preview",
   "allow-md-to-html",
-  "allow-mcp-settings",
   "allow-move-path",
   "allow-open-vault",
   "allow-open-system-settings",
@@ -67,7 +66,6 @@ permissions = [
   "allow-restore-file",
   "allow-search-vault",
   "allow-set-ai-settings",
-  "allow-set-mcp-settings",
   "allow-web-tools-settings",
   "allow-set-web-tools-settings",
   "allow-set-web-search-key",
@@ -135,26 +133,6 @@ commands.allow = ["cancel_context_request"]
 identifier = "deny-cancel-context-request"
 description = "Denies the cancel_context_request command."
 commands.deny = ["cancel_context_request"]
-
-[[permission]]
-identifier = "allow-mcp-settings"
-description = "Enables the mcp_settings command."
-commands.allow = ["mcp_settings"]
-
-[[permission]]
-identifier = "deny-mcp-settings"
-description = "Denies the mcp_settings command."
-commands.deny = ["mcp_settings"]
-
-[[permission]]
-identifier = "allow-set-mcp-settings"
-description = "Enables the set_mcp_settings command."
-commands.allow = ["set_mcp_settings"]
-
-[[permission]]
-identifier = "deny-set-mcp-settings"
-description = "Denies the set_mcp_settings command."
-commands.deny = ["set_mcp_settings"]
 
 [[permission]]
 identifier = "allow-web-tools-settings"

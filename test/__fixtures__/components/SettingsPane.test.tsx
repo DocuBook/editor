@@ -53,7 +53,6 @@ beforeEach(() => {
   invoke.mockImplementation(async (command: string) => {
     if (command === 'ai_settings') return JSON.stringify({ active: '', endpoints: {}, savedProviders: [] })
     if (command === 'custom_ai_config') return JSON.stringify({ source: 'ui', hasKey: false })
-    if (command === 'mcp_settings') return JSON.stringify({ servers: [], envManaged: false })
     if (command === 'git_settings') return JSON.stringify({ isRepo: false, noVault: true, name: '', email: '', defaultBranch: 'main', remotes: [] })
     return ''
   })
@@ -99,13 +98,13 @@ describe('SettingsPane — one page per menu', () => {
   })
 
   /** The AI page's Provider section holds all three provider forms as content
-   *  (no per-provider anchors), and MCP Server follows it — the two rows the
+   *  (no per-provider anchors), and Web Tools follows it — the two rows the
    *  sidebar lists. */
-  it('renders the AI page with the Provider forms, Web Tools and MCP Server', async () => {
+  it('renders the AI page with the Provider forms and Web Tools', async () => {
     useSettings.setState({ open: true, section: 'ai-provider' })
     await render()
 
-    for (const id of ['ai-provider', 'ai-web-tools', 'ai-mcp-server']) {
+    for (const id of ['ai-provider', 'ai-web-tools']) {
       expect(document.getElementById(id), `missing AI page anchor ${id}`).not.toBeNull()
     }
     // Three provider forms render INSIDE the Provider section (one per provider).
@@ -139,13 +138,13 @@ describe('SettingsPane — one page per menu', () => {
     expect(provider.querySelector('.space-y-6')).toBeNull()
   })
 
-  /** The Provider and MCP Server sections share the ONE AI page, so selecting
+  /** The Provider and Web Tools sections share the ONE AI page, so selecting
    *  either keeps both mounted. */
   it('renders the same AI page for either of its sections', async () => {
-    useSettings.setState({ open: true, section: 'ai-mcp-server' })
+    useSettings.setState({ open: true, section: 'ai-web-tools' })
     await render()
 
-    expect(section('ai-mcp-server')).not.toBeNull()
+    expect(section('ai-web-tools')).not.toBeNull()
     // Provider's anchor is the page heading; its forms are still on the page.
     expect(heading()!.id).toBe('ai-provider')
     expect(providerSection().querySelectorAll('[data-testid^="provider-form-"]')).toHaveLength(3)
@@ -186,7 +185,7 @@ describe('SettingsPane — one page per menu', () => {
 
     expect(document.querySelectorAll('[data-testid^="provider-form-"]')).toHaveLength(3)
 
-    act(() => useSettings.setState({ section: 'ai-mcp-server' }))
+    act(() => useSettings.setState({ section: 'ai-web-tools' }))
     await settle()
 
     // Still mounted after navigating to the other AI section.
@@ -201,7 +200,7 @@ describe('SettingsPane — one page per menu', () => {
     expect(useAiSettings.getState().provider).toBe('openai-compatible')
 
     act(() => useAiSettings.getState().setProvider('deepseek'))
-    act(() => useSettings.setState({ section: 'ai-mcp-server' }))
+    act(() => useSettings.setState({ section: 'ai-web-tools' }))
     act(() => useSettings.setState({ section: 'ai-provider' }))
     await settle()
     expect(useAiSettings.getState().provider).toBe('deepseek')
@@ -227,7 +226,7 @@ describe('SettingsPane — one page per menu', () => {
   /** Every sidebar row resolves to a real, visible anchor: the first section of a
    *  page is its heading, the rest are sections. The id is never duplicated. */
   it('exposes every section as a real anchor', async () => {
-    for (const id of ['general-themes', 'git-identity', 'ai-provider', 'ai-mcp-server'] as const) {
+    for (const id of ['general-themes', 'git-identity', 'ai-provider', 'ai-web-tools'] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -254,7 +253,7 @@ describe('SettingsPane — one page per menu', () => {
   /** The page heading IS the page's menu name, so the pane and the sidebar row
    *  that opened it always read the same. */
   it('titles each page with its menu name', async () => {
-    for (const [id, title] of [['general-themes', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI'], ['ai-mcp-server', 'AI']] as const) {
+    for (const [id, title] of [['general-themes', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI'], ['ai-web-tools', 'AI']] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -298,7 +297,7 @@ describe('SettingsPane — one page per menu', () => {
     await render()
     expect(heading()!.className).not.toContain('border-t')
     expect(document.querySelector('[data-settings-section]#ai-provider')).toBeNull()
-    expect(section('ai-mcp-server')!.className).toContain('border-t')
+    expect(section('ai-web-tools')!.className).toContain('border-t')
 
     if (root) act(() => root!.unmount())
     useSettings.setState({ open: true, section: 'general-themes' })
@@ -356,7 +355,7 @@ describe('SettingsPane — anchor scroll', () => {
   })
 
   it('reserves trailing space so a short LAST section can reach the top', async () => {
-    useSettings.setState({ open: true, section: 'ai-mcp-server' })
+    useSettings.setState({ open: true, section: 'ai-web-tools' })
     await render()
 
     const pane = document.querySelector<HTMLElement>('.settings-pane-scroll')!
@@ -364,12 +363,12 @@ describe('SettingsPane — anchor scroll', () => {
     const sections = content.querySelectorAll<HTMLElement>('[data-settings-section]')
     const lastSection = sections[sections.length - 1]
     // The section the sidebar anchors on the AI page IS the last one.
-    expect(lastSection.id).toBe('ai-mcp-server')
+    expect(lastSection.id).toBe('ai-web-tools')
 
     Object.defineProperty(pane, 'clientHeight', { value: 500, configurable: true })
     Object.defineProperty(lastSection, 'offsetHeight', { value: 300, configurable: true })
 
-    act(() => useSettings.getState().setSection('ai-mcp-server'))
+    act(() => useSettings.getState().setSection('ai-web-tools'))
     await settle()
 
     // 500 - 300 - 72 = 128.
@@ -380,7 +379,7 @@ describe('SettingsPane — anchor scroll', () => {
    *  its own, so no trailing space is reserved — the page keeps its natural
    *  bottom instead of gaining a blank gap. */
   it('reserves no trailing space when the last section already fills the pane', async () => {
-    useSettings.setState({ open: true, section: 'ai-mcp-server' })
+    useSettings.setState({ open: true, section: 'ai-web-tools' })
     await render()
 
     const pane = document.querySelector<HTMLElement>('.settings-pane-scroll')!
@@ -391,7 +390,7 @@ describe('SettingsPane — anchor scroll', () => {
     Object.defineProperty(pane, 'clientHeight', { value: 500, configurable: true })
     Object.defineProperty(lastSection, 'offsetHeight', { value: 1000, configurable: true })
 
-    act(() => useSettings.getState().setSection('ai-mcp-server'))
+    act(() => useSettings.getState().setSection('ai-web-tools'))
     await settle()
 
     expect(content.style.paddingBottom).toBe('')
