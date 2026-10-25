@@ -217,7 +217,7 @@ On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` pins the p
 | `url_not_allowed` | Blocked address, port, scheme, or credentials in the URL |
 | `unsupported_content_type` | The page is not HTML or text (PDFs and images are not read) |
 | `unauthorized` | Tavily rejected the API key — save a new one |
-| `rate_limited` / `quota_exceeded` | Tavily is throttling or the plan's credits are used up |
+| `rate_limited` / `quota_exceeded` | The provider is throttling (Tavily's rate limit, or a SearXNG instance with `limiter: true` — set it to `false` in `settings.yml`), or the Tavily plan's credits are used up |
 | *SearXNG refused JSON output* | Add `json` under `search.formats` in the instance's `settings.yml` |
 
 </details>
