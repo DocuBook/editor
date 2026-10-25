@@ -320,6 +320,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           <BacklinksPanel onNavigate={onNavigate} />
         </div>
       )}
+      {activePanel === 'vault' && (
       <div ref={sidebarActionsRef} className="relative flex items-center gap-0.5 px-2 py-1.5 shrink-0">
         <span className="flex-1 min-w-0">
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading || trashBusy} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
@@ -375,6 +376,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
         )}
 
       </div>
+      )}
 
       <ProfileMenu isNative={isTauri} settingsOpen={settingsOpen} onOpenSettings={() => { onOpenSettings(); openSettings() }} onCloseSettings={() => { onNavigate(); closeSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
 

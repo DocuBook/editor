@@ -386,4 +386,26 @@ describe('SidebarContextMenu in the Sidebar', () => {
     // The vault tree row is gone — no `active` file row under the search bar.
     expect(Array.from(document.querySelectorAll<HTMLElement>('span.truncate')).some(n => n.textContent === 'active')).toBe(false)
   })
+
+
+  /** The vault switcher and the create (+) control belong to the Folders panel;
+   *  the Changes and Trash panels show neither. */
+  it('shows the vault switcher and create control only on the Folders panel', async () => {
+    renderSidebar()
+    await flush()
+    const plus = () => document.querySelector('[data-plus-btn]')
+    const switcher = () => document.querySelector('[aria-label="Switch vault"]')
+    expect(plus()).not.toBeNull()
+    expect(switcher()).not.toBeNull()
+
+    act(() => (document.querySelector('[data-testid="sidebar-panel-git"]') as HTMLElement).click())
+    await flush()
+    expect(plus()).toBeNull()
+    expect(switcher()).toBeNull()
+
+    act(() => (document.querySelector('[data-testid="sidebar-panel-vault"]') as HTMLElement).click())
+    await flush()
+    expect(plus()).not.toBeNull()
+    expect(switcher()).not.toBeNull()
+  })
 })
