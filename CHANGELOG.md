@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.4.2 — 2026-10-25
+
+
+### 🐛 Bug Fixes
+
+* **desktop:** require macOS 12.3 (Safari 15.4 WKWebView); macOS 12.0–12.2 could not render the app ([ef52619](https://github.com/DocuBook/editor/commit/ef526197a8b139737cb3b5d4e3151cfa6d68dc9f))
+
+
+### 🔧 CI
+
+* **build:** pass the Rust target through setup-rust-toolchain's `target` input ([#335](https://github.com/DocuBook/editor/issues/335)) ([0de21ae](https://github.com/DocuBook/editor/commit/0de21ae42dc9f4cd1ede81d9aa88e3837fc36d12))
+* **lint:** lint the frontend and the built bundle against its oldest engines (.browserslistrc) ([ef52619](https://github.com/DocuBook/editor/commit/ef526197a8b139737cb3b5d4e3151cfa6d68dc9f))
+* move macOS jobs to macos-15 and guard the macOS 12 deployment target ([#331](https://github.com/DocuBook/editor/issues/331)) ([45f5ebf](https://github.com/DocuBook/editor/commit/45f5ebf97a12942593527f72242703a967e27062))
+* pin Node 22.23.4 to meet the dev dependencies' engine floors ([#334](https://github.com/DocuBook/editor/issues/334)) ([53db515](https://github.com/DocuBook/editor/commit/53db515915f0ee2eefff779c46ef4dc189f1b274))
+
 ## v0.4.1 — 2026-10-25
 
 
