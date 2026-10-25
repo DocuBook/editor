@@ -1,0 +1,10 @@
+# Engines the shipped frontend must run on. Read by the compat lints only
+# (eslint-plugin-compat via oxlint, doiuse in test/check-bundle-compat.mjs) —
+# Vite and Tailwind do not consume this file.
+#
+# safari 15.4: WKWebView on the desktop floor, macOS 12.3
+#   (src-tauri/tauri.conf.json bundle.macOS.minimumSystemVersion). WKWebView
+#   follows the installed Safari, so 12.3 is the oldest engine a user can have.
+# chrome 105: the web build's floor (vite.config.ts build.target).
+safari >= 15.4
+chrome >= 105

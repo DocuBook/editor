@@ -130,6 +130,8 @@ Download the appropriate DMG from [Releases](https://github.com/DocuBook/editor/
 | `DocuBook Editor_<version>_aarch64.dmg` | Apple Silicon                         |
 | `DocuBook Editor_<version>_x64.dmg`     | Intel, or Apple Silicon via Rosetta 2 |
 
+Requires macOS 12.3 (Monterey) or later.
+
 Builds are not signed or notarized yet; Apple Developer signing will be added when sponsorship covers it. You can [sponsor the project on GitHub](https://github.com/sponsors/gitfromwildan). If Gatekeeper blocks the first launch, run once:
 
 ```bash
