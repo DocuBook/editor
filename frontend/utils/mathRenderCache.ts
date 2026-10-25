@@ -54,4 +54,3 @@ export function installKatexRenderCache(): void {
   katex.renderToString = cachedRenderToString(katex.renderToString);
 }
 
-export { cache as katexRenderCache };

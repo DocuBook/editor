@@ -465,6 +465,9 @@ fn parse_ai(value: &serde_json::Value) -> AiSelection {
 /// servers in `config["mcp"]`. Returns whether the retired block can be dropped:
 /// it was present and every token was deleted. A kept token keeps the block so
 /// the next boot retries, as the desktop does with `mcp-settings.json`.
+///
+/// Upgrade migration from versions before 0.5.0 (MCP removed in #339); delete
+/// it together with its call site once those versions are no longer supported.
 fn purge_legacy_mcp(config: &serde_json::Value, data_dir: &Path) -> bool {
     let Some(servers) = config.get("mcp").and_then(serde_json::Value::as_array) else {
         return config.get("mcp").is_some();

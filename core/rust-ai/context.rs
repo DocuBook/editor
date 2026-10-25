@@ -329,10 +329,6 @@ pub fn cancel(request_id: &str) {
     }
 }
 
-pub fn is_document_tool(name: &str) -> bool {
-    name == crate::rust_ai::tool_schema::DOCUMENT_OPERATION_TOOL
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,8 +337,6 @@ mod tests {
     fn frames_results_as_untrusted_data() {
         let framed = frame_result(&json!({"content":[{"text":"reference"}]})).unwrap();
         assert!(framed.contains(UNTRUSTED_REFERENCE_TYPE));
-        assert!(!is_document_tool("lookup"));
-        assert!(is_document_tool("applyDocumentOperations"));
     }
 
     /// Read every page of a framed result and return the reassembled text.

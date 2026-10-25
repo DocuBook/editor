@@ -755,6 +755,9 @@ pub async fn context_tools(request_id: String, url_sources: Option<Vec<String>>)
 /// Remove what a pre-removal version stored for MCP servers: their Keychain
 /// tokens (`mcp:<name>`) and `mcp-settings.json`. Runs at startup; a no-op once
 /// the file is gone.
+///
+/// Upgrade migration from versions before 0.5.0 (MCP removed in #339); delete
+/// it together with its call site once those versions are no longer supported.
 pub fn purge_legacy_mcp_settings(app: &tauri::AppHandle) {
     let Ok(dir) = app.path().app_config_dir() else {
         return;

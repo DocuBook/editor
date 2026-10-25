@@ -212,10 +212,6 @@ export function setSyncVaultScope(vaultPath: string): void {
   generation++
 }
 
-export function syncVaultScope(): string {
-  return activeVaultPath
-}
-
 /** Whether a persisted record belongs to the given vault.
  *
  *  Records created before vault scoping have no `vaultPath`. They are treated as

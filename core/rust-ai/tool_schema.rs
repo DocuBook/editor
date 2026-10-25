@@ -86,18 +86,6 @@ pub fn openai_document_operation_tool() -> Value {
     })
 }
 
-/// Wrap the operation schema in provider tool-definition shape.
-#[allow(dead_code)]
-pub fn document_operation_tool_definition() -> Value {
-    json!({
-        DOCUMENT_OPERATION_TOOL: {
-            "description": "Apply grounded HTML block operations to the document.",
-            "inputSchema": document_operation_tool_schema(),
-            "outputSchema": { "type": "object" }
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,15 +104,6 @@ mod tests {
 
     #[test]
     fn tool_definition_uses_stable_name_and_schema() {
-        let definition = document_operation_tool_definition();
-        assert_eq!(
-            definition[DOCUMENT_OPERATION_TOOL]["inputSchema"]["type"],
-            "object"
-        );
-        assert_eq!(
-            definition[DOCUMENT_OPERATION_TOOL]["outputSchema"]["type"],
-            "object"
-        );
         let openai = openai_document_operation_tool();
         assert_eq!(openai["function"]["name"], DOCUMENT_OPERATION_TOOL);
         assert_eq!(

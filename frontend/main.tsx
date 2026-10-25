@@ -25,9 +25,6 @@ import { installGlobalErrorHandlers } from './utils/logger'
 import './stores/theme' // applies <html data-theme> before first paint
 import { installIteratorFilterPolyfill } from './utils/iteratorPolyfill'
 installIteratorFilterPolyfill()
-// WKWebView macOS 12 lacks structuredClone (Safari 15.4+) — see polyfill file.
-import { installWebkitStructuredClone } from './utils/webkitStructuredClone'
-installWebkitStructuredClone()
 // WKWebView macOS 12 can't construct CSSStyleSheet (Safari 16.4+) — mermaid
 // needs it to render. See polyfill file.
 import { installWebkitCssStyleSheet } from './utils/webkitCssStyleSheet'
