@@ -126,9 +126,12 @@ editor/
        macOS 12.3. The oldest engines are covered statically instead —
        `compat/compat` in `.oxlintrc.json` (our source) and
        `npm run lint:compat` (the built bundle, dependencies and Tailwind
-       output included), both against `.browserslistrc`. Neither sees an
-       unsupported value of a supported CSS property (e.g. `overflow: clip`),
-       so keep the `@supports` fallbacks in `frontend/index.css`.
+       output included), both against `.browserslistrc`. Two blind spots:
+       neither sees an unsupported value of a supported CSS property (e.g.
+       `overflow: clip`), so keep the `@supports` fallbacks in
+       `frontend/index.css`; and the JS rule only knows the APIs in its
+       bundled snapshot, so newer ones (e.g. `Object.groupBy`, `URL.canParse`,
+       `AbortSignal.timeout`) pass unflagged and need a manual caniuse check.
 4. Open a PR against `master` using the PR template.
 
 ### Commit conventions (enforced by the commit-msg hook)

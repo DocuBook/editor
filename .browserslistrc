@@ -1,5 +1,5 @@
 # Engines the shipped frontend must run on. Read by the compat lints only
-# (eslint-plugin-compat via oxlint, doiuse in test/check-css-compat.mjs) —
+# (eslint-plugin-compat via oxlint, doiuse in test/check-bundle-compat.mjs) —
 # Vite and Tailwind do not consume this file.
 #
 # safari 15.4: WKWebView on the desktop floor, macOS 12.3

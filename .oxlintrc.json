@@ -11,10 +11,6 @@
     {
       "files": ["frontend/**/*.{ts,tsx}"],
       "rules": { "compat/compat": "error" }
-    },
-    {
-      "files": ["frontend/**/*.test.{ts,tsx}"],
-      "rules": { "compat/compat": "off" }
     }
   ]
 }

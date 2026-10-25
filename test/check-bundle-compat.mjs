@@ -80,7 +80,12 @@ try {
  *  character class — that one is a SyntaxError on Safari < 16.4 and must
  *  still fail. */
 function hasRealLookbehind(literal) {
-  const pattern = literal.slice(1, literal.lastIndexOf("/"));
+  // `/pattern/flags` for a regex literal; the plugin also reports the quoted
+  // string passed to `new RegExp("…")`, which may contain an unescaped `/`
+  // and whose own escapes (`"\\("` is one escaped paren) must be decoded first.
+  const pattern = literal.startsWith("/")
+    ? literal.slice(1, literal.lastIndexOf("/"))
+    : literal.slice(1, -1).replace(/\\(.)/g, "$1");
   const stripped = pattern.replace(/\\./g, "").replace(/\[[^\]]*\]/g, "");
   return /\(\?<[=!]/.test(stripped);
 }
@@ -90,8 +95,14 @@ let jsCount = 0;
 for (const d of report.diagnostics) {
   const span = d.labels?.[0]?.span;
   if (d.message.startsWith("Lookbehind ") && span) {
-    if (!sources.has(d.filename)) sources.set(d.filename, readFileSync(join(root, d.filename), "utf8"));
-    const literal = sources.get(d.filename).slice(span.offset, span.offset + span.length);
+    if (!sources.has(d.filename)) sources.set(d.filename, readFileSync(join(root, d.filename)));
+    // oxlint spans are UTF-8 byte offsets: slice the bytes, not the decoded string.
+    const literal = sources.get(d.filename).subarray(span.offset, span.offset + span.length).toString("utf8");
+    // A misaligned slice would silently drop the finding, so fail loudly instead.
+    if (!/^[/"'`]/.test(literal)) {
+      console.error(`Cannot locate the regex reported at ${d.filename}:${span.line}:${span.column}: got ${JSON.stringify(literal)}`);
+      process.exit(1);
+    }
     if (!hasRealLookbehind(literal)) continue;
   }
   jsCount++;
