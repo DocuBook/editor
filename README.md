@@ -51,7 +51,7 @@ docker logs docubook | grep "one-time setup token"
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | unset | Skips the setup wizard when both are set |
 | `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset | Provisions a custom OpenAI-compatible provider |
 | `RUST_LOG` | app defaults | Controls server log filtering |
-| `DOCUBOOK_SEARXNG_URL` / `DOCUBOOK_TAVILY_API_KEY` | unset | Pins the AI's built-in `web_search` provider (SearXNG wins when both are set); otherwise chosen in Settings → AI → Web Tools |
+| `DOCUBOOK_SEARXNG_URL` / `DOCUBOOK_TAVILY_API_KEY` | unset | Switches the AI's built-in `web_search` on and locks its provider (SearXNG wins when both are set); unset, the provider is chosen in Settings → AI → Web Tools |
 
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
 
@@ -85,11 +85,35 @@ services:
       - "8080:8080"
     volumes:
       - docubook:/data
+    # Optional: web search for the AI through the searxng service below. Setting
+    # this switches web_search on and locks the provider in Settings → AI → Web
+    # Tools; drop this block and the searxng service if you do not want that.
+    environment:
+      DOCUBOOK_SEARXNG_URL: http://searxng:8080
+    restart: unless-stopped
+
+  # Optional: self-hosted search for the AI web tools (see "AI web tools").
+  searxng:
+    image: searxng/searxng
+    volumes:
+      - ./searxng:/etc/searxng   # holds settings.yml below
     restart: unless-stopped
 
 volumes:
   docubook:
     name: docubook
+```
+
+`./searxng/settings.yml` for the optional `searxng` service. JSON output must be enabled, or the AI's searches fail with *"SearXNG refused JSON output"*:
+
+```yaml
+use_default_settings: true
+server:
+  secret_key: "change-me"   # openssl rand -hex 32
+search:
+  formats:
+    - html
+    - json
 ```
 
 The image supports `linux/amd64` and `linux/arm64` and includes a health check at `/api/health`.
@@ -144,7 +168,7 @@ open /Applications/DocuBook\ Editor.app
 1. Open, create, or clone a vault.
 2. Select a `.md` or `.mdx` file.
 3. Type `/` to insert blocks or use **Code** to edit raw Markdown.
-4. Configure an AI provider in **Settings → AI** if needed.
+4. Configure an AI provider in **Settings → AI** if needed, and optionally **Web Tools** so the AI can search the web.
 5. Configure identity and a remote in **Settings → Git**, then **Save** and **Publish**.
 
 Other text formats can be viewed but only `.md` and `.mdx` use the WYSIWYG editor.
@@ -155,8 +179,49 @@ Other text formats can be viewed but only `.md` and `.mdx` use the WYSIWYG edito
 - **Block editing** — Headings, lists, quotes, code, math, diagrams, inline formatting, and raw Markdown mode.
 - **Reviewable AI** — Write, improve, summarize, translate, and fix text; accept or reject every suggested change before it reaches the document.
 - **Provider choice** — Built-in providers plus custom OpenAI-compatible endpoints, with keys stored backend-side.
+- **Web-grounded AI (opt-in)** — Let the AI search the web and read pages before it edits, through Tavily or your own SearXNG.
 - **Git publishing** — Stage, commit, push, and see the active branch from the editor.
 - **Fast navigation** — File search, expandable folders, backlinks, and wikilinks.
+
+<details>
+<summary><strong>AI web tools (web search and page reading)</strong></summary>
+
+The AI can call two read-only tools before it proposes an edit. Both are **off by default**; turn them on in **Settings → AI → Web Tools** (on the web build, the server's environment can switch `web_search` on — see below).
+
+| Tool | What it does |
+| --- | --- |
+| `web_search` | Searches the web and returns 1–10 results with title, URL and snippet (5 by default, set in Settings) |
+| `web_fetch` | Reads one page and returns its main text (HTML, plain text, or Markdown) |
+
+**Search providers**
+
+- **Tavily** — paste an API key from [tavily.com](https://tavily.com); the free plan includes 1,000 searches a month. The key is stored in the macOS Keychain (desktop) or `keys.json` (web, encrypted with `DB_KEYS_PASSPHRASE` when set) and is only ever sent to `api.tavily.com`.
+- **SearXNG** — point it at your own instance. Local and private addresses are fine (a Compose service, a LAN box); a public instance must use HTTPS. JSON output must be enabled in its `settings.yml` (see **Docker Compose** under Install).
+
+On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` switches `web_search` on for every user and locks the provider (SearXNG wins when both are set); Settings shows it as managed by the environment, and `web_fetch` stays a Settings toggle. **Docker Compose** under Install includes an optional `searxng` service and its `settings.yml`.
+
+**What the AI can and cannot open**
+
+- `web_fetch` only opens URLs that already appeared in the current prompt: in your message, in the document, or in an earlier search result or page it read. It cannot invent a URL, so a malicious page cannot steer it to an address carrying your notes.
+- Pages are fetched from your computer (desktop) or from the server (web). Private, loopback, link-local and cloud-metadata addresses are always blocked, every redirect is re-checked (at most 5), and only ports 80 and 443 are used.
+- Each page is capped at 5 MB and 20 seconds; a search at 15 seconds. One prompt can make at most 8 tool calls over 4 rounds.
+- Results reach the model as untrusted reference data, and every change still goes through your accept/reject review.
+
+**Privacy** — Search queries are written by the AI and can contain text from your notes. Tavily's terms allow it to use queries to improve its service; SearXNG forwards them to the engines your instance is configured for, without your identity. If that matters for a note, leave web search off.
+
+**Troubleshooting**
+
+| Message in the AI's tool result | Meaning |
+| --- | --- |
+| `tool_not_enabled` | The tool is off in Settings → AI → Web Tools |
+| `url_not_in_context` | The URL was not in your prompt, the document, or an earlier result — paste it into the prompt |
+| `url_not_allowed` | Blocked address, port, scheme, or credentials in the URL |
+| `unsupported_content_type` | The page is not HTML or text (PDFs and images are not read) |
+| `unauthorized` | Tavily rejected the API key — save a new one |
+| `rate_limited` / `quota_exceeded` | The provider is throttling (Tavily's rate limit, or a SearXNG instance with `limiter: true` — set it to `false` in `settings.yml`), or the Tavily plan's credits are used up |
+| *SearXNG refused JSON output* | Add `json` under `search.formats` in the instance's `settings.yml` |
+
+</details>
 
 ## Shortcuts
 
