@@ -1,5 +1,6 @@
 // Auth routes (isolated).
 use super::*;
+use super::auth::{client_ip, is_local_client};
 
 pub(crate) fn cookie_value(cookie: &str, name: &str) -> Option<String> {
     cookie.split(';').find_map(|part| {
@@ -23,7 +24,7 @@ pub(crate) fn request_uses_https(headers: &HeaderMap) -> bool {
 }
 
 pub(crate) fn session_cookie(state: &AuthState, token: &str, headers: &HeaderMap) -> String {
-    let ttl = state.config.lock().expect("lock").session_ttl_hours * 3600;
+    let ttl = state.config.lock().unwrap_or_else(|e| e.into_inner()).session_ttl_hours * 3600;
     // DB_SECURE_COOKIE forces the flag either way; unset follows the request.
     let secure_flag = state.secure_cookie.unwrap_or_else(|| request_uses_https(headers));
     let secure = if secure_flag { "; Secure" } else { "" };
@@ -46,8 +47,8 @@ pub(crate) async fn login(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let ip = addr.ip().to_string();
-    let admin = state.auth.config.lock().expect("lock").admin.clone();
+    let ip = client_ip(addr.ip(), &headers, &state.auth.trusted_proxies).to_string();
+    let admin = state.auth.config.lock().unwrap_or_else(|e| e.into_inner()).admin.clone();
     let admin = match admin {
         Some(a) => a,
         None => {
@@ -127,7 +128,7 @@ pub(crate) async fn setup_admin(
         .get("token")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
-    let ip = addr.ip().to_string();
+    let ip = client_ip(addr.ip(), &headers, &state.auth.trusted_proxies).to_string();
     if email.is_empty() {
         return err_response("Email and password are required");
     }
@@ -137,12 +138,12 @@ pub(crate) async fn setup_admin(
         tracing::warn!(event = "auth_setup_rate_limited", client_ip = %ip);
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e }))).into_response();
     }
-    let mut cfg = state.auth.config.lock().expect("lock");
+    let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
     // Defense in depth: `ensure_setup_token` mints a token at boot whenever no
     // admin exists, so this is only reachable if that step was skipped. Without
     // a token only a loopback client may claim the account — the server listens
     // on all interfaces, so anyone else could take it first.
-    if cfg.setup_token.is_none() && !addr.ip().to_canonical().is_loopback() {
+    if cfg.setup_token.is_none() && !is_local_client(addr.ip(), &headers) {
         drop(cfg);
         tracing::warn!(event = "auth_setup_failure", reason = "setup_token_missing", client_ip = %ip);
         return err_response("A setup token is required from another machine — check the server logs / DB_SETUP_TOKEN env");

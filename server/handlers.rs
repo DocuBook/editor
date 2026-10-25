@@ -226,8 +226,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
             let mut view = state
                 .auth
                 .config
-                .lock()
-                .expect("lock")
+                .lock().unwrap_or_else(|e| e.into_inner())
                 .view(&state.data_dir)["mcp"]
                 .clone();
             if std::env::var("DOCUBOOK_MCP_SERVERS").is_ok() {
@@ -283,7 +282,7 @@ fn configure_mcp(state: &AppState) -> Result<(), String> {
             .map_err(|_| "DOCUBOOK_MCP_SERVERS must be a JSON array".to_string())?;
         return rust_ai::context::set_configured_servers(servers);
     }
-    let cfg = state.auth.config.lock().expect("lock");
+    let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
     let servers = cfg
         .mcp
         .iter()
@@ -319,7 +318,7 @@ fn restore_key(data_dir: &std::path::Path, provider: &str, key: Option<&str>) {
  *  `set_endpoint` call). `std::sync::Mutex` is not reentrant: locking it while
  *  already holding it blocks the thread on itself forever. */
 fn restore_ai(state: &AppState, selection: &config::AiSelection) {
-    let mut cfg = state.auth.config.lock().expect("lock");
+    let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
     cfg.ai = selection.clone();
     let _ = cfg.save();
 }
@@ -333,25 +332,25 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
     };
     match cmd {
         "close_vault" => {
-            *state.vault.lock().expect("lock") = None;
-            *state.wiki.lock().expect("lock") = None;
-            *state.git.lock().expect("lock") = None;
+            *state.vault.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            *state.wiki.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            *state.git.lock().unwrap_or_else(|e| e.into_inner()) = None;
             Ok("null".into())
         }
-        "list_tree" => match state.vault.lock().expect("lock").as_ref() {
+        "list_tree" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => serde_json::to_string(&v.tree(&s("subpath"))).map_err(|e| e.to_string()),
             None => Ok("[]".into()),
         },
-        "read_file" => match state.vault.lock().expect("lock").as_ref() {
+        "read_file" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => v.read_file_limited(&s("path"), httpm::MAX_FILE_BYTES),
             None => Err("No vault".into()),
         },
-        "file_version" => match state.vault.lock().expect("lock").as_ref() {
+        "file_version" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => serde_json::to_string(&v.version_of(&s("path"))?).map_err(|e| e.to_string()),
             None => Err("No vault".into()),
         },
         "write_file" => {
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v
                     .write_file(&s("path"), &s("content"))
                     .map(|_| "null".into()),
@@ -369,7 +368,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 Some(serde_json::Value::String(v)) => Some(v.clone()),
                 _ => None,
             };
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v
                     .write_file_checked(&s("path"), &s("content"), base.as_deref())
                     .and_then(|o| serde_json::to_string(&o).map_err(|e| e.to_string())),
@@ -382,11 +381,11 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         }
         // WYSIWYG-only snapshot cache: never rescans the wiki (not Markdown) and
         // never invalidates the tree/search caches (the dir is an ignored entry).
-        "read_wysiwyg_snapshot" => match state.vault.lock().expect("lock").as_ref() {
+        "read_wysiwyg_snapshot" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => v.read_snapshot(&s("path")).map(|o| o.unwrap_or_default()),
             None => Ok(String::new()),
         },
-        "write_wysiwyg_snapshot" => match state.vault.lock().expect("lock").as_ref() {
+        "write_wysiwyg_snapshot" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => v
                 .write_snapshot(&s("path"), &s("content"))
                 .map(|_| "null".into()),
@@ -395,7 +394,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         "create_entry" => {
             let kind = docubook_core::vault::EntryKind::parse(&s("kind"))
                 .ok_or_else(|| "Unknown entry kind".to_string())?;
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.create_entry(kind, &s("path")),
                 None => Err("No vault".into()),
             };
@@ -408,7 +407,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         "copy_path" => {
             // Copying a folder walks the whole subtree — kept off the async
             // thread like delete, for the same reason.
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.copy_path(&s("from"), &s("toDir")),
                 None => Err("No vault".into()),
             };
@@ -418,7 +417,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             r
         }
         "move_path" => {
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.move_path(&s("from"), &s("toDir")),
                 None => Err("No vault".into()),
             };
@@ -428,7 +427,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             r
         }
         "delete_file" => {
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.delete_file(&s("path")).map(|_| "null".into()),
                 None => Err("No vault".into()),
             };
@@ -437,12 +436,12 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
             r
         }
-        "list_trash" => match state.vault.lock().expect("lock").as_ref() {
+        "list_trash" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => serde_json::to_string(&v.list_trash()).map_err(|e| e.to_string()),
             None => Ok("[]".to_string()),
         },
         "restore_file" => {
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.restore_file(&s("trashName")).map(|_| "null".into()),
                 None => Err("No vault".into()),
             };
@@ -451,12 +450,12 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
             r
         }
-        "delete_trash_item" => match state.vault.lock().expect("lock").as_ref() {
+        "delete_trash_item" => match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(v) => v.delete_trash_item(&s("trashName")).map(|_| "null".into()),
             None => Err("No vault".into()),
         },
         "rename_file" => {
-            let r = match state.vault.lock().expect("lock").as_ref() {
+            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.rename_file(&s("from"), &s("to")).map(|_| "null".into()),
                 None => Err("No vault".into()),
             };
@@ -466,27 +465,27 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             r
         }
         "git_settings" => cmds::git_settings(state),
-        "git_add_remote" => match state.git.lock().expect("lock").as_ref() {
+        "git_add_remote" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(g) => g.add_remote(&s("name"), &s("url")).map(|_| "null".into()),
             None => Err("No vault".into()),
         },
-        "git_remove_remote" => match state.git.lock().expect("lock").as_ref() {
+        "git_remove_remote" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(g) => g.remove_remote(&s("name")).map(|_| "null".into()),
             None => Err("No vault".into()),
         },
-        "git_set_identity" => match state.git.lock().expect("lock").as_ref() {
+        "git_set_identity" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(g) => g
                 .set_identity(&s("name"), &s("email"))
                 .map(|_| "null".into()),
             None => Err("No vault".into()),
         },
-        "git_init" => match state.git.lock().expect("lock").as_ref() {
+        "git_init" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(g) => serde_json::to_string(&g.init(&s("branch"))?).map_err(|e| e.to_string()),
             None => Err("No vault".into()),
         },
         "git_stage" => {
             let path = s("path");
-            match state.git.lock().expect("lock").as_ref() {
+            match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(g) => {
                     let r = if path.is_empty() {
                         g.add_all()
@@ -499,7 +498,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
         }
         "git_status" => {
-            let guard = state.git.lock().expect("lock");
+            let guard = state.git.lock().unwrap_or_else(|e| e.into_inner());
             match guard.as_ref() {
                 Some(g) if g.is_repo() => {
                     let ws = g.status_with_branch().unwrap_or_default();
@@ -515,29 +514,29 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         "wiki_backlinks" => {
             // Only the root is copied out under the vault lock: backlink snippets
             // read markdown files, so the wiki lock alone must cover that work.
-            let root = match state.vault.lock().expect("lock").as_ref() {
+            let root = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.root().to_path_buf(),
                 None => return Ok("[]".to_string()),
             };
-            match state.wiki.lock().expect("lock").as_ref() {
+            match state.wiki.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(w) => serde_json::to_string(&w.backlinks(&root, &s("path")))
                     .map_err(|e| e.to_string()),
                 None => Ok("[]".to_string()),
             }
         }
         "wiki_suggest" => {
-            let root = match state.vault.lock().expect("lock").as_ref() {
+            let root = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(v) => v.root().to_path_buf(),
                 None => return Ok("[]".to_string()),
             };
-            match state.wiki.lock().expect("lock").as_ref() {
+            match state.wiki.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
                 Some(w) => {
                     serde_json::to_string(&w.suggest(&root, &s("query"))).map_err(|e| e.to_string())
                 }
                 None => Ok("[]".to_string()),
             }
         }
-        "wiki_resolve" => match state.wiki.lock().expect("lock").as_ref() {
+        "wiki_resolve" => match state.wiki.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
             Some(w) => Ok(w.resolve(&s("title")).unwrap_or_default()),
             None => Ok(String::new()),
         },
@@ -551,8 +550,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 None => state
                     .auth
                     .config
-                    .lock()
-                    .expect("lock")
+                    .lock().unwrap_or_else(|e| e.into_inner())
                     .ai
                     .endpoints
                     .get(agent::CUSTOM_PROVIDER_ID)
@@ -575,7 +573,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "set_api_key" => {
-            let _writes = state.auth.config_writes.lock().expect("lock");
+            let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
             let provider = s("provider");
             let key = s("key");
             let base_url = s("baseUrl");
@@ -595,7 +593,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             // first-time creation here; an endpoint left by a failed/legacy save
             // may be completed only when no API key exists yet.
             {
-                let cfg = state.auth.config.lock().expect("lock");
+                let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
                 if cfg.ai.endpoints.contains_key(&provider) && previous_key.is_some() {
                     return Err(
                         "Provider is already configured; revoke it before changing settings".into(),
@@ -605,13 +603,13 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             // Scoped so the guard is released before any later lock: both this and
             // `restore_ai` take the same non-reentrant config mutex. Snapshot first,
             // then set — never with both guards alive.
-            let previous_ai = { state.auth.config.lock().expect("lock").ai.clone() };
+            let previous_ai = { state.auth.config.lock().unwrap_or_else(|e| e.into_inner()).ai.clone() };
             keys::set_key(&state.data_dir, &provider, &key)?;
             // `let` binding, not `if let`: a guard created in an `if let` scrutinee
             // lives until the end of the whole statement, which would keep the lock
             // held while the error arm calls `restore_ai`.
             let saved = {
-                let mut cfg = state.auth.config.lock().expect("lock");
+                let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
                 if cfg.ai.endpoints.contains_key(&provider) {
                     cfg.complete_endpoint(&provider, model, &base_url)
                 } else {
@@ -628,7 +626,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "set_custom_endpoint" => {
-            let _writes = state.auth.config_writes.lock().expect("lock");
+            let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
             if probe::custom_env_base_url().is_some() {
                 return Err("Custom endpoint is controlled by DB_OPENAI_COMPAT_BASE_URL — remove the env var to edit in the UI".into());
             }
@@ -638,7 +636,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             agent::validate_custom_base_url(&url, false)?;
             let previous_key = keys::get_key(&state.data_dir, &provider).ok();
             {
-                let cfg = state.auth.config.lock().expect("lock");
+                let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
                 if cfg.ai.endpoints.contains_key(&provider) && previous_key.is_some() {
                     return Err(
                         "Provider is already configured; revoke it before changing settings".into(),
@@ -647,11 +645,11 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             }
             // See `set_api_key` for why this snapshot is scoped and why the write
             // below is a `let` binding rather than an `if let` scrutinee.
-            let previous_ai = { state.auth.config.lock().expect("lock").ai.clone() };
+            let previous_ai = { state.auth.config.lock().unwrap_or_else(|e| e.into_inner()).ai.clone() };
             keys::set_key(&state.data_dir, &provider, &key)?;
             let model = args.get("model").and_then(|v| v.as_str()).unwrap_or("");
             let saved = {
-                let mut cfg = state.auth.config.lock().expect("lock");
+                let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
                 if cfg.ai.endpoints.contains_key(&provider) {
                     cfg.complete_endpoint(&provider, model, &url)
                 } else {
@@ -668,20 +666,19 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok("null".into())
         }
         "delete_api_key" => {
-            let _writes = state.auth.config_writes.lock().expect("lock");
+            let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
             // Total revoke: remove the key and endpoint together. If config
             // persistence fails after the key is deleted, restore both the key
             // and the in-memory/on-disk endpoint so no half-revoked state remains.
             let provider = s("provider");
             let previous_key = keys::get_key(&state.data_dir, &provider).ok();
-            let previous_ai = { state.auth.config.lock().expect("lock").ai.clone() };
+            let previous_ai = { state.auth.config.lock().unwrap_or_else(|e| e.into_inner()).ai.clone() };
             keys::delete_key(&state.data_dir, &provider)?;
             let removed = {
                 state
                     .auth
                     .config
-                    .lock()
-                    .expect("lock")
+                    .lock().unwrap_or_else(|e| e.into_inner())
                     .remove_endpoint(&provider)
             };
             if let Err(error) = removed {
@@ -731,7 +728,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             if env.is_some() && !saved.iter().any(|p| p == agent::CUSTOM_PROVIDER_ID) {
                 saved.push(agent::CUSTOM_PROVIDER_ID.to_string());
             }
-            let cfg = state.auth.config.lock().expect("lock");
+            let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
             // Server-side guard: the active pointer can name an endpoint that is no
             // longer there (hand-edited config), so it is resolved, not echoed.
             let active = cfg
@@ -783,13 +780,13 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Ok(out.to_string())
         }
         "set_ai_settings" => {
-            let _writes = state.auth.config_writes.lock().expect("lock");
+            let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
             // Selection only: the endpoint itself is created by `set_api_key` /
             // `set_custom_endpoint`, so switching providers cannot invent one.
             let provider = s("provider");
             let model = s("model");
             let base_url = s("baseUrl");
-            let mut cfg = state.auth.config.lock().expect("lock");
+            let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
             cfg.set_active(&provider, &model)?;
             // The UI may report the URL it is bound to; adopt it when non-empty so
             // an endpoint saved before URL relocations did not exist still catches up.
@@ -817,8 +814,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             state
                 .auth
                 .config
-                .lock()
-                .expect("lock")
+                .lock().unwrap_or_else(|e| e.into_inner())
                 .set_probe(&provider, &model, tools)
                 .map(|_| "null".into())
         }
@@ -826,7 +822,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         "web_vault_root" => Ok(state.data_dir.join("vaults").to_string_lossy().to_string()),
         // ── account / system ──
         "setup_status" => {
-            let cfg = state.auth.config.lock().expect("lock");
+            let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
             let env = std::env::var("DB_SETUP_TOKEN").ok();
             let source = config::setup_token_source(env.as_deref(), cfg.setup_token.is_some());
             Ok(json!({
@@ -837,7 +833,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             .to_string())
         }
         "account_get" => {
-            let cfg = state.auth.config.lock().expect("lock");
+            let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
             match &cfg.admin {
                 Some(a) => Ok(json!({ "email": a.email }).to_string()),
                 None => Err("No admin account".into()),
@@ -847,8 +843,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             state
                 .auth
                 .config
-                .lock()
-                .expect("lock")
+                .lock().unwrap_or_else(|e| e.into_inner())
                 .change_password(&s("old"), &s("new"))?;
             state.auth.sessions.revoke_all();
             Ok("null".into())
@@ -856,12 +851,11 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         "config_get" => Ok(state
             .auth
             .config
-            .lock()
-            .expect("lock")
+            .lock().unwrap_or_else(|e| e.into_inner())
             .view(&state.data_dir)
             .to_string()),
         "config_set" => {
-            let _writes = state.auth.config_writes.lock().expect("lock");
+            let _writes = state.auth.config_writes.lock().unwrap_or_else(|e| e.into_inner());
             let key = s("key");
             let value = args.get("value").cloned().unwrap_or(Value::Null);
             if key == "mcp" {
@@ -934,7 +928,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                     })
                     .collect::<Vec<_>>();
                 rust_ai::context::validate_configured_servers(&validation_servers)?;
-                let mut cfg = state.auth.config.lock().expect("lock");
+                let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
                 let previous_config = cfg.mcp.clone();
                 let mut previous_keys = std::collections::HashMap::new();
                 for name in previous_config
@@ -987,7 +981,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 }
                 drop(cfg);
                 if let Err(error) = configure_mcp(state) {
-                    let mut cfg = state.auth.config.lock().expect("lock");
+                    let mut cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
                     cfg.mcp = previous_config;
                     let _ = cfg.save();
                     drop(cfg);
@@ -1001,8 +995,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 state
                     .auth
                     .config
-                    .lock()
-                    .expect("lock")
+                    .lock().unwrap_or_else(|e| e.into_inner())
                     .set(&key, &value)
                     .map(|_| "null".into())
             }

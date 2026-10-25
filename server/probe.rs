@@ -31,8 +31,7 @@ fn configured_base_url(state: &AppState, provider: &str) -> Option<String> {
     let saved = state
         .auth
         .config
-        .lock()
-        .expect("lock")
+        .lock().unwrap_or_else(|e| e.into_inner())
         .ai
         .endpoints
         .get(provider)
