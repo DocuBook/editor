@@ -5,7 +5,7 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 ## Prerequisites
 
 - **macOS** — desktop development only. CI uses macos-15 for lint/test/build/E2E (macos-14 runners retire on 2026-11-02; the pinned Playwright WebKit build also needs macOS 15+). The app itself targets macOS 12.3+ (WKWebView Safari 15.4) — the build job pins and verifies that deployment target, and the compat lints hold the frontend to `.browserslistrc`
-- **Node.js** 22.12 or newer — CI pins `22.12.0` to satisfy Vitest's engine requirement; `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint
+- **Node.js** 22.22.1 or newer — CI pins `22.23.4` (the newest dependency floor is `lint-staged` 17 at `>=22.22.1`; ESLint 10, pulled in by `eslint-plugin-compat`, needs `^22.13.0`); `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint. The Dockerfile's `node:22-alpine` floats on the same major
 - **npm**
 - **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically; includes `clippy` and `rustfmt`)
 - **Tauri v2 system dependencies** — see https://v2.tauri.app/start/prerequisites/
