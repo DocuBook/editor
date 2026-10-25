@@ -860,7 +860,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ammonia",
  "base64 0.23.1",
@@ -881,7 +881,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-desktop"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "ammonia",
  "base64 0.23.1",

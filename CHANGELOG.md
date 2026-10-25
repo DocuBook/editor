@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.4.1 — 2026-10-25
+
+
+### 🐛 Bug Fixes
+
+* close race conditions and tighten state handling (core/server/frontend) [#325](https://github.com/DocuBook/editor/issues/325) ([59e3d2d](https://github.com/DocuBook/editor/commit/59e3d2db0ab636f1d7fde7c0d4a16f367bcf5c5c))
+* **core:** route every new note and folder through one create path ([#327](https://github.com/DocuBook/editor/issues/327)) ([f727dfd](https://github.com/DocuBook/editor/commit/f727dfd070eaf31ea8accb6c830b2b5d9e1afc88))
+* **frontend:** show the vault switcher and create control only on Folders ([70e6d7c](https://github.com/DocuBook/editor/commit/70e6d7c6f90217e75d8f8dc9b18d6b6c6c7e8847))
+* **frontend:** use a md corner radius on the compact tab count badge ([1d1aa82](https://github.com/DocuBook/editor/commit/1d1aa82445dd1ad4865d15cd943e3c2cb9c2aa84))
+* **server:** harden client IP trust, health probe, and lock recovery ([#329](https://github.com/DocuBook/editor/issues/329)) ([84f6773](https://github.com/DocuBook/editor/commit/84f6773bb2b3a2679e93b2e49c736e6b01b5d0eb))
+* **server:** remove the dead web health command ([#330](https://github.com/DocuBook/editor/issues/330)) ([70c0683](https://github.com/DocuBook/editor/commit/70c0683e274a0ec2ea26be2f3adffb8c423e107a))
+* **server:** require a setup token off-host and follow HTTPS for session cookies ([#328](https://github.com/DocuBook/editor/issues/328)) ([c08cee7](https://github.com/DocuBook/editor/commit/c08cee7e931ad8fddfc7a284e441c6afad7e7280))
+
 ## v0.4.0 — 2026-10-24
 
 
