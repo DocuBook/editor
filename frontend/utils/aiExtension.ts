@@ -1,7 +1,7 @@
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { createAiTransport } from './aiTransport'
-import { buildHtmlDocumentState, captureAISelection, hasAISelection, releaseAISelection, replaceAISelectionInlineContent, restoreAISelection } from './aiBlocks'
+import { buildHtmlDocumentState, captureAISelection, forgetAISelection, hasAISelection, releaseAISelection, replaceAISelectionInlineContent, restoreAISelection } from './aiBlocks'
 import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
@@ -323,7 +323,14 @@ const extensionFactory = ({ editor, options }: any) => {
 
   const applyInput = (input: any) => {
     const { written, changed } = applyOperations(editor, input)
-    if (changed) options?.onDocumentChange?.()
+    /** The selected range has been rewritten, so its snapshot is spent: a
+     *  follow-up prompt during review runs in cursor mode at the menu's block
+     *  instead of failing against the old range (and closing the review). A
+     *  failed apply throws above and keeps the snapshot for Retry. */
+    if (changed) {
+      forgetAISelection(editor)
+      options?.onDocumentChange?.()
+    }
     moveWritingCursor(written[written.length - 1] ?? null)
     startReveal(written)
   }
@@ -401,7 +408,13 @@ const extensionFactory = ({ editor, options }: any) => {
       const controller = new AbortController()
       const before = editor.document.map((block: any) => ({ ...block, children: block.children?.map((child: any) => ({ ...child })) || [] }))
       const current: AiSession = { options: invokeOptions, controller, before, retries, pendingInputs: [], streamComplete: false }
+      /** One request owns the menu at a time. A previous stream that is still
+       *  running is cancelled here, and `superseded()` below stops it from
+       *  writing into the document or the menu status once a newer request has
+       *  taken over — otherwise its late operations landed in the new review. */
+      session?.controller.abort('superseded by a newer AI request')
       session = current
+      const superseded = () => session !== current || controller.signal.aborted
       setStatus('thinking')
       try {
         if (invokeOptions.useSelection && hasAISelection(editor)) {
@@ -417,6 +430,7 @@ const extensionFactory = ({ editor, options }: any) => {
         const documentState = options?.documentStateBuilder
           ? await options.documentStateBuilder({ editor, selectedBlocks })
           : await buildHtmlDocumentState(editor, invokeOptions.useSelection)
+        if (superseded()) return
         const transport = options?.transport || createAiTransport({ getEditor: () => editor })
         const stream = await transport.sendMessages({
           messages: [{ id: uuid(), role: 'user', parts: [{ type: 'text', text: invokeOptions.userPrompt }], metadata: { documentState } }],
@@ -427,6 +441,10 @@ const extensionFactory = ({ editor, options }: any) => {
         let toolInput: any = null
         while (true) {
           const next = await reader.read()
+          if (superseded()) {
+            void reader.cancel().catch(() => {})
+            return
+          }
           if (next.done) break
           /** The provider started emitting output, but nothing is in the editor yet:
            *  the completed operations only arrive at end of stream (and Path A may
@@ -444,7 +462,7 @@ const extensionFactory = ({ editor, options }: any) => {
         current.streamComplete = true
         if (current.pendingInputs.length === 0) await completeReview(current)
       } catch (error) {
-        if (controller.signal.aborted) return
+        if (superseded()) return
         /** `retriesLeft` drives the Retry button state: rust-ai renders the error
          *  surface, so the budget has to travel with it. */
         setStatus({ status: 'error', error, retriesLeft: Math.max(0, MAX_AI_RETRIES - retries) })

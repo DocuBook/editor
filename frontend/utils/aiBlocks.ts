@@ -51,6 +51,15 @@ export function captureAISelection(editor: any): boolean {
   return true;
 }
 
+/** Drop the remembered selection without touching the live one. Once an AI
+ *  result has been written into the selected range the snapshot describes a
+ *  document that no longer exists — keeping it would pull the NEXT prompt (a
+ *  follow-up typed while the result is under review) into selection mode
+ *  against that stale range, where it can only fail. */
+export function forgetAISelection(editor: any): void {
+  if (editor && typeof editor === "object") aiSelectionSnapshots.delete(editor);
+}
+
 export function hasAISelection(editor: any): boolean {
   return !!liveAISelection(editor) || !!getAISelectionSnapshot(editor)?.length;
 }
@@ -124,7 +133,7 @@ export function hasTextSelection(editor: any): boolean {
  *  to the editor. Collapsing hands the caret back to the document without
  *  re-showing the toolbar. */
 export function releaseAISelection(editor: any): void {
-  if (editor && typeof editor === "object") aiSelectionSnapshots.delete(editor);
+  forgetAISelection(editor);
   try {
     const blocks = editor?.getSelection?.()?.blocks;
     const blockId = blocks?.[blocks.length - 1]?.id;
