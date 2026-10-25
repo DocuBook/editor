@@ -109,6 +109,7 @@ fn main() {
                 .unwrap_or_else(|_| EnvFilter::new("docubook_server=info,tower_http=info")),
         )
         .init();
+    // Upgrade notice for MCP users (removed in #339); drop with purge_legacy_mcp.
     if std::env::var_os("DOCUBOOK_MCP_SERVERS").is_some() {
         tracing::warn!(
             event = "mcp_removed",

@@ -102,8 +102,6 @@ export interface AiTransportDeps {
   executeContextTool?: (name: string, input: unknown, signal?: AbortSignal) => Promise<string>
   /** Tool names approved for the injected executor; schemas alone never grant access. */
   trustedContextTools?: string[]
-  /** Short alias retained for host adapters. */
-  contextToolAllowlist?: string[]
 }
 
 /** Create the rust-ai ChatTransport. `reconnectToStream` is unsupported (the Rust
@@ -142,7 +140,7 @@ async function runSendMessages(
    *  search returned in round 1 is fetched in round 2). */
   const contextId = uuid();
   if (supportsTools && deps.executeContextTool) {
-    const trustedTools = new Set(deps.trustedContextTools ?? deps.contextToolAllowlist ?? []);
+    const trustedTools = new Set(deps.trustedContextTools ?? []);
     for (const [name, definition] of Object.entries(suppliedToolDefs ?? {})) {
       if (name !== "applyDocumentOperations" && trustedTools.has(name)) {
         contextTools.push({
