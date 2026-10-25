@@ -4,7 +4,7 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 
 ## Prerequisites
 
-- **macOS** — desktop development only. CI uses macos-15 for lint/test/build/E2E (macos-14 runners retire on 2026-11-02; the pinned Playwright WebKit build also needs macOS 15+). The app itself still targets macOS 12+ — the build job pins and verifies that deployment target
+- **macOS** — desktop development only. CI uses macos-15 for lint/test/build/E2E (macos-14 runners retire on 2026-11-02; the pinned Playwright WebKit build also needs macOS 15+). The app itself targets macOS 12.3+ (WKWebView Safari 15.4) — the build job pins and verifies that deployment target, and the compat lints hold the frontend to `.browserslistrc`
 - **Node.js** 22.12 or newer — CI pins `22.12.0` to satisfy Vitest's engine requirement; `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint
 - **npm**
 - **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically; includes `clippy` and `rustfmt`)
@@ -94,6 +94,7 @@ editor/
    - `node test/check-docker-paths.mjs`
    - `npm test`
    - `npm run build`
+   - `npm run lint:compat` — engine-compat guard on the built `dist/` (needs `npm run build` first)
    - `cd core && cargo test`
    - `cd src-tauri && cargo test`
    - `cd server && cargo test`
@@ -120,6 +121,14 @@ editor/
      - CI runs Rust, lint, and security checks on macOS 15 / Ubuntu 22.04,
        then the Chromium/WebKit E2E matrix on macOS 15 as required by the
        pinned Playwright build.
+     - That WebKit is the newest engine, not the oldest one we ship to:
+       desktop runs on the system WKWebView, down to Safari 15.4 on
+       macOS 12.3. The oldest engines are covered statically instead —
+       `compat/compat` in `.oxlintrc.json` (our source) and
+       `npm run lint:compat` (the built bundle, dependencies and Tailwind
+       output included), both against `.browserslistrc`. Neither sees an
+       unsupported value of a supported CSS property (e.g. `overflow: clip`),
+       so keep the `@supports` fallbacks in `frontend/index.css`.
 4. Open a PR against `master` using the PR template.
 
 ### Commit conventions (enforced by the commit-msg hook)

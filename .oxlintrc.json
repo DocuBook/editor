@@ -1,8 +1,20 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "plugins": ["react", "typescript", "oxc"],
+  "jsPlugins": ["eslint-plugin-compat"],
+  "settings": { "lintAllEsApis": true },
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
+  },
+  "overrides": [
+    {
+      "files": ["frontend/**/*.{ts,tsx}"],
+      "rules": { "compat/compat": "error" }
+    },
+    {
+      "files": ["frontend/**/*.test.{ts,tsx}"],
+      "rules": { "compat/compat": "off" }
+    }
+  ]
 }

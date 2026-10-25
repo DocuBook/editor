@@ -39,6 +39,7 @@ export function whenIdle<T>(run: () => Promise<T>): Promise<T> {
   if (typeof requestIdleCallback === "undefined")
     return new Promise((resolve) => setTimeout(resolve, 0)).then(run);
   return new Promise<T>((resolve, reject) =>
+    // oxlint-disable-next-line compat/compat -- feature-detected above (Safari has no requestIdleCallback)
     requestIdleCallback(() => void run().then(resolve, reject), {
       timeout: 250,
     }),

@@ -45,6 +45,12 @@ jobs:
         run: node test/check-release-tag.mjs
       - name: Frontend tests
         run: npm test
+      # Engine-compat guard on what ships: the source lint above (compat/compat)
+      # cannot see dependencies or Tailwind output. Targets: .browserslistrc.
+      - name: Build frontend (for the bundle compat guard)
+        run: npx vite build
+      - name: Bundle compat guard (WKWebView Safari 15.4 / Chrome 105)
+        run: npm run lint:compat
       - name: Check version consistency (manifests + locks + changelog section)
         run: |
           npm_v=$(node -p "require('./package.json').version")

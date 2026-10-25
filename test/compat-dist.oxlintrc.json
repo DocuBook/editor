@@ -1,0 +1,42 @@
+{
+  // Engine-compat lint for the BUILT bundle (dist/assets/*.js), run by
+  // test/check-bundle-compat.mjs. Targets come from .browserslistrc.
+  // Only compat/compat runs here: the bundle is minified third-party code, so
+  // every other oxlint rule is noise.
+  "$schema": "../node_modules/oxlint/configuration_schema.json",
+  "plugins": [],
+  "categories": {
+    "correctness": "off",
+    "suspicious": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "style": "off",
+    "restriction": "off",
+    "nursery": "off"
+  },
+  "jsPlugins": ["eslint-plugin-compat"],
+  "settings": {
+    // Not real polyfills: APIs that dependencies use ONLY behind a runtime
+    // feature check, verified in the bundle when each was added. The rule
+    // cannot see guards, so without this every dependency bump would fail.
+    // Allowlisting is per API, not per call site — before adding an entry,
+    // confirm every hit for it in dist/assets is guarded.
+    "polyfills": [
+      // tabbable/focus-trap (Mantine) + our mobile check: `navigator.userAgentData?.…`
+      "navigator.userAgentData",
+      // network-speed estimate: `navigator.connection && …`, default 5 Mb/s
+      "navigator.connection",
+      // ProseMirror HTML parsing: `if (!window.trustedTypes) return html`
+      "trustedTypes",
+      // BlockNote drag handle: `window.TouchEvent ? … instanceof TouchEvent : "touches" in e`
+      "TouchEvent",
+      // cytoscape (mermaid): `typeof OffscreenCanvas !== "undefined" ? … : createElement("canvas")`
+      "OffscreenCanvas",
+      // frontend/utils/mermaidRenderCache.ts whenIdle: setTimeout fallback
+      "requestIdleCallback",
+      // mermaid KaTeX check: `window.MathMLElement !== undefined`
+      "MathMLElement"
+    ]
+  },
+  "rules": { "compat/compat": "error" }
+}
