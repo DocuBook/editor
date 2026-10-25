@@ -34,7 +34,7 @@ The Rust backend (`src-tauri`) is the trust boundary; the webview is treated as 
 - Migration & guards: a plaintext file auto-migrates to encrypted on first access when the passphrase is set; an encrypted file is **never overwritten** when the passphrase is missing; a wrong passphrase yields an error, never garbage.
 
 **Deployment hardening — decide at first boot**
-- `DB_SETUP_TOKEN` — required on public deployments so no one can claim the admin account before you do.
+- `DB_SETUP_TOKEN` — optional fixed setup token. If unset, the server prints a one-time token to its log at first boot and the wizard requires it, so no one can claim the admin account before you do. The token changes on restart until the admin exists.
 - `DB_KEYS_PASSPHRASE` — set from first boot and keep it in your secret manager; losing it makes stored keys unrecoverable.
 - Admin account — setup cannot be skipped. Create it before exposing the server; login remains required afterward.
 

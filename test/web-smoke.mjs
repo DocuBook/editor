@@ -29,7 +29,7 @@ await runSuite('web-smoke', {
   // ── Setup wizard ──
   await page.goto(base, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector(click('Create admin account'), { timeout: 12000 })
-  await page.waitForSelector('input[placeholder="Setup token (DB_SETUP_TOKEN)"]', { timeout: 12000 })
+  await page.waitForSelector('input[placeholder="Setup token"]', { timeout: 12000 })
   await page.screenshot({ path: 'test/artifacts/web-smoke-setup-token-no-skip.png', fullPage: false })
   ok('setup wizard: admin creation is required',
     await page.getByRole('button', { name: 'Create admin account' }).isVisible())
@@ -44,7 +44,7 @@ await runSuite('web-smoke', {
   await page.fill('input[type="email"]', ADMIN.email)
   await page.fill('input[placeholder="Password"]', ADMIN.password)
   await page.fill('input[placeholder="Confirm password"]', ADMIN.password)
-  await page.fill('input[placeholder="Setup token (DB_SETUP_TOKEN)"]', SETUP_TOKEN)
+  await page.fill('input[placeholder="Setup token"]', SETUP_TOKEN)
   await page.locator(click('Create admin account')).click()
   await page.waitForFunction((ui) => new RegExp(ui, 'i').test(document.body.innerText), MAIN_UI, { timeout: 10000 })
   const afterSetup = await page.locator('body').innerText()
@@ -110,7 +110,7 @@ await runSuite('web-smoke', {
   })).json()
   const st = JSON.parse(stResponse.result)
   ok('redeploy: admin persisted with minimal setup contract',
-    st.setupRequired === false && Object.keys(st).sort().join(',') === 'setupRequired,setupToken',
+    st.setupRequired === false && Object.keys(st).sort().join(',') === 'setupRequired,setupToken,setupTokenSource',
     JSON.stringify(st))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => !document.querySelector('input[type="email"]') && !Array.from(document.querySelectorAll('button')).some(button => button.textContent?.includes('Create admin account')), { timeout: 10000 })

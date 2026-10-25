@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildSetupPayload, validateSetupInput } from '../../../frontend/utils/setupWizard'
+import { buildSetupPayload, setupTokenHint, validateSetupInput } from '../../../frontend/utils/setupWizard'
 import { evaluatePassword, isPasswordValid, passwordError } from '../../../frontend/utils/passwordPolicy'
 
 const valid = { email: 'a@b.c', password: 'Password1!', confirm: 'Password1!', token: '', tokenRequired: false }
@@ -59,5 +59,24 @@ describe('buildSetupPayload', () => {
   it('includes trimmed token only when required', () => {
     expect(buildSetupPayload('a@b.c', 'pw', '  tok  ', true)).toEqual({ email: 'a@b.c', password: 'pw', token: 'tok' })
     expect(buildSetupPayload('a@b.c', 'pw', '', false)).toEqual({ email: 'a@b.c', password: 'pw' })
+  })
+})
+
+describe('setupTokenHint (where the operator finds the token)', () => {
+  it('points at the env override when DB_SETUP_TOKEN is set', () => {
+    const hint = setupTokenHint('env')
+    expect(hint?.title).toContain('DB_SETUP_TOKEN')
+    expect(hint?.code).toBeUndefined()
+  })
+
+  it('points at the server log for the one-time boot token, with a copyable command', () => {
+    const hint = setupTokenHint('log')
+    expect(hint?.title).toContain('server log')
+    expect(hint?.code).toContain('docker logs')
+    expect(hint?.code).toContain('one-time setup token')
+  })
+
+  it('shows nothing when the server requires no token', () => {
+    expect(setupTokenHint(null)).toBeNull()
   })
 })

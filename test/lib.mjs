@@ -174,10 +174,13 @@ export async function runSuite(name, opts, body) {
     writeFileSync(path, file.content)
   }
 
+  /* The suite's own setup token, so bootstrapping the admin over the API is
+     allowed without reading the boot token from the server log. */
+  const setupToken = server.env?.DB_SETUP_TOKEN ?? 'e2e-setup-token'
   /* One server per suite, restarted in place by ctx.restart(). */
   const spawnServer = () => (server === 'preview'
     ? startServer(name, { cmd: 'npx', args: ['vite', 'preview', '--port', String(port), '--strictPort'], shell: true, port, dataDir, wwwDir: 'dist' })
-    : startServer(name, { binary: server.binary, port, dataDir, wwwDir: 'dist', env: server.env }))
+    : startServer(name, { binary: server.binary, port, dataDir, wwwDir: 'dist', env: { DB_SETUP_TOKEN: setupToken, ...server.env } }))
   let running = spawnServer()
 
   const api = async (command, args = {}, cookie = '') => {
@@ -211,7 +214,7 @@ export async function runSuite(name, opts, body) {
     browser = await launchBrowser()
     ctx.context = await browser.newContext({ viewport, ...context })
     if (session) {
-      const created = await api('setup_admin', admin)
+      const created = await api('setup_admin', { ...admin, token: setupToken })
       ok('setup_admin: ok', created.status === 200, created.text.slice(0, 80))
       const login = await fetch(`${base}/api/login`, {
         method: 'POST',
