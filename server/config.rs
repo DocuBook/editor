@@ -121,7 +121,8 @@ impl Config {
             .unwrap_or(168);
         let ai = v.get("ai").map(parse_ai).unwrap_or_default();
         // MCP was removed: drop the tokens a previous version stored for its
-        // servers, and re-save below so config.json loses the block too.
+        // servers, and re-save below so config.json loses the block too. A token
+        // that could not be deleted keeps the block, so the next load retries.
         let legacy_mcp = purge_legacy_mcp(&v, path.parent().unwrap_or_else(|| Path::new(".")));
         // An invalid or hand-broken block falls back to "all off" instead of failing the load.
         let web_tools = v
@@ -461,11 +462,14 @@ fn parse_ai(value: &serde_json::Value) -> AiSelection {
 }
 
 /// Delete the `mcp:<name>` secrets a pre-removal version stored for the
-/// servers in `config["mcp"]`. Returns whether the retired block was present.
+/// servers in `config["mcp"]`. Returns whether the retired block can be dropped:
+/// it was present and every token was deleted. A kept token keeps the block so
+/// the next boot retries, as the desktop does with `mcp-settings.json`.
 fn purge_legacy_mcp(config: &serde_json::Value, data_dir: &Path) -> bool {
     let Some(servers) = config.get("mcp").and_then(serde_json::Value::as_array) else {
         return config.get("mcp").is_some();
     };
+    let mut purged = true;
     for name in servers.iter().filter_map(|server| {
         server
             .get("name")
@@ -476,10 +480,11 @@ fn purge_legacy_mcp(config: &serde_json::Value, data_dir: &Path) -> bool {
         if super::keys::get_key(data_dir, &account).is_ok() {
             if let Err(error) = super::keys::delete_key(data_dir, &account) {
                 tracing::warn!(event = "legacy_mcp_token_kept", error = %error);
+                purged = false;
             }
         }
     }
-    true
+    purged
 }
 /** Legacy `{provider, model, probes: {provider: {model: bool}}}` → endpoints.
  *
