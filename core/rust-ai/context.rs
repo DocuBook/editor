@@ -490,7 +490,7 @@ mod tests {
 
     #[tokio::test]
     async fn only_built_in_tools_can_be_invoked() {
-        let error = invoke("round-unknown", "turn-unknown", "mcp_0", json!({})).await.unwrap_err();
+        let error = invoke("round-unknown", "turn-unknown", "lookup", json!({})).await.unwrap_err();
         assert_eq!(error, "Context tool is not available");
     }
 

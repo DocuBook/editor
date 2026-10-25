@@ -120,10 +120,6 @@ impl Config {
             .and_then(|x| x.as_u64())
             .unwrap_or(168);
         let ai = v.get("ai").map(parse_ai).unwrap_or_default();
-        // MCP was removed: drop the tokens a previous version stored for its
-        // servers, and re-save below so config.json loses the block too. A token
-        // that could not be deleted keeps the block, so the next load retries.
-        let legacy_mcp = purge_legacy_mcp(&v, path.parent().unwrap_or_else(|| Path::new(".")));
         // An invalid or hand-broken block falls back to "all off" instead of failing the load.
         let web_tools = v
             .get("webTools")
@@ -135,20 +131,14 @@ impl Config {
         let setup_token = std::env::var("DB_SETUP_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
-        let config = Self {
+        Self {
             admin,
             session_ttl_hours,
             ai,
             web_tools,
             setup_token,
             path: path.to_path_buf(),
-        };
-        if legacy_mcp {
-            if let Err(error) = config.save() {
-                tracing::warn!(event = "legacy_mcp_block_kept", error = %error, "config.json still lists the removed MCP servers");
-            }
         }
-        config
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -461,34 +451,6 @@ fn parse_ai(value: &serde_json::Value) -> AiSelection {
     migrate_legacy_ai(value)
 }
 
-/// Delete the `mcp:<name>` secrets a pre-removal version stored for the
-/// servers in `config["mcp"]`. Returns whether the retired block can be dropped:
-/// it was present and every token was deleted. A kept token keeps the block so
-/// the next boot retries, as the desktop does with `mcp-settings.json`.
-///
-/// Upgrade migration from versions before 0.5.0 (MCP removed in #339); delete
-/// it together with its call site once those versions are no longer supported.
-fn purge_legacy_mcp(config: &serde_json::Value, data_dir: &Path) -> bool {
-    let Some(servers) = config.get("mcp").and_then(serde_json::Value::as_array) else {
-        return config.get("mcp").is_some();
-    };
-    let mut purged = true;
-    for name in servers.iter().filter_map(|server| {
-        server
-            .get("name")
-            .or_else(|| server.get("id"))
-            .and_then(serde_json::Value::as_str)
-    }) {
-        let account = format!("mcp:{name}");
-        if super::keys::get_key(data_dir, &account).is_ok() {
-            if let Err(error) = super::keys::delete_key(data_dir, &account) {
-                tracing::warn!(event = "legacy_mcp_token_kept", error = %error);
-                purged = false;
-            }
-        }
-    }
-    purged
-}
 /** Legacy `{provider, model, probes: {provider: {model: bool}}}` → endpoints.
  *
  *  The old shape kept ONE model and one probe tree for every provider ever probed,
@@ -756,26 +718,6 @@ mod tests {
             &next
         ));
         let _ = std::fs::remove_file(dir.join("config.json"));
-    }
-
-    #[test]
-    fn retired_mcp_block_and_its_tokens_are_purged_on_load() {
-        let dir = tmp();
-        std::fs::write(
-            dir.join("config.json"),
-            serde_json::json!({"session_ttl_hours": 24, "mcp": [{"name": "docs", "url": "https://mcp.example.com"}, {"id": "legacy"}]}).to_string(),
-        )
-        .unwrap();
-        super::super::keys::set_key(&dir, "mcp:docs", "secret-token").unwrap();
-        super::super::keys::set_key(&dir, "openai", "kept-key").unwrap();
-
-        let config = Config::load(&dir);
-        assert_eq!(config.session_ttl_hours, 24);
-        assert!(super::super::keys::get_key(&dir, "mcp:docs").is_err(), "MCP token must be deleted");
-        assert_eq!(super::super::keys::get_key(&dir, "openai").unwrap(), "kept-key");
-        let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(dir.join("config.json")).unwrap()).unwrap();
-        assert!(saved.get("mcp").is_none(), "{saved}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

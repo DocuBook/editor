@@ -789,41 +789,6 @@ pub async fn context_tools(request_id: String, url_sources: Option<Vec<String>>)
         .map_err(|_| "Could not encode context tools".into())
 }
 
-/// Remove what a pre-removal version stored for MCP servers: their Keychain
-/// tokens (`mcp:<name>`) and `mcp-settings.json`. Runs at startup; a no-op once
-/// the file is gone.
-///
-/// Upgrade migration from versions before 0.5.0 (MCP removed in #339); delete
-/// it together with its call site once those versions are no longer supported.
-pub fn purge_legacy_mcp_settings(app: &tauri::AppHandle) {
-    let Ok(dir) = app.path().app_config_dir() else {
-        return;
-    };
-    let path = dir.join("mcp-settings.json");
-    let Ok(raw) = std::fs::read(&path) else {
-        return;
-    };
-    let servers: Vec<serde_json::Value> = serde_json::from_slice(&raw).unwrap_or_default();
-    for name in servers.iter().filter_map(|server| {
-        server
-            .get("name")
-            .or_else(|| server.get("id"))
-            .and_then(serde_json::Value::as_str)
-    }) {
-        let account = format!("mcp:{name}");
-        if crate::keychain::get_key(&account).is_ok() {
-            if let Err(error) = crate::keychain::delete_key(&account) {
-                // The Keychain account label stays out of the log; the kept
-                // file lists the servers whose tokens are still pending.
-                eprintln!("[docubook] could not delete a legacy MCP token: {error}");
-                // Keep the file so the next launch retries the token.
-                return;
-            }
-        }
-    }
-    let _ = std::fs::remove_file(path);
-}
-
 #[tauri::command]
 pub fn cancel_context_request(request_id: String) {
     crate::rust_ai::context::cancel(&request_id);

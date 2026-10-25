@@ -61,7 +61,6 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
-            commands::agent::purge_legacy_mcp_settings(app.handle());
             let _ = commands::web_tools::initialize_web_tools(app.handle());
             if let Some(w) = app.get_webview_window("main") {
                 eprintln!("[docubook] window theme at startup: {:?}", w.theme());
