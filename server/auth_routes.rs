@@ -11,15 +11,29 @@ pub(crate) fn cookie_value(cookie: &str, name: &str) -> Option<String> {
     })
 }
 
-pub(crate) fn session_cookie(state: &AuthState, token: &str) -> String {
+/// The client reached us over HTTPS, as reported by the TLS-terminating proxy.
+/// Only the cookie flag reads this: a client that spoofs it over plain HTTP just
+/// gets a cookie its own browser refuses to store.
+pub(crate) fn request_uses_https(headers: &HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("https"))
+}
+
+pub(crate) fn session_cookie(state: &AuthState, token: &str, headers: &HeaderMap) -> String {
     let ttl = state.config.lock().expect("lock").session_ttl_hours * 3600;
-    let secure = if state.secure_cookie { "; Secure" } else { "" };
+    // DB_SECURE_COOKIE forces the flag either way; unset follows the request.
+    let secure_flag = state.secure_cookie.unwrap_or_else(|| request_uses_https(headers));
+    let secure = if secure_flag { "; Secure" } else { "" };
     format!("db_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={ttl}{secure}")
 }
 
 pub(crate) async fn login(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
     Json(args): Json<Value>,
 ) -> Response {
     let email = args
@@ -62,7 +76,7 @@ pub(crate) async fn login(
     tracing::info!(event = "auth_login_success", client_ip = %ip);
     (
         StatusCode::OK,
-        [(header::SET_COOKIE, session_cookie(&state.auth, &token))],
+        [(header::SET_COOKIE, session_cookie(&state.auth, &token, &headers))],
         Json(json!({ "result": "null" })),
     )
         .into_response()
@@ -94,6 +108,7 @@ pub(crate) async fn logout(State(state): State<AppState>, req: Request) -> Respo
 pub(crate) async fn setup_admin(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
+    headers: HeaderMap,
     Json(args): Json<Value>,
 ) -> Response {
     let email = args
@@ -123,6 +138,13 @@ pub(crate) async fn setup_admin(
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e }))).into_response();
     }
     let mut cfg = state.auth.config.lock().expect("lock");
+    // Without DB_SETUP_TOKEN only a loopback client may claim the account: the
+    // server listens on all interfaces, so anyone else could take it first.
+    if cfg.setup_token.is_none() && !addr.ip().to_canonical().is_loopback() {
+        drop(cfg);
+        tracing::warn!(event = "auth_setup_failure", reason = "setup_token_missing", client_ip = %ip);
+        return err_response("Set DB_SETUP_TOKEN before creating the admin account from another machine");
+    }
     let res = cfg.setup_admin(&email, &password, token.as_deref());
     drop(cfg); // never call session_ttl/session_cookie while holding the config lock (std Mutex is not reentrant)
     match res {
@@ -138,7 +160,7 @@ pub(crate) async fn setup_admin(
             tracing::info!(event = "auth_setup_success", client_ip = %ip);
             (
                 StatusCode::OK,
-                [(header::SET_COOKIE, session_cookie(&state.auth, &token))],
+                [(header::SET_COOKIE, session_cookie(&state.auth, &token, &headers))],
                 Json(json!({ "result": "null" })),
             )
                 .into_response()

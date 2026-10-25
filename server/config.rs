@@ -8,7 +8,8 @@
 //!   DB_ADMIN_EMAIL + DB_ADMIN_PASSWORD  → auto-create admin on first boot
 //!     (env-based headless provisioning; BOTH required)
 //!   DB_SESSION_TTL_HOURS                → session lifetime
-//!   DB_SECURE_COOKIE=1                  → set Secure flag on session cookie
+//!   DB_SECURE_COOKIE=1|0                → force the Secure flag on/off (default: follows X-Forwarded-Proto)
+//!   DB_SETUP_TOKEN                      → fixed setup token (default: one-time token printed at boot)
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -147,9 +148,6 @@ impl Config {
         let setup_token = std::env::var("DB_SETUP_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
-        if setup_token.is_none() {
-            tracing::warn!(event = "setup_token_missing");
-        }
         Self {
             admin,
             session_ttl_hours,
@@ -614,7 +612,31 @@ pub struct AuthState {
     pub config_writes: Mutex<()>,
     pub sessions: super::auth::Sessions,
     pub limiter: super::auth::LoginLimiter,
-    pub secure_cookie: bool,
+    /// `Some` when DB_SECURE_COOKIE forces the flag; `None` follows the request scheme.
+    pub secure_cookie: Option<bool>,
+}
+
+/// Where the setup token the wizard asks for comes from: the operator's
+/// DB_SETUP_TOKEN (`env`), the one-time value printed to the log at boot (`log`),
+/// or nothing (`None`). An empty env value counts as unset, like at load time.
+pub fn setup_token_source(env_value: Option<&str>, has_token: bool) -> Option<&'static str> {
+    if env_value.is_some_and(|v| !v.is_empty()) {
+        Some("env")
+    } else if has_token {
+        Some("log")
+    } else {
+        None
+    }
+}
+
+/// DB_SECURE_COOKIE: `1`/`true` forces `Secure`, `0`/`false` forces it off, and
+/// anything else (including unset) lets the request scheme decide.
+fn secure_cookie_setting(value: Option<&str>) -> Option<bool> {
+    match value.map(str::trim) {
+        Some(v) if v == "1" || v.eq_ignore_ascii_case("true") => Some(true),
+        Some(v) if v == "0" || v.eq_ignore_ascii_case("false") => Some(false),
+        _ => None,
+    }
 }
 
 impl AuthState {
@@ -624,10 +646,26 @@ impl AuthState {
             config_writes: Mutex::new(()),
             sessions: super::auth::Sessions::new(data_dir),
             limiter: super::auth::LoginLimiter::new(),
-            secure_cookie: std::env::var("DB_SECURE_COOKIE")
-                .ok()
-                .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true")),
+            secure_cookie: secure_cookie_setting(std::env::var("DB_SECURE_COOKIE").ok().as_deref()),
         }
+    }
+
+    /// First boot with no admin and no DB_SETUP_TOKEN: mint a one-time token and
+    /// print it, so the wizard can require one without any env setup. Memory only,
+    /// so it changes on every restart until the admin exists.
+    pub fn ensure_setup_token(&self) {
+        let mut cfg = self.config.lock().expect("lock");
+        if cfg.admin.is_some() || cfg.setup_token.is_some() {
+            return;
+        }
+        let mut bytes = [0u8; 32];
+        getrandom::getrandom(&mut bytes).expect("operating system random source is unavailable");
+        let token: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+        tracing::warn!(
+            event = "setup_token_generated",
+            "one-time setup token: {token} — enter it in the setup wizard (set DB_SETUP_TOKEN to choose your own)"
+        );
+        cfg.setup_token = Some(token);
     }
 
     pub fn session_ttl(&self) -> std::time::Duration {
@@ -1070,5 +1108,25 @@ mod tests {
         assert_eq!(c.session_ttl_hours, 24);
         assert!(c.set("port", &serde_json::json!(1)).is_err());
         let _ = std::fs::remove_file(dir.join("config.json"));
+    }
+
+    #[test]
+    fn secure_cookie_setting_forces_only_when_explicit() {
+        assert_eq!(secure_cookie_setting(None), None);
+        assert_eq!(secure_cookie_setting(Some("")), None);
+        assert_eq!(secure_cookie_setting(Some("yes")), None);
+        assert_eq!(secure_cookie_setting(Some("1")), Some(true));
+        assert_eq!(secure_cookie_setting(Some("TRUE")), Some(true));
+        assert_eq!(secure_cookie_setting(Some("0")), Some(false));
+        assert_eq!(secure_cookie_setting(Some(" False ")), Some(false));
+    }
+
+    #[test]
+    fn setup_token_source_names_where_the_token_comes_from() {
+        assert_eq!(setup_token_source(Some("fixed"), false), Some("env"));
+        assert_eq!(setup_token_source(Some("fixed"), true), Some("env"));
+        assert_eq!(setup_token_source(Some(""), true), Some("log"));
+        assert_eq!(setup_token_source(None, true), Some("log"));
+        assert_eq!(setup_token_source(None, false), None);
     }
 }

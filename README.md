@@ -21,17 +21,17 @@ docker run -d --name docubook -p 8080:8080 \
   ghcr.io/docubook/editor
 ```
 
-Open [http://localhost:8080](http://localhost:8080) and create the admin account. Setup cannot be skipped; set `DB_SETUP_TOKEN` before public exposure to protect account creation.
+Open [http://localhost:8080](http://localhost:8080) and create the admin account. The setup wizard asks for a one-time token that the server prints at first boot: `docker logs <container> | grep "one-time setup token"`. Setup cannot be skipped.
 
 > [!IMPORTANT]
 > Keep `/data` on a persistent volume. It contains vaults, configuration, and keys; recreating a container without this mount deletes them.
 
-For production, pin an image tag, place the container behind HTTPS, set `DB_SECURE_COOKIE=1`, and back up `/data`.
+For production, pin an image tag, place the container behind HTTPS (the proxy must send `X-Forwarded-Proto: https`), and back up `/data`. Session cookies are marked `Secure` automatically over HTTPS.
 
 | Variable                                                                          | Default      | Purpose                                                                 |
 | --------------------------------------------------------------------------------- | ------------ | ----------------------------------------------------------------------- |
-| `DB_SETUP_TOKEN`                                                                  | empty        | Protects first-run admin setup; generate with `openssl rand -hex 32`    |
-| `DB_SECURE_COOKIE`                                                                | `false`      | Restricts session cookies to HTTPS when set to `1`                      |
+| `DB_SETUP_TOKEN`    | empty (one-time token printed at first boot) | Optional fixed setup token; `openssl rand -hex 32` |
+| `DB_SECURE_COOKIE` | auto | `Secure` on session cookies follows `X-Forwarded-Proto`; `1`/`0` forces it |
 | `DB_SESSION_TTL_HOURS`                                                            | `168`        | Session lifetime in hours                                               |
 | `DB_KEYS_PASSPHRASE`                                                              | empty        | Encrypts `keys.json` at rest; losing it makes encrypted keys unreadable |
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD`                                            | unset        | Skips the setup wizard when both are set                                |

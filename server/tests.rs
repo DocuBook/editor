@@ -177,7 +177,7 @@ mod api_tests {
         let v = result_json(&body);
         assert_eq!(
             v,
-            json!({ "setupRequired": true, "setupToken": false }),
+            json!({ "setupRequired": true, "setupToken": false, "setupTokenSource": null }),
             "{body}"
         );
     }
@@ -287,8 +287,14 @@ mod api_tests {
             .and_then(|v| v.to_str().ok())
             .map(|c| c.to_string());
         assert!(
-            cookie.is_some_and(|c| c.starts_with("db_session=")),
+            cookie.as_deref().is_some_and(|c| c.starts_with("db_session=")),
             "session cookie set: {h:?}"
+        );
+        // Plain HTTP (no proxy header): the cookie must not be Secure, or the
+        // browser would drop it and login would silently fail.
+        assert!(
+            cookie.as_deref().is_some_and(|c| !c.contains("Secure")),
+            "plain-HTTP session cookie is not Secure: {cookie:?}"
         );
 
         // second admin rejected
@@ -940,5 +946,104 @@ mod api_tests {
         assert_eq!(status, StatusCode::OK);
         assert_eq!(headers.get(header::CACHE_CONTROL).unwrap(), "no-cache", "{body}");
         assert!(body.contains("id=root"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn setup_without_token_is_refused_from_another_machine() {
+        let state = test_state();
+        let app = build_router(state, std::env::temp_dir());
+        let body = json!({"email": "a@b.c", "password": "Password1!"});
+        // A non-loopback peer (LAN or proxy) must not claim the account without a token.
+        let remote = app.layer(MockConnectInfo(SocketAddr::from(([203, 0, 113, 7], 0))));
+        let resp = remote
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/setup_admin")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("DB_SETUP_TOKEN"));
+    }
+
+    /// Sends `setup_admin` from `peer` with optional extra headers.
+    async fn setup_from(
+        app: &Router,
+        peer: [u8; 4],
+        body: Value,
+        headers: &[(&str, &str)],
+    ) -> (StatusCode, HeaderMap, String) {
+        let mut builder = Request::builder()
+            .method("POST")
+            .uri("/api/setup_admin")
+            .header(header::CONTENT_TYPE, "application/json");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let app = app
+            .clone()
+            .layer(MockConnectInfo(SocketAddr::from((peer, 0))));
+        let resp = app
+            .oneshot(builder.body(Body::from(body.to_string())).unwrap())
+            .await
+            .unwrap();
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        (status, headers, String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    #[tokio::test]
+    async fn session_cookie_is_secure_when_the_proxy_reports_https() {
+        let app = build_router(test_state(), std::env::temp_dir());
+        let body = json!({"email": "a@b.c", "password": "Password1!"});
+        let (s, h, b) = setup_from(&app, [127, 0, 0, 1], body, &[("x-forwarded-proto", "https")]).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+        let cookie = h.get(header::SET_COOKIE).and_then(|v| v.to_str().ok()).unwrap_or_default();
+        assert!(cookie.contains("; Secure"), "https cookie must be Secure: {cookie}");
+    }
+
+    #[tokio::test]
+    async fn boot_token_gates_setup_from_another_machine() {
+        let state = test_state();
+        state.auth.ensure_setup_token();
+        let token = state.auth.config.lock().unwrap().setup_token.clone().expect("token generated");
+        let app = build_router(state.clone(), std::env::temp_dir());
+        let (_, _, b) = post(&app, "/api/setup_status", json!({})).await;
+        assert_eq!(result_json(&b)["setupTokenSource"], "log", "{b}");
+        assert_eq!(token.len(), 64, "32 random bytes as hex");
+        let app = build_router(state, std::env::temp_dir());
+        let body = json!({"email": "a@b.c", "password": "Password1!"});
+
+        // Another machine without the token: refused, no admin created.
+        let (s, _, _) = setup_from(&app, [203, 0, 113, 7], body.clone(), &[]).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST);
+
+        // With the boot token from the logs: accepted.
+        let mut with_token = body;
+        with_token["token"] = json!(token);
+        let (s, _, b) = setup_from(&app, [203, 0, 113, 7], with_token, &[]).await;
+        assert_eq!(s, StatusCode::OK, "{b}");
+    }
+
+    #[test]
+    fn boot_token_is_not_generated_when_one_is_configured_or_admin_exists() {
+        let configured = test_state();
+        configured.auth.config.lock().unwrap().setup_token = Some("tok-fixed".to_string());
+        configured.auth.ensure_setup_token();
+        assert_eq!(configured.auth.config.lock().unwrap().setup_token.as_deref(), Some("tok-fixed"));
+
+        let with_admin = test_state();
+        with_admin.auth.config.lock().unwrap().admin = Some(crate::config::Admin {
+            email: "a@b.c".into(),
+            password_hash: String::new(),
+        });
+        with_admin.auth.ensure_setup_token();
+        assert!(with_admin.auth.config.lock().unwrap().setup_token.is_none());
     }
 }

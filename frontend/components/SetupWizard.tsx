@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { Info } from 'lucide-react'
 import { invoke } from '../lib/ipc'
 import { useAuth } from '../stores/auth'
-import { buildSetupPayload, validateSetupInput } from '../utils/setupWizard'
+import { buildSetupPayload, setupTokenHint, validateSetupInput, type SetupTokenSource } from '../utils/setupWizard'
 import { isPasswordValid } from '../utils/passwordPolicy'
 import PasswordInput from './PasswordInput'
 import PasswordRequirements from './PasswordRequirements'
@@ -14,14 +15,23 @@ export default function SetupWizard() {
   const [confirm, setConfirm] = useState('')
   const [token, setToken] = useState('')
   const [tokenRequired, setTokenRequired] = useState(false)
+  const [tokenSource, setTokenSource] = useState<SetupTokenSource>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
     invoke<string>('setup_status')
-      .then(s => { try { setTokenRequired(!!JSON.parse(s).setupToken) } catch { /* keep hidden */ } })
+      .then(s => {
+        try {
+          const status = JSON.parse(s)
+          setTokenRequired(!!status.setupToken)
+          setTokenSource(status.setupTokenSource ?? null)
+        } catch { /* keep hidden */ }
+      })
       .catch(() => {})
   }, [])
+
+  const hint = setupTokenHint(tokenSource)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -68,7 +78,21 @@ export default function SetupWizard() {
             )}
           </div>
           {tokenRequired && (
-            <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Setup token (DB_SETUP_TOKEN)" className={input} />
+            <div>
+              <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="Setup token" aria-describedby="setup-token-hint" className={input} />
+              {hint && (
+                <div id="setup-token-hint" role="note" className="mt-2 flex gap-2.5 rounded-md border border-border-subtle bg-accent-subtle px-3 py-2.5">
+                  <Info size={15} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />
+                  <div className="min-w-0 text-xs text-foreground-secondary">
+                    <div className="font-semibold text-foreground">{hint.title}</div>
+                    <div className="mt-0.5">{hint.body}</div>
+                    {hint.code && (
+                      <code className="mt-1.5 block overflow-x-auto rounded bg-background px-2 py-1 font-mono text-[11px] text-foreground">{hint.code}</code>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
           {err && <div className="text-xs text-danger">{err}</div>}
           <button disabled={!canSubmit} className={btn + ' bg-accent hover:bg-accent-hover text-on-accent'}>

@@ -19,7 +19,33 @@ export function validateSetupInput({ email, password, confirm, token, tokenRequi
   const pwErr = passwordError(password)
   if (pwErr) return pwErr
   if (password !== confirm) return 'Passwords do not match'
-  if (tokenRequired && !token.trim()) return 'Setup token is required — check the server env (DB_SETUP_TOKEN)'
+  if (tokenRequired && !token.trim()) return 'Setup token is required — see the hint under the field'
+  return null
+}
+
+/** Where the server's setup token came from (`setup_status.setupTokenSource`). */
+export type SetupTokenSource = 'env' | 'log' | null
+
+export interface SetupTokenHint {
+  title: string
+  body: string
+  /** Command the operator can copy to read the token, when there is one. */
+  code?: string
+}
+
+/** Callout under the token field: where the operator finds the token.
+ *  `env` → the operator set DB_SETUP_TOKEN; `log` → a one-time token was printed at boot. */
+export function setupTokenHint(source: SetupTokenSource): SetupTokenHint | null {
+  if (source === 'env') {
+    return { title: 'Set by DB_SETUP_TOKEN', body: 'Enter the same value the server was started with.' }
+  }
+  if (source === 'log') {
+    return {
+      title: 'One-time token from the server log',
+      body: 'Printed at first boot. Running locally, check the terminal. In Docker, run:',
+      code: 'docker logs <container> | grep "one-time setup token"',
+    }
+  }
   return null
 }
 
