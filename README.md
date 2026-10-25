@@ -51,7 +51,7 @@ docker logs docubook | grep "one-time setup token"
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | unset | Skips the setup wizard when both are set |
 | `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset | Provisions a custom OpenAI-compatible provider |
 | `RUST_LOG` | app defaults | Controls server log filtering |
-| `DOCUBOOK_SEARXNG_URL` / `DOCUBOOK_TAVILY_API_KEY` | unset | Pins the AI's built-in `web_search` provider (SearXNG wins when both are set); otherwise chosen in Settings → AI → Web Tools |
+| `DOCUBOOK_SEARXNG_URL` / `DOCUBOOK_TAVILY_API_KEY` | unset | Switches the AI's built-in `web_search` on and locks its provider (SearXNG wins when both are set); unset, the provider is chosen in Settings → AI → Web Tools |
 
 See [`.env.example`](./.env.example) for the complete list and deployment notes. Environment variables are read at startup.
 
@@ -85,8 +85,9 @@ services:
       - "8080:8080"
     volumes:
       - docubook:/data
-    # Optional: web search for the AI through the searxng service below.
-    # Drop this environment block and the searxng service if you do not use it.
+    # Optional: web search for the AI through the searxng service below. Setting
+    # this switches web_search on and locks the provider in Settings → AI → Web
+    # Tools; drop this block and the searxng service if you do not want that.
     environment:
       DOCUBOOK_SEARXNG_URL: http://searxng:8080
     restart: unless-stopped
@@ -185,7 +186,7 @@ Other text formats can be viewed but only `.md` and `.mdx` use the WYSIWYG edito
 <details>
 <summary><strong>AI web tools (web search and page reading)</strong></summary>
 
-The AI can call two read-only tools before it proposes an edit. Both are **off by default**; turn them on in **Settings → AI → Web Tools**.
+The AI can call two read-only tools before it proposes an edit. Both are **off by default**; turn them on in **Settings → AI → Web Tools** (on the web build, the server's environment can switch `web_search` on — see below).
 
 | Tool | What it does |
 | --- | --- |
@@ -197,7 +198,7 @@ The AI can call two read-only tools before it proposes an edit. Both are **off b
 - **Tavily** — paste an API key from [tavily.com](https://tavily.com); the free plan includes 1,000 searches a month. The key is stored in the macOS Keychain (desktop) or `keys.json` (web, encrypted with `DB_KEYS_PASSPHRASE` when set) and is only ever sent to `api.tavily.com`.
 - **SearXNG** — point it at your own instance. Local and private addresses are fine (a Compose service, a LAN box); a public instance must use HTTPS. JSON output must be enabled in its `settings.yml` (see **Docker Compose** under Install).
 
-On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` pins the provider (SearXNG wins when both are set) and Settings shows it as managed by the environment. **Docker Compose** under Install includes an optional `searxng` service and its `settings.yml`.
+On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` switches `web_search` on for every user and locks the provider (SearXNG wins when both are set); Settings shows it as managed by the environment, and `web_fetch` stays a Settings toggle. **Docker Compose** under Install includes an optional `searxng` service and its `settings.yml`.
 
 **What the AI can and cannot open**
 
