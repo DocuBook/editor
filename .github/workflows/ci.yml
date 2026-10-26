@@ -52,6 +52,8 @@ jobs:
         run: node test/check-changelog-heading.mjs
       - name: Release tag guard (release detection does not depend on github.ref)
         run: node test/check-release-tag.mjs
+      - name: Release notes guard (body is the tag's changelog, no icons, contributors)
+        run: node test/check-release-notes.mjs
       - name: Frontend tests
         run: npm test
       # Engine-compat guard on what ships: the source lint above (compat/compat)
@@ -480,13 +482,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.releasetag.outputs.tag }}"
-          # Extract changelog section matching the tag version
-          awk -v tag="$TAG" '
-            BEGIN { flag=0 }
-            index($0, "## "tag) == 1 && flag==0 { flag=1; next }
-            /^## / && flag==1 { exit }
-            flag { print }
-          ' CHANGELOG.md > /tmp/release-notes.md
+          # Contributors: the authors of the commits since the previous release
+          # (a squash merge is authored by the PR's author). Best effort: no
+          # previous release or a failed lookup leaves the section out rather
+          # than blocking the publish.
+          PREV=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
+            --jq "[.[] | select(.draft | not) | .tag_name | select(. != \"$TAG\")][0] // empty" 2>/dev/null || true)
+          : > /tmp/contributors.txt
+          if [ -n "$PREV" ]; then
+            gh api "repos/$GITHUB_REPOSITORY/compare/$PREV...$TAG" --paginate \
+              --jq '.commits[] | select(.author.type? != "Bot") | .author.login // empty' \
+              > /tmp/contributors.txt 2>/dev/null || : > /tmp/contributors.txt
+          fi
+          echo "contributors since ${PREV:-none}: $(tr '\n' ' ' < /tmp/contributors.txt)"
+          # The tag's changelog section, heading icons removed, plus Contributors.
+          node .github/scripts/release-notes.mjs "$TAG" CHANGELOG.md /tmp/contributors.txt > /tmp/release-notes.md
           # Artifacts preserve their full relative path (upload-artifact v4), so
           # locate the DMGs recursively instead of assuming a flat layout. The
           # product name contains a SPACE ("DocuBook Editor_*.dmg") — a plain
