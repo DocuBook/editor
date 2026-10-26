@@ -10,8 +10,8 @@ vi.mock('../../../frontend/utils/aiMenu', () => ({
   getDefaultAIMenuItems: () => [],
 }))
 
-vi.mock('../../../frontend/utils/modelDiscovery', () => ({
-  fetchProviderModels: vi.fn(async (provider: string) => {
+const { fetchProviderModels } = vi.hoisted(() => ({ fetchProviderModels: vi.fn() }))
+const serveModels = async (provider: string) => {
     if (provider === 'opencode-go') return [
       { id: 'deepseek-v4-flash', name: 'DS V4 Flash' },
       { id: 'deepseek-reasoner', name: 'DS Reasoner' },
@@ -21,7 +21,11 @@ vi.mock('../../../frontend/utils/modelDiscovery', () => ({
       { id: 'deepseek-chat', name: 'DS Chat' },
     ]
     return []
-  }),
+}
+vi.mock('../../../frontend/utils/modelDiscovery', () => ({ fetchProviderModels }))
+vi.mock('../../../frontend/utils/aiProbe', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../frontend/utils/aiProbe')>(),
+  ensureToolProbe: vi.fn(async () => undefined),
 }))
 
 import AiFloatingChat from '../../../frontend/components/editor/AiFloatingChat'
@@ -60,6 +64,8 @@ function makeAi(aiMenuState: any = 'closed') {
 }
 
 beforeEach(() => {
+  fetchProviderModels.mockImplementation(serveModels)
+  useAiSettings.setState({ defaultModels: {}, dirtySelection: false })
   document.body.innerHTML = '<div id="root"></div>'
   root = createRoot(document.getElementById('root')!)
   useAiChat.setState({ expanded: false, input: '', focusRequest: 0, selectionPromptOpen: false })
@@ -193,5 +199,113 @@ describe('composer model picker', () => {
     expect(useAiSettings.getState().provider).toBe('opencode-go')
     // The data still refreshes: probes/baseUrls come from the backend.
     expect(useAiSettings.getState().baseUrls['opencode-go']).toBe('https://opencode.ai/zen/go/v1')
+  })
+
+  const rowsIn = (group: string) => {
+    const header = Array.from(document.querySelectorAll('#ai-model-listbox [role="presentation"]')).find((node) => node.textContent === group)
+    return Array.from(header?.closest('[role="group"]')?.querySelectorAll('[role="option"]') ?? []) as HTMLButtonElement[]
+  }
+  const groupNames = () => Array.from(document.querySelectorAll('#ai-model-listbox [role="group"]')).map((group) =>
+    document.getElementById(group.getAttribute('aria-labelledby')!)?.textContent)
+
+  it('groups models under their provider instead of a badge per row', async () => {
+    useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'deepseek-v4-flash',
+      savedProviders: ['opencode-go', 'deepseek'],
+      models: { 'opencode-go': 'deepseek-v4-flash', deepseek: 'deepseek-chat' },
+      baseUrls: {},
+    })
+    renderComposer()
+    openPicker()
+    await settle()
+
+    expect(groupNames()).toEqual(['Opencode Go', 'DeepSeek'])
+    // A row is just the model id: no provider label inside it.
+    expect(rowsIn('Opencode Go').map((row) => row.textContent)).toEqual(['deepseek-v4-flash', 'deepseek-reasoner'])
+    expect(rowsIn('DeepSeek').map((row) => row.textContent)).toEqual(['deepseek-v4-flash', 'deepseek-chat'])
+  })
+
+  it('picks the provider of the group when two providers serve the same model id', async () => {
+    useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'deepseek-v4-flash',
+      savedProviders: ['opencode-go', 'deepseek'],
+      models: { 'opencode-go': 'deepseek-v4-flash' },
+      baseUrls: {},
+    })
+    renderComposer()
+    openPicker()
+    await settle()
+
+    // Only the row under the active provider is marked active.
+    expect(rowsIn('Opencode Go')[0].getAttribute('aria-selected')).toBe('true')
+    expect(rowsIn('DeepSeek')[0].getAttribute('aria-selected')).toBe('false')
+    act(() => rowsIn('DeepSeek')[0].click())
+    await settle()
+    expect(useAiSettings.getState().provider).toBe('deepseek')
+    expect(useAiSettings.getState().model).toBe('deepseek-v4-flash')
+  })
+
+  it('lists only what the provider serves, not a model it dropped', async () => {
+    useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'retired-model',
+      savedProviders: ['opencode-go'],
+      models: { 'opencode-go': 'retired-model' },
+      defaultModels: { 'opencode-go': 'retired-model' },
+      baseUrls: {},
+    })
+    renderComposer()
+    openPicker()
+    await settle()
+
+    expect(rowsIn('Opencode Go').map((row) => row.textContent)).toEqual(['deepseek-v4-flash', 'deepseek-reasoner'])
+  })
+
+  it('falls back to the backend default model, not a session pick, when a list cannot be fetched', async () => {
+    fetchProviderModels.mockImplementation(async (provider: string) => {
+      if (provider === 'deepseek') throw new Error('offline')
+      return serveModels(provider)
+    })
+    useAiSettings.setState({
+      provider: 'deepseek',
+      model: 'session-pick',
+      savedProviders: ['opencode-go', 'deepseek'],
+      models: { deepseek: 'session-pick' },
+      defaultModels: { deepseek: 'deepseek-chat' },
+      baseUrls: {},
+    })
+    renderComposer()
+    openPicker()
+    await settle()
+
+    expect(rowsIn('DeepSeek').map((row) => row.textContent)).toEqual(['deepseek-chat'])
+    expect(document.querySelector('#ai-model-listbox')?.textContent).toContain('Could not load models')
+    // The provider that answered is unaffected by the one that failed.
+    expect(rowsIn('Opencode Go')).toHaveLength(2)
+  })
+
+  it('refetches on every open and ignores a slower reply from an earlier open', async () => {
+    let answerFirst!: (models: { id: string; name: string }[]) => void
+    fetchProviderModels.mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve }))
+    fetchProviderModels.mockImplementationOnce(async () => [{ id: 'current-model', name: 'Current' }])
+    useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'current-model',
+      savedProviders: ['opencode-go'],
+      models: { 'opencode-go': 'current-model' },
+      baseUrls: {},
+    })
+    renderComposer()
+    openPicker()
+    openPicker()
+    openPicker()
+    await settle()
+    answerFirst([{ id: 'stale-model', name: 'Stale' }])
+    await settle()
+
+    expect(fetchProviderModels).toHaveBeenCalledTimes(2)
+    expect(rowsIn('Opencode Go').map((row) => row.textContent)).toEqual(['current-model'])
   })
 })

@@ -51,6 +51,11 @@ interface AiSettingsState {
    *  Ground truth for whether OUR payload passes that gateway — no static
    *  exclusions; unmeasured providers/models are treated as text-only. */
   probeTools: Record<string, Record<string, boolean>>
+  /** Each configured provider's DEFAULT model, exactly as the backend holds it
+   *  (the endpoint saved in Settings, or the env model). Written only by
+   *  hydration, never by a composer pick: it is the one fallback when a
+   *  provider's live model list cannot be fetched. */
+  defaultModels: Record<string, string>
   /** True once the composer has picked a model this session. Composer picks are
    *  session-local (the backend is only told on an explicit Settings save), so a
    *  repeat/delayed hydration must preserve the live selection instead of
@@ -90,6 +95,7 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
   models: {},
   baseUrls: {},
   probeTools: {},
+  defaultModels: {},
   dirtySelection: false,
   /** Switch provider, keeping whatever model THIS provider already had. No
    *  catalog fallback: models are discovered at runtime, so an unconfigured
@@ -127,8 +133,9 @@ export const useAiSettings = create<AiSettingsState>()((set, get) => ({
     const { [pid]: _model, ...models } = s.models
     const { [pid]: _url, ...baseUrls } = s.baseUrls
     const { [pid]: _probes, ...probeTools } = s.probeTools
+    const { [pid]: _default, ...defaultModels } = s.defaultModels
     return {
-      apiKeys, models, baseUrls, probeTools,
+      apiKeys, models, baseUrls, probeTools, defaultModels,
       savedProviders: s.savedProviders.filter(x => x !== pid),
       ...(s.provider === pid ? { provider: '', model: '', apiKey: '' } : {}),
     }
@@ -213,6 +220,7 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
     model: preserveSelection ? live.model : model,
     savedProviders: cfg.savedProviders,
     models,
+    defaultModels: Object.fromEntries(Object.entries(models).filter(([, value]) => !!value)),
     baseUrls,
     probeTools,
   }

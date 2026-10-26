@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAiTransport } from '../../../frontend/utils/aiTransport'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useAiChat } from '../../../frontend/stores/aiChat'
-import { resetToolProbeBackoff } from '../../../frontend/utils/aiProbe'
+import { ensureToolProbe, resetToolProbeBackoff } from '../../../frontend/utils/aiProbe'
 
 function sseStream(chunks: string[]) {
   const encoder = new TextEncoder()
@@ -728,30 +728,55 @@ describe('createAiTransport tools-to-text fallback', () => {
     })
   })
 
-  it('measures an unmeasured model before the first request and uses tools when it can', async () => {
-    useAiSettings.setState({ provider: 'deepseek', model: 'fresh-pick', probeTools: {}, savedProviders: ['deepseek'] })
-    const order: string[] = []
-    const asks: any[] = []
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+  describe('tool probe of a composer pick', () => {
+    const askFetch = (order: string[], asks: any[], probeResult: Promise<Response>) => vi.fn(async (url: string, init: any) => {
       const command = String(url).replace(/^.*\/api\//, '')
       order.push(command)
       const body = JSON.parse(String(init?.body ?? '{}'))
-      if (command === 'test_connection') return Response.json({ result: JSON.stringify({ status: 'ok', tools: true }) })
+      if (command === 'test_connection') return probeResult
       if (command === 'ask_ai') {
         asks.push(body)
         return new Response(sseStream([
           'event: ai:tool_call\n',
           `data: {"requestId":"${body.requestId}","toolCallId":"tool-0","providerToolCallId":"doc","toolName":"applyDocumentOperations","input":{"operations":[{"type":"update","id":"b1$","block":"<p>Done.</p>"}]}}\n\n`,
+          'event: ai:token\n', `data: {"requestId":"${body.requestId}","token":"<content>Done.</content>"}\n\n`,
           'event: ai:done\n', `data: {"requestId":"${body.requestId}","provider":"deepseek","truncated":false}\n\n`,
         ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
       }
       return Response.json({ result: null })
-    }))
-    const { parts } = await drain(createAiTransport({ getEditor: editor }))
-    expect(order.indexOf('test_connection')).toBeLessThan(order.indexOf('ask_ai'))
-    expect(asks[0].tools).toBeDefined()
-    expect(useAiSettings.getState().probeTools.deepseek['fresh-pick']).toBe(true)
-    expect(parts.find(part => part.type === 'tool-input-available')).toBeTruthy()
+    })
+
+    it('waits for the probe a pick started, then uses tools when it says so', async () => {
+      useAiSettings.setState({ provider: 'deepseek', model: 'fresh-pick', probeTools: {}, savedProviders: ['deepseek'] })
+      const order: string[] = []
+      const asks: any[] = []
+      let answer!: (response: Response) => void
+      vi.stubGlobal('fetch', askFetch(order, asks, new Promise<Response>(resolve => { answer = resolve })))
+
+      // The composer pick starts the probe; the prompt goes out before it lands.
+      const picked = ensureToolProbe('deepseek', 'fresh-pick')
+      const turn = drain(createAiTransport({ getEditor: editor }))
+      await new Promise(resolve => setTimeout(resolve, 10))
+      expect(order).not.toContain('ask_ai')
+      answer(Response.json({ result: JSON.stringify({ status: 'ok', tools: true }) }))
+      await picked
+      const { parts } = await turn
+
+      expect(order.filter(command => command === 'test_connection')).toHaveLength(1)
+      expect(order.indexOf('test_connection')).toBeLessThan(order.indexOf('ask_ai'))
+      expect(asks[0].tools).toBeDefined()
+      expect(parts.find(part => part.type === 'tool-input-available')).toBeTruthy()
+    })
+
+    it('never starts a probe of its own: an unmeasured model with none running stays text-only', async () => {
+      useAiSettings.setState({ provider: 'deepseek', model: 'unmeasured', probeTools: {}, savedProviders: ['deepseek'] })
+      const order: string[] = []
+      const asks: any[] = []
+      vi.stubGlobal('fetch', askFetch(order, asks, Promise.resolve(Response.json({ result: JSON.stringify({ status: 'ok', tools: true }) }))))
+      await drain(createAiTransport({ getEditor: editor }))
+      expect(order).not.toContain('test_connection')
+      expect(asks[0].tools).toBeUndefined()
+    })
   })
 
   it('discovers backend context tools even when the editor supplies only the document tool', async () => {

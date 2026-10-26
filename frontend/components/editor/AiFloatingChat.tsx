@@ -50,14 +50,16 @@ const optionId = (position: number) => `mention-option-${position}`
 
 /** `aria-controls` target for the composer while the picker is open. */
 const MENTION_LISTBOX_ID = 'mention-listbox'
-/** Provider badges in the model picker. Name-style (not initialisms) so each
- *  row reads as its provider: the catalog `name` alone is too wide for the row,
- *  so short but spelled-out forms are used. */
-const MODEL_PROVIDER_LABELS: Record<string, string> = {
-  'opencode-go': 'Opencode',
-  deepseek: 'DeepSeek',
-  [CUSTOM_PROVIDER_ID]: 'OpenAI',
-}
+/** Group header of a provider in the model picker. Two providers can serve the
+ *  same model id (OpenCode Go and DeepSeek both list `deepseek-v4-flash`), and
+ *  the pick decides which provider is billed, so rows sit under their
+ *  provider's header instead of carrying a badge each. */
+const providerGroupLabel = (id: string) =>
+  id === CUSTOM_PROVIDER_ID ? 'OpenAI Compatible' : PROVIDERS.find((item) => item.id === id)?.name || id
+
+/** One provider's model list in the picker, as the provider reported it on
+ *  this open. `error` falls back to the backend's default model. */
+type ProviderModels = { status: 'loading' | 'ok' | 'error'; models: DiscoveredModel[] }
 
 /** Folder part of a vault path (`docs/notes` for `docs/notes/guide.md`), empty
  *  at the vault root. */
@@ -86,10 +88,6 @@ const modelRowClass = (selected: boolean) =>
   'flex w-full cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] ' +
   (selected ? 'bg-accent text-on-accent' : 'hover:bg-surface-active')
 
-/** Provider badge inside a model row — the accent tint flips on the selected
- *  row, exactly as mentionMetaClass flips text for the dropdown surface. */
-const modelBadgeClass = (selected: boolean) =>
-  'shrink-0 text-[9px] font-semibold ' + (selected ? 'text-on-accent opacity-80' : 'text-accent')
 
 /** True while BlockNote's mobile formatting toolbar (0.55) is up — the strip
  *  above the on-screen keyboard that shares the composer's bottom edge. */
@@ -111,9 +109,11 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const setModel = useAiSettings((s) => s.setModel)
   const markSelectionDirty = useAiSettings((s) => s.markSelectionDirty)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
-  const [modelOptions, setModelOptions] = useState<Record<string, DiscoveredModel[]>>({})
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsError, setModelsError] = useState(false)
+  const defaultModels = useAiSettings((s) => s.defaultModels)
+  const [modelOptions, setModelOptions] = useState<Record<string, ProviderModels>>({})
+  /** Identity of the latest discovery: a slow reply from an earlier open must
+   *  not overwrite the lists of a newer one. */
+  const discoveryRun = useRef(0)
 
   const modelPickerRef = useRef<HTMLDivElement>(null)
   const modelTriggerRef = useRef<HTMLButtonElement>(null)
@@ -420,33 +420,43 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   }, [status, accept])
 
   const modelProviders = savedProviders.filter((id) => id === CUSTOM_PROVIDER_ID || PROVIDERS.some((item) => item.id === id))
-  const loadModels = async () => {
-    setModelsLoading(true)
-    setModelsError(false)
-    let failed = false
-    const discovered = await Promise.all(modelProviders.map(async (id) => {
-      const baseUrl = baseUrls[id] || PROVIDERS.find((item) => item.id === id)?.api
-      if (!baseUrl) return [id, []] as const
-      try { return [id, await fetchProviderModels(id, baseUrl)] as const } catch { failed = true; return [id, []] as const }
-    }))
-    setModelOptions(Object.fromEntries(discovered))
-    setModelsError(failed)
-    setModelsLoading(false)
+  /** Fetch every configured provider's models from its own endpoint on each
+   *  open. Providers load independently, so a slow or failing one neither holds
+   *  back nor overwrites another's list. The backend resolves the endpoint it
+   *  stored for a configured provider; the URL sent here is only a fallback. */
+  const loadModels = () => {
+    const run = ++discoveryRun.current
+    setModelOptions(Object.fromEntries(modelProviders.map((id) => [id, { status: 'loading', models: [] }])))
+    for (const id of modelProviders) {
+      const finish = (next: ProviderModels) => {
+        if (discoveryRun.current === run) setModelOptions((current) => ({ ...current, [id]: next }))
+      }
+      const baseUrl = baseUrls[id] || PROVIDERS.find((item) => item.id === id)?.api || ''
+      fetchProviderModels(id, baseUrl).then(
+        (models) => finish({ status: 'ok', models }),
+        () => finish({ status: 'error', models: [] }),
+      )
+    }
   }
-  /** The active selection always has a row, so a failed or empty discovery cannot
-   *  make a configured provider look like it has no models at all. */
-  const discoveredOptions = modelProviders.flatMap((id) => (modelOptions[id] ?? []).map((option) => ({ id, model: option.id })))
-  const pickerOptions = aiConfigured && provider && model && !discoveredOptions.some((option) => option.id === provider && option.model === model)
-    ? [{ id: provider, model }, ...discoveredOptions]
-    : discoveredOptions
+  /** What each provider group lists. A fetched list is shown as the provider
+   *  sent it — nothing added, so a model it no longer serves is not offered.
+   *  Until it arrives, or when it fails, the backend's default model for that
+   *  provider is the only fallback row. */
+  const modelGroups = modelProviders.map((id) => {
+    const entry = modelOptions[id] ?? { status: 'loading' as const, models: [] }
+    const models = entry.status === 'ok'
+      ? entry.models.map((option) => option.id)
+      : defaultModels[id] ? [defaultModels[id]] : []
+    return { id, label: providerGroupLabel(id), status: entry.status, models }
+  })
   /** Opening the picker over a long model list must land on the active model:
    *  the listbox is max-h-64 + overflow-y-auto, so the current selection can
-   *  sit below the fold, invisible. Re-runs when discovery lands (modelsLoading
-   *  flips) so the initially-empty listbox still gets its scroll. */
+   *  sit below the fold, invisible. Re-runs as each provider's list lands, so
+   *  the active row still gets its scroll once it appears. */
   useEffect(() => {
-    if (!modelPickerOpen || modelsLoading) return
+    if (!modelPickerOpen) return
     modelActiveRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [modelPickerOpen, modelsLoading, provider, model])
+  }, [modelPickerOpen, modelOptions, provider, model])
   const selectModel = (id: string, nextModel: string) => {
     if (!nextModel) return
     setProvider(id)
@@ -480,10 +490,18 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   const modelPicker = modelPickerOpen && (
     <div id="ai-model-listbox" ref={modelPickerRef} className="absolute bottom-full right-0 z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="AI models">
-      {modelsLoading ? <div className="px-2.5 py-1.5 text-[11px] text-muted">Loading models…</div> : pickerOptions.length === 0 ? <div className="px-2.5 py-1.5 text-[11px] text-muted">{modelsError ? 'Could not load models' : 'No models found'}</div> : pickerOptions.map((option) => {
-        const active = option.id === provider && option.model === model
-        return <button key={`${option.id}:${option.model}`} ref={active ? modelActiveRef : undefined} role="option" aria-selected={active} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(option.id, option.model)} className={modelRowClass(active)}><span className={modelBadgeClass(active)}>{MODEL_PROVIDER_LABELS[option.id] || option.id}</span><span className="truncate font-mono">{option.model}</span>{active && <Check size={11} className="ml-auto shrink-0" />}</button>
-      })}
+      {modelGroups.map((group) => (
+        <div key={group.id} role="group" aria-labelledby={`ai-model-group-${group.id}`}>
+          <div id={`ai-model-group-${group.id}`} role="presentation" className="px-2.5 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted">{group.label}</div>
+          {group.models.map((option) => {
+            const active = group.id === provider && option === model
+            return <button key={`${group.id}:${option}`} ref={active ? modelActiveRef : undefined} role="option" aria-selected={active} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(group.id, option)} className={modelRowClass(active)}><span className="truncate font-mono">{option}</span>{active && <Check size={11} className="ml-auto shrink-0" />}</button>
+          })}
+          {group.status === 'loading' && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">Loading models…</div>}
+          {group.status === 'error' && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">Could not load models</div>}
+          {group.status === 'ok' && group.models.length === 0 && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">No models found</div>}
+        </div>
+      ))}
     </div>
   )
 

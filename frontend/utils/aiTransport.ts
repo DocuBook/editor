@@ -34,7 +34,7 @@ import {
 import { buildAiPrompt } from "./aiPrompt";
 import type { ReferenceResult } from "./aiPromptState";
 import { parseMentions } from "./aiMentions";
-import { ensureToolProbe, isTextOnly } from "./aiProbe";
+import { isTextOnly, pendingToolProbe } from "./aiProbe";
 import { mapWithConcurrency } from "./concurrency";
 import { uuid } from "./uuid";
 import { collectUrlSources, extractUrls } from "./webTools";
@@ -63,9 +63,9 @@ const CONTEXT_BUDGET_EXHAUSTED = "Context result budget exhausted.";
 const MAX_PREFETCH_URLS = 3;
 const WEB_FETCH_TOOL = "web_fetch";
 
-/** Longest wait for an unmeasured model's tool probe before the first request.
- *  The probe is two small provider calls; past this the turn runs text-only and
- *  the probe still lands for the next one. */
+/** Longest wait for a running tool probe (a fresh composer pick) before the
+ *  first request. The probe is two small provider calls; past this the turn
+ *  runs text-only and the probe still lands for the next one. */
 const PROBE_WAIT_MS = 8_000;
 
 /** Resolve with `probe`, or `undefined` once `ms` passed or `signal` aborted. */
@@ -178,11 +178,15 @@ async function runSendMessages(
    *  the probe is the single source of truth; unmeasured → text-only until
    *  auto-probe measures true. For env-controlled custom endpoints the probe is
    *  keyed by the env model (the one the backend actually sends). */
-  /** A model nobody measured yet (picked in the composer, hydrated from another
-   *  device) used to run text-only silently. Measure it first; the composer
-   *  pick usually started this probe already, so the wait is short or zero. */
-  if (provider && model && st.probeTools[provider]?.[model] === undefined) {
-    await waitForProbe(ensureToolProbe(provider, model), PROBE_WAIT_MS, abortSignal);
+  /** The composer starts a probe when a model is picked. A prompt sent before
+   *  it lands waits for it (bounded) instead of running a tool-capable model as
+   *  text-only. The transport never starts a probe of its own: an unmeasured
+   *  model with none running stays text-only. */
+  const runningProbe = provider && model && st.probeTools[provider]?.[model] === undefined
+    ? pendingToolProbe(provider, model)
+    : undefined;
+  if (runningProbe) {
+    await waitForProbe(runningProbe, PROBE_WAIT_MS, abortSignal);
     if (abortSignal?.aborted) return closedStream();
   }
   const supportsTools = !isTextOnly(provider, model, useAiSettings.getState().probeTools);
