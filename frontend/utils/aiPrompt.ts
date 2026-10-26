@@ -1,4 +1,4 @@
-import { injectDocumentStateMessages, injectMentionContextMessages } from './aiPromptState';
+import { formatWebReferences, injectDocumentStateMessages, injectMentionContextMessages, type ReferenceResult } from './aiPromptState';
 
 import { AI_CONTENT_CLOSE, AI_CONTENT_OPEN, CURSOR_MARKER } from "./aiBlocks";
 
@@ -19,6 +19,9 @@ export type BuildAiPromptInput = {
   userText: string;
   taskRules: string;
   retryFeedback?: string;
+  /** Web results gathered by tool mode before a fallback. Text mode only: tool
+   *  mode keeps them in its native tool transcript. */
+  references?: readonly ReferenceResult[];
 };
 
 export type CompiledAiPrompt = {
@@ -123,7 +126,11 @@ function textMessages(input: BuildAiPromptInput): PromptMessage[] {
   const mentionMessage = input.mentionContext && (input.mentionContext.files?.length || input.mentionContext.skipped?.length)
     ? cleanMessage({ role: 'assistant', content: injectMentionContextMessages([{ role: 'user', id: 'latest' }], input.mentionContext)[0]?.parts?.[0]?.text })
     : null;
-  const contextMessages = mentionMessage ? [mentionMessage] : [];
+  const references = formatWebReferences(input.references ?? []);
+  const contextMessages = [
+    ...(mentionMessage ? [mentionMessage] : []),
+    ...(references ? [{ role: "assistant" as const, content: references }] : []),
+  ];
   return [
     ...history,
     {
