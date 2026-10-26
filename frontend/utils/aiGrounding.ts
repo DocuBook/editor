@@ -118,5 +118,5 @@ export async function groundTextOutput(
   if (!payload) return { payload: null, parsed: false, input: null };
   const parsed = await buildApplyDocumentInput(editor, payload, scope.selectedBlocks ?? null);
   if (!parsed) return { payload, parsed: false, input: null };
-  return { payload, parsed: true, input: filterMeaningfulOperations(editor, { input: parsed })?.input ?? null };
+  return { payload, parsed: true, input: filterMeaningfulOperations(editor, { input: parsed }, scope.selectedBlocks)?.input ?? null };
 }

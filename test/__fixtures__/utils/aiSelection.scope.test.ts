@@ -123,6 +123,13 @@ describe('applying a result to a selection', () => {
     expect(await markdown(ed)).toBe('## New title')
   })
 
+  it('keeps the props of a fully selected block whose result changes them but not the type', async () => {
+    const ed = mount([{ id: 'h', type: 'heading', props: { level: 2 }, content: 'Old title' }])
+    select(ed, pos(ed, 'h', 'Old title'), pos(ed, 'h', 'Old title') + 'Old title'.length)
+    await prompt(ed, operationsTransport([{ type: 'update', id: 'h$', block: '<h3>New title</h3>' }]), 'demote', true)
+    expect(await markdown(ed)).toBe('### New title')
+  })
+
   it('converts a fully selected block when the result deliberately changes its type', async () => {
     const ed = mount([{ id: 'p', type: 'paragraph', content: 'Make me a heading' }])
     select(ed, pos(ed, 'p', 'Make'), pos(ed, 'p', 'heading') + 'heading'.length)

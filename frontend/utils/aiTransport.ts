@@ -663,7 +663,7 @@ async function runSendMessages(
            *  streamed live; Path A flushes now). */
           const meaningfulOps = accepted
             ? emitToolCalls
-                .map((tc: any) => filterMeaningfulOperations(editor, tc))
+                .map((tc: any) => filterMeaningfulOperations(editor, tc, scope.selectedBlocks))
                 .filter(Boolean)
             : [];
           if (useTools || meaningfulOps.length > 0 || emitToolCalls.length > 0) {

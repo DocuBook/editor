@@ -105,7 +105,17 @@ describe('text-mode output gate', () => {
   })
 
   it('reports a payload that changes nothing as parsed with no input', async () => {
-    const result = await groundTextOutput(editor(), '<content>text b</content>', { selectedBlocks: [{ id: 'b', type: 'paragraph' }] })
+    const scope = { selectedBlocks: [{ id: 'b', type: 'paragraph', content: [{ type: 'text', text: 'text b' }] }] }
+    const result = await groundTextOutput(editor(), '<content>text b</content>', scope)
     expect(result).toMatchObject({ payload: 'text b', parsed: true, input: null })
+  })
+
+  it('judges "changes nothing" against the selected part of a block, not the whole block', async () => {
+    // The model was shown the cut block (`b` out of "text b"); echoing it is a no-op,
+    // even though the whole editor block reads differently.
+    const scope = { selectedBlocks: [{ id: 'b', type: 'paragraph', content: [{ type: 'text', text: 'b' }] }] }
+    expect(await groundTextOutput(editor(), '<content>b</content>', scope)).toMatchObject({ parsed: true, input: null })
+    const changed = await groundTextOutput(editor(), '<content>B</content>', scope)
+    expect(changed.input.operations).toEqual([{ type: 'update', id: 'b$', block: '<p>B</p>' }])
   })
 })

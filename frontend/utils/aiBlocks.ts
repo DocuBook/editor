@@ -79,9 +79,11 @@ function blockInlineRange(doc: any, blockId: string): { from: number; to: number
  * part. Returns false when the selection does not own this write, and the
  * caller applies the operation to the whole block instead:
  * - the block is not part of the selection, or has no inline content;
- * - the block is fully selected and the result deliberately changes its type
- *   (a paragraph turned into a heading). A plain paragraph keeps the original
- *   type, like Path B's `inheritFormatOnReplace`;
+ * - the block is fully selected and the result is not a plain paragraph: the
+ *   type (a paragraph turned into a heading) or the props (an h2 turned into
+ *   an h3, a code block's language) are deliberate, and only a whole-block
+ *   write keeps them. A plain paragraph keeps the original type, like Path
+ *   B's `inheritFormatOnReplace`;
  * - a delete of a fully selected block (the block itself goes).
  * Throws when the selection is stale or the result cannot fill a text range.
  */
@@ -101,7 +103,7 @@ export function replaceSelectedBlockContent(editor: any, blockId: string, block:
   const to = Math.max(from, Math.min(range.to, Math.max(snapshot.anchor, snapshot.head)));
   const whole = from <= range.from && to >= range.to;
   if (block === null && whole) return false;
-  if (whole && block?.type && block.type !== "paragraph" && block.type !== original.type) return false;
+  if (whole && block?.type && block.type !== "paragraph") return false;
   const content = block === null ? [] : block?.content;
   if (!(typeof content === "string" || Array.isArray(content))) {
     if (whole) return false;
@@ -730,12 +732,18 @@ function sanitizeBlockHtml(editor: any, html: unknown): string | null {
   }
 }
 
+/** `scopeBlocks` are a selection request's cut blocks: the model was shown
+ *  only the selected part of a block, so a result is compared against that
+ *  part, not the whole editor block, or an echo of a partial selection would
+ *  count as a change. */
 function updateIsMeaningful(
   editor: any,
   op: any,
+  scopeBlocks?: readonly any[],
 ): { meaningful: boolean; block: string } | null {
   if (!op?.id || typeof op.block !== "string") return null;
-  const current = findBlock(editor, op.id);
+  const clean = stripSuffix(op.id);
+  const current = scopeBlocks?.find((block) => block?.id === clean) ?? findBlock(editor, op.id);
   if (!current || typeof editor?.blocksToHTMLLossy !== "function") return null;
   const requestedHtml = sanitizeBlockHtml(editor, op.block);
   if (requestedHtml === null) return null;
@@ -753,12 +761,14 @@ function updateIsMeaningful(
 }
 
 /** Remove operations that cannot change current document state. Returns cloned
- *  tool call so mixed meaningful/no-op calls keep only effective operations. */
-export function filterMeaningfulOperations(editor: any, tc: any): any | null {
+ *  tool call so mixed meaningful/no-op calls keep only effective operations.
+ *  `scopeBlocks` (a selection request's cut blocks) are what an update is
+ *  compared against; without them the whole editor block is. */
+export function filterMeaningfulOperations(editor: any, tc: any, scopeBlocks?: readonly any[]): any | null {
   if (!isMeaningfulOps(tc)) return null;
   const operations = tc.input.operations.flatMap((op: any) => {
     if (op?.type === "update") {
-      const result = updateIsMeaningful(editor, op);
+      const result = updateIsMeaningful(editor, op, scopeBlocks);
       return result?.meaningful ? [{ ...op, block: result.block }] : [];
     }
     if (op?.type === "delete") {

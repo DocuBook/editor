@@ -590,6 +590,28 @@ describe("filterMeaningfulOperations", () => {
     expect(result?.input.operations).toHaveLength(1);
   });
 
+  it("compares an update against the scope's cut block when one is given", () => {
+    // A selection of "content" out of "Existing content": the model saw only the
+    // cut, so echoing it changes nothing even though the whole block differs.
+    const scope = [
+      {
+        id: "f420cd68-9d89-46dc-9782-d1d973af1471",
+        type: "paragraph",
+        content: [{ type: "text", text: "content" }],
+      },
+    ];
+    const update = (block: string) => ({
+      input: {
+        operations: [
+          { type: "update", id: "f420cd68-9d89-46dc-9782-d1d973af1471$", block },
+        ],
+      },
+    });
+    expect(filterMeaningfulOperations(editor, update("<p>content</p>"), scope)).toBeNull();
+    expect(filterMeaningfulOperations(editor, update("<p>content</p>"))?.input.operations).toHaveLength(1);
+    expect(filterMeaningfulOperations(editor, update("<p>CONTENT</p>"), scope)?.input.operations).toHaveLength(1);
+  });
+
   it("does not pass script-like HTML through operation output", () => {
     const result = filterMeaningfulOperations(editor, {
       input: {
