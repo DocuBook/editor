@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Check, Loader, RefreshCw } from 'lucide-react'
-import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
-import { resolveProbeModel, ensureToolProbe, parseProbeResult, recordToolProbe, resetToolProbeBackoff } from '../../utils/aiProbe'
+import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, adoptBackendEndpoints, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
+import { resolveProbeModel, parseProbeResult, recordToolProbe, resetToolProbeBackoff } from '../../utils/aiProbe'
 import { fetchProviderModels } from '../../utils/modelDiscovery'
 import { FORM_DIVIDER_CLASS, FORM_DIVIDER_FIRST_CLASS } from './SettingsSection'
 import { PROVIDERS } from '../../data/providers'
@@ -124,7 +124,12 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
     setBackendLoading(false)
     if (!settings) return
     setBackendCfg(settings)
-    setSavedProviders(settings.savedProviders)
+    /** The store adopts the payload's provider rows too, not just the saved list:
+     *  a save/revoke here is the one backend write that app-root hydration (boot
+     *  and window focus) does not follow, so a provider saved this session must
+     *  get its default model into the store now — the picker's only fallback row
+     *  for it — rather than when the window is next refocused. */
+    adoptBackendEndpoints(settings)
   }
   /* oxlint-disable react/set-state-in-effect -- initial async load from the backend */
   useEffect(() => { void refreshBackend() }, [])
@@ -138,9 +143,8 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
    *  runs once for the whole surface. */
   const envCustom = customCfg?.source === 'env'
   const envCustomRef = useRef(envCustom)
-  /** Latest-value refs for async probes: synced after commit (never during
-   *  render) and read only from callbacks. Declared before the auto-probe
-   *  effect so the refs are fresh when it runs. */
+  /** Latest-value refs for the async save/test handlers: synced after commit
+   *  (never during render) and read only from callbacks. */
   useEffect(() => {
     keyInputRef.current = keyInput
     baseUrlInputRef.current = baseUrlInput
@@ -153,27 +157,12 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   const configured = hasBackendKey(backendCfg, provider)
   const locked = configured || envCustom
   const stored = lockedEndpoint(backendCfg, provider, isCustomProvider(provider))
-  /** Bumped after an explicit write so the auto-probe effect re-runs: a freshly
-   *  saved endpoint has no measurement yet, and the effect's own dependencies
-   *  (model/url) may not have changed since the save. */
-  const [probeTick, setProbeTick] = useState(0)
-
   /** This provider's own stored model. For the ACTIVE provider the store's `model`
    *  IS this value (kept in sync); for another form on the page it is that
    *  provider's row. Reading per-provider keeps every form on its own model: the
-   *  live `model` belongs to the active provider only, and probing or saving
-   *  another provider with it sent that provider a model it does not serve. */
+   *  live `model` belongs to the active provider only, and saving another
+   *  provider with it sent that provider a model it does not serve. */
   const providerModel = models[provider] || (useAiSettings.getState().provider === provider ? model : '') || ''
-
-  /** Auto-probe THIS provider's model when it has no stored probe yet: unmeasured
-   *  runs text-only. `ensureToolProbe` shares one request per provider+model with
-   *  the composer and the transport, and probes with the backend's stored key
-   *  and endpoint — only a CONFIGURED provider has a key to probe with. */
-  useEffect(() => {
-    if (!provider || !configured) return
-    const probeModel = resolveProbeModel(provider, providerModel, envCustom ? customCfg?.model : undefined)
-    if (probeModel) void ensureToolProbe(provider, probeModel)
-  }, [providerModel, provider, configured, envCustom, customCfg?.model, probeTick])
 
   /** Runtime model discovery lives in the composer's model picker, not here: the
    *  model is ONE setting with ONE UI, so the form renders NO model control. */
@@ -272,9 +261,6 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
        *  model this provider runs is measured right away. */
       resetToolProbeBackoff()
       setKeyInput('')
-      // Re-run the model-switch probe effect: a just-saved endpoint has no
-      // measurement, and its inputs (model/url) may not have changed at all.
-      setProbeTick(t => t + 1)
       if (tools !== undefined) {
         toast.success(tools === true ? 'API key saved - tool call' : 'API key saved - text-only')
       } else {
@@ -308,7 +294,7 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
         return
       }
       // Test ONLY checks connectivity — it does not measure or persist tool-call
-      // support (that's handleSave's probe and the model-switch effect).
+      // support: that happens when the key is saved, and on a composer pick.
       await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: keyInput })
       toast.success('Connection OK')
     } catch (e) {

@@ -68,7 +68,7 @@ beforeEach(() => {
   backend.custom = { source: 'file', baseUrl: '', hasKey: false, model: '' }
   useAiSettings.setState({
     provider: '', model: '', apiKey: '', savedProviders: [],
-    apiKeys: {}, models: {}, baseUrls: {}, probeTools: {},
+    apiKeys: {}, models: {}, baseUrls: {}, probeTools: {}, defaultModels: {},
   })
   useSettings.setState({ open: true, section: 'ai-provider' })
   invoke.mockReset()
@@ -465,6 +465,32 @@ describe('SettingsPane — save', () => {
     expect(buttonsIn('opencode-go')).toContain('Revoke')
   })
 
+  /** The default model the backend now holds must reach the store from the
+   *  save's own re-read: app-root hydration runs on boot and window focus only,
+   *  so until then the picker had no fallback row for a provider saved this
+   *  session when its live model list failed. */
+  it('puts the saved default model into the store without waiting for a focus hydration', async () => {
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    const key = inSection('opencode-go', 'API Key')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(key, 'sk-new-key')
+      key.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    configure('opencode-go', { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'deepseek-v4-flash' })
+    act(() => sectionOf('opencode-go').querySelector<HTMLButtonElement>('button.px-3\\.5')!.click())
+    await settle()
+
+    const state = useAiSettings.getState()
+    expect(state.defaultModels['opencode-go']).toBe('deepseek-v4-flash')
+    expect(state.models['opencode-go']).toBe('deepseek-v4-flash')
+    expect(state.baseUrls['opencode-go']).toBe('https://opencode.ai/zen/go/v1')
+    expect(state.savedProviders).toEqual(['opencode-go'])
+  })
+
   /** Each form saves ITS provider with ITS model. The active provider's live
    *  model belongs to another provider; validating a second provider's key with
    *  it sent `deepseek` an OpenCode model, failed, and blamed the key. */
@@ -499,9 +525,10 @@ describe('SettingsPane — save', () => {
     expect(invoke.mock.calls.filter(c => c[0] === 'set_probe').map(c => c[1])).toEqual([{ provider: 'deepseek', model: 'deepseek-chat', tools: true }])
   })
 
-  /** Every configured provider form auto-probes ITS OWN model. The active model
-   *  belongs to the active provider only. */
-  it('auto-probes each configured provider with that provider\'s model', async () => {
+  /** A probe runs when a default model is SAVED and when the composer picks a
+   *  model — never because Settings was opened. Opening it must not spend
+   *  provider calls re-measuring what the backend already reported. */
+  it('does not probe configured providers just because Settings opened', async () => {
     configure('deepseek', { model: 'deepseek-chat', probes: {} })
     backend.endpoints['opencode-go'] = { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'go-model', probes: { 'go-model': true }, hasKey: true }
     backend.savedProviders = ['opencode-go', 'deepseek']
@@ -509,8 +536,8 @@ describe('SettingsPane — save', () => {
     useAiSettings.setState({ provider: 'opencode-go', model: 'go-model', models: { 'opencode-go': 'go-model', 'deepseek': 'deepseek-chat' }, savedProviders: ['opencode-go', 'deepseek'], probeTools: { 'opencode-go': { 'go-model': true } } })
     await render()
 
-    const probes = invoke.mock.calls.filter(c => c[0] === 'test_connection').map(c => [c[1].provider, c[1].model])
-    expect(probes).toEqual([['deepseek', 'deepseek-chat']])
+    expect(invoke.mock.calls.map(c => c[0])).not.toContain('test_connection')
+    expect(invoke.mock.calls.map(c => c[0])).not.toContain('set_probe')
   })
 
   /** A live composer pick is newer than the fetch this form rendered from, so the

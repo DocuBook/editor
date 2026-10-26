@@ -9,10 +9,12 @@
  * 1. Env-controlled custom endpoints (DB_OPENAI_COMPAT_*): the probe is keyed
  *    by the ENV model (the one the backend actually uses), not whatever the UI
  *    happens to hold.
- * 2. Unmeasured means text-only, for every provider. A newly selected model —
- *    a composer pick, a Settings save, a hydrated selection — is therefore
- *    measured by `ensureToolProbe`, one request per provider+model at a time,
- *    so the transport never silently runs a tool-capable model as text-only.
+ * 2. Unmeasured means text-only, for every provider.
+ * 3. A probe runs at exactly two moments: when Settings saves a provider's
+ *    default model (measured with the key being saved), and when the composer
+ *    picks a model (`ensureToolProbe`). The backend persists both, and
+ *    hydration hands them to every session. Nothing else starts a probe: the
+ *    transport only waits for one already running (`pendingToolProbe`).
  */
 import { invoke } from '../lib/ipc'
 import { CUSTOM_PROVIDER_ID, useAiSettings } from '../stores/aiSettings'
@@ -87,9 +89,14 @@ const probesInFlight = new Map<string, Promise<boolean | undefined>>()
 const PROBE_RETRY_AFTER_MS = 60_000
 const probeFailedAt = new Map<string, number>()
 
+/** The probe of `provider`+`model` that is running right now, if any. */
+export function pendingToolProbe(provider: string, model: string): Promise<boolean | undefined> | undefined {
+  return probesInFlight.get(`${provider}\u0000${model}`)
+}
+
 /** Measured tool support for a configured provider+model, probing it once when
- *  unmeasured. Concurrent callers (the composer pick, the Settings form, the
- *  transport) share one request per pair. The probe runs with the backend's
+ *  unmeasured. Called for a composer pick; repeated picks of the same pair share
+ *  one request. The probe runs with the backend's
  *  stored key and endpoint (empty key/URL), so it measures exactly what chat
  *  will send. Resolves `undefined` when the pair cannot be measured now. */
 export function ensureToolProbe(provider: string, model: string): Promise<boolean | undefined> {
