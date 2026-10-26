@@ -186,7 +186,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ammonia",
  "base64",
