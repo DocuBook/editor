@@ -17,6 +17,7 @@ import { PROVIDERS } from '../../data/providers'
 import { CUSTOM_PROVIDER_ID } from '../../stores/aiSettings'
 import { getAiConfig } from '../../utils/aiConfig'
 import { ensureToolProbe } from '../../utils/aiProbe'
+import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 
 type TreeEntry = MentionEntry
 
@@ -137,6 +138,10 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  flag alone let the window listener tear the menu down mid-composition and
    *  wedge the keyboard (the crash reported from a phone IME). */
   const composingRef = useRef(false)
+  /** Enter sends only where a hardware keyboard is the norm. On a phone or
+   *  tablet the on-screen keyboard has no Shift+Enter, so its Return key is the
+   *  only way to start a new line; the send button (arrow up) sends. */
+  const enterSends = useMemo(() => !softKeyboardOnFocus(), [])
   /** When the last composition committed. A ref, not an effect-local: the
    *  keydown effect re-mounts on every picker/menu change and must not forget
    *  the commit it is still guarding. */
@@ -524,9 +529,9 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
           if (picker && event.key === 'Enter' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
           if (picker && event.key === 'Tab' && activeEntry) { event.preventDefault(); insertMention(activeEntry); return }
           if (event.key === 'Backspace' && !input && mentions.length) { event.preventDefault(); removeMention(mentions[mentions.length - 1]); return }
-          if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && hasInput && promptEnabled) { event.preventDefault(); submit() }
-        }} rows={1} role="combobox" aria-label="AI prompt" aria-expanded={pickerOpen} aria-controls={pickerOpen ? MENTION_LISTBOX_ID : undefined} aria-autocomplete="list" aria-activedescendant={pickerOpen && activeEntry ? optionId(activeIndex) : undefined} disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? 'Enter to send · Shift+Enter for new line' : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
-        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? 'Send prompt (Enter)' : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <Maximize2 size={16} />}</button>}
+          if (event.key === 'Enter' && enterSends && !event.shiftKey && !event.metaKey && !event.ctrlKey && hasInput && promptEnabled) { event.preventDefault(); submit() }
+        }} rows={1} enterKeyHint={enterSends ? 'send' : 'enter'} role="combobox" aria-label="AI prompt" aria-expanded={pickerOpen} aria-controls={pickerOpen ? MENTION_LISTBOX_ID : undefined} aria-autocomplete="list" aria-activedescendant={pickerOpen && activeEntry ? optionId(activeIndex) : undefined} disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? (enterSends ? 'Enter to send · Shift+Enter for new line' : 'Return for new line · arrow button to send') : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
+        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? (enterSends ? 'Send prompt (Enter)' : 'Send prompt') : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <Maximize2 size={16} />}</button>}
       </div>
       <div className="relative flex justify-end px-2 pb-2">
         {modelPicker}
