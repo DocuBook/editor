@@ -142,17 +142,17 @@ editor/
 
 **DRY mapping — the commit subject IS the changelog line.** Each type maps 1:1 to a CHANGELOG category; a release section is assembled by grouping the merged PR subjects by type (no rewriting):
 
-| Type       | CHANGELOG category   | Usage                                     |
-| ---------- | -------------------- | ----------------------------------------- |
-| `feat`     | 🚀 Features          | new feature                               |
-| `fix`      | 🐛 Bug Fixes         | bug fix                                   |
-| `security` | 🛡️ Security          | security hardening / audit                |
-| `perf`     | ⚡ Performance       | performance optimization                  |
-| `refactor` | 🔄 Refactor          | structural change without behavior change |
-| `docs`     | 📚 Documentation     | documentation (README, CONTRIBUTING)      |
-| `test`     | 🧪 Testing & CI      | test suite / test tooling                 |
-| `ci`       | 🔧 CI                | CI / pipeline                             |
-| `chore`    | 🔄 Version / Hygiene | maintenance (release, deps)               |
+| Type       | CHANGELOG category | Usage                                     |
+| ---------- | ------------------ | ----------------------------------------- |
+| `feat`     | Features           | new feature                               |
+| `fix`      | Bug Fixes          | bug fix                                   |
+| `security` | Security           | security hardening / audit                |
+| `perf`     | Performance        | performance optimization                  |
+| `refactor` | Refactor           | structural change without behavior change |
+| `docs`     | Documentation      | documentation (README, CONTRIBUTING)      |
+| `test`     | Testing & CI       | test suite / test tooling                 |
+| `ci`       | CI                 | CI / pipeline                             |
+| `chore`    | Version / Hygiene  | maintenance (release, deps)               |
 
 - **Scope** is optional and may contain lowercase letters, digits, dots, or hyphens: `fix(docker):`, `ci(release):`, `feat(theme):`
 - **Subject** should be concise, imperative, and lowercase because it becomes the changelog line
