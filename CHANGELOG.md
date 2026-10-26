@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.5.1](https://github.com/DocuBook/editor/compare/v0.5.0...v0.5.1) (2026-10-26)
+## v0.5.1 — 2026-10-26
 
 
 ### Bug Fixes
