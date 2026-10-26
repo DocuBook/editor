@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.0](https://github.com/DocuBook/editor/compare/v0.4.2...v0.5.0) (2026-10-26)
+
+
+### ⚠ BREAKING CHANGES
+
+* **ai:** remove MCP context servers; the built-in web_search and web_fetch tools are rust-ai's only context tools, and stored MCP tokens are deleted
+
+### 🚀 Features
+
+* **ai:** built-in web_search and web_fetch tools for rust-ai (MCP replacement, part 1) ([#338](https://github.com/DocuBook/editor/issues/338)) ([7db1306](https://github.com/DocuBook/editor/commit/7db130666026fa610117b0d37ca8c59d012b9d35))
+* **ai:** list live provider models in grouped picker; probe only on save and pick ([#346](https://github.com/DocuBook/editor/issues/346)) ([d18080d](https://github.com/DocuBook/editor/commit/d18080d27ad5e85c0b675b38d32397d1f5b43308))
+
+
+### 🐛 Bug Fixes
+
+* **ai:** keep Path B a Markdown-only edit path that never carries tool calls ([#344](https://github.com/DocuBook/editor/issues/344)) ([de09ff9](https://github.com/DocuBook/editor/commit/de09ff98b3b574e5246ef440ab5dc4760c9b6d71))
+* **ai:** measure tool support for the model each path really sends, and read linked pages for Path B ([#345](https://github.com/DocuBook/editor/issues/345)) ([4435cee](https://github.com/DocuBook/editor/commit/4435cee3a7e5c391ea3744b49feff9e6da959848))
+* **ai:** one selection scope for both edit paths, and grounding in one helper per mode ([#347](https://github.com/DocuBook/editor/issues/347)) ([46fce12](https://github.com/DocuBook/editor/commit/46fce12fe2eb01faac4a51f564c1547a4ba36ae7))
+* **ai:** stop a text-selection prompt from hijacking the next prompt ([#336](https://github.com/DocuBook/editor/issues/336)) ([1d54183](https://github.com/DocuBook/editor/commit/1d54183986fc522eca10934d8d69ceb28bcd50a0))
+
+
+### ⚡ Performance
+
+* **ai:** remove races and stalls between the prompt, stream and apply layers ([#343](https://github.com/DocuBook/editor/issues/343)) ([fd51070](https://github.com/DocuBook/editor/commit/fd5107021f535a18ef97e311a0c09835e0bd15ce))
+
+
+### 🔄 Refactor
+
+* **ai:** remove MCP context servers; the built-in web_search and web_fetch tools are rust-ai's only context tools, and stored MCP tokens are deleted ([4869933](https://github.com/DocuBook/editor/commit/4869933506e355e31ede8e4cf01e20076ce455be))
+* remove dead code left after the MCP removal and the Safari 15.4 floor ([#340](https://github.com/DocuBook/editor/issues/340)) ([e91cd1f](https://github.com/DocuBook/editor/commit/e91cd1faf59e0fb5a04ad17b82ca811657e30e54))
+
+
+### 🔧 CI
+
+* **e2e:** stop a hung suite from holding a job for 6 hours; screenshots only on failure ([#348](https://github.com/DocuBook/editor/issues/348)) ([8f2f502](https://github.com/DocuBook/editor/commit/8f2f50268c03516e908249045852341a3d6ab21b))
+
 ## v0.4.2 — 2026-10-25
 
 
