@@ -13,6 +13,9 @@ vi.mock('../../../frontend/utils/aiMenu', () => ({
   ],
 }))
 
+const softKeyboard = vi.hoisted(() => ({ onFocus: false }))
+vi.mock('../../../frontend/utils/softKeyboard', () => ({ softKeyboardOnFocus: () => softKeyboard.onFocus }))
+
 import AiFloatingChat from '../../../frontend/components/editor/AiFloatingChat'
 import { useAiChat } from '../../../frontend/stores/aiChat'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
@@ -47,6 +50,7 @@ function makeAi(aiMenuState: any = 'closed') {
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
+  softKeyboard.onFocus = false
   root = createRoot(document.getElementById('root')!)
   useAiChat.setState({ expanded: false, input: '', focusRequest: 0, selectionPromptOpen: false })
   useAiSettings.setState({ provider: 'openai', savedProviders: ['openai'] })
@@ -418,6 +422,63 @@ describe('AI floating composer', () => {
     // A plain Enter still sends, so the guard cannot swallow the real key.
     act(() => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
     expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Tighten this paragraph', useSelection: false })
+  })
+
+  it('makes Return a new line on an on-screen keyboard and leaves sending to the arrow button', () => {
+    softKeyboard.onFocus = true
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    const textarea = document.querySelector('textarea')!
+    // The keyboard shows a Return key, not a Send key.
+    expect(textarea.getAttribute('enterkeyhint')).toBe('enter')
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'First line')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    // Not prevented: the browser inserts the line break.
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    act(() => textarea.dispatchEvent(enter))
+    expect(enter.defaultPrevented).toBe(false)
+    expect(ai.invokeAI).not.toHaveBeenCalled()
+
+    act(() => (document.querySelector('[aria-label="Send prompt"]') as HTMLButtonElement).click())
+    expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'First line', useSelection: false })
+  })
+
+  it('keeps Enter as send with a hardware keyboard', () => {
+    const ai = makeAi()
+    useEditorStore.setState({
+      blockEditor: {
+        getExtension: vi.fn(() => ai),
+        getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+        getSelection: vi.fn(() => undefined),
+      },
+    })
+
+    act(() => root!.render(<AiFloatingChat />))
+    const textarea = document.querySelector('textarea')!
+    expect(textarea.getAttribute('enterkeyhint')).toBe('send')
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Tighten this')
+      textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const shiftEnter = new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true })
+    act(() => textarea.dispatchEvent(shiftEnter))
+    expect(shiftEnter.defaultPrevented).toBe(false)
+    expect(ai.invokeAI).not.toHaveBeenCalled()
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+    act(() => textarea.dispatchEvent(enter))
+    expect(enter.defaultPrevented).toBe(true)
+    expect(ai.invokeAI).toHaveBeenCalledWith({ userPrompt: 'Tighten this', useSelection: false })
   })
 
   it('keeps the FAB prompt list out of selection mode', () => {
