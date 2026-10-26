@@ -77,18 +77,29 @@ pub struct SearchHit {
     pub published: Option<String>,
 }
 
+/// One pooled client for every search, so consecutive searches of a turn reuse
+/// the provider connection instead of repeating DNS, TCP and TLS setup. The
+/// request timeout is set per request; nothing else here is per-call state.
+fn shared_client() -> Result<reqwest::Client, ToolError> {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client.clone());
+    }
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .connect_timeout(CONNECT_TIMEOUT)
+        .build()
+        .map_err(|_| ToolError::unavailable("could not create the HTTP client"))?;
+    Ok(CLIENT.get_or_init(|| client).clone())
+}
+
 /// Run a search on the configured provider.
 pub async fn search(
     provider: &SearchProvider,
     request: &SearchRequest,
     cancelled: &mut watch::Receiver<bool>,
 ) -> Result<Vec<SearchHit>, ToolError> {
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(CONNECT_TIMEOUT)
-        .timeout(SEARCH_TIMEOUT)
-        .build()
-        .map_err(|_| ToolError::unavailable("could not create the HTTP client"))?;
+    let client = shared_client()?;
     let call = match provider {
         SearchProvider::Off => return Err(ToolError::unavailable("web search is off")),
         SearchProvider::Tavily { api_key } => client
@@ -102,7 +113,7 @@ pub async fn search(
         }
     };
     let response = tokio::select! {
-        response = call.send() => response.map_err(|error| {
+        response = call.timeout(SEARCH_TIMEOUT).send() => response.map_err(|error| {
             if error.is_timeout() {
                 ToolError::unavailable("the search provider timed out")
             } else {

@@ -31,6 +31,18 @@ export class IpcError extends Error {
 type Listener = (e: { payload: unknown }) => void
 const bus = new Map<string, Set<Listener>>()
 
+/** Events of an `ask_ai` stream. Both runtimes deliver them on the local bus:
+ *  web re-emits its SSE frames, desktop its per-request channel. They are never
+ *  global Tauri events, so a listener costs no IPC round trip and a stream only
+ *  reaches the window that asked for it. */
+const AI_STREAM_EVENTS = new Set(['ai:token', 'ai:generating', 'ai:tool_call', 'ai:tools_done', 'ai:done'])
+/** Last message of a desktop `ask_ai` channel (`AI_END_EVENT` in agent.rs). */
+const AI_END_EVENT = 'ai:end'
+/** How long a finished desktop `ask_ai` waits for its channel to drain. Channel
+ *  messages are ordered, but not against the command reply: a large tool call
+ *  travels by a separate fetch and can land after it. */
+const AI_CHANNEL_DRAIN_MS = 10_000
+
 function emit(event: string, payload: unknown) {
   bus.get(event)?.forEach(fn => fn({ payload }))
 }
@@ -46,7 +58,7 @@ function parseSseJson(value: string): unknown {
 
 /** Same signature as @tauri-apps/api/event.listen for the fields used by the UI. */
 export async function listen<T>(event: string, cb: (e: { payload: T }) => void): Promise<UnlistenFn> {
-  if (isTauri) {
+  if (isTauri && !AI_STREAM_EVENTS.has(event)) {
     const { listen } = await import('@tauri-apps/api/event')
     return listen<T>(event, cb)
   }
@@ -77,6 +89,10 @@ export async function invoke<T>(cmd: string, args?: Record<string, unknown>, sig
         return await invoke<T>(cmd, { ...args, requestId })
       }
       finally { signal?.removeEventListener('abort', onAbort) }
+    }
+    if (cmd === 'ask_ai') {
+      await askAiOverChannel(args ?? {})
+      return undefined as T
     }
     return invoke<T>(cmd, args)
   }
@@ -189,6 +205,25 @@ async function post(cmd: string, args: Record<string, unknown>, signal?: AbortSi
   }
 }
 
+/** Desktop ask_ai: events arrive on a channel owned by this request and are
+ *  re-emitted on the local bus, exactly like the web SSE frames. Resolves once
+ *  the command finished AND its channel delivered the end marker, so callers
+ *  that read the turn after `invoke` resolves never miss its last events. */
+async function askAiOverChannel(args: Record<string, unknown>) {
+  const { Channel, invoke } = await import('@tauri-apps/api/core')
+  let drained!: () => void
+  const end = new Promise<void>(resolve => { drained = resolve })
+  const channel = new Channel<{ event?: string; payload?: unknown }>(message => {
+    if (message?.event === AI_END_EVENT) drained()
+    else if (message?.event && AI_STREAM_EVENTS.has(message.event)) emit(message.event, message.payload)
+  })
+  await invoke('ask_ai', { ...args, onEvent: channel })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<void>(resolve => { timer = setTimeout(resolve, AI_CHANNEL_DRAIN_MS) })
+  await Promise.race([end, late])
+  clearTimeout(timer)
+}
+
 /** ask_ai streams SSE events from the server → re-emit on the local bus,
  *  resolve when the stream completes (mirrors the tauri emit flow). */
 async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
@@ -234,14 +269,25 @@ async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
     const payload = data.join('\n')
     arm()
     if (event === 'error') throw new Error(payload || 'AI request failed')
-    if (event !== 'ai:token' && event !== 'ai:generating' && event !== 'ai:tool_call' && event !== 'ai:tools_done' && event !== 'ai:done') return
+    if (!AI_STREAM_EVENTS.has(event)) return
     emit(event, parseSseJson(payload))
   }
+  /** Where the next frame-terminator search starts. A large frame (a tool call
+   *  carrying a whole document edit) arrives over many chunks; rescanning it
+   *  from the start on every chunk was quadratic in its size. Backing up by 3
+   *  keeps a terminator split across two chunks findable. */
+  let scanFrom = 0
+  const FRAME_END = /\r\n\r\n|\n\n|\r\r/g
   const takeFrame = () => {
-    const match = buf.match(/\r\n\r\n|\n\n|\r\r/)
-    if (!match || match.index === undefined) return null
+    FRAME_END.lastIndex = Math.max(0, scanFrom - 3)
+    const match = FRAME_END.exec(buf)
+    if (!match) {
+      scanFrom = buf.length
+      return null
+    }
     const frame = buf.slice(0, match.index)
     buf = buf.slice(match.index + match[0].length)
+    scanFrom = 0
     return frame
   }
   arm()

@@ -214,7 +214,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "config_set" => sync(state, cmd, args),
         "list_models" => probe::list_models(state, &s("provider"), &s("baseUrl"), &s("apiKey")).await,
         "context_tools" => {
-            web_tools::configure_or_disable(state);
+            configure_web_tools(state).await;
             let url_sources = web_tools::url_sources(&args);
             Ok(
                 serde_json::to_string(&rust_ai::context::discover(&s("requestId"), &url_sources).await?)
@@ -222,7 +222,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
             )
         }
         "call_context_tool" => {
-            web_tools::configure_or_disable(state);
+            configure_web_tools(state).await;
             let request_id = s("requestId");
             let context_id = s("contextId");
             let name = s("name");
@@ -815,6 +815,16 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 .map(|_| "null".into())
         }
         _ => Err(format!("Unknown command: {cmd}")),
+    }
+}
+
+/** Apply the web-tool settings before a tool dispatch. Reading keys.json (and
+ *  decrypting it) blocks, and parallel tool calls of a round would otherwise
+ *  each stall a runtime worker on it. */
+async fn configure_web_tools(state: &AppState) {
+    let st = state.clone();
+    if tokio::task::spawn_blocking(move || web_tools::configure_or_disable(&st)).await.is_err() {
+        let _ = rust_ai::web::set_config(Default::default());
     }
 }
 

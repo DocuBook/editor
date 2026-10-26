@@ -25,6 +25,7 @@ import {
   buildTaskFormattingRules,
   normalizeMarkdown,
   buildDocumentContext,
+  captureDocumentCursor,
   filterMeaningfulOperations,
   isDocumentOperationToolCall,
   latestUserText,
@@ -33,6 +34,7 @@ import {
 import { buildAiPrompt } from "./aiPrompt";
 import { parseMentions } from "./aiMentions";
 import { isTextOnly } from "./aiProbe";
+import { mapWithConcurrency } from "./concurrency";
 import { uuid } from "./uuid";
 import { collectUrlSources } from "./webTools";
 
@@ -50,6 +52,17 @@ const READ_CONTEXT_RESULT_TOOL = "read_context_result";
 const MAX_CONTEXT_PAGE_ROUNDS = 12;
 const MAX_CONTEXT_PAGE_CALLS = 12;
 const MAX_CONTEXT_PAGE_TOTAL_CHARS = 120_000;
+/** Context-tool calls of one round run side by side: a search and two page
+ *  fetches used to wait for each other (up to 20 s per fetch). Results still
+ *  enter the transcript, and the char budgets, in the model's call order. */
+const MAX_PARALLEL_CONTEXT_CALLS = 4;
+const CONTEXT_BUDGET_EXHAUSTED = "Context result budget exhausted.";
+
+/** A stream that is already finished. A bare `new ReadableStream()` never
+ *  closes, so a reader awaiting it after an early abort hung forever. */
+function closedStream(): ReadableStream<any> {
+  return new ReadableStream({ start: (controller) => controller.close() });
+}
 
 function untrustedContextResult(text: string, remainingChars: number): string {
   const limit = Math.max(0, Math.min(MAX_CONTEXT_TOOL_RESULT_CHARS, remainingChars));
@@ -118,7 +131,7 @@ async function runSendMessages(
   deps: AiTransportDeps,
 ): Promise<ReadableStream<any>> {
   const { messages, abortSignal, body } = args;
-  if (!messages.length || abortSignal?.aborted) return new ReadableStream();
+  if (!messages.length || abortSignal?.aborted) return closedStream();
   const config = await getAiConfig();
   /** Fallback: always resolve provider/model from store even if config incomplete (HMR-safe) */
   const st = useAiSettings.getState();
@@ -155,7 +168,7 @@ async function runSendMessages(
     const discovered = await invoke<any>("context_tools", { requestId: contextId, urlSources: collectUrlSources(messages) }, abortSignal).then((value) => {
       try { return typeof value === "string" ? JSON.parse(value) : value } catch { return [] }
     }).catch(() => []);
-    if (abortSignal?.aborted) return new ReadableStream();
+    if (abortSignal?.aborted) return closedStream();
     if (Array.isArray(discovered)) contextTools.push(...discovered);
     else if (Array.isArray(discovered?.result)) contextTools.push(...discovered.result);
   }
@@ -284,14 +297,19 @@ async function runSendMessages(
          *  turn buffered the whole reply and flushed it once at the end. */
         bufferText = useTools;
         /** Text-mode context (full markdown + selection) is only needed on Path B,
-         *  but a Path A turn may fall back into it. Building it up front (instead of
-         *  at the fallback site) keeps the selection read at its earliest, focused
-         *  point — resolving it after the first attempt can see a stale cursor. */
-        const docContext = buildDocumentContext(editor);
-        const sel = editor?.getSelection?.();
-        const selText = sel?.blocks?.length
-          ? editor.blocksToMarkdownLossy(sel.blocks)
-          : "";
+         *  but a Path A turn may fall back into it. The cursor is captured up front
+         *  — resolving it after the first attempt can see a stale cursor — while
+         *  the Markdown rendering of the whole document, the expensive part, waits
+         *  until a text-mode prompt actually needs it: tool mode never reads it. */
+        const cursor = captureDocumentCursor(editor);
+        let textContext: { docContext: string; selText: string } | undefined;
+        const ensureTextContext = () =>
+          (textContext ??= {
+            docContext: buildDocumentContext(editor, cursor),
+            selText: cursor.selection?.blocks?.length
+              ? editor.blocksToMarkdownLossy(cursor.selection.blocks)
+              : "",
+          });
         const userText = latestUserText(messages);
         const parsedMentions = parseMentions(userText);
         const mentionResult = parsedMentions.hasMentions
@@ -324,8 +342,6 @@ async function runSendMessages(
           messages,
           documentState,
           mentionContext,
-          documentMarkdown: docContext,
-          selectedMarkdown: selText,
           userText,
           taskRules,
         };
@@ -358,8 +374,11 @@ async function runSendMessages(
             pendingDelta = "";
             toolBuffer.length = 0;
             streamTruncated = false;
+            const text = useTools ? undefined : ensureTextContext();
             const msgs = buildAiPrompt({
               ...basePrompt,
+              documentMarkdown: text?.docContext ?? "",
+              selectedMarkdown: text?.selText ?? "",
               mode: useTools ? ("tool" as const) : ("text" as const),
               retryFeedback: errorFeedback,
             }).messages;
@@ -375,8 +394,8 @@ async function runSendMessages(
                 mode: useTools ? "tool" : "text",
                 documentStateBytes: JSON.stringify(documentState ?? {}).length,
                 mentionContextChars: JSON.stringify(mentionContext ?? {}).length,
-                documentMarkdownChars: docContext.length,
-                selectedMarkdownChars: selText.length,
+                documentMarkdownChars: text?.docContext.length ?? 0,
+                selectedMarkdownChars: text?.selText.length ?? 0,
                 promptChars: msgs.reduce((total, message) => total + String(message.content ?? "").length, 0),
                 messageCount: msgs.length,
                 attempt: attempts + 1,
@@ -430,27 +449,34 @@ async function runSendMessages(
                 };
               });
               toolTranscript.push({ role: "assistant", content: null, tool_calls: providerToolCalls });
-              for (const toolCall of contextCalls) {
-                if (abortSignal?.aborted) return;
-                let result: string;
-                const pageRead = isPageRead(toolCall);
-                const usedChars = pageRead ? contextPageChars : contextToolChars;
-                const totalChars = pageRead ? MAX_CONTEXT_PAGE_TOTAL_CHARS : MAX_CONTEXT_TOOL_TOTAL_CHARS;
-                if (!contextToolNames.has(String(toolCall.toolName ?? ""))) {
-                  result = "Context tool is not available.";
-                } else if (usedChars >= totalChars) {
-                  result = "Context result budget exhausted.";
-                } else {
-                  try {
-                    result = deps.executeContextTool
-                      ? await deps.executeContextTool(toolCall.toolName, toolCall.input, abortSignal)
-                      : await invoke<string>("call_context_tool", { requestId: currentRequestId, contextId, name: toolCall.toolName, input: toolCall.input }, abortSignal);
-                  } catch (error) {
-                    if (abortSignal?.aborted) throw error;
-                    result = "Context tool execution failed.";
-                  }
+              const budgetFor = (pageRead: boolean) => ({
+                used: pageRead ? contextPageChars : contextToolChars,
+                total: pageRead ? MAX_CONTEXT_PAGE_TOTAL_CHARS : MAX_CONTEXT_TOOL_TOTAL_CHARS,
+              });
+              const requestId = currentRequestId;
+              const results = await mapWithConcurrency(contextCalls, MAX_PARALLEL_CONTEXT_CALLS, async (toolCall: any) => {
+                if (abortSignal?.aborted) return "";
+                if (!contextToolNames.has(String(toolCall.toolName ?? ""))) return "Context tool is not available.";
+                const { used, total } = budgetFor(isPageRead(toolCall));
+                if (used >= total) return CONTEXT_BUDGET_EXHAUSTED;
+                try {
+                  return deps.executeContextTool
+                    ? await deps.executeContextTool(toolCall.toolName, toolCall.input, abortSignal)
+                    : await invoke<string>("call_context_tool", { requestId, contextId, name: toolCall.toolName, input: toolCall.input }, abortSignal);
+                } catch (error) {
+                  if (abortSignal?.aborted) throw error;
+                  return "Context tool execution failed.";
                 }
-                const content = untrustedContextResult(result, totalChars - usedChars);
+              });
+              if (abortSignal?.aborted) return;
+              /** Budgets are charged in call order, exactly as when the calls ran
+               *  one by one: a result that arrives after earlier ones spent the
+               *  budget is reported as exhausted rather than squeezed in. */
+              contextCalls.forEach((toolCall: any, index: number) => {
+                const pageRead = isPageRead(toolCall);
+                const { used, total } = budgetFor(pageRead);
+                const result = used >= total ? CONTEXT_BUDGET_EXHAUSTED : results[index];
+                const content = untrustedContextResult(result, total - used);
                 if (pageRead) contextPageChars += content.length;
                 else contextToolChars += content.length;
                 toolTranscript.push({
@@ -458,7 +484,7 @@ async function runSendMessages(
                   tool_call_id: toolCall.providerToolCallId,
                   content,
                 });
-              }
+              });
               pendingDelta = "";
               if (abortSignal?.aborted) return;
               continue;

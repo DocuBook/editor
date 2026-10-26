@@ -25,7 +25,7 @@ pub const READ_CONTEXT_RESULT_TOOL: &str = "read_context_result";
 
 pub const UNTRUSTED_REFERENCE_TYPE: &str = "untrusted_reference_data";
 
-static CONTEXT_CALLS: OnceLock<Mutex<HashMap<String, Arc<watch::Sender<bool>>>>> = OnceLock::new();
+static CONTEXT_CALLS: OnceLock<Mutex<CallRegistry>> = OnceLock::new();
 static STORED_RESULTS: OnceLock<Mutex<ResultStore>> = OnceLock::new();
 
 #[derive(Default)]
@@ -89,31 +89,72 @@ fn new_result_handle() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// Active context-tool calls, by AI round (`request_id`). A round may run its
+/// calls in parallel, so every call of a round shares one cancel sender and the
+/// slot lives until the last of them finishes.
+#[derive(Default)]
+struct CallRegistry {
+    active: HashMap<String, CallSlot>,
+    /// Rounds Stop already cancelled: a call that arrives afterwards (it was
+    /// sent in parallel and lost the race to the Stop) starts cancelled.
+    cancelled: crate::rust_ai::requests::Tombstones,
+}
+
+struct CallSlot {
+    sender: Arc<watch::Sender<bool>>,
+    calls: usize,
+}
+
 /// Lock the active-call registry, recovering from poisoning. The map only ever
 /// holds whole entries, so a recovered guard is still sound; returning an error
 /// here would silently disable Stop for an already-running request.
-fn calls() -> MutexGuard<'static, HashMap<String, Arc<watch::Sender<bool>>>> {
+fn calls() -> MutexGuard<'static, CallRegistry> {
     CONTEXT_CALLS
-        .get_or_init(|| Mutex::new(HashMap::new()))
+        .get_or_init(|| Mutex::new(CallRegistry::default()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn register_call(request_id: &str, sender: Arc<watch::Sender<bool>>) -> Result<(), String> {
-    let mut calls = calls();
-    if calls.contains_key(request_id) {
-        return Err("Context-tool request is already active".into());
-    }
-    calls.insert(request_id.to_string(), sender);
-    Ok(())
+/// One registered call. Dropping it — on completion, or when the caller's
+/// future is dropped mid-call (the web client disconnected) — releases the
+/// call's share of the round's slot, so the registry cannot leak.
+struct CallGuard {
+    request_id: String,
+    sender: Arc<watch::Sender<bool>>,
 }
 
-/// Forget `request_id` only while it still maps to `sender`: a cancelled call
-/// that finishes late must not evict a newer call that reused the id.
-fn remove_call(request_id: &str, sender: &Arc<watch::Sender<bool>>) {
-    let mut calls = calls();
-    if calls.get(request_id).is_some_and(|current| Arc::ptr_eq(current, sender)) {
-        calls.remove(request_id);
+fn register_call(request_id: &str) -> (CallGuard, watch::Receiver<bool>) {
+    let mut registry = calls();
+    if registry.cancelled.contains(request_id) {
+        let (sender, receiver) = watch::channel(true);
+        let guard = CallGuard { request_id: request_id.to_string(), sender: Arc::new(sender) };
+        return (guard, receiver);
+    }
+    let slot = registry
+        .active
+        .entry(request_id.to_string())
+        .or_insert_with(|| CallSlot { sender: Arc::new(watch::channel(false).0), calls: 0 });
+    slot.calls += 1;
+    let receiver = slot.sender.subscribe();
+    let guard = CallGuard { request_id: request_id.to_string(), sender: Arc::clone(&slot.sender) };
+    (guard, receiver)
+}
+
+impl Drop for CallGuard {
+    /// Release only while the slot still belongs to this call's sender: a
+    /// cancelled round's late finish must not touch a newer slot.
+    fn drop(&mut self) {
+        let mut registry = calls();
+        let Some(slot) = registry.active.get_mut(&self.request_id) else {
+            return;
+        };
+        if !Arc::ptr_eq(&slot.sender, &self.sender) {
+            return;
+        }
+        slot.calls -= 1;
+        if slot.calls == 0 {
+            registry.active.remove(&self.request_id);
+        }
     }
 }
 
@@ -310,22 +351,28 @@ pub async fn invoke(
     if !crate::rust_ai::web::is_web_tool(name) {
         return Err("Context tool is not available".into());
     }
-    let (cancel, mut cancelled) = watch::channel(false);
-    let cancel = Arc::new(cancel);
-    register_call(request_id, Arc::clone(&cancel))?;
+    let (_call, mut cancelled) = register_call(request_id);
+    if *cancelled.borrow() {
+        return frame_result(&crate::rust_ai::web::cancelled_error().to_value());
+    }
     let context_id = if context_id.is_empty() { request_id } else { context_id };
     let outcome = crate::rust_ai::web::invoke(context_id, name, &input, &mut cancelled).await;
-    remove_call(request_id, &cancel);
     // Tool errors are answers for the model, not request failures.
     frame_result(&outcome.unwrap_or_else(|error| error.to_value()))
 }
 
+/// Cancel every call of the round `request_id`, including calls that arrive
+/// after this Stop.
 pub fn cancel(request_id: &str) {
+    if request_id.is_empty() {
+        return;
+    }
     // Recover from a poisoned lock instead of silently doing nothing: a panic
     // elsewhere must not turn Stop into a no-op for an already-running request.
-    let sender = calls().remove(request_id);
-    if let Some(sender) = sender {
-        let _ = sender.send(true);
+    let mut registry = calls();
+    registry.cancelled.insert(request_id);
+    if let Some(slot) = registry.active.remove(request_id) {
+        let _ = slot.sender.send(true);
     }
 }
 
@@ -459,15 +506,48 @@ mod tests {
         web::set_config(WebToolsConfig::default()).unwrap();
     }
 
+    #[test]
+    fn parallel_calls_of_one_round_share_cancellation() {
+        // A round may run its web calls in parallel; they used to be refused
+        // ("already active") after the first.
+        let (first, mut first_rx) = register_call("parallel-round");
+        let (second, mut second_rx) = register_call("parallel-round");
+        assert_eq!(calls().active["parallel-round"].calls, 2);
+        cancel("parallel-round");
+        assert!(*first_rx.borrow_and_update());
+        assert!(*second_rx.borrow_and_update());
+        drop((first, second));
+        assert!(!calls().active.contains_key("parallel-round"));
+    }
+
+    #[test]
+    fn the_slot_lives_until_the_last_call_of_the_round_finishes() {
+        let (first, _) = register_call("slot-round");
+        let (second, mut second_rx) = register_call("slot-round");
+        drop(first);
+        assert!(calls().active.contains_key("slot-round"));
+        cancel("slot-round");
+        assert!(*second_rx.borrow_and_update());
+        drop(second);
+        assert!(!calls().active.contains_key("slot-round"));
+    }
+
+    #[test]
+    fn a_call_that_arrives_after_stop_starts_cancelled() {
+        cancel("late-round");
+        let (_guard, receiver) = register_call("late-round");
+        assert!(*receiver.borrow());
+        assert!(!calls().active.contains_key("late-round"));
+    }
+
     #[tokio::test]
-    async fn duplicate_context_requests_do_not_replace_cancellation_sender() {
-        let (first, _receiver) = watch::channel(false);
-        let first = Arc::new(first);
-        register_call("same-request", Arc::clone(&first)).unwrap();
-        let (second, _receiver) = watch::channel(false);
-        assert!(register_call("same-request", Arc::new(second)).is_err());
-        cancel("same-request");
-        remove_call("same-request", &first);
+    async fn invoking_a_cancelled_round_answers_without_network_access() {
+        cancel("cancelled-round");
+        let framed = invoke("cancelled-round", "turn-x", crate::rust_ai::web::WEB_SEARCH_TOOL, json!({"query": "q"}))
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_str(&framed).unwrap();
+        assert_eq!(value["content"]["error"]["code"], "unavailable");
     }
 
     #[test]
@@ -478,29 +558,22 @@ mod tests {
         }));
         assert!(poisoned.is_err());
 
-        let (sender, mut receiver) = watch::channel(false);
-        let sender = Arc::new(sender);
-        register_call("poison-recovery", Arc::clone(&sender)).unwrap();
+        let (_guard, mut receiver) = register_call("poison-recovery");
         cancel("poison-recovery");
         assert!(*receiver.borrow_and_update());
-        remove_call("poison-recovery", &sender);
     }
 
     #[test]
-    fn late_finish_of_cancelled_call_does_not_evict_its_replacement() {
-        // Stop cancels request "reused" and frees its slot. A retry reuses the id
-        // before the stopped call has unwound; that call's late cleanup must not
-        // remove the retry's cancel sender, or the retry can no longer be stopped.
-        let (stale, _stale_rx) = watch::channel(false);
-        let stale = Arc::new(stale);
-        register_call("reused", Arc::clone(&stale)).unwrap();
-        cancel("reused");
-        let (fresh, mut fresh_rx) = watch::channel(false);
-        let fresh = Arc::new(fresh);
-        register_call("reused", Arc::clone(&fresh)).unwrap();
-        remove_call("reused", &stale);
-        cancel("reused");
+    fn late_finish_of_a_released_call_does_not_touch_a_newer_slot() {
+        // A call whose slot was already retired must not release a slot that
+        // a different sender now owns.
+        let (stale, _) = register_call("reused-round");
+        calls().active.remove("reused-round");
+        let (fresh, mut fresh_rx) = register_call("reused-round");
+        drop(stale);
+        assert_eq!(calls().active["reused-round"].calls, 1);
+        cancel("reused-round");
         assert!(*fresh_rx.borrow_and_update());
-        remove_call("reused", &fresh);
+        drop(fresh);
     }
 }

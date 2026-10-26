@@ -394,6 +394,134 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(output.input.operations[0].block).toContain('Grounded in source data')
   })
 
+  it('runs one round of context tools in parallel and records results in call order', async () => {
+    usePathA()
+    const requests: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const request = JSON.parse(String(init?.body ?? '{}'))
+      requests.push({ ...request, messages: JSON.parse(request.messages) })
+      const id = String(request.requestId ?? '')
+      const call = (index: number, toolName: string, input: string) => [
+        'event: ai:tool_call\n',
+        `data: {"requestId":"${id}","toolCallId":"tool-${index}","providerToolCallId":"p-${index}","toolName":"${toolName}","input":${input}}\n\n`,
+      ]
+      const frames = requests.length === 1
+        ? [...call(0, 'lookup_context', '{"query":"a"}'), ...call(1, 'lookup_context', '{"query":"b"}'), ...call(2, 'lookup_context', '{"query":"c"}')]
+        : call(0, 'applyDocumentOperations', '{"operations":[{"type":"update","id":"b1$","block":"<p>Done.</p>"}]}')
+      return new Response(sseStream([
+        ...frames,
+        'event: ai:tools_done\n', `data: {"requestId":"${id}"}\n\n`,
+        'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    let inFlight = 0
+    let maxInFlight = 0
+    // The first call is the slowest, so completion order differs from call order.
+    const delays: Record<string, number> = { a: 30, b: 10, c: 0 }
+    const executeContextTool = vi.fn(async (_name: string, input: any) => {
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise(resolve => setTimeout(resolve, delays[input.query]))
+      inFlight--
+      return `result ${input.query}`
+    })
+    const transport = createAiTransport({ getEditor: editor, executeContextTool, trustedContextTools: ['lookup_context'] })
+    const stream = await transport.sendMessages({
+      messages: [{ role: 'user', content: 'Use three lookups.' }],
+      body: { toolDefinitions: {
+        applyDocumentOperations: { description: 'Edit doc', inputSchema: {} },
+        lookup_context: { description: 'Look up', inputSchema: { type: 'object' } },
+      } },
+    })
+    const reader = stream.getReader()
+    const parts: any[] = []
+    for (;;) {
+      const result = await reader.read()
+      if (result.done) break
+      parts.push(result.value)
+    }
+
+    expect(maxInFlight).toBe(3)
+    const toolMessages = requests[1].messages.filter((message: any) => message.role === 'tool')
+    expect(toolMessages.map((message: any) => message.tool_call_id)).toEqual(['p-0', 'p-1', 'p-2'])
+    expect(toolMessages.map((message: any) => JSON.parse(message.content).content)).toEqual(['result a', 'result b', 'result c'])
+    expect(parts.find(part => part.type === 'tool-input-available')?.toolName).toBe('applyDocumentOperations')
+  })
+
+  it('charges parallel results against the budget in call order', async () => {
+    usePathA()
+    const requests: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const request = JSON.parse(String(init?.body ?? '{}'))
+      requests.push({ ...request, messages: JSON.parse(request.messages) })
+      const id = String(request.requestId ?? '')
+      const frames = requests.length === 1
+        ? Array.from({ length: 5 }, (_, index) => [
+            'event: ai:tool_call\n',
+            `data: {"requestId":"${id}","toolCallId":"tool-${index}","providerToolCallId":"p-${index}","toolName":"lookup_context","input":{"query":"q${index}"}}\n\n`,
+          ]).flat()
+        : ['event: ai:tool_call\n', `data: {"requestId":"${id}","toolCallId":"tool-0","providerToolCallId":"doc","toolName":"applyDocumentOperations","input":{"operations":[{"type":"update","id":"b1$","block":"<p>Done.</p>"}]}}\n\n`]
+      return new Response(sseStream([
+        ...frames,
+        'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    // Each result fills one 12k slot, so the 48k budget covers four of five.
+    const executeContextTool = vi.fn(async (_name: string, input: any) => `${input.query}:`.padEnd(20_000, 'x'))
+    const transport = createAiTransport({ getEditor: editor, executeContextTool, trustedContextTools: ['lookup_context'] })
+    const stream = await transport.sendMessages({
+      messages: [{ role: 'user', content: 'Use five lookups.' }],
+      body: { toolDefinitions: {
+        applyDocumentOperations: { description: 'Edit doc', inputSchema: {} },
+        lookup_context: { description: 'Look up', inputSchema: { type: 'object' } },
+      } },
+    })
+    const reader = stream.getReader()
+    while (!(await reader.read()).done) { /* drain */ }
+
+    const contents = requests[1].messages
+      .filter((message: any) => message.role === 'tool')
+      .map((message: any) => JSON.parse(message.content).content as string)
+    expect(contents.slice(0, 4).map((content: string) => content.slice(0, 3))).toEqual(['q0:', 'q1:', 'q2:', 'q3:'])
+    // The fifth result exceeds the remaining budget; it is not squeezed in.
+    expect(contents[4].length).toBeLessThan(12_000)
+    expect(contents[4]).not.toContain('q4:x')
+  })
+
+  it('renders the document as Markdown only for a text-mode prompt', async () => {
+    usePathA()
+    const markdown = vi.fn(() => 'rendered')
+    const toolEditor = () => ({ ...editor(), blocksToMarkdownLossy: markdown })
+    vi.stubGlobal('fetch', sseResponder(id => [
+      'event: ai:tool_call\n',
+      `data: {"requestId":"${id}","toolCallId":"tool-0","providerToolCallId":"doc","toolName":"applyDocumentOperations","input":{"operations":[{"type":"update","id":"b1$","block":"<p>Done.</p>"}]}}\n\n`,
+      'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+    ]))
+    const { parts } = await drain(createAiTransport({ getEditor: toolEditor }))
+    expect(parts.find(part => part.type === 'tool-input-available')).toBeTruthy()
+    expect(markdown).not.toHaveBeenCalled()
+
+    useTextOnly()
+    vi.stubGlobal('fetch', sseResponder(id => [
+      'event: ai:token\n', `data: {"requestId":"${id}","token":"Nothing to change."}\n\n`,
+      'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+    ]))
+    await drain(createAiTransport({ getEditor: toolEditor }))
+    expect(markdown).toHaveBeenCalled()
+  })
+
+  it('hands back a finished stream when stopped before the request starts', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const stream = await createAiTransport({ getEditor: () => null }).sendMessages({
+      messages: [{ role: 'user', content: 'anything' }],
+      body: {},
+      abortSignal: controller.signal,
+    })
+    // A never-closing stream left the AI session's reader waiting forever.
+    await expect(stream.getReader().read()).resolves.toEqual({ done: true, value: undefined })
+  })
+
   it('discovers backend context tools even when the editor supplies only the document tool', async () => {
     usePathA()
     useAiSettings.setState({ provider: 'deepseek', model: 'deepseek-v4-flash', probeTools: { deepseek: { 'deepseek-v4-flash': true } } })

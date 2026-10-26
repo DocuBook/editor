@@ -6,6 +6,7 @@
 use super::*;
 use crate::rust_ai::{events::AiEvent, request::AiRequest, sse::stream_chat};
 use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::StreamExt as _;
 
 /** Base URL chat should use for this request, in precedence order: the custom
  *  endpoint env override (unchanged), the endpoint saved in config.json (the
@@ -44,6 +45,67 @@ fn resolve_model(state: &AppState, provider: &str, browser_model: &str) -> Strin
         .unwrap_or_default()
 }
 
+/// Provider endpoint for one request: the agent plus, for the custom provider,
+/// the `(host, addresses)` its client is pinned to.
+type ResolvedAgent = (agent::Agent, Option<(String, Vec<std::net::SocketAddr>)>);
+
+/// Resolve the agent for `provider`. Blocking: reads keys.json (and decrypts
+/// it) and resolves a custom endpoint's host, so callers run it off the async
+/// runtime.
+fn resolve_agent(
+    state: &AppState,
+    provider: &str,
+    requested_model: &str,
+    base_url: &str,
+) -> Result<ResolvedAgent, String> {
+    match provider {
+        // Custom endpoint is bound server-side. The webview URL is ignored.
+        p if !p.is_empty() && p == agent::CUSTOM_PROVIDER_ID => {
+            let requested_model = resolve_model(state, p, requested_model);
+            let (bound_url, key, model) = match probe::custom_env_config() {
+                Some((env_url, env_key, env_model)) => {
+                    let key = env_key
+                        .or_else(|| keys::get_key(&state.data_dir, p).ok())
+                        .ok_or("No API key found")?;
+                    (env_url, key, env_model.unwrap_or_else(|| requested_model.clone()))
+                }
+                None => {
+                    // The bound URL comes from config.json (env override handled
+                    // above); the browser-supplied URL is ignored for this provider.
+                    let url = state
+                        .auth
+                        .config
+                        .lock().unwrap_or_else(|e| e.into_inner())
+                        .ai
+                        .endpoints
+                        .get(p)
+                        .map(|e| e.base_url.clone())
+                        .filter(|u| !u.is_empty())
+                        .ok_or("No custom base URL saved — set it in Settings → AI")?;
+                    let key = keys::get_key(&state.data_dir, p).map_err(|_| "No API key found")?;
+                    (url, key, requested_model)
+                }
+            };
+            let resolution = agent::validated_custom_addrs(&bound_url, false)?;
+            Ok((agent::Agent::new(p, &model, &key, &bound_url), Some(resolution)))
+        }
+        p if !p.is_empty() => {
+            let model = resolve_model(state, p, requested_model);
+            if model.is_empty() {
+                return Err("Provider model is required".into());
+            }
+            let base_url = resolve_base_url(state, p, base_url);
+            if base_url.is_empty() {
+                return Err("Provider, model, and base URL are required".into());
+            }
+            agent::validate_base_url(p, &base_url)?;
+            let key = keys::get_key(&state.data_dir, p).map_err(|_| "No API key found")?;
+            Ok((agent::Agent::new(p, &model, &key, &base_url), None))
+        }
+        _ => Err("Provider, model, and base URL are required".into()),
+    }
+}
+
 pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Response {
     let ai_slot = match state.ai_slots.clone().try_acquire_owned() {
         Ok(slot) => slot,
@@ -69,93 +131,26 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
     let request_id = string_arg("requestId");
     let tools = args.get("tools").and_then(Value::as_str);
 
-    let mut custom_resolution = None;
-    let agent_cfg = match provider.as_str() {
-        // Custom endpoint is bound server-side. The webview URL is ignored.
-        p if !p.is_empty() && p == agent::CUSTOM_PROVIDER_ID => {
-            let requested_model = resolve_model(&state, p, &requested_model);
-            let (bound_url, key, model) = match probe::custom_env_config() {
-                Some((env_url, env_key, env_model)) => {
-                    let key = match env_key.or_else(|| keys::get_key(&state.data_dir, p).ok()) {
-                        Some(key) => key,
-                        None => return err_response("No API key found"),
-                    };
-                    (
-                        env_url,
-                        key,
-                        env_model.unwrap_or_else(|| requested_model.clone()),
-                    )
-                }
-                None => {
-                    // The bound URL comes from config.json (env override handled
-                    // above); the browser-supplied URL is ignored for this provider.
-                    let url = state
-                        .auth
-                        .config
-                        .lock().unwrap_or_else(|e| e.into_inner())
-                        .ai
-                        .endpoints
-                        .get(p)
-                        .map(|e| e.base_url.clone())
-                        .filter(|u| !u.is_empty());
-                    let url = match url {
-                        Some(url) => url,
-                        None => {
-                            return err_response(
-                                "No custom base URL saved — set it in Settings → AI",
-                            )
-                        }
-                    };
-                    let key = match keys::get_key(&state.data_dir, p) {
-                        Ok(key) => key,
-                        Err(_) => return err_response("No API key found"),
-                    };
-                    (url, key, requested_model)
-                }
-            };
-            match agent::validated_custom_addrs(&bound_url, false) {
-                Ok(resolution) => custom_resolution = Some(resolution),
-                Err(error) => return err_response(&error),
-            }
-            agent::Agent::new(p, &model, &key, &bound_url)
-        }
-        p if !p.is_empty() => {
-            let model = resolve_model(&state, p, &requested_model);
-            if model.is_empty() {
-                return err_response("Provider model is required");
-            }
-            let base_url = resolve_base_url(&state, p, &base_url);
-            if base_url.is_empty() {
-                return err_response("Provider, model, and base URL are required");
-            }
-            if let Err(error) = agent::validate_base_url(p, &base_url) {
-                return err_response(&error);
-            }
-            let key = match keys::get_key(&state.data_dir, p) {
-                Ok(key) => key,
-                Err(_) => return err_response("No API key found"),
-            };
-            agent::Agent::new(p, &model, &key, &base_url)
-        }
-        _ => return err_response("Provider, model, and base URL are required"),
-    };
-
-    // Own this turn's cancellation slot for as long as the provider stream runs.
-    // `ask_ai` returns as soon as the SSE response is handed to axum, so the
-    // guard has to live in the producing task — otherwise `cancel_ai` (a
-    // separate HTTP request) would find no slot to cancel.
+    // Own this turn's cancellation slot before anything slow happens, and for as
+    // long as the provider stream runs. `ask_ai` returns as soon as the SSE
+    // response is handed to axum, so the guard moves into the producing task —
+    // otherwise `cancel_ai` (a separate HTTP request) would find no slot to
+    // cancel. A Stop that overtook this request is remembered by the registry.
     let request_guard = state.ai_requests.begin(&request_id);
+    let cancel = request_guard.token();
     let started = std::time::Instant::now();
-    let mut client_builder = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .read_timeout(std::time::Duration::from_secs(120));
-    if let Some((host, addrs)) = &custom_resolution {
-        client_builder = client_builder.resolve_to_addrs(host, addrs);
-    }
-    let client = match client_builder.build() {
+    let lookup_state = state.clone();
+    let lookup = tokio::task::spawn_blocking(move || {
+        resolve_agent(&lookup_state, &provider, &requested_model, &base_url)
+    });
+    let (agent_cfg, custom_resolution) = match lookup.await {
+        Ok(Ok(resolved)) => resolved,
+        Ok(Err(error)) => return err_response(&error),
+        Err(_) => return err_response("AI request failed"),
+    };
+    let client = match crate::rust_ai::http::chat_client(custom_resolution.as_ref()) {
         Ok(client) => client,
-        Err(error) => return err_response(&format!("Client error: {error}")),
+        Err(error) => return err_response(&error),
     };
     let request = match AiRequest::from_json(
         agent_cfg.model.clone(),
@@ -168,7 +163,6 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         Err(error) => return err_response(&error),
     };
     let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<AiEvent, String>>(64);
-    let cancel = request_guard.flag();
     let provider_name = agent_cfg.provider.clone();
     let model_name = agent_cfg.model.clone();
     tokio::spawn(async move {
@@ -185,12 +179,14 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         if provider_name == agent::SESSION_PROVIDER_ID {
             chat = chat.header("x-opencode-session", agent::session_id());
         }
-        let response = match tokio::time::timeout(
-            std::time::Duration::from_secs(30),
-            chat.json(&body).send(),
-        )
-        .await
-        {
+        let send = tokio::time::timeout(std::time::Duration::from_secs(30), chat.json(&body).send());
+        let response = tokio::select! {
+            result = send => result,
+            // Stop, or the browser went away, during the provider's prefill.
+            _ = cancel.cancelled() => return,
+            _ = event_tx.closed() => return,
+        };
+        let response = match response {
             Ok(Ok(response)) => response,
             Ok(Err(error)) => {
                 tracing::warn!(
@@ -234,26 +230,21 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         .await;
     });
 
-    let (sse_tx, sse_rx) = tokio::sync::mpsc::channel::<Result<Event, axum::Error>>(64);
-    tokio::spawn(async move {
-        let mut event_rx = event_rx;
-        while let Some(event) = event_rx.recv().await {
-            let result = match event {
-                Ok(event) => {
-                    let (name, payload) = event.to_wire(&request_id);
-                    Event::default().event(name).data(payload.to_string())
-                }
-                Err(error) => Event::default()
-                    .event(crate::rust_ai::events::ERROR_EVENT)
-                    .data(error),
-            };
-            if sse_tx.send(Ok(result)).await.is_err() {
-                break;
+    // Map events straight onto the SSE body. When the browser disconnects, axum
+    // drops this stream and with it the receiver, which `stream_chat` notices at
+    // once and stops reading from the provider.
+    let events = ReceiverStream::new(event_rx).map(move |event| {
+        Ok::<_, std::convert::Infallible>(match event {
+            Ok(event) => {
+                let (name, payload) = event.to_wire(&request_id);
+                Event::default().event(name).data(payload.to_string())
             }
-        }
+            Err(error) => Event::default()
+                .event(crate::rust_ai::events::ERROR_EVENT)
+                .data(error),
+        })
     });
-
-    Sse::new(ReceiverStream::new(sse_rx))
+    Sse::new(events)
         .keep_alive(KeepAlive::default())
         .into_response()
 }
