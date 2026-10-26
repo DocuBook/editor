@@ -100,6 +100,36 @@ for (const file of readdirSync(workflowDir).filter((f) => f.endsWith('.yml'))) {
     }
   })
 
+  // --- 7. Every resolver call on a push waits for a tag still being created
+  // (see 6 below): without RELEASE_TAG_WAIT_SECONDS it looks once, and the
+  // release commit's run resolves "not a release" before release-please tags it.
+  lines.forEach((line, i) => {
+    if (!/^\s*run:.*resolve-release-tag\.sh/.test(line)) return
+    let step = i - 1
+    while (step >= 0 && !/^\s*- (name|uses|run):/.test(lines[step])) step--
+    if (!/RELEASE_TAG_WAIT_SECONDS:/.test(lines.slice(step, i).join('\n'))) {
+      fail(
+        `.github/workflows/${file}:${i + 1} runs ${RESOLVER} without RELEASE_TAG_WAIT_SECONDS — ` +
+          `on the release commit's push the tag does not exist yet, so the run resolves ` +
+          `"not a release" and skips publishing (v0.5.0's image).`,
+      )
+    }
+  })
+
+  // --- 8. Superseding runs is for PRs only. A push-triggered workflow whose
+  // concurrency cancels unconditionally, or groups pushes by ref, lets a merge
+  // that lands minutes after a release cancel (or, as a dropped pending run,
+  // never start) the run that publishes it.
+  if (/^on:[\s\S]*?\n  push:/m.test(src) && /^concurrency:/m.test(src)) {
+    const block = src.slice(src.search(/^concurrency:/m)).split(/\n(?=\S)/)[0]
+    if (/cancel-in-progress:\s*true\b/.test(block) || !/github\.run_id/.test(block)) {
+      fail(
+        `.github/workflows/${file}: its concurrency group can cancel or drop a push run — ` +
+          `cancel only pull_request runs and give every other run its own group (github.run_id).`,
+      )
+    }
+  }
+
   // --- 5. A smoke test must not run when the image it inspects was never built.
   //
   // docker.yml builds an image under two mutually exclusive conditions (`check-`
@@ -198,6 +228,64 @@ esac
     fail(`resolver did not pass through an explicit tag push (stdout=${JSON.stringify(push.stdout.trim())})`)
   }
 
+  // --- 6. The release commit's tag may not exist yet when the resolver runs.
+  //
+  // release-please tags the release commit from its own workflow ~10 s after the
+  // push, and docker.yml's resolve-tag looked it up before that: v0.5.0 resolved
+  // "not a release" and published no image. The resolver therefore waits while
+  // package.json's version has no tag yet, and returns at once otherwise.
+  // A second stub serves an extra tag only from its Nth lookup on.
+  const lateStub = `#!/bin/sh
+count=$(cat "$STUB_COUNT" 2>/dev/null || echo 0)
+case "$*" in
+  *"matching-refs/tags/v"*)
+    count=$((count + 1)); echo "$count" > "$STUB_COUNT"
+    printf 'refs/tags/v1.0.0\\tcommit\\t%s\\n' '${TARGET}'
+    [ "$count" -lt "\${STUB_LATE_FROM:-999}" ] || printf 'refs/tags/v3.0.0\\tcommit\\t%s\\n' 'ffffffffffffffffffffffffffffffffffffffff'
+    ;;
+  *) exit 1 ;;
+esac
+`
+  writeFileSync(join(fakeBin, 'gh'), lateStub)
+  const versionDir = join(workdir, 'repo')
+  mkdirSync(versionDir)
+  const late = (version, env) => {
+    writeFileSync(join(versionDir, 'package.json'), JSON.stringify({ version }))
+    const count = join(workdir, `count-${version}`)
+    const out = spawnSync('sh', [resolverPath], {
+      cwd: versionDir,
+      encoding: 'utf8',
+      env: {
+        ...process.env, PATH: `${fakeBin}:${process.env.PATH}`, ...base,
+        GITHUB_REF: 'refs/heads/master', STUB_COUNT: count, RELEASE_TAG_POLL_SECONDS: '0', ...env,
+      },
+    })
+    return { ...out, lookups: Number(readFileSync(count, 'utf8')) }
+  }
+
+  const pending = late('3.0.0', { GITHUB_SHA: 'f'.repeat(40), RELEASE_TAG_WAIT_SECONDS: '30', STUB_LATE_FROM: '3' })
+  if (!/^tag=v3\.0\.0$/m.test(pending.stdout) || pending.lookups !== 3) {
+    fail(
+      `resolver did not wait for the release commit's tag to be created ` +
+        `(stdout=${JSON.stringify(pending.stdout.trim())}, lookups=${pending.lookups})`,
+    )
+  }
+
+  // An ordinary push after a release: v1.0.0 already tags another commit.
+  const ordinary = late('1.0.0', { GITHUB_SHA: 'e'.repeat(40), RELEASE_TAG_WAIT_SECONDS: '30' })
+  if (!/^tag=$/m.test(ordinary.stdout) || ordinary.lookups !== 1) {
+    fail(
+      `resolver delayed an ordinary push whose version is already tagged elsewhere ` +
+        `(stdout=${JSON.stringify(ordinary.stdout.trim())}, lookups=${ordinary.lookups})`,
+    )
+  }
+
+  // A tag that never comes: the wait is bounded and the answer is "not a release".
+  const never = late('9.9.9', { GITHUB_SHA: 'e'.repeat(40), RELEASE_TAG_WAIT_SECONDS: '3' })
+  if (!/^tag=$/m.test(never.stdout) || never.lookups !== 4) {
+    fail(`resolver did not give up on a tag that never appears (stdout=${JSON.stringify(never.stdout.trim())}, lookups=${never.lookups})`)
+  }
+
   rmSync(workdir, { recursive: true, force: true })
 }
 
@@ -272,5 +360,6 @@ console.log(
   'Release-tag guard OK — no workflow decides a release from github.ref, the resolver ' +
     'finds a lightweight tag on a master push, passes through a tag push, and rejects an untagged ' +
     'commit, publish skips (never fails) on a non-release push, every resolver call is preceded ' +
-    'by a checkout, and no image smoke test outruns the build that produces it',
+    'by a checkout and waits for a tag still being created, no image smoke test outruns the ' +
+    'build that produces it, and no push run can be cancelled by a later one',
 )

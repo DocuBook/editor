@@ -15,9 +15,14 @@ on:
   pull_request:
   workflow_dispatch:
 
+# A new push to a PR supersedes its running check. A master push never cancels
+# or queues behind another: the release commit's run is the one that publishes
+# the image, and a merge landing minutes after the release must not cancel it.
+# (A shared group without cancel-in-progress is no fix: GitHub keeps one pending
+# run per group and cancels the older pending one.)
 concurrency:
-  group: docker-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: docker-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE: ghcr.io/docubook/editor
@@ -34,6 +39,7 @@ jobs:
   # and gate the publish steps on the output instead of on github.ref.
   resolve-tag:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     # Runs on PRs too (with an empty tag) purely so `build-and-push`, which
     # needs it, is not skipped — a skipped dependency would skip the PR check.
     # The resolver itself is only reached when a release is possible: a PR can
@@ -57,6 +63,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # release-please tags the release commit ~10 s after this run starts.
+          RELEASE_TAG_WAIT_SECONDS: "300"
         run: ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
       # package.json is read by this step, so it relies on the checkout above
       # being unconditional — it no longer fetches the repo itself.
@@ -74,6 +82,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -102,6 +111,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(github.event_name == 'pull_request' && '[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"amd64"}]' || '[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"amd64"},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"arm64"}]') }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     environment:
       name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
     steps:
@@ -207,6 +217,7 @@ jobs:
     if: needs.resolve-tag.outputs.tag != ''
     needs: [build-and-push, resolve-tag]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     environment: release-auto
     steps:
       - name: Download digests
