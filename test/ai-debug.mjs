@@ -205,11 +205,25 @@ await runSuite('ai-debug', {
     for (let i = 0; i < 100 && !failedRequestIds.has(hold.requestId); i++) await page.waitForTimeout(50)
     return failedRequestIds.has(hold.requestId)
   }
+  /* The prompt is set on the composer element and sent with its button — not
+     typed into whatever holds focus. After a tab switch the editor takes focus
+     back a moment later; `fill` (which inserts into the focused element) then
+     put the prompt into the DOCUMENT, Enter added a block there, no request was
+     ever sent, and `hold.started` waited forever. */
   const sendHeldRequest = async (hold, promptText) => {
     const box = page.locator('textarea[aria-label="AI prompt"]')
-    await box.fill(promptText)
-    await page.keyboard.press('Enter')
-    await hold.started
+    await box.waitFor({ state: 'visible' })
+    await box.evaluate((element, value) => {
+      const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set
+      setValue.call(element, value)
+      element.dispatchEvent(new Event('input', { bubbles: true }))
+    }, promptText)
+    await page.getByRole('button', { name: 'Send prompt' }).click()
+    let timer
+    const unsent = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`ask_ai was not sent for "${promptText}"`)), 15_000)
+    })
+    try { await Promise.race([hold.started, unsent]) } finally { clearTimeout(timer) }
   }
 
   const background = holdNextAsk()
