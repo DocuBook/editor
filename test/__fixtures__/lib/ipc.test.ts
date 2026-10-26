@@ -111,6 +111,33 @@ describe('web IPC bridge', () => {
     }
   })
 
+  it('finds frame terminators split across reads, and frames spanning many reads', async () => {
+    const tokens: string[] = []
+    const tools: unknown[] = []
+    const unlistenToken = await listen<{ token: string }>('ai:token', e => tokens.push(e.payload.token))
+    const unlistenTool = await listen('ai:tool_call', e => tools.push(e.payload))
+    const big = 'x'.repeat(200_000)
+    const toolFrame = `event: ai:tool_call\ndata: {"input":"${big}"}\n\n`
+    const pieces: string[] = []
+    for (let at = 0; at < toolFrame.length; at += 1_000) pieces.push(toolFrame.slice(at, at + 1_000))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(sseStream([
+      'event: ai:token\r\ndata: {"token":"a"}\r\n\r',
+      '\nevent: ai:token\ndata: {"token":"b"}\n',
+      '\n',
+      ...pieces,
+      'event: ai:token\rdata: {"token":"c"}\r',
+      '\r',
+    ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+    try {
+      await invoke('ask_ai', { messages: '[]' })
+      expect(tokens).toEqual(['a', 'b', 'c'])
+      expect(tools).toEqual([{ input: big }])
+    } finally {
+      unlistenToken()
+      unlistenTool()
+    }
+  })
+
   it('emits the auth event for unauthorized JSON requests', async () => {
     let unauthorized = 0
     const unlisten = await listen('auth:unauthorized', () => { unauthorized++ })

@@ -521,12 +521,30 @@ function flattenBlocks(blocks: any[]): any[] {
  * on long notes. Instead, window the Markdown around the anchored block and
  * mark the caret, so the model always sees local context and where to resume.
  */
-export function buildDocumentContext(editor: any): string {
+/** Where the user's cursor was when the prompt was submitted. Reading it is
+ *  cheap; rendering the document around it is not, so the transport captures
+ *  this first and renders the context only when a text-mode prompt needs it. */
+export interface DocumentCursorSnapshot {
+  selection: any;
+  anchorId: string | undefined;
+}
+
+export function captureDocumentCursor(editor: any): DocumentCursorSnapshot {
+  let selection: any;
+  try {
+    selection = editor?.getSelection?.();
+  } catch {
+    selection = undefined;
+  }
+  return { selection, anchorId: editor ? resolveActiveBlockId(editor) : undefined };
+}
+
+export function buildDocumentContext(editor: any, cursor: DocumentCursorSnapshot = captureDocumentCursor(editor)): string {
   if (!editor) return "";
   try {
     const MAX = AI_FORMATTING_RULES.maxContextChars;
-    const selCtx = describeSelection(editor);
-    const anchorId = resolveActiveBlockId(editor);
+    const selCtx = describeSelection(editor, cursor);
+    const anchorId = cursor.anchorId;
     const block = anchorId ? findBlock(editor, anchorId) : null;
     if (!block) {
       const md = editor.blocksToMarkdownLossy(editor.document);
@@ -591,15 +609,15 @@ function trimContext(text: string, max: number): string {
 /** Selection block-type summary for the text prompt. Falls back to the AI menu's
  *  anchored block when the editor has lost focus (composer submit), so the model
  *  still learns the block type it must preserve on edit. */
-function describeSelection(editor: any): string {
+function describeSelection(editor: any, cursor: DocumentCursorSnapshot): string {
   try {
-    const sel = editor.getSelection();
+    const sel = cursor.selection;
     if (sel?.blocks?.length)
       return `\n\nSelection block types (preserve on edit):\n${sel.blocks.map((b: any) => `- ${b.type}${b.level ? " level " + b.level : ""}`).join("\n")}`;
   } catch {
     /* fall through to the anchored block */
   }
-  const id = resolveActiveBlockId(editor);
+  const id = cursor.anchorId;
   if (!id) return "";
   const block = findBlock(editor, id);
   return block?.type

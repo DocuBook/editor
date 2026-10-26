@@ -8,7 +8,7 @@
 //! reset and a webview storage wipe alike.
 
 use crate::AppState;
-use tauri::{Emitter, Manager, State};
+use tauri::{Manager, State};
 
 const MAX_PROBE_MODELS_PER_PROVIDER: usize = 128;
 const MAX_PROBE_ID_LEN: usize = 256;
@@ -651,10 +651,21 @@ pub async fn test_connection(
 
 // ── Shared streaming adapter ──
 
+/// Wire name of the last message on an `ask_ai` channel. Channel messages are
+/// ordered among themselves but not against the command's own reply, and a large
+/// one (an `applyDocumentOperations` call) travels by a separate fetch — so the
+/// frontend waits for this marker, not for the reply, before it reads the turn.
+const AI_END_EVENT: &str = "ai:end";
+
 /// Stream an AI response. Deliberately takes no `apiKey`: the key is resolved
 /// from the keychain/backend, and a key sent in the request payload is ignored
 /// (Tauri resolves args by name, so an undeclared key is never read).
+///
+/// Events go to `on_event`, a channel owned by this one request: ordered, and
+/// delivered only to the caller instead of broadcast to every listener of a
+/// global event.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn ask_ai(
     messages: String,
     app: tauri::AppHandle,
@@ -663,45 +674,49 @@ pub async fn ask_ai(
     base_url: Option<String>,
     tools: Option<String>,
     request_id: Option<String>,
+    on_event: tauri::ipc::Channel<serde_json::Value>,
 ) -> Result<(), String> {
     let provider =
         provider.ok_or_else(|| "Provider, model, and base URL are required".to_string())?;
     let model = model.ok_or_else(|| "Provider, model, and base URL are required".to_string())?;
-    // Single source of truth for where the request goes.
-    let resolved = resolve_base_url(
-        &load_selection(&app),
-        &provider,
-        base_url.as_deref().unwrap_or(""),
-    )?;
-    let mut custom_resolution = None;
-    let agent = if provider == crate::agent::CUSTOM_PROVIDER_ID {
-        custom_resolution = Some(crate::agent::validated_custom_addrs(&resolved, true)?);
-        let key =
-            crate::keychain::get_key(&provider).map_err(|_| "No API key found in keychain")?;
-        crate::agent::Agent::new(&provider, &model, &key, &resolved)
-    } else {
-        crate::agent::validate_base_url(&provider, &resolved)?;
-        let key =
-            crate::keychain::get_key(&provider).map_err(|_| "No API key found in keychain")?;
-        crate::agent::Agent::new(&provider, &model, &key, &resolved)
-    };
-
     let state = app.state::<AppState>();
-    // Own this turn's cancellation slot before the request goes out. The guard
-    // releases it when the command returns (including every early `?`), and the
-    // per-request flag means a Stop aimed at this turn cannot revive another.
+    // Own this turn's cancellation slot before anything slow happens. The guard
+    // releases it when the command returns (including every early `?`), the
+    // per-request token means a Stop aimed at this turn cannot revive another,
+    // and a Stop that arrived even earlier is remembered by the registry.
     let request_guard = state.ai_requests.begin(request_id.as_deref().unwrap_or(""));
+    let cancel = request_guard.token();
+    let finish = || {
+        let _ = on_event.send(serde_json::json!({ "event": AI_END_EVENT }));
+        Ok(())
+    };
     let started = std::time::Instant::now();
-    let mut client_builder = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .read_timeout(std::time::Duration::from_secs(120));
-    if let Some((host, addrs)) = &custom_resolution {
-        client_builder = client_builder.resolve_to_addrs(host, addrs);
-    }
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("Client error: {}", e))?;
+    // The selection file, the DNS lookup of a custom endpoint and the Keychain
+    // (a `security` process) all block; keep them off the async runtime.
+    let lookup_app = app.clone();
+    let lookup_provider = provider.clone();
+    let lookup = tauri::async_runtime::spawn_blocking(move || {
+        let provider = lookup_provider;
+        let resolved = resolve_base_url(
+            &load_selection(&lookup_app),
+            &provider,
+            base_url.as_deref().unwrap_or(""),
+        )?;
+        let pinned = if provider == crate::agent::CUSTOM_PROVIDER_ID {
+            Some(crate::agent::validated_custom_addrs(&resolved, true)?)
+        } else {
+            crate::agent::validate_base_url(&provider, &resolved)?;
+            None
+        };
+        let key =
+            crate::keychain::get_key(&provider).map_err(|_| "No API key found in keychain")?;
+        Ok::<_, String>((crate::agent::Agent::new(&provider, &model, &key, &resolved), pinned))
+    });
+    let (agent, pinned) = tokio::select! {
+        result = lookup => result.map_err(|e| e.to_string())??,
+        _ = cancel.cancelled() => return finish(),
+    };
+    let client = crate::rust_ai::http::chat_client(pinned.as_ref())?;
     let request = crate::rust_ai::request::AiRequest::from_json(
         agent.model.clone(),
         agent.api_key.clone(),
@@ -716,21 +731,24 @@ pub async fn ask_ai(
     if provider == crate::agent::SESSION_PROVIDER_ID {
         chat = chat.header("x-opencode-session", crate::agent::session_id());
     }
-    let response = tokio::time::timeout(
+    let send = tokio::time::timeout(
         std::time::Duration::from_secs(30),
         chat.json(&request.body()).send(),
-    )
-    .await
-    .map_err(|_| "AI provider did not respond — try again".to_string())?
-    .map_err(|e| crate::rust_ai::error::sanitize_ai_error(&e.to_string()))?;
+    );
+    let response = tokio::select! {
+        response = send => response
+            .map_err(|_| "AI provider did not respond — try again".to_string())?
+            .map_err(|e| crate::rust_ai::error::sanitize_ai_error(&e.to_string()))?,
+        // Stop during the provider's prefill: drop the request now.
+        _ = cancel.cancelled() => return finish(),
+    };
 
     let (tx, mut rx) = tokio::sync::mpsc::channel(64);
-    let cancel = request_guard.flag();
     tokio::spawn(crate::rust_ai::sse::stream_chat(
         response,
         agent.provider.clone(),
         agent.model.clone(),
-        cancel,
+        std::sync::Arc::clone(&cancel),
         started,
         tx,
     ));
@@ -738,9 +756,16 @@ pub async fn ask_ai(
     while let Some(event) = rx.recv().await {
         let event = event?;
         let (name, payload) = event.to_wire(&request_id);
-        app.emit(name, payload).map_err(|e| e.to_string())?;
+        if on_event
+            .send(serde_json::json!({ "event": name, "payload": payload }))
+            .is_err()
+        {
+            // The webview that asked is gone; stop paying for the stream.
+            cancel.cancel();
+            return Ok(());
+        }
     }
-    Ok(())
+    finish()
 }
 
 /// List context tools for a prompt turn; `url_sources` seeds `web_fetch`'s

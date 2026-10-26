@@ -1,4 +1,5 @@
 use super::error::sanitize_ai_error;
+use super::requests::CancelToken;
 use super::events::{
     AiEvent, StreamSummary, ToolCall, AI_MAX_SECONDS, MAX_AI_BUFFER, MAX_TOOL_ARGS_SIZE,
     MAX_TOOL_CALLS_PER_REQUEST,
@@ -8,7 +9,6 @@ use futures_util::StreamExt as _;
 use reqwest::Response;
 use serde_json::Value;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
@@ -101,29 +101,27 @@ where
 /// `sanitize_ai_error` and lose the size framing.
 const TOO_LARGE_MESSAGE: &str = "AI response too large";
 
-/// How often a pending chunk read re-checks the cancellation flag.
-///
-/// `AtomicBool` has no wakeup of its own, so a Stop that arrives while the
-/// stream is parked on `events.next()` is only observable by polling. The
-/// transport read timeout stays the backstop for genuine provider stalls.
-const CANCEL_POLL_INTERVAL: Duration = Duration::from_millis(100);
-
-/// Resolve once the caller has asked to stop.
-async fn cancel_requested(cancel: &AtomicBool) {
-    while !cancel.load(Ordering::SeqCst) {
-        tokio::time::sleep(CANCEL_POLL_INTERVAL).await;
+/// Resolve once the request should stop producing events: Stop was pressed, or
+/// the consumer went away (a closed browser tab drops the web SSE body, and
+/// with it the receiver). Without the second arm a disconnected client kept the
+/// provider stream — and its token bill — running until the next event failed
+/// to send, which during a long prefill is up to the first-chunk timeout.
+async fn stop_requested(cancel: &CancelToken, tx: &EventSender) {
+    tokio::select! {
+        _ = cancel.cancelled() => {}
+        _ = tx.closed() => {}
     }
 }
 
 /// Send `event` unless the request is cancelled first, including while the
 /// channel is full. `false` means the stream should stop.
-async fn send_if_live(tx: &EventSender, event: AiEvent, cancel: &AtomicBool) -> bool {
-    if cancel.load(Ordering::SeqCst) {
+async fn send_if_live(tx: &EventSender, event: AiEvent, cancel: &CancelToken) -> bool {
+    if cancel.is_cancelled() {
         return false;
     }
     tokio::select! {
         result = tx.send(Ok(event)) => result.is_ok(),
-        _ = cancel_requested(cancel) => false,
+        _ = cancel.cancelled() => false,
     }
 }
 
@@ -131,7 +129,7 @@ pub async fn stream_chat(
     response: Response,
     provider: String,
     model: String,
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<CancelToken>,
     started: Instant,
     tx: EventSender,
 ) {
@@ -169,7 +167,7 @@ pub async fn stream_chat(
     let mut cancelled = false;
 
     loop {
-        if cancel.load(Ordering::SeqCst) {
+        if cancel.is_cancelled() {
             cancelled = true;
             break;
         }
@@ -185,13 +183,13 @@ pub async fn stream_chat(
         }
         // Only the event carrying the prefill latency is bounded here; a stall later
         // in the stream is the transport's read timeout to catch.
-        // Race every read against the cancellation poller: an `AtomicBool` cannot
-        // be awaited, so without this a Stop arriving mid-stall went unobserved
-        // until the transport read timeout elapsed.
+        // Race every read against Stop and consumer disconnect: without this a
+        // Stop arriving mid-stall went unobserved until the transport read
+        // timeout elapsed.
         let next = if saw_event {
             tokio::select! {
                 next = events.next() => next,
-                _ = cancel_requested(&cancel) => {
+                _ = stop_requested(&cancel, &tx) => {
                     cancelled = true;
                     break;
                 }
@@ -216,7 +214,7 @@ pub async fn stream_chat(
                         }
                     }
                 }
-                _ = cancel_requested(&cancel) => {
+                _ = stop_requested(&cancel, &tx) => {
                     cancelled = true;
                     break;
                 }
@@ -224,7 +222,7 @@ pub async fn stream_chat(
         };
         match next {
             Some(Ok(event)) => {
-                if cancel.load(Ordering::SeqCst) {
+                if cancel.is_cancelled() {
                     cancelled = true;
                     break;
                 }
@@ -351,50 +349,67 @@ pub async fn process_sse_data(
         return Err("AI response too large".into());
     }
 
-    let mut next_tool_calls = summary.tool_calls.clone();
-    let mut tool_call_delta = false;
-    if let Some(tool_calls) = value["choices"][0]["delta"]["tool_calls"].as_array() {
-        tool_call_delta = !tool_calls.is_empty();
-        for tool_call in tool_calls {
+    // Validate the whole delta against the limits before touching `summary`, so a
+    // rejected frame leaves it unchanged. This used to clone every buffered tool
+    // call per frame — quadratic in the argument size, since providers stream
+    // `applyDocumentOperations` arguments a few bytes per frame.
+    let deltas = value["choices"][0]["delta"]["tool_calls"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let tool_call_delta = !deltas.is_empty();
+    if tool_call_delta {
+        let mut new_calls = 0usize;
+        let mut added_bytes = 0usize;
+        for (position, tool_call) in deltas.iter().enumerate() {
             let index = tool_call["index"].as_i64().unwrap_or(0);
-            let id = tool_call["id"].as_str().unwrap_or("").to_string();
-            let name = tool_call["function"]["name"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            let arguments = tool_call["function"]["arguments"]
-                .as_str()
-                .unwrap_or("")
-                .to_string();
-            if let Some(position) = next_tool_calls.iter().position(|call| call.index == index) {
+            let seen = summary.tool_calls.iter().any(|call| call.index == index)
+                || deltas[..position]
+                    .iter()
+                    .any(|earlier| earlier["index"].as_i64().unwrap_or(0) == index);
+            if !seen {
+                new_calls += 1;
+            }
+            added_bytes = added_bytes.saturating_add(
+                tool_call["function"]["arguments"]
+                    .as_str()
+                    .map_or(0, str::len),
+            );
+        }
+        let buffered_bytes = summary
+            .tool_calls
+            .iter()
+            .map(|call| call.arguments.len())
+            .sum::<usize>();
+        if summary.tool_calls.len() + new_calls > MAX_TOOL_CALLS_PER_REQUEST
+            || buffered_bytes.saturating_add(added_bytes) > MAX_TOOL_ARGS_SIZE
+        {
+            return Err("AI response too large".into());
+        }
+        for tool_call in deltas {
+            let index = tool_call["index"].as_i64().unwrap_or(0);
+            let id = tool_call["id"].as_str().unwrap_or("");
+            let name = tool_call["function"]["name"].as_str().unwrap_or("");
+            let arguments = tool_call["function"]["arguments"].as_str().unwrap_or("");
+            if let Some(call) = summary.tool_calls.iter_mut().find(|call| call.index == index) {
                 if !id.is_empty() {
-                    next_tool_calls[position].provider_id = id;
+                    call.provider_id = id.to_string();
                 }
                 if !name.is_empty() {
-                    next_tool_calls[position].name = name;
+                    call.name = name.to_string();
                 }
-                next_tool_calls[position].arguments.push_str(&arguments);
+                call.arguments.push_str(arguments);
             } else {
-                next_tool_calls.push(ToolCall {
+                summary.tool_calls.push(ToolCall {
                     index,
-                    provider_id: id,
-                    name,
-                    arguments,
+                    provider_id: id.to_string(),
+                    name: name.to_string(),
+                    arguments: arguments.to_string(),
                 });
             }
         }
     }
-    let tool_args_size = next_tool_calls
-        .iter()
-        .try_fold(0usize, |total, call| {
-            total.checked_add(call.arguments.len())
-        })
-        .ok_or_else(|| "AI response too large".to_string())?;
-    if next_tool_calls.len() > MAX_TOOL_CALLS_PER_REQUEST || tool_args_size > MAX_TOOL_ARGS_SIZE {
-        return Err("AI response too large".into());
-    }
     let text_delta = content.is_some_and(|delta| !delta.is_empty());
-    summary.tool_calls = next_tool_calls;
     // First non-empty delta — prose or tool-call arguments — means the provider has
     // begun writing. One signal per stream, sent before the completed call — without
     // it the UI sits in "thinking" for the whole write and only flips at the end.
@@ -591,7 +606,7 @@ mod tests {
         let response = get_sse(format!("http://{addr}/chat")).await;
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let cancel = Arc::new(AtomicBool::new(true));
+        let cancel = Arc::new(CancelToken::cancelled_token());
         stream_chat(
             response,
             "test".into(),
@@ -627,7 +642,7 @@ mod tests {
             response,
             "test".into(),
             "test".into(),
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(CancelToken::new()),
             Instant::now(),
             tx,
         )
@@ -654,7 +669,7 @@ mod tests {
             response,
             "test".into(),
             "test".into(),
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(CancelToken::new()),
             Instant::now(),
             tx,
         )
@@ -718,7 +733,7 @@ mod tests {
             response,
             "test".into(),
             "test".into(),
-            Arc::new(AtomicBool::new(false)),
+            Arc::new(CancelToken::new()),
             Instant::now(),
             tx,
         )
@@ -763,7 +778,7 @@ mod tests {
         let response = get_sse(format!("http://{addr}/chat")).await;
 
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(CancelToken::new());
         let task_cancel = Arc::clone(&cancel);
         let handle = tokio::spawn(async move {
             stream_chat(
@@ -782,7 +797,7 @@ mod tests {
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(value))) if value == "hi"));
 
-        cancel.store(true, Ordering::SeqCst);
+        cancel.cancel();
         tokio::time::timeout(Duration::from_secs(2), handle)
             .await
             .expect("cancellation must not wait for the transport read timeout")
@@ -792,6 +807,65 @@ mod tests {
             rx.recv().await.is_none(),
             "a cancelled stream must not emit anything further"
         );
+    }
+
+    #[tokio::test]
+    async fn a_dropped_consumer_stops_a_stalled_stream() {
+        // The web client closed its tab: axum drops the SSE body and with it the
+        // receiver. The provider read must end now, not at the next token.
+        let addr = stalled_sse_after_first_event(r#"{"choices":[{"delta":{"content":"hi"}}]}"#).await;
+        let response = get_sse(format!("http://{addr}/chat")).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let handle = tokio::spawn(stream_chat(
+            response,
+            "test".into(),
+            "test".into(),
+            Arc::new(CancelToken::new()),
+            Instant::now(),
+            tx,
+        ));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(_)))));
+
+        drop(rx);
+        tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("a closed consumer must end the provider stream")
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn many_small_argument_deltas_accumulate_in_order() {
+        // Providers stream tool arguments a few bytes per frame; accumulation must
+        // stay linear (it used to clone every buffered call per frame) and exact.
+        let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+        tokio::spawn(async move { while rx.recv().await.is_some() {} });
+        let mut state = summary();
+        let piece = "{\"x\":1}";
+        let frames = 20_000;
+        let started = std::time::Instant::now();
+        for _ in 0..frames {
+            let data = json!({ "choices": [{ "delta": { "tool_calls": [{ "index": 0, "function": { "arguments": piece } }] } }] }).to_string();
+            process_sse_data(&data, &mut state, &tx).await.unwrap();
+        }
+        assert_eq!(state.tool_calls.len(), 1);
+        assert_eq!(state.tool_calls[0].arguments.len(), piece.len() * frames);
+        assert!(started.elapsed() < Duration::from_secs(5), "accumulation must not be quadratic");
+    }
+
+    #[tokio::test]
+    async fn repeated_index_within_one_frame_is_one_call() {
+        let (tx, _rx) = tokio::sync::mpsc::channel(8);
+        let mut state = summary();
+        let data = json!({ "choices": [{ "delta": { "tool_calls": [
+            { "index": 3, "id": "call-3", "function": { "name": "lookup", "arguments": "{\"a\"" } },
+            { "index": 3, "function": { "arguments": ":1}" } }
+        ] } }] }).to_string();
+        process_sse_data(&data, &mut state, &tx).await.unwrap();
+        assert_eq!(state.tool_calls.len(), 1);
+        assert_eq!(state.tool_calls[0].arguments, "{\"a\":1}");
+        assert_eq!(state.tool_calls[0].provider_id, "call-3");
     }
 
     #[tokio::test]
@@ -818,11 +892,11 @@ mod tests {
         // letting the event through after the cancel.
         let (tx, _rx) = mpsc::channel(1);
         let _ = tx.send(Ok(AiEvent::ToolsDone)).await;
-        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(CancelToken::new());
         let canceller = Arc::clone(&cancel);
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(50)).await;
-            canceller.store(true, Ordering::SeqCst);
+            canceller.cancel();
         });
         let sent = tokio::time::timeout(
             Duration::from_secs(2),

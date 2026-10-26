@@ -7,6 +7,7 @@
 pub mod context;
 pub mod error;
 pub mod events;
+pub mod http;
 pub mod prompt;
 pub mod provider;
 pub mod request;
