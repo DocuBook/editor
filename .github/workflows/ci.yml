@@ -176,8 +176,10 @@ jobs:
         run: npm run build
       - name: "E2E — all suites (smoke, AI transport, mentions)"
         # All three suites take about a minute. The step limit (not just the job's)
-        # lets the log upload below still run when a suite hangs.
-        timeout-minutes: 10
+        # lets the log upload below still run when a suite hangs. It must outlast
+        # the runner's own backstop for every suite (3 × 240 s + grace = ~12.5 min)
+        # so run-all still prints its TIMEOUT summary when all of them hang.
+        timeout-minutes: 15
         run: npm run test:e2e
         env:
           BROWSER: ${{ matrix.browser }}

@@ -14,7 +14,9 @@
  * Playwright's own SIGTERM handler closes the browser and does NOT exit the
  * process, so the stuck promise keeps it alive. One such hang held a CI job
  * for the full 6 hours. The suite therefore runs in its own process group and
- * is escalated to SIGKILL, which takes the server and the browser with it.
+ * is escalated to SIGKILL, which takes the server with it. The browser is NOT
+ * in that group (Playwright launches it detached); it exits because its pipe to
+ * the dead node process closes.
  */
 import { spawn } from 'node:child_process'
 import { readdirSync } from 'node:fs'
@@ -33,8 +35,9 @@ const POSIX = process.platform !== 'win32'
 
 let current
 
-/** Signal the suite's whole process group (server, browser, node), or just the
- *  child where process groups do not exist. */
+/** Signal the suite's whole process group (node and its server child — the
+ *  browser is detached and goes down with its pipe instead), or just the child
+ *  where process groups do not exist. */
 function signalSuite(child, signal) {
   try {
     if (POSIX && child.pid) process.kill(-child.pid, signal)
@@ -64,7 +67,7 @@ function runSuite(suite) {
     const finish = outcome => {
       clearTimeout(timer)
       clearTimeout(killer)
-      // Whatever the suite left behind (a server on its port, a browser).
+      // Whatever the suite left behind in its group (a server on its port).
       signalSuite(child, 'SIGKILL')
       current = undefined
       resolve(outcome)
@@ -75,7 +78,7 @@ function runSuite(suite) {
 }
 
 // CI cancels a job with SIGTERM/SIGINT: take the running suite down with us
-// instead of orphaning its server and browser.
+// instead of orphaning its server (the browser follows once its pipe closes).
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
     if (current) signalSuite(current, 'SIGKILL')

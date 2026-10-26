@@ -252,8 +252,8 @@ export async function runSuite(name, opts, body) {
   const bounded = (promise, ms) => Promise.race([promise, new Promise(resolve => setTimeout(resolve, ms))])
   /* A screenshot needs a live page: take it before the browser goes away. */
   const failed = results.some(([status]) => status === 'FAIL') || (logging?.errors.length ?? 0) > 0
-  await bounded(shots?.finish(failed) ?? Promise.resolve(), 20_000)
-  await bounded(browser?.close().catch(() => {}) ?? Promise.resolve(), 10_000)
+  if (shots) await bounded(shots.finish(failed), 20_000)
+  if (browser) await bounded(browser.close().catch(() => {}), 10_000)
   running.bin.kill()
 
   if (!summary(name, results, { serverLog: running.logPath, logging })) process.exitCode = 1
