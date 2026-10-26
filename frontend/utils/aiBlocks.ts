@@ -55,50 +55,75 @@ export function hasAISelection(editor: any): boolean {
   return !!liveAISelection(editor) || !!getAISelectionSnapshot(editor)?.length;
 }
 
-/** Replace an AI result inside the captured single-block text range. BlockNote's
- *  updateBlock replaces the whole block, so selection prompts use its inline
- *  insertion API instead and leave text on either side untouched. */
-export function replaceAISelectionInlineContent(
-  editor: any,
-  blockId: string,
-  content: any,
-): boolean | null {
+/** The inline-content range of `blockId` in `doc`, or null when the block has
+ *  no inline content (an image, a table) or is not in `doc`. */
+function blockInlineRange(doc: any, blockId: string): { from: number; to: number } | null {
+  let range: { from: number; to: number } | null | undefined;
+  doc?.descendants?.((node: any, pos: number) => {
+    if (range !== undefined) return false;
+    if (node.attrs?.id !== blockId) return true;
+    const content = node.firstChild;
+    range = content?.inlineContent ? { from: pos + 2, to: pos + 2 + content.content.size } : null;
+    return false;
+  });
+  return range ?? null;
+}
+
+/**
+ * Write an AI result into the part of `blockId` the remembered selection
+ * covers, leaving the block's unselected text untouched. The model was shown
+ * exactly that part (the selection's cut blocks), so a whole-block replace
+ * would drop the text before and after the selection.
+ *
+ * `block` is the parsed result for this block; `null` deletes the selected
+ * part. Returns false when the selection does not own this write, and the
+ * caller applies the operation to the whole block instead:
+ * - the block is not part of the selection, or has no inline content;
+ * - the block is fully selected and the result deliberately changes its type
+ *   (a paragraph turned into a heading). A plain paragraph keeps the original
+ *   type, like Path B's `inheritFormatOnReplace`;
+ * - a delete of a fully selected block (the block itself goes).
+ * Throws when the selection is stale or the result cannot fill a text range.
+ */
+export function replaceSelectedBlockContent(editor: any, blockId: string, block: any | null): boolean {
   const snapshot = editor && typeof editor === "object"
     ? aiSelectionSnapshots.get(editor)
     : undefined;
+  const original = snapshot?.blocks.find((item) => item?.id === blockId);
+  if (!snapshot || !original) return false;
   const view = editor?.prosemirrorView;
-  if (
-    !snapshot ||
-    snapshot.blocks.length !== 1 ||
-    snapshot.blocks[0]?.id !== blockId
-  ) return null;
-  if (
-    !view ||
-    view.state.doc !== snapshot.doc ||
-    !editor.insertInlineContent ||
-    !(typeof content === "string" || Array.isArray(content)) ||
-    content.length === 0
-  ) return false;
-
-  try {
-    return !!editor.transact((tr: any) => {
-      const selection = TextSelection.create(
-        tr.doc,
-        tr.mapping.map(snapshot.anchor, -1),
-        tr.mapping.map(snapshot.head, 1),
-      );
-      if (
-        selection.empty ||
-        !selection.$from.parent.inlineContent ||
-        selection.$from.parent !== selection.$to.parent
-      ) return false;
-      tr.setSelection(selection);
-      editor.insertInlineContent(content);
-      return true;
-    });
-  } catch {
-    return false;
+  if (!view || view.state.doc !== snapshot.doc || !editor.insertInlineContent) {
+    throw new Error("Text selection is no longer available");
   }
+  const range = blockInlineRange(snapshot.doc, blockId);
+  if (!range) return false;
+  const from = Math.max(range.from, Math.min(snapshot.anchor, snapshot.head));
+  const to = Math.max(from, Math.min(range.to, Math.max(snapshot.anchor, snapshot.head)));
+  const whole = from <= range.from && to >= range.to;
+  if (block === null && whole) return false;
+  if (whole && block?.type && block.type !== "paragraph" && block.type !== original.type) return false;
+  const content = block === null ? [] : block?.content;
+  if (!(typeof content === "string" || Array.isArray(content))) {
+    if (whole) return false;
+    throw new Error("The AI result does not fit the selected text");
+  }
+  editor.transact((tr: any) => {
+    const start = tr.mapping.map(from, -1);
+    const end = tr.mapping.map(to, 1);
+    if (content.length === 0) {
+      if (end > start) tr.delete(start, end);
+      return;
+    }
+    tr.setSelection(TextSelection.create(tr.doc, start, end));
+    editor.insertInlineContent(content);
+  });
+  return true;
+}
+
+/** Forget the remembered selection without touching the editor: a cursor
+ *  request must never be served by a selection left over from an earlier one. */
+export function dropAISelectionSnapshot(editor: any): void {
+  if (editor && typeof editor === "object") aiSelectionSnapshots.delete(editor);
 }
 
 /** BlockNote-level check: is a text/block range selected right now? Unlike
@@ -526,17 +551,29 @@ function flattenBlocks(blocks: any[]): any[] {
  *  this first and renders the context only when a text-mode prompt needs it. */
 export interface DocumentCursorSnapshot {
   selection: any;
+  /** The selected CONTENT: the selection's cut blocks (only the selected part
+   *  of a partially selected block), falling back to whole blocks when the
+   *  editor cannot cut. This is what a selection request is about, in both
+   *  paths: Path A's document state is built from the same cut blocks. */
+  selectedBlocks: any[] | undefined;
   anchorId: string | undefined;
 }
 
 export function captureDocumentCursor(editor: any): DocumentCursorSnapshot {
   let selection: any;
+  let selectedBlocks: any[] | undefined;
   try {
     selection = editor?.getSelection?.();
   } catch {
     selection = undefined;
   }
-  return { selection, anchorId: editor ? resolveActiveBlockId(editor) : undefined };
+  try {
+    selectedBlocks = editor?.getSelectionCutBlocks?.()?.blocks;
+  } catch {
+    selectedBlocks = undefined;
+  }
+  if (!selectedBlocks?.length) selectedBlocks = selection?.blocks?.length ? selection.blocks : undefined;
+  return { selection, selectedBlocks, anchorId: editor ? resolveActiveBlockId(editor) : undefined };
 }
 
 export function buildDocumentContext(editor: any, cursor: DocumentCursorSnapshot = captureDocumentCursor(editor)): string {
@@ -810,6 +847,9 @@ export function extractDelimitedContent(text: unknown): string | null {
 export async function buildApplyDocumentInput(
   editor: any,
   fullText: string,
+  /** The request's selection (its cut blocks), `null` for a cursor request.
+   *  Omitted only by legacy callers, which fall back to the live selection. */
+  selection?: readonly any[] | null,
 ): Promise<any | null> {
   if (!editor || !fullText?.trim()) return null;
   try {
@@ -822,17 +862,20 @@ export async function buildApplyDocumentInput(
       mathDollarToMathML(text),
     );
     if (!parsed?.length) return null;
-    let sel: any;
-    try {
-      sel = editor.getSelection();
-    } catch {
-      sel = undefined;
+    let selectedBlocks: readonly any[] | undefined;
+    if (selection !== undefined) {
+      selectedBlocks = selection?.length ? selection : undefined;
+    } else {
+      let sel: any;
+      try {
+        sel = editor.getSelection();
+      } catch {
+        sel = undefined;
+      }
+      selectedBlocks = sel?.blocks?.length ? sel.blocks : getAISelectionSnapshot(editor);
     }
-    const selectedBlocks = sel?.blocks?.length
-      ? sel.blocks
-      : getAISelectionSnapshot(editor);
     if (selectedBlocks?.length) {
-      const formatted = inheritFormatOnReplace(selectedBlocks, parsed);
+      const formatted = inheritFormatOnReplace([...selectedBlocks], parsed);
       /** Update ops map 1:1 onto the selection; extra blocks (model returned more than selected)
        *  become an add-op after the last selected block — never an "undefined$" id that fails validation. */
       const operations: any[] = formatted

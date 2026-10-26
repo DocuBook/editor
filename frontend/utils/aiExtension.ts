@@ -1,7 +1,7 @@
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { Plugin, PluginKey } from 'prosemirror-state'
 import { createAiTransport } from './aiTransport'
-import { buildHtmlDocumentState, captureAISelection, hasAISelection, releaseAISelection, replaceAISelectionInlineContent, restoreAISelection } from './aiBlocks'
+import { buildHtmlDocumentState, captureAISelection, dropAISelectionSnapshot, hasAISelection, releaseAISelection, replaceSelectedBlockContent, restoreAISelection } from './aiBlocks'
 import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
@@ -64,9 +64,9 @@ function applyOperations(editor: any, input: any): { written: string[]; changed:
         if (!id || !editor.getBlock(id)) throw new Error('Referenced document block is no longer available')
         const blocks = editor.tryParseHTMLToBlocks(operation.block)
         if (!blocks.length) throw new Error('AI returned invalid HTML block')
-        const selectionResult = replaceAISelectionInlineContent(editor, id, blocks[0].content)
-        if (selectionResult === false) throw new Error('Text selection is no longer available')
-        if (selectionResult === null) {
+        /** A selected block is written only where the selection covers it;
+         *  everything else is replaced whole. */
+        if (!replaceSelectedBlockContent(editor, id, blocks[0])) {
           editor.updateBlock(id, { ...blocks[0], id: undefined, children: undefined })
         }
         written.push(id)
@@ -83,7 +83,9 @@ function applyOperations(editor: any, input: any): { written: string[]; changed:
       } else if (operation?.type === 'delete') {
         const id = cleanId(operation.id)
         if (!id || !editor.getBlock(id)) throw new Error('Referenced document block is no longer available')
-        editor.removeBlocks([id])
+        /** Deleting inside a partly selected block removes only the selected
+         *  text; a fully selected block goes as a whole. */
+        if (!replaceSelectedBlockContent(editor, id, null)) editor.removeBlocks([id])
         changed = true
       }
     }
@@ -425,6 +427,10 @@ const extensionFactory = ({ editor, options }: any) => {
         if (invokeOptions.useSelection && hasAISelection(editor)) {
           if (!restoreAISelection(editor)) throw new Error('Text selection is no longer available')
           captureAISelection(editor)
+        } else if (!invokeOptions.useSelection) {
+          /** A cursor request writes at the cursor: a selection remembered by
+           *  an earlier request must not redirect its operations into a range. */
+          dropAISelectionSnapshot(editor)
         }
         /** rust-ai: the canonical document state comes from the injected
          *  builder (selection-aware, windowed) — the local HTML builder is only
