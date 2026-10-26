@@ -30,7 +30,6 @@ await runSuite('web-smoke', {
   await page.goto(base, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector(click('Create admin account'), { timeout: 12000 })
   await page.waitForSelector('input[placeholder="Setup token"]', { timeout: 12000 })
-  await page.screenshot({ path: 'test/artifacts/web-smoke-setup-token-no-skip.png', fullPage: false })
   ok('setup wizard: admin creation is required',
     await page.getByRole('button', { name: 'Create admin account' }).isVisible())
   ok('setup wizard: no account Skip control',

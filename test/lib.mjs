@@ -1,9 +1,11 @@
 /**
  * Shared e2e helpers — CI-friendly. Two artifacts matter:
- *   - a FAILING run writes artifacts/<name>.gif: one frame per assertion, so the
- *     rule that broke is visible instead of inferred from a wall of text
- *   - artifacts/<name>.server.log / .browser.log keep the text evidence a GIF
- *     cannot carry (a Rust 500, a refused request, an engine warning)
+ *   - a FAILING run writes screenshots, a passing run writes no images at all:
+ *     artifacts/<name>.fail-NN-<check>.png for each failed assertion (the page as
+ *     it was at that moment), or <name>.fail-01-final.png when the run failed some
+ *     other way (an exception, the suite deadline, a console error)
+ *   - artifacts/<name>.server.log / .browser.log keep the text evidence a
+ *     screenshot cannot carry (a Rust 500, a refused request, an engine warning)
  *   - pass/fail lines -> artifacts/<name>.results.txt, and the failing run prints
  *     the tail of the server log to stdout
  *
@@ -13,7 +15,7 @@
  * width left `innerWidth` at 1280px until a call with a DIFFERENT width was made.
  * Verify the media query (or `innerWidth`) actually flipped before asserting.
  */
-import { execFileSync, execSync, spawn } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname } from 'node:path'
@@ -27,75 +29,52 @@ export const PORTS = {
 const ARTIFACTS = 'test/artifacts'
 
 /**
- * Assertion frame trail: every `ok()` queues one JPEG frame (never awaited —
- * assertions stay synchronous), and a failing run assembles them into
- * artifacts/<name>.gif — the frames that lead to the broken rule, and the frame
- * of the gap itself. A passing run deletes the frames.
- *
- * The GIF needs a full ffmpeg: Playwright ships a deliberately minimal build
- * (no gif muxer, no palettegen) for video recording only. With no system ffmpeg
- * the frames are kept instead, so the evidence is never lost.
+ * Failure evidence as screenshots only: no GIF, no video, and nothing at all for
+ * a passing run. A failing assertion screenshots the page as it was at that
+ * moment (artifacts/<name>.fail-NN-<check>.png); a run that failed without a
+ * failing assertion — an exception, the suite deadline, a console error — gets
+ * one of its final state (artifacts/<name>.fail-01-final.png).
  */
-function frameTrail(page, name) {
-  const dir = `${ARTIFACTS}/${name}.frames`
-  const frames = []
+function failureShots(page, name) {
+  /* A suite that falls over takes every later check with it; a handful of
+     screenshots shows why, dozens only bury it. */
+  const MAX_SHOTS = 10
+  let count = 0
   let queue = Promise.resolve()
+  const shoot = label => {
+    if (count >= MAX_SHOTS) return
+    count++
+    mkdirSync(ARTIFACTS, { recursive: true })
+    const slug = label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'check'
+    const file = `${ARTIFACTS}/${name}.fail-${String(count).padStart(2, '0')}-${slug}.png`
+    /* Queued, never awaited by the assertion: `ok()` stays synchronous. */
+    queue = queue.then(() => page.screenshot({ path: file }).catch(() => {}))
+  }
   return {
+    /** Every assertion calls this; only a failing one takes a screenshot. */
     capture(label, passed) {
-      mkdirSync(dir, { recursive: true })
-      /* Numbered only: `%03d.jpg` is the image2 sequence every ffmpeg reads.
-         Frame N is assertion N of artifacts/<name>.results.txt — that file is
-         the caption line for the GIF. */
-      const file = `${dir}/${String(frames.length).padStart(3, '0')}.jpg`
-      frames.push({ file, label, passed })
-      queue = queue.then(() => page.screenshot({ path: file, type: 'jpeg', quality: 82 }).catch(() => {}))
+      if (!passed) shoot(label)
     },
-    /** Returns the GIF path when the run failed, else undefined. */
+    /** After the run: a failure no assertion captured still gets its screenshot. */
     async finish(failed) {
+      if (failed && count === 0) shoot('final')
       await queue
-      if (!failed || frames.length === 0) {
-        rmSync(dir, { recursive: true, force: true })
-        return undefined
-      }
-      const gap = frames.findIndex(frame => !frame.passed) + 1
-      const gif = `${ARTIFACTS}/${name}.gif`
-      const ffmpeg = systemFfmpeg()
-      if (!ffmpeg) {
-        console.log(`\nNo system ffmpeg — kept ${frames.length} JPEG frames. Encode with:\n  ffmpeg -framerate 1 -i ${dir}/%03d.jpg -vf fps=2,scale=520:-1 -loop 0 ${gif}`)
-        return dir
-      }
-      try {
-        execFileSync(ffmpeg, [
-          '-y', '-loglevel', 'error',
-          '-framerate', '1', '-i', `${dir}/%03d.jpg`,
-          '-vf', 'fps=2,scale=520:-1:flags=lanczos',
-          '-loop', '0', gif,
-        ], { stdio: 'inherit' })
-      } catch {
-        console.log(`\nGIF assembly failed — kept ${frames.length} JPEG frames in ${dir}`)
-        return dir
-      }
-      rmSync(dir, { recursive: true, force: true })
-      console.log(`\nRULE GAP ${gap}/${frames.length} → ${gif}`)
-      return gif
     },
   }
 }
 
-/** A full ffmpeg (gif muxer + palette filters) — Playwright's own build cannot
- *  encode GIF and the macOS CI runners ship no ffmpeg at all, so a missing one
- *  is normal; the caller keeps the frames. `FFMPEG_EXE` overrides. */
-function systemFfmpeg() {
-  if (process.env.FFMPEG_EXE) return process.env.FFMPEG_EXE
+/** Evidence from an earlier run of this suite — including the GIFs and frame
+ *  folders older versions wrote — must not pass for this run's. */
+function clearShots(name) {
   try {
-    const found = execSync('command -v ffmpeg', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim()
-    if (found) return found
-  } catch {}
-  /* Homebrew bins are not always on a CI job's PATH. */
-  for (const candidate of ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', '/usr/bin/ffmpeg']) {
-    if (existsSync(candidate)) return candidate
+    for (const entry of readdirSync(ARTIFACTS)) {
+      if (entry.startsWith(`${name}.fail-`) || entry === `${name}.gif` || entry === `${name}.frames`) {
+        rmSync(`${ARTIFACTS}/${entry}`, { recursive: true, force: true })
+      }
+    }
+  } catch {
+    // No artifacts folder yet.
   }
-  return undefined
 }
 
 /** JSON response in the IPC bridge's `{ result }` envelope. */
@@ -137,6 +116,12 @@ export function killPort(port) {
  *   seed      [{ path, content }] written into the vault before boot
  *   allow     console errors the suite provokes on purpose (see attachLogging)
  *   setup     async (ctx) => {} — route mocks / init scripts, before the body
+ *   deadlineMs  hard limit for the whole suite (default 180 s, or the
+ *             E2E_SUITE_DEADLINE_MS env). A suite that has not finished by then
+ *             fails with the last check it passed, screenshots the stuck page,
+ *             keeps its logs,
+ *             and the process exits — it is never left waiting on a promise
+ *             that cannot settle.
  *
  * body receives ctx: { base, api, page, context, browser, server, restart, ok,
  * results, vaultPath, admin }.
@@ -154,17 +139,19 @@ export async function runSuite(name, opts, body) {
     seed = [],
     setup,
     allow = [],
+    deadlineMs = Number(process.env.E2E_SUITE_DEADLINE_MS) || 180_000,
   } = opts
   const base = `http://localhost:${port}`
   const results = []
-  let trail
+  let shots
   const ok = (label, condition, extra = '') => {
     results.push([condition ? 'PASS' : 'FAIL', label, extra])
     if (!condition) process.exitCode = 1
-    trail?.capture(label, condition)
+    shots?.capture(label, condition)
   }
 
   ensureArtifacts()
+  clearShots(name)
   killPort(port)
   rmSync(dataDir, { recursive: true, force: true })
   mkdirSync(vaultPath, { recursive: true })
@@ -209,7 +196,19 @@ export async function runSuite(name, opts, body) {
     },
   }
 
-  try {
+  /* Playwright bounds its own actions, but not a promise the suite awaits itself
+     (a held request that is never sent, a hook that never fires): without a
+     deadline such a suite waits until the CI job is killed, hours later. */
+  let deadlineTimer
+  let timedOut = false
+  const deadline = new Promise((_, reject) => {
+    deadlineTimer = setTimeout(() => {
+      timedOut = true
+      const last = [...results].reverse().find(([status]) => status === 'PASS')
+      reject(new Error(`suite did not finish within ${Math.round(deadlineMs / 1000)}s — last passing check: ${last ? `"${last[1]}"` : 'none'}`))
+    }, deadlineMs)
+  })
+  const run = async () => {
     await waitForServer(base)
     browser = await launchBrowser()
     ctx.context = await browser.newContext({ viewport, ...context })
@@ -229,21 +228,38 @@ export async function runSuite(name, opts, body) {
     }
     page = await ctx.context.newPage()
     logging = attachLogging(page, name, { allow })
-    trail = frameTrail(page, name)
+    shots = failureShots(page, name)
     if (setup) await setup(ctx)
     await body(ctx)
+  }
+
+  try {
+    const work = run()
+    // The loser must not become an unhandled rejection.
+    work.catch(() => {})
+    await Promise.race([work, deadline])
   } catch (error) {
     results.push(['FAIL', 'setup/run', error instanceof Error ? error.stack || error.message : String(error)])
     process.exitCode = 1
+    // What the stuck page looked like is the evidence for why it stuck.
+    if (timedOut) shots?.capture('suite deadline', false)
+  } finally {
+    clearTimeout(deadlineTimer)
   }
 
-  /* Frames need a live page: build the GIF before the browser goes away. */
+  /* Cleanup is bounded too: a hung page or browser must not be able to keep a
+     failed suite from reporting. */
+  const bounded = (promise, ms) => Promise.race([promise, new Promise(resolve => setTimeout(resolve, ms))])
+  /* A screenshot needs a live page: take it before the browser goes away. */
   const failed = results.some(([status]) => status === 'FAIL') || (logging?.errors.length ?? 0) > 0
-  await trail?.finish(failed)
-  await browser?.close().catch(() => {})
+  await bounded(shots?.finish(failed) ?? Promise.resolve(), 20_000)
+  await bounded(browser?.close().catch(() => {}) ?? Promise.resolve(), 10_000)
   running.bin.kill()
 
   if (!summary(name, results, { serverLog: running.logPath, logging })) process.exitCode = 1
+  // A suite that timed out still has a body awaiting something forever; exit
+  // rather than wait for an event loop that those promises do not hold open.
+  if (timedOut) process.exit(1)
 }
 
 /** Locate the Playwright browser binary — env override (CHROMIUM_EXE /
