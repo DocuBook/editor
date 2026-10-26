@@ -13,15 +13,15 @@
   "bump-minor-pre-major": true,
 
   "changelog-sections": [
-    { "type": "feat", "section": "🚀 Features" },
-    { "type": "fix", "section": "🐛 Bug Fixes" },
-    { "type": "security", "section": "🛡️ Security" },
-    { "type": "perf", "section": "⚡ Performance" },
-    { "type": "refactor", "section": "🔄 Refactor" },
-    { "type": "docs", "section": "📚 Documentation", "hidden": true },
-    { "type": "test", "section": "🧪 Testing & CI", "hidden": true },
-    { "type": "ci", "section": "🔧 CI" },
-    { "type": "chore", "section": "🔄 Version / Hygiene", "hidden": true }
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "security", "section": "Security" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "refactor", "section": "Refactor" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "test", "section": "Testing & CI", "hidden": true },
+    { "type": "ci", "section": "CI" },
+    { "type": "chore", "section": "Version / Hygiene", "hidden": true }
   ],
 
   "packages": {
