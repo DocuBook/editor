@@ -1,6 +1,13 @@
-import { describe, it, expect } from 'vitest'
-import { resolveProbeModel, resolveRequestModel, isTextOnly, autoProbe } from '../../../frontend/utils/aiProbe'
-import { CUSTOM_PROVIDER_ID } from '../../../frontend/stores/aiSettings'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
+vi.mock('../../../frontend/lib/ipc', async importOriginal => ({
+  ...await importOriginal<typeof import('../../../frontend/lib/ipc')>(),
+  invoke,
+}))
+
+import { resolveProbeModel, resolveRequestModel, isTextOnly, ensureToolProbe, parseProbeResult, resetToolProbeBackoff } from '../../../frontend/utils/aiProbe'
+import { CUSTOM_PROVIDER_ID, useAiSettings } from '../../../frontend/stores/aiSettings'
 
 describe('resolveProbeModel', () => {
   it('env model wins for custom provider', () => {
@@ -51,26 +58,85 @@ describe('isTextOnly', () => {
   })
 })
 
-describe('autoProbe', () => {
-  it('skips when a probe already exists', async () => {
-    let calls = 0
-    const run = async () => { calls++; return { tools: true } }
-    await autoProbe('p', 'm', { p: { m: true } }, () => {}, run)
-    expect(calls).toBe(0)
+describe('parseProbeResult', () => {
+  it('reads a measured result and treats anything else as inconclusive', () => {
+    expect(parseProbeResult('{"status":"ok","tools":true}')).toBe(true)
+    expect(parseProbeResult('{"status":"ok","tools":false}')).toBe(false)
+    // Rate limit / outage on the tool request: not a measurement.
+    expect(parseProbeResult('{"status":"ok","tools":null}')).toBeUndefined()
+    expect(parseProbeResult('not json')).toBeUndefined()
   })
-  it('probes and stores when missing', async () => {
-    let stored: [string, string, boolean] | null = null
-    await autoProbe('p', 'm', {}, (p, m, t) => { stored = [p, m, t] }, async () => ({ tools: false }))
-    expect(stored).toEqual(['p', 'm', false])
+})
+
+describe('ensureToolProbe', () => {
+  beforeEach(() => {
+    invoke.mockReset()
+    resetToolProbeBackoff()
+    useAiSettings.setState({ savedProviders: ['p'], probeTools: {} })
   })
-  it('silently ignores probe errors', async () => {
-    await autoProbe('p', 'm', {}, () => {}, async () => { throw new Error('boom') })
-    // no throw = pass
-    expect(true).toBe(true)
+
+  it('returns a stored probe without a request', async () => {
+    useAiSettings.setState({ probeTools: { p: { m: false } } })
+    await expect(ensureToolProbe('p', 'm')).resolves.toBe(false)
+    expect(invoke).not.toHaveBeenCalled()
   })
-  it('ignores undefined result', async () => {
-    let stored = false
-    await autoProbe('p', 'm', {}, () => { stored = true }, async () => undefined)
-    expect(stored).toBe(false)
+
+  it('probes once with the backend key and endpoint, then stores the result', async () => {
+    let finish!: (value: string) => void
+    invoke.mockImplementation(async (command: string) => command === 'test_connection'
+      ? new Promise<string>(resolve => { finish = resolve })
+      : null)
+    // Composer pick, Settings form and transport ask at the same time.
+    const results = Promise.all([ensureToolProbe('p', 'm'), ensureToolProbe('p', 'm'), ensureToolProbe('p', 'm')])
+    await Promise.resolve()
+    finish('{"status":"ok","tools":true}')
+    expect(await results).toEqual([true, true, true])
+    const probes = invoke.mock.calls.filter(call => call[0] === 'test_connection')
+    expect(probes).toEqual([['test_connection', { provider: 'p', model: 'm', baseUrl: '', apiKey: '' }]])
+    expect(invoke).toHaveBeenCalledWith('set_probe', { provider: 'p', model: 'm', tools: true })
+    expect(useAiSettings.getState().probeTools.p.m).toBe(true)
+  })
+
+  it('stores nothing when the probe is inconclusive or fails, so it is retried later', async () => {
+    invoke.mockResolvedValueOnce('{"status":"ok","tools":null}')
+    await expect(ensureToolProbe('p', 'm')).resolves.toBeUndefined()
+    invoke.mockRejectedValueOnce(new Error('offline'))
+    await expect(ensureToolProbe('p', 'other')).resolves.toBeUndefined()
+    expect(useAiSettings.getState().probeTools.p).toBeUndefined()
+    expect(invoke.mock.calls.map(call => call[0])).not.toContain('set_probe')
+  })
+
+  it('backs off a failing pair instead of probing it on every prompt', async () => {
+    vi.useFakeTimers()
+    try {
+      invoke.mockResolvedValue('{"status":"ok","tools":null}')
+      await ensureToolProbe('p', 'm')
+      await ensureToolProbe('p', 'm')
+      expect(invoke).toHaveBeenCalledTimes(1)
+      vi.advanceTimersByTime(61_000)
+      invoke.mockResolvedValue('{"status":"ok","tools":true}')
+      await expect(ensureToolProbe('p', 'm')).resolves.toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not probe a provider without a saved key', async () => {
+    await expect(ensureToolProbe('other', 'm')).resolves.toBeUndefined()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it('drops a result that lands after the provider was revoked', async () => {
+    let finish!: (value: string) => void
+    invoke.mockImplementation(async (command: string) => command === 'test_connection'
+      ? new Promise<string>(resolve => { finish = resolve })
+      : null)
+    const pending = ensureToolProbe('p', 'm')
+    await Promise.resolve()
+    useAiSettings.getState().forgetProvider('p')
+    finish('{"status":"ok","tools":true}')
+    await pending
+    expect(useAiSettings.getState().probeTools.p).toBeUndefined()
+    expect(invoke.mock.calls.map(call => call[0])).not.toContain('set_probe')
   })
 })

@@ -221,11 +221,15 @@ pub(crate) async fn test_connection(
     if let Some(session) = &session {
         tool_req = tool_req.header("x-opencode-session", *session);
     }
-    let tool_res = tool_req
-        .json(&tool_body)
-        .send()
-        .await
-        .map_err(|e| format!("Tool test failed: {}", e))?;
+    // The key and model already passed the basic request, so from here on a
+    // transport failure, rate limit or outage is "not measured", never "no tool
+    // support": the frontend leaves those unstored and probes again later.
+    let Ok(tool_res) = tool_req.json(&tool_body).send().await else {
+        return Ok(agent::PROBE_INCONCLUSIVE.to_string());
+    };
+    if agent::probe_status_is_inconclusive(tool_res.status()) {
+        return Ok(agent::PROBE_INCONCLUSIVE.to_string());
+    }
     if !tool_res.status().is_success() {
         // Some gateways REJECT forced tool_choice:"required" (HTTP 400) yet still
         // support tool calls in "auto" mode (e.g. opencode.ai, DeepSeek thinking).
@@ -238,21 +242,25 @@ pub(crate) async fn test_connection(
         if let Some(session) = &session {
             retry = retry.header("x-opencode-session", *session);
         }
-        let auto = retry
-            .json(&tool_body)
-            .send()
-            .await;
-        if let Ok(r2) = auto {
-            if r2.status().is_success() {
-                let t2 = r2.text().await.map_err(|e| e.to_string())?;
-                if t2.contains("tool_calls") || t2.contains("test_tool") {
-                    return Ok(r#"{"status":"ok","tools":true}"#.to_string());
-                }
+        let Ok(r2) = retry.json(&tool_body).send().await else {
+            return Ok(agent::PROBE_INCONCLUSIVE.to_string());
+        };
+        if agent::probe_status_is_inconclusive(r2.status()) {
+            return Ok(agent::PROBE_INCONCLUSIVE.to_string());
+        }
+        if r2.status().is_success() {
+            let Ok(t2) = r2.text().await else {
+                return Ok(agent::PROBE_INCONCLUSIVE.to_string());
+            };
+            if t2.contains("tool_calls") || t2.contains("test_tool") {
+                return Ok(r#"{"status":"ok","tools":true}"#.to_string());
             }
         }
         return Ok(r#"{"status":"ok","tools":false}"#.to_string());
     }
-    let text = tool_res.text().await.map_err(|e| e.to_string())?;
+    let Ok(text) = tool_res.text().await else {
+        return Ok(agent::PROBE_INCONCLUSIVE.to_string());
+    };
     let supports_tools = text.contains("tool_calls") || text.contains("test_tool");
     Ok(format!(r#"{{"status":"ok","tools":{}}}"#, supports_tools))
 }

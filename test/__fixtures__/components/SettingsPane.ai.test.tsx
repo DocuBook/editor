@@ -465,6 +465,54 @@ describe('SettingsPane — save', () => {
     expect(buttonsIn('opencode-go')).toContain('Revoke')
   })
 
+  /** Each form saves ITS provider with ITS model. The active provider's live
+   *  model belongs to another provider; validating a second provider's key with
+   *  it sent `deepseek` an OpenCode model, failed, and blamed the key. */
+  it('saves a second provider with its own model, not the active provider\'s', async () => {
+    configure('opencode-go', { model: 'go-model', probes: { 'go-model': true } })
+    useAiSettings.setState({ provider: 'opencode-go', model: 'go-model', models: { 'opencode-go': 'go-model' }, savedProviders: ['opencode-go'], probeTools: { 'opencode-go': { 'go-model': true } } })
+    await render()
+
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      for (const [label, value] of [['API Key', 'sk-deepseek'], ['Model', 'deepseek-chat']] as const) {
+        const input = inSection('deepseek', label)!
+        setter.call(input, value)
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      }
+    })
+    // A real backend lists the provider once its key is saved.
+    const base = invoke.getMockImplementation()!
+    invoke.mockImplementation(async (command: string, args: any) => {
+      if (command === 'set_api_key') {
+        backend.savedProviders = [...backend.savedProviders, args.provider]
+        backend.endpoints[args.provider] = { baseUrl: args.baseUrl, model: args.model, probes: {}, hasKey: true }
+      }
+      return base(command, args)
+    })
+    act(() => sectionOf('deepseek').querySelector<HTMLButtonElement>('button.px-3\\.5')!.click())
+    await settle()
+
+    const test = invoke.mock.calls.find(c => c[0] === 'test_connection' && c[1].provider === 'deepseek')!
+    expect(test[1]).toMatchObject({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect(invoke.mock.calls.find(c => c[0] === 'set_api_key')![1]).toMatchObject({ provider: 'deepseek', model: 'deepseek-chat' })
+    expect(invoke.mock.calls.filter(c => c[0] === 'set_probe').map(c => c[1])).toEqual([{ provider: 'deepseek', model: 'deepseek-chat', tools: true }])
+  })
+
+  /** Every configured provider form auto-probes ITS OWN model. The active model
+   *  belongs to the active provider only. */
+  it('auto-probes each configured provider with that provider\'s model', async () => {
+    configure('deepseek', { model: 'deepseek-chat', probes: {} })
+    backend.endpoints['opencode-go'] = { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'go-model', probes: { 'go-model': true }, hasKey: true }
+    backend.savedProviders = ['opencode-go', 'deepseek']
+    backend.active = 'opencode-go'
+    useAiSettings.setState({ provider: 'opencode-go', model: 'go-model', models: { 'opencode-go': 'go-model', 'deepseek': 'deepseek-chat' }, savedProviders: ['opencode-go', 'deepseek'], probeTools: { 'opencode-go': { 'go-model': true } } })
+    await render()
+
+    const probes = invoke.mock.calls.filter(c => c[0] === 'test_connection').map(c => [c[1].provider, c[1].model])
+    expect(probes).toEqual([['deepseek', 'deepseek-chat']])
+  })
+
   /** A live composer pick is newer than the fetch this form rendered from, so the
    *  Model field — the SAME single setting the picker edits — must show it instead
    *  of whatever stale per-provider row the store holds. Only UNCONFIGURED providers

@@ -207,6 +207,8 @@ On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` switches `
 - Each page is capped at 5 MB and 20 seconds; a search at 15 seconds. One prompt can make at most 8 tool calls over 4 rounds.
 - Results reach the model as untrusted reference data, and every change still goes through your accept/reject review.
 
+**Models without tool calling** — DocuBook measures whether each provider and model can call tools when you save its key or pick it in the composer. If a model cannot, it edits through Markdown and cannot call the tools itself. With `web_fetch` on, the first 3 pages linked in your prompt are read for it before the request, and the line under the composer shows how many were read (for example `1 of 2 linked pages read`). Web search needs a model with tool calling.
+
 **Privacy** — Search queries are written by the AI and can contain text from your notes. Tavily's terms allow it to use queries to improve its service; SearXNG forwards them to the engines your instance is configured for, without your identity. If that matters for a note, leave web search off.
 
 **Troubleshooting**

@@ -34,10 +34,10 @@ import {
 import { buildAiPrompt } from "./aiPrompt";
 import type { ReferenceResult } from "./aiPromptState";
 import { parseMentions } from "./aiMentions";
-import { isTextOnly } from "./aiProbe";
+import { ensureToolProbe, isTextOnly } from "./aiProbe";
 import { mapWithConcurrency } from "./concurrency";
 import { uuid } from "./uuid";
-import { collectUrlSources } from "./webTools";
+import { collectUrlSources, extractUrls } from "./webTools";
 
 /** Batch AI token deltas into one text-delta part per tick — fewer ProseMirror
  *  document writes while the AI types (smooth instead of janky streaming). */
@@ -58,6 +58,40 @@ const MAX_CONTEXT_PAGE_TOTAL_CHARS = 120_000;
  *  enter the transcript, and the char budgets, in the model's call order. */
 const MAX_PARALLEL_CONTEXT_CALLS = 4;
 const CONTEXT_BUDGET_EXHAUSTED = "Context result budget exhausted.";
+/** Path B cannot call tools, so it reads the pages the user linked in the prompt
+ *  before the request: at most this many, in prompt order. */
+const MAX_PREFETCH_URLS = 3;
+const WEB_FETCH_TOOL = "web_fetch";
+
+/** Longest wait for an unmeasured model's tool probe before the first request.
+ *  The probe is two small provider calls; past this the turn runs text-only and
+ *  the probe still lands for the next one. */
+const PROBE_WAIT_MS = 8_000;
+
+/** Resolve with `probe`, or `undefined` once `ms` passed or `signal` aborted. */
+function waitForProbe(probe: Promise<boolean | undefined>, ms: number, signal?: AbortSignal): Promise<boolean | undefined> {
+  return new Promise((resolve) => {
+    const done = (value: boolean | undefined) => {
+      clearTimeout(timer);
+      signal?.removeEventListener?.("abort", onAbort);
+      resolve(value);
+    };
+    const onAbort = () => done(undefined);
+    const timer = setTimeout(() => done(undefined), ms);
+    signal?.addEventListener?.("abort", onAbort, { once: true });
+    probe.then(done, () => done(undefined));
+  });
+}
+
+/** Whether a web_fetch result carries a page rather than a tool error. */
+function pageWasRead(result: string): boolean {
+  try {
+    const parsed = JSON.parse(result);
+    return parsed?.type === "untrusted_reference_data" && !parsed?.content?.error;
+  } catch {
+    return false;
+  }
+}
 
 /** A stream that is already finished. A bare `new ReadableStream()` never
  *  closes, so a reader awaiting it after an early abort hung forever. */
@@ -144,7 +178,14 @@ async function runSendMessages(
    *  the probe is the single source of truth; unmeasured → text-only until
    *  auto-probe measures true. For env-controlled custom endpoints the probe is
    *  keyed by the env model (the one the backend actually sends). */
-  const supportsTools = !isTextOnly(provider, model, st.probeTools);
+  /** A model nobody measured yet (picked in the composer, hydrated from another
+   *  device) used to run text-only silently. Measure it first; the composer
+   *  pick usually started this probe already, so the wait is short or zero. */
+  if (provider && model && st.probeTools[provider]?.[model] === undefined) {
+    await waitForProbe(ensureToolProbe(provider, model), PROBE_WAIT_MS, abortSignal);
+    if (abortSignal?.aborted) return closedStream();
+  }
+  const supportsTools = !isTextOnly(provider, model, useAiSettings.getState().probeTools);
   const suppliedToolDefs = (body as any)?.toolDefinitions as
     Record<string, { description: string; inputSchema: any }> | undefined;
   const toolDefs = Object.fromEntries(Object.entries(suppliedToolDefs ?? {}).filter(([name]) => name === "applyDocumentOperations")) as Record<string, { description: string; inputSchema: any }>;
@@ -165,7 +206,10 @@ async function runSendMessages(
         });
       }
     }
-  } else if (supportsTools && deps.discoverContextTools) {
+  } else if (deps.discoverContextTools) {
+    /** Discovery runs for text-only models too: it seeds the turn's URL ledger
+     *  and says whether web_fetch is enabled, which Path B's prefetch needs. The
+     *  tools themselves are offered only to a model that can call them. */
     const discovered = await invoke<any>("context_tools", { requestId: contextId, urlSources: collectUrlSources(messages) }, abortSignal).then((value) => {
       try { return typeof value === "string" ? JSON.parse(value) : value } catch { return [] }
     }).catch(() => []);
@@ -183,6 +227,8 @@ async function runSendMessages(
   const toolEntries = Object.entries(toolDefs ?? {}).filter(
     ([name]) => name === "applyDocumentOperations" || (Array.isArray(contextTools) && contextTools.some((tool: any) => tool?.read_only === true && tool.name === name)),
   );
+  /** Backend web_fetch is on for this turn (host-injected tools are not). */
+  const webFetchAvailable = !deps.executeContextTool && contextTools.some((tool: any) => tool?.name === WEB_FETCH_TOOL && tool?.read_only === true);
   const contextToolNames = new Set(
     (supportsTools ? contextTools : [])
       .filter((tool: any) => tool?.read_only === true && typeof tool.name === "string")
@@ -364,6 +410,47 @@ async function runSendMessages(
         let contextPageRounds = 0;
         let contextPageCalls = 0;
         let contextPageChars = 0;
+        /** Path B cannot call tools, so the pages linked in the prompt are read
+         *  for it, once per turn, through the same backend web_fetch (URL ledger,
+         *  SSRF guard, budgets) and handed over as reference data. URLs Path A
+         *  already fetched before a fallback are not read twice. */
+        let prefetched = false;
+        const prefetchLinkedPages = async () => {
+          if (prefetched || !webFetchAvailable) return;
+          prefetched = true;
+          const fetched = new Set(references.filter((reference) => reference.tool === WEB_FETCH_TOOL).map((reference) => {
+            try { return String(JSON.parse(reference.input)?.url ?? ""); } catch { return ""; }
+          }));
+          const urls = extractUrls(userText).filter((url) => !fetched.has(url)).slice(0, MAX_PREFETCH_URLS);
+          if (!urls.length) return;
+          /** Its own request id, so Stop cancels the fetches like a tool round. */
+          currentRequestId = uuid();
+          const requestId = currentRequestId;
+          const results = await mapWithConcurrency(urls, MAX_PARALLEL_CONTEXT_CALLS, async (url) => {
+            try {
+              return await invoke<string>("call_context_tool", { requestId, contextId, name: WEB_FETCH_TOOL, input: { url } }, abortSignal);
+            } catch (error) {
+              if (abortSignal?.aborted) throw error;
+              return "Context tool execution failed.";
+            }
+          });
+          let read = 0;
+          urls.forEach((url, index) => {
+            if (contextToolChars >= MAX_CONTEXT_TOOL_TOTAL_CHARS) return;
+            const content = untrustedContextResult(results[index], MAX_CONTEXT_TOOL_TOTAL_CHARS - contextToolChars);
+            contextToolChars += content.length;
+            const text = JSON.parse(content).content as string;
+            if (!text) return;
+            if (pageWasRead(results[index])) read++;
+            references.push({ tool: WEB_FETCH_TOOL, input: JSON.stringify({ url }), content: text });
+          });
+          /** Visible like the mention summary: "the AI ignored my link" and "the
+           *  link was never read" must not look the same. */
+          const notice = [mentionNotice(mentionContext), `${read} of ${urls.length} linked page${urls.length === 1 ? "" : "s"} read`]
+            .filter(Boolean)
+            .join(" · ");
+          useAiChat.getState().setMentionNotice(notice);
+        };
         /** Outer turn loop. Each iteration = one provider attempt (which may itself
          *  contain semantic-validation retries). A turn normally ends the stream, but
          *  the Path A → Path B fallback re-enters for exactly one more iteration. */
@@ -379,6 +466,10 @@ async function runSendMessages(
             pendingDelta = "";
             toolBuffer.length = 0;
             streamTruncated = false;
+            if (!useTools) {
+              await prefetchLinkedPages();
+              if (abortSignal?.aborted) return;
+            }
             const text = useTools ? undefined : ensureTextContext();
             const msgs = buildAiPrompt({
               ...basePrompt,

@@ -15,6 +15,8 @@ import { observeMobileToolbar } from '../../utils/mobileToolbar'
 import { fetchProviderModels, type DiscoveredModel } from '../../utils/modelDiscovery'
 import { PROVIDERS } from '../../data/providers'
 import { CUSTOM_PROVIDER_ID } from '../../stores/aiSettings'
+import { getAiConfig } from '../../utils/aiConfig'
+import { ensureToolProbe } from '../../utils/aiProbe'
 
 type TreeEntry = MentionEntry
 
@@ -457,6 +459,12 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
      *  backend's stale active model. */
     markSelectionDirty()
     setModelPickerOpen(false)
+    /** Measure the pick now, while the user types the prompt: an unmeasured
+     *  model runs text-only. Resolved like the transport resolves it, so an
+     *  env-controlled endpoint measures the env model it actually sends. */
+    void getAiConfig().then(({ provider: active, model: sent }) => {
+      if (active && sent) void ensureToolProbe(active, sent)
+    })
   }
   useEffect(() => {
     if (!modelPickerOpen) return

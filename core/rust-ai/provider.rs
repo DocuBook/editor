@@ -184,6 +184,21 @@ pub fn validate_base_url(provider: &str, base_url: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `test_connection` reply when the tool request told nothing about tool
+/// support. The frontend stores only a boolean `tools`, so this one is retried
+/// later instead of being recorded.
+pub const PROBE_INCONCLUSIVE: &str = r#"{"status":"ok","tools":null}"#;
+
+/// Whether a tool-probe response status says nothing about tool support: the
+/// gateway was rate limiting, timing out or failing. Recording `tools:false`
+/// for these demoted a tool-capable model to text-only for good, since a
+/// measured model is never probed again.
+pub fn probe_status_is_inconclusive(status: reqwest::StatusCode) -> bool {
+    status == reqwest::StatusCode::REQUEST_TIMEOUT
+        || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
+}
+
 /// Fetch model metadata from an OpenAI-compatible endpoint.
 pub async fn fetch_models(
     client: &reqwest::Client,
@@ -236,6 +251,18 @@ pub async fn fetch_models(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_rate_limits_and_outages_make_a_tool_probe_inconclusive() {
+        use reqwest::StatusCode;
+        for status in [StatusCode::TOO_MANY_REQUESTS, StatusCode::REQUEST_TIMEOUT, StatusCode::BAD_GATEWAY, StatusCode::SERVICE_UNAVAILABLE] {
+            assert!(probe_status_is_inconclusive(status), "{status}");
+        }
+        // A gateway that rejects the tool payload has answered: no tool support.
+        for status in [StatusCode::BAD_REQUEST, StatusCode::UNPROCESSABLE_ENTITY, StatusCode::NOT_FOUND] {
+            assert!(!probe_status_is_inconclusive(status), "{status}");
+        }
+    }
 
     #[test]
     fn agent_new_constructs_struct() {
