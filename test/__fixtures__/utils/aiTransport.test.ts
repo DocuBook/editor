@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAiTransport } from '../../../frontend/utils/aiTransport'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
+import { useAiChat } from '../../../frontend/stores/aiChat'
+import { resetToolProbeBackoff } from '../../../frontend/utils/aiProbe'
 
 function sseStream(chunks: string[]) {
   const encoder = new TextEncoder()
@@ -26,7 +28,8 @@ function sseResponder(frames: (requestId: string) => string[]) {
 }
 
 beforeEach(() => {
-  useAiSettings.setState({ provider: '', model: '', probeTools: {} })
+  resetToolProbeBackoff()
+  useAiSettings.setState({ provider: '', model: '', probeTools: {}, savedProviders: [] })
 })
 
 afterEach(() => vi.unstubAllGlobals())
@@ -266,9 +269,9 @@ describe('createAiTransport tools-to-text fallback', () => {
       { type: 'paragraph', content: markdown },
     ],
   })
-  const drain = async (transport: any) => {
+  const drain = async (transport: any, prompt = 'summarise this document') => {
     const stream = await transport.sendMessages({
-      messages: [{ role: 'user', content: 'summarise this document' }],
+      messages: [{ role: 'user', content: prompt }],
       body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit doc', inputSchema: {} } } },
     })
     const reader = stream.getReader()
@@ -592,6 +595,163 @@ describe('createAiTransport tools-to-text fallback', () => {
     expect(parts.some(part => part.type === 'tool-input-available')).toBe(false)
     expect(JSON.stringify(parts)).not.toContain('Hijacked')
     expect(error).toBeTruthy()
+  })
+
+  describe('Path B linked-page prefetch', () => {
+    const textDone = (id: string, token: string) => new Response(sseStream([
+      'event: ai:token\n', `data: {"requestId":"${id}","token":${JSON.stringify(token)}}\n\n`,
+      'event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`,
+    ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    const page = (url: string) => JSON.stringify({ type: 'untrusted_reference_data', truncated: false, content: { url, title: 'T', text: `Body of ${url}` } })
+
+    function backend(tools: string[], onFetch?: (input: any) => string) {
+      const calls: Record<string, any[]> = { context_tools: [], call_context_tool: [], ask_ai: [] }
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        const command = String(url).replace(/^.*\/api\//, '')
+        calls[command]?.push(body)
+        if (command === 'context_tools') return Response.json({ result: tools.map(name => ({ name, description: name, input_schema: { type: 'object' }, read_only: true })) })
+        if (command === 'call_context_tool') return Response.json({ result: onFetch ? onFetch(body.input) : page(body.input.url) })
+        if (command === 'ask_ai') return textDone(body.requestId, '<content>Summary.</content>')
+        return Response.json({ result: null })
+      }))
+      return calls
+    }
+
+    it('reads the linked pages for a text-only model and hands them over as reference data', async () => {
+      useTextOnly()
+      const calls = backend(['web_fetch'])
+      const { parts, error } = await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'Summarise https://a.example/one and https://b.example/two.')
+      expect(error).toBeNull()
+
+      expect(calls.call_context_tool.map(call => [call.name, call.input.url])).toEqual([
+        ['web_fetch', 'https://a.example/one'],
+        ['web_fetch', 'https://b.example/two'],
+      ])
+      // Same turn ledger as discovery; one Stop-able request id for the batch.
+      expect(new Set(calls.call_context_tool.map(call => call.contextId))).toEqual(new Set([calls.context_tools[0].requestId]))
+      expect(new Set(calls.call_context_tool.map(call => call.requestId)).size).toBe(1)
+
+      const ask = calls.ask_ai[0]
+      expect(ask.tools).toBeUndefined()
+      const messages = JSON.parse(ask.messages)
+      expect(messages.some((message: any) => message.role === 'tool' || message.tool_calls)).toBe(false)
+      const reference = messages.find((message: any) => String(message.content).includes('<web_context>')).content
+      expect(reference).toContain('Body of https://a.example/one')
+      expect(reference).toContain('Body of https://b.example/two')
+      expect(useAiChat.getState().mentionNotice).toContain('2 of 2 linked pages read')
+      expect(parts.find(part => part.type === 'tool-input-available')).toBeTruthy()
+    })
+
+    it('reports a page the backend refused instead of hiding it', async () => {
+      useTextOnly()
+      backend(['web_fetch'], () => JSON.stringify({ type: 'untrusted_reference_data', truncated: false, content: { error: { code: 'blocked_address', message: 'blocked' } } }))
+      await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'Read http://intranet.example/x')
+      expect(useAiChat.getState().mentionNotice).toContain('0 of 1 linked page read')
+    })
+
+    it('fetches nothing when web_fetch is off or the prompt has no link', async () => {
+      useTextOnly()
+      let calls = backend(['web_search'])
+      await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'Summarise https://a.example/one')
+      expect(calls.call_context_tool).toHaveLength(0)
+
+      calls = backend(['web_fetch'])
+      await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'Summarise this document')
+      expect(calls.call_context_tool).toHaveLength(0)
+    })
+
+    it('caps the prefetch at three links', async () => {
+      useTextOnly()
+      const calls = backend(['web_fetch'])
+      await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'https://e.example/1 https://e.example/2 https://e.example/3 https://e.example/4')
+      expect(calls.call_context_tool.map(call => call.input.url)).toEqual(['https://e.example/1', 'https://e.example/2', 'https://e.example/3'])
+      // The link past the cap counts as never read, not as ignored by the AI.
+      expect(useAiChat.getState().mentionNotice).toContain('3 of 4 linked pages read')
+    })
+
+    it('does not re-read a page Path A already fetched before the fallback', async () => {
+      usePathA()
+      const calls: Record<string, any[]> = { context_tools: [], call_context_tool: [], ask_ai: [] }
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        const command = String(url).replace(/^.*\/api\//, '')
+        calls[command]?.push(body)
+        if (command === 'context_tools') return Response.json({ result: [{ name: 'web_fetch', description: 'f', input_schema: { type: 'object' }, read_only: true }] })
+        if (command === 'call_context_tool') return Response.json({ result: page(body.input.url) })
+        if (command !== 'ask_ai') return Response.json({ result: null })
+        const id = String(body.requestId ?? '')
+        const done = ['event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`]
+        const frames = calls.ask_ai.length === 1
+          // Path A round 1: the model reads the first link itself.
+          ? ['event: ai:tool_call\n', `data: {"requestId":"${id}","toolCallId":"tool-0","providerToolCallId":"p-fetch","toolName":"web_fetch","input":{"url":"https://a.example/one"}}\n\n`]
+          : calls.ask_ai.length === 2
+            // Path A round 2: prose instead of an edit, which triggers the fallback.
+            ? ['event: ai:token\n', `data: {"requestId":"${id}","token":"I cannot call tools."}\n\n`]
+            // Path B: the Markdown payload.
+            : ['event: ai:token\n', `data: {"requestId":"${id}","token":"<content>Summary.</content>"}\n\n`]
+        return new Response(sseStream([...frames, ...done]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }))
+      const { error } = await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'Summarise https://a.example/one and https://b.example/two.')
+      expect(error).toBeNull()
+      expect(calls.ask_ai).toHaveLength(3)
+      // The prefetch reads only the link Path A left unread.
+      expect(calls.call_context_tool.map(call => call.input.url)).toEqual(['https://a.example/one', 'https://b.example/two'])
+      expect(useAiChat.getState().mentionNotice).toContain('1 of 1 linked page read')
+      const messages = JSON.parse(calls.ask_ai[2].messages)
+      const reference = messages.find((message: any) => String(message.content).includes('<web_context>')).content
+      expect(reference).toContain('Body of https://a.example/one')
+      expect(reference).toContain('Body of https://b.example/two')
+    })
+
+    it('does not start the model request when stopped during the prefetch', async () => {
+      useTextOnly()
+      const controller = new AbortController()
+      const asks: unknown[] = []
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+        const command = String(url).replace(/^.*\/api\//, '')
+        if (command === 'context_tools') return Response.json({ result: [{ name: 'web_fetch', description: 'f', input_schema: { type: 'object' }, read_only: true }] })
+        if (command === 'call_context_tool') {
+          controller.abort()
+          throw new DOMException('aborted', 'AbortError')
+        }
+        if (command === 'ask_ai') asks.push(init)
+        return Response.json({ result: null })
+      }))
+      const stream = await createAiTransport({ getEditor: editor, discoverContextTools: true }).sendMessages({
+        messages: [{ role: 'user', content: 'Read https://a.example/' }],
+        body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit doc', inputSchema: {} } } },
+        abortSignal: controller.signal,
+      })
+      await stream.getReader().read().catch(() => undefined)
+      expect(asks).toHaveLength(0)
+    })
+  })
+
+  it('measures an unmeasured model before the first request and uses tools when it can', async () => {
+    useAiSettings.setState({ provider: 'deepseek', model: 'fresh-pick', probeTools: {}, savedProviders: ['deepseek'] })
+    const order: string[] = []
+    const asks: any[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      const command = String(url).replace(/^.*\/api\//, '')
+      order.push(command)
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      if (command === 'test_connection') return Response.json({ result: JSON.stringify({ status: 'ok', tools: true }) })
+      if (command === 'ask_ai') {
+        asks.push(body)
+        return new Response(sseStream([
+          'event: ai:tool_call\n',
+          `data: {"requestId":"${body.requestId}","toolCallId":"tool-0","providerToolCallId":"doc","toolName":"applyDocumentOperations","input":{"operations":[{"type":"update","id":"b1$","block":"<p>Done.</p>"}]}}\n\n`,
+          'event: ai:done\n', `data: {"requestId":"${body.requestId}","provider":"deepseek","truncated":false}\n\n`,
+        ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return Response.json({ result: null })
+    }))
+    const { parts } = await drain(createAiTransport({ getEditor: editor }))
+    expect(order.indexOf('test_connection')).toBeLessThan(order.indexOf('ask_ai'))
+    expect(asks[0].tools).toBeDefined()
+    expect(useAiSettings.getState().probeTools.deepseek['fresh-pick']).toBe(true)
+    expect(parts.find(part => part.type === 'tool-input-available')).toBeTruthy()
   })
 
   it('discovers backend context tools even when the editor supplies only the document tool', async () => {

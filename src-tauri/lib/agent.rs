@@ -620,11 +620,15 @@ pub async fn test_connection(
     if let Some(session) = &session {
         tool_req = tool_req.header("x-opencode-session", *session);
     }
-    let tool_res = tool_req
-        .json(&tool_body)
-        .send()
-        .await
-        .map_err(|e| format!("Tool test failed: {}", e))?;
+    // The key and model already passed the basic request, so from here on a
+    // transport failure, rate limit or outage is "not measured", never "no tool
+    // support": the frontend leaves those unstored and probes again later.
+    let Ok(tool_res) = tool_req.json(&tool_body).send().await else {
+        return Ok(crate::agent::PROBE_INCONCLUSIVE.to_string());
+    };
+    if crate::agent::probe_status_is_inconclusive(tool_res.status()) {
+        return Ok(crate::agent::PROBE_INCONCLUSIVE.to_string());
+    }
     if !tool_res.status().is_success() {
         tool_body["tool_choice"] = serde_json::json!("auto");
         let mut retry = client
@@ -634,17 +638,25 @@ pub async fn test_connection(
         if let Some(session) = &session {
             retry = retry.header("x-opencode-session", *session);
         }
-        if let Ok(resp) = retry.json(&tool_body).send().await {
-            if resp.status().is_success() {
-                let text = resp.text().await.map_err(|e| e.to_string())?;
-                if text.contains("tool_calls") || text.contains("test_tool") {
-                    return Ok(r#"{"status":"ok","tools":true}"#.to_string());
-                }
+        let Ok(resp) = retry.json(&tool_body).send().await else {
+            return Ok(crate::agent::PROBE_INCONCLUSIVE.to_string());
+        };
+        if crate::agent::probe_status_is_inconclusive(resp.status()) {
+            return Ok(crate::agent::PROBE_INCONCLUSIVE.to_string());
+        }
+        if resp.status().is_success() {
+            let Ok(text) = resp.text().await else {
+                return Ok(crate::agent::PROBE_INCONCLUSIVE.to_string());
+            };
+            if text.contains("tool_calls") || text.contains("test_tool") {
+                return Ok(r#"{"status":"ok","tools":true}"#.to_string());
             }
         }
         return Ok(r#"{"status":"ok","tools":false}"#.to_string());
     }
-    let text = tool_res.text().await.map_err(|e| e.to_string())?;
+    let Ok(text) = tool_res.text().await else {
+        return Ok(crate::agent::PROBE_INCONCLUSIVE.to_string());
+    };
     let supports_tools = text.contains("tool_calls") || text.contains("test_tool");
     Ok(format!(r#"{{"status":"ok","tools":{}}}"#, supports_tools))
 }

@@ -394,6 +394,10 @@ export async function mockAiSettings(page, opts = {}) {
     baseUrl = 'http://mock.invalid/v1',
     hasKey = true,
     probes = {},
+    /* What a tool probe of an unmeasured model answers. The transport measures
+       an unmeasured model before its first request, so the mock answers it the
+       way the scenario's model behaves (text-only by default). */
+    probeAnswer = false,
     env,
   } = opts
   const state = { probes: { ...probes }, hasKey, saved: [provider] }
@@ -413,6 +417,13 @@ export async function mockAiSettings(page, opts = {}) {
     route.fulfill(json({ result: JSON.stringify({ source: env ? 'env' : 'file', baseUrl, model, hasKey }) })))
   await page.route('**/api/list_api_keys', route =>
     route.fulfill(json({ result: JSON.stringify([]) })))
+  await page.route('**/api/test_connection', route =>
+    route.fulfill(json({ result: JSON.stringify({ status: 'ok', tools: probeAnswer }) })))
+  await page.route('**/api/set_probe', route => {
+    const { model: probed, tools } = route.request().postDataJSON()
+    state.probes[probed] = tools
+    return route.fulfill(json({ result: 'null' }))
+  })
   return state
 }
 

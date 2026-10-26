@@ -3,7 +3,7 @@ import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Check, Loader, RefreshCw } from 'lucide-react'
 import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
-import { resolveProbeModel, autoProbe } from '../../utils/aiProbe'
+import { resolveProbeModel, ensureToolProbe, parseProbeResult, recordToolProbe, resetToolProbeBackoff } from '../../utils/aiProbe'
 import { fetchProviderModels } from '../../utils/modelDiscovery'
 import { FORM_DIVIDER_CLASS, FORM_DIVIDER_FIRST_CLASS } from './SettingsSection'
 import { PROVIDERS } from '../../data/providers'
@@ -38,17 +38,6 @@ const lockedEndpoint = (cfg: BackendAiSettings | null, provider: string, isCusto
 
 const isCustomProvider = (provider: string) => provider === CUSTOM_PROVIDER_ID
 
-/** Store a probe result in the UI state AND on the backend. The write is explicit:
- *  the implicit mirror the store used to run is gone, and a probe is worth
- *  keeping server-side because re-measuring costs a round-trip while an unmeasured
- *  model runs text-only. Failure is non-fatal — the local record still holds. */
-async function storeProbe(provider: string, model: string, tools: boolean): Promise<void> {
-  useAiSettings.getState().setProbeTools(provider, model, tools)
-  try {
-    await invoke('set_probe', { provider, model, tools })
-  } catch { /* probe stays local until the next successful write */ }
-}
-
 /** Validate a freshly entered key without assuming a model: the catalog bakes in
  *  none, so a user who has not picked a model yet gets one DISCOVERED from the
  *  endpoint (`list_models` with the still-unsaved key). Returns '' when the
@@ -82,8 +71,7 @@ async function discoverModel(provider: string, customBaseUrl: string, key: strin
  *  mounting from one page open share ONE request instead of firing three — while
  *  each instance still holds only the state it renders. */
 export default function ProviderForm({ provider, first }: { provider: string; first?: boolean }) {
-  const { model, probeTools, models, dirtySelection,
-    forgetProvider } = useAiSettings()
+  const { model, models, dirtySelection, forgetProvider } = useAiSettings()
 
   /** The store selection, READ here so the form can adopt a composer pick. The
    *  form's own locked-field values still come from its fetch of the backend, which
@@ -150,7 +138,6 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
    *  runs once for the whole surface. */
   const envCustom = customCfg?.source === 'env'
   const envCustomRef = useRef(envCustom)
-  const probeToolsRef = useRef(probeTools)
   /** Latest-value refs for async probes: synced after commit (never during
    *  render) and read only from callbacks. Declared before the auto-probe
    *  effect so the refs are fresh when it runs. */
@@ -159,7 +146,6 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
     baseUrlInputRef.current = baseUrlInput
     modelInputRef.current = modelInput
     envCustomRef.current = envCustom
-    probeToolsRef.current = probeTools
   })
   const envBadge = <span className="text-[10px] px-1.5 py-0.5 rounded bg-warning-surface text-warning border border-warning-border ml-2">from env</span>
 
@@ -172,33 +158,22 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
    *  (model/url) may not have changed since the save. */
   const [probeTick, setProbeTick] = useState(0)
 
-  /** Auto-probe when the selected model changes and has no stored probe yet.
-   *  Custom endpoints are text-only until measured true — a model switch would
-   *  otherwise silently drop tool calls until a manual Test. The result is
-   *  written back with an explicit `set_probe`: there is no implicit mirror path
-   *  any more, and only a CONFIGURED provider has a key to probe with. */
+  /** This provider's own stored model. For the ACTIVE provider the store's `model`
+   *  IS this value (kept in sync); for another form on the page it is that
+   *  provider's row. Reading per-provider keeps every form on its own model: the
+   *  live `model` belongs to the active provider only, and probing or saving
+   *  another provider with it sent that provider a model it does not serve. */
+  const providerModel = models[provider] || (useAiSettings.getState().provider === provider ? model : '') || ''
+
+  /** Auto-probe THIS provider's model when it has no stored probe yet: unmeasured
+   *  runs text-only. `ensureToolProbe` shares one request per provider+model with
+   *  the composer and the transport, and probes with the backend's stored key
+   *  and endpoint — only a CONFIGURED provider has a key to probe with. */
   useEffect(() => {
-    if (!provider || !model || !configured) return
-    const p = providers.find(x => x.id === provider)
-    const probeModel = resolveProbeModel(provider, model, envCustom ? customCfg?.model : undefined)
-    if (!probeModel) return
-    // Skip env-controlled custom: the probe must run against the env key/baseUrl
-    // which the backend resolves — invoke with empty UI values lets it do that.
-    void autoProbe(provider, probeModel, probeToolsRef.current, storeProbe, async () => {
-      const result = await invoke<string>('test_connection', {
-        provider,
-        model: probeModel,
-        // Configured providers probe with the BACKEND's endpoint values, not with
-        // whatever this browser last typed into the (now read-only) inputs. An
-        // unconfigured provider probes the typed URL, falling back to the catalog
-        // default so a first save works before discovery.
-        baseUrl: stored?.baseUrl || (envCustomRef.current ? '' : baseUrlInputRef.current.trim()) || p?.api || '',
-        apiKey: envCustomRef.current ? '' : keyInputRef.current,
-      })
-      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') return { tools: parsed.tools } } catch {}
-      return undefined
-    })
-  }, [model, provider, configured, stored?.baseUrl, envCustom, customCfg?.model, probeTick])
+    if (!provider || !configured) return
+    const probeModel = resolveProbeModel(provider, providerModel, envCustom ? customCfg?.model : undefined)
+    if (probeModel) void ensureToolProbe(provider, probeModel)
+  }, [providerModel, provider, configured, envCustom, customCfg?.model, probeTick])
 
   /** Runtime model discovery lives in the composer's model picker, not here: the
    *  model is ONE setting with ONE UI, so the form renders NO model control. */
@@ -214,11 +189,6 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
     : null
   const isCustom = provider === CUSTOM_PROVIDER_ID
 
-  /** This provider's own stored model. For the ACTIVE provider the store's `model`
-   *  IS this value (kept in sync); for another form on the page it is that
-   *  provider's row. Reading per-provider keeps the prefill correct for all three
-   *  forms at once. */
-  const providerModel = models[provider] || (useAiSettings.getState().provider === provider ? model : '') || ''
 
   /** A live composer pick for THIS provider, when this form's provider is the
    *  active one. `dirtySelection` marks that the pick is session-local and the
@@ -247,12 +217,15 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   }, [livePick, providerModel])
   /* oxlint-enable react/set-state-in-effect */
 
-  /** The model to validate/persist with, in order: what the user picked in the
-   *  composer (env override included), what this form holds for THIS provider,
-   *  then a model DISCOVERED from the endpoint with the not-yet-saved key. */
-  const effectiveModel = () => resolveProbeModel(provider, model, envCustom ? customCfg?.model : undefined)
+  /** The model to validate/persist THIS provider with, in order: the env model
+   *  (custom env endpoints), the form's Model field — seeded from a live composer
+   *  pick or this provider's stored model, then whatever the user typed — and
+   *  this provider's stored row. Never the active provider's model: that belongs
+   *  to another provider. The caller discovers one from the endpoint when all
+   *  are empty. */
+  const effectiveModel = () => resolveProbeModel(provider, modelInputRef.current.trim(), envCustom ? customCfg?.model : undefined)
     || models[provider]
-    || modelInputRef.current.trim()
+    || ''
 
   const handleSave = async () => {
     if (!provider || !keyInput || !baseUrlInput.trim()) return
@@ -276,8 +249,7 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
        *  SELECTED provider. Otherwise picking provider A + pasting provider B's
        *  key stores a dead key that fails at ask_ai time. */
       const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: keyInput })
-      let tools: boolean | undefined
-      try { const parsed = JSON.parse(result); if (typeof parsed.tools === 'boolean') tools = parsed.tools } catch {}
+      const tools = parseProbeResult(result)
       // test_connection resolved → key is valid for this provider. Persist. The
       // custom path validates any public host; the catalog path allowlists the
       // host AND binds the key to this provider.
@@ -290,11 +262,15 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
        *  the conservative unmeasured default) — an explicit set_probe, since no
        *  implicit mirror exists any more. ONE toast: the probe outcome is inline
        *  in the save confirmation, not a second toast stacking on top. */
-      if (tools !== undefined) await storeProbe(provider, probeModel, tools)
       /** The saved endpoint becomes the source of truth for the locked fields, so
        *  the refresh is what locks them — never an assumption that the write
-       *  landed as typed. */
+       *  landed as typed. It also lists the provider as saved, which the probe
+       *  record requires. */
       await refreshBackend()
+      if (tools !== undefined) await recordToolProbe(provider, probeModel, tools)
+      /** A key that just worked clears earlier failed probes, so the next
+       *  model this provider runs is measured right away. */
+      resetToolProbeBackoff()
       setKeyInput('')
       // Re-run the model-switch probe effect: a just-saved endpoint has no
       // measurement, and its inputs (model/url) may not have changed at all.
