@@ -29,7 +29,7 @@ function sseResponder(frames: (requestId: string) => string[]) {
 
 beforeEach(() => {
   resetToolProbeBackoff()
-  useAiSettings.setState({ provider: '', model: '', probeTools: {} })
+  useAiSettings.setState({ provider: '', model: '', probeTools: {}, savedProviders: [] })
 })
 
 afterEach(() => vi.unstubAllGlobals())
@@ -666,6 +666,42 @@ describe('createAiTransport tools-to-text fallback', () => {
       const calls = backend(['web_fetch'])
       await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'https://e.example/1 https://e.example/2 https://e.example/3 https://e.example/4')
       expect(calls.call_context_tool.map(call => call.input.url)).toEqual(['https://e.example/1', 'https://e.example/2', 'https://e.example/3'])
+      // The link past the cap counts as never read, not as ignored by the AI.
+      expect(useAiChat.getState().mentionNotice).toContain('3 of 4 linked pages read')
+    })
+
+    it('does not re-read a page Path A already fetched before the fallback', async () => {
+      usePathA()
+      const calls: Record<string, any[]> = { context_tools: [], call_context_tool: [], ask_ai: [] }
+      vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+        const body = JSON.parse(String(init?.body ?? '{}'))
+        const command = String(url).replace(/^.*\/api\//, '')
+        calls[command]?.push(body)
+        if (command === 'context_tools') return Response.json({ result: [{ name: 'web_fetch', description: 'f', input_schema: { type: 'object' }, read_only: true }] })
+        if (command === 'call_context_tool') return Response.json({ result: page(body.input.url) })
+        if (command !== 'ask_ai') return Response.json({ result: null })
+        const id = String(body.requestId ?? '')
+        const done = ['event: ai:done\n', `data: {"requestId":"${id}","provider":"deepseek","truncated":false}\n\n`]
+        const frames = calls.ask_ai.length === 1
+          // Path A round 1: the model reads the first link itself.
+          ? ['event: ai:tool_call\n', `data: {"requestId":"${id}","toolCallId":"tool-0","providerToolCallId":"p-fetch","toolName":"web_fetch","input":{"url":"https://a.example/one"}}\n\n`]
+          : calls.ask_ai.length === 2
+            // Path A round 2: prose instead of an edit, which triggers the fallback.
+            ? ['event: ai:token\n', `data: {"requestId":"${id}","token":"I cannot call tools."}\n\n`]
+            // Path B: the Markdown payload.
+            : ['event: ai:token\n', `data: {"requestId":"${id}","token":"<content>Summary.</content>"}\n\n`]
+        return new Response(sseStream([...frames, ...done]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }))
+      const { error } = await drain(createAiTransport({ getEditor: editor, discoverContextTools: true }), 'Summarise https://a.example/one and https://b.example/two.')
+      expect(error).toBeNull()
+      expect(calls.ask_ai).toHaveLength(3)
+      // The prefetch reads only the link Path A left unread.
+      expect(calls.call_context_tool.map(call => call.input.url)).toEqual(['https://a.example/one', 'https://b.example/two'])
+      expect(useAiChat.getState().mentionNotice).toContain('1 of 1 linked page read')
+      const messages = JSON.parse(calls.ask_ai[2].messages)
+      const reference = messages.find((message: any) => String(message.content).includes('<web_context>')).content
+      expect(reference).toContain('Body of https://a.example/one')
+      expect(reference).toContain('Body of https://b.example/two')
     })
 
     it('does not start the model request when stopped during the prefetch', async () => {

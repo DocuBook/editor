@@ -421,7 +421,8 @@ async function runSendMessages(
           const fetched = new Set(references.filter((reference) => reference.tool === WEB_FETCH_TOOL).map((reference) => {
             try { return String(JSON.parse(reference.input)?.url ?? ""); } catch { return ""; }
           }));
-          const urls = extractUrls(userText).filter((url) => !fetched.has(url)).slice(0, MAX_PREFETCH_URLS);
+          const linked = extractUrls(userText).filter((url) => !fetched.has(url));
+          const urls = linked.slice(0, MAX_PREFETCH_URLS);
           if (!urls.length) return;
           /** Its own request id, so Stop cancels the fetches like a tool round. */
           currentRequestId = uuid();
@@ -445,8 +446,9 @@ async function runSendMessages(
             references.push({ tool: WEB_FETCH_TOOL, input: JSON.stringify({ url }), content: text });
           });
           /** Visible like the mention summary: "the AI ignored my link" and "the
-           *  link was never read" must not look the same. */
-          const notice = [mentionNotice(mentionContext), `${read} of ${urls.length} linked page${urls.length === 1 ? "" : "s"} read`]
+           *  link was never read" must not look the same. The count is over every
+           *  link, so one past the cap reads as never read, not as ignored. */
+          const notice = [mentionNotice(mentionContext), `${read} of ${linked.length} linked page${linked.length === 1 ? "" : "s"} read`]
             .filter(Boolean)
             .join(" · ");
           useAiChat.getState().setMentionNotice(notice);
