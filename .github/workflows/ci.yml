@@ -16,6 +16,14 @@ env:
 permissions:
   contents: read
 
+# A new push to a PR supersedes its running check (the macOS jobs alone take
+# 15-40 min). Master and tag pushes each get their own group so a later merge
+# never cancels — or, through GitHub's one-pending-run-per-group rule, drops —
+# the run that publishes a release.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   lint:
     runs-on: macos-15
@@ -421,6 +429,9 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # Normally the tag exists long before this job; the wait only covers a
+          # slow release-please run.
+          RELEASE_TAG_WAIT_SECONDS: "300"
         run: ./.github/scripts/resolve-release-tag.sh >> "$GITHUB_OUTPUT"
       - name: All release checks passed
         if: steps.releasetag.outputs.tag != ''
