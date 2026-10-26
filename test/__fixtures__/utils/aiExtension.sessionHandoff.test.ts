@@ -153,15 +153,18 @@ describe('AI session hand-off between prompts', () => {
    *  Multi-block `updateBlock` and `add` ops map it through the change and
    *  leave it non-empty, so `hasAISelection` still reported "the selection"
    *  and the follow-up silently rewrote the reviewed blocks. */
+  // The selection runs from "beta" in `a` to the end of `b`, so the model is
+  // shown `a` as "beta gamma" (its cut) and `b` whole. Its answer for `a`
+  // replaces only that part: "alpha " is not part of the request.
   it.each<[string, any[], string]>([
     ['two update ops', [
-      { type: 'update', id: 'a$', block: '<p>ALPHA BETA GAMMA</p>' },
+      { type: 'update', id: 'a$', block: '<p>BETA GAMMA</p>' },
       { type: 'update', id: 'b$', block: '<p>SECOND</p>' },
-    ], 'ALPHA BETA GAMMA\n\nSECOND'],
+    ], 'alpha BETA GAMMA\n\nSECOND'],
     ['an update and an add op', [
-      { type: 'update', id: 'a$', block: '<p>ALPHA BETA GAMMA</p>' },
+      { type: 'update', id: 'a$', block: '<p>BETA GAMMA</p>' },
       { type: 'add', referenceId: 'b$', position: 'after', blocks: ['<p>added</p>'] },
-    ], 'ALPHA BETA GAMMA\n\nsecond paragraph\n\nadded'],
+    ], 'alpha BETA GAMMA\n\nsecond paragraph\n\nadded'],
   ])('runs a follow-up in cursor mode after a multi-block selection result applied with %s', async (_label, operations, result) => {
     const ed = mountEditor()
     const provider = deferredTransport()

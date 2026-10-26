@@ -1,6 +1,12 @@
-use super::{prompt, tool_schema};
+use super::tool_schema;
 use serde_json::{json, Value};
 
+/// One chat request to an OpenAI-compatible provider.
+///
+/// The messages are forwarded verbatim: the frontend compiles the whole
+/// prompt (system policy, grounding rules, document state, reference data)
+/// in one place (`frontend/utils/aiPrompt.ts`, `aiGrounding.ts`), so the
+/// backend adds no policy of its own that could drift from it.
 #[derive(Debug, Clone)]
 pub struct AiRequest {
     pub model: String,
@@ -8,21 +14,11 @@ pub struct AiRequest {
     pub base_url: String,
     pub messages: Value,
     pub tools: Option<Value>,
-    pub document_state: Option<Value>,
 }
 
 impl AiRequest {
     pub fn body(&self) -> Value {
-        let mut messages = self.messages.clone();
-        if let Some(document_state) = &self.document_state {
-            if let Some(messages) = messages.as_array_mut() {
-                prompt::attach_document_state(messages, document_state.clone());
-            }
-        }
-        let messages = messages
-            .as_array()
-            .map(|messages| prompt::assemble_messages(messages))
-            .unwrap_or_default();
+        let messages = self.messages.as_array().cloned().unwrap_or_default();
         let mut body = json!({
             "model": self.model,
             "messages": messages,
@@ -72,21 +68,12 @@ impl AiRequest {
         // Older desktop/web adapters ignored malformed or non-array tools and
         // continued with text-only streaming. Keep that compatibility here.
         let tools = tools.and_then(|value| serde_json::from_str(value).ok());
-        let document_state = messages.as_array().and_then(|items| {
-            items.iter().rev().find_map(|message| {
-                (message.get("role").and_then(Value::as_str) == Some("user"))
-                    .then(|| message.get("metadata")?.get(prompt::DOCUMENT_STATE_FIELD))
-                    .flatten()
-                    .cloned()
-            })
-        });
         Ok(Self {
             model: model.into(),
             api_key: api_key.into(),
             base_url: base_url.into(),
             messages,
             tools,
-            document_state,
         })
     }
 }
@@ -175,27 +162,23 @@ mod tests {
     }
 
     #[test]
-    fn extracts_document_state_and_keeps_it_out_of_system_policy() {
+    fn forwards_the_compiled_prompt_without_adding_policy() {
+        // The frontend owns the prompt; a second policy added here would drift
+        // from it (it did: this module used to inject its own system prompt
+        // and document-state messages, which the frontend's always overrode).
         let request = AiRequest::from_json(
             "model",
             "key",
             "https://example.test/v1",
-            r#"[{"role":"user","content":"hi","metadata":{"documentState":{"selection":false,"isEmptyDocument":false,"blocks":[{"id":"b$"}]}}}]"#,
+            r#"[{"role":"system","content":"policy"},{"role":"assistant","content":"state"},{"role":"user","content":"hi"}]"#,
             None,
         )
         .unwrap();
         let body = request.body();
         let messages = body["messages"].as_array().unwrap();
-        assert_eq!(messages[0]["role"], "system");
-        assert!(messages[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("applyDocumentOperations"));
-        assert_eq!(messages[1]["role"], "assistant");
-        assert_eq!(messages[2]["role"], "user");
-        assert_eq!(
-            messages[2]["metadata"]["documentState"]["blocks"][0]["id"],
-            "b$"
-        );
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["content"], "policy");
+        assert_eq!(messages[1]["content"], "state");
+        assert_eq!(messages[2]["content"], "hi");
     }
 }

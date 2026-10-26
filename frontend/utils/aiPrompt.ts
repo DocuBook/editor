@@ -1,4 +1,5 @@
 import { formatWebReferences, injectDocumentStateMessages, injectMentionContextMessages, type ReferenceResult } from './aiPromptState';
+import { groundingPolicy } from './aiGrounding';
 
 import { AI_CONTENT_CLOSE, AI_CONTENT_OPEN, CURSOR_MARKER } from "./aiBlocks";
 
@@ -19,6 +20,8 @@ export type BuildAiPromptInput = {
   userText: string;
   taskRules: string;
   retryFeedback?: string;
+  /** Read-only context tools are offered this turn (tool mode only). */
+  contextTools?: boolean;
   /** Web results gathered by tool mode before a fallback. Text mode only: tool
    *  mode keeps them in its native tool transcript. */
   references?: readonly ReferenceResult[];
@@ -35,6 +38,9 @@ const COMMON_SYSTEM_POLICY = `You are DocuBook's document editing assistant. Fol
 const TOOL_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 
 You're manipulating a text document using HTML blocks. Follow applyDocumentOperations JSON schema. IDs include trailing $.
+List items are one block per item: \`<ul><li>item1</li></ul>\` is valid, \`<ul><li>item1</li><li>item2</li></ul>\` is not (consecutive items are merged automatically).
+For a code block, put the language in a \`data-language\` attribute on the <code> element inside <pre>.
+Without a selection, first work out which part of the document the request is about; take the cursor into account. To insert at the cursor (unless told otherwise), add after the block before the cursor (\`referenceId\` of that block, position \`after\`), or before the block below it.
 Math blocks MUST use one HTML block per operation: <math display="block"><annotation encoding="application/x-tex">LATEX</annotation></math>. Inline math inside text uses <math display="inline"><annotation encoding="application/x-tex">LATEX</annotation></math>. Never emit Markdown delimiters (\\(...\\), \\[...\\], $...$, $$...$$) inside HTML tool arguments.`;
 
 const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
@@ -42,7 +48,7 @@ const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 ${AI_MARKDOWN_INSTRUCTION}
 The document context may contain the marker ${CURSOR_MARKER}, which shows where the user's caret currently is. Never output that marker. When asked to continue or insert, resume at the marker: match the surrounding content and continue in the same voice, tense, and block style. When asked to change text without a selection, treat the block at the marker as the target. Do not repeat content that already appears before the marker.
 Wrap document content in ${AI_CONTENT_OPEN} and ${AI_CONTENT_CLOSE}. What sits inside those tags is written into the document; what sits outside is shown to the user and never written. Put the requested content inside them and nothing else. If the request needs no document change — there is nothing to fix, or you are answering a question rather than editing — reply with a short explanation and no ${AI_CONTENT_OPEN} block at all.
-Output only requested document content. Do not output metadata, internal identifiers, the user's prompt, commentary, or a preamble. Preserve selected block types and formatting when editing. Never fabricate source facts; state when required information is missing.`;
+Output only requested document content. Do not output metadata, internal identifiers, the user's prompt, commentary, or a preamble. Preserve selected block types and formatting when editing.`;
 
 function messageContent(message: any): string {
   return (
@@ -146,10 +152,12 @@ function textMessages(input: BuildAiPromptInput): PromptMessage[] {
 }
 
 export function buildAiPrompt(input: BuildAiPromptInput): CompiledAiPrompt {
+  /** Each path's grounding rules come from one helper (aiGrounding), so the
+   *  anti-hallucination contract cannot drift between them. */
   const system =
     input.mode === "tool"
-      ? TOOL_SYSTEM_POLICY
-      : `${TEXT_SYSTEM_POLICY}${input.taskRules || ""}`;
+      ? `${TOOL_SYSTEM_POLICY}\n\n${groundingPolicy("tool", { contextTools: input.contextTools })}`
+      : `${TEXT_SYSTEM_POLICY}${input.taskRules || ""}\n\n${groundingPolicy("text")}`;
   const conversation =
     input.mode === "tool" ? toolMessages(input) : textMessages(input);
   const compiled: PromptMessage[] = [
