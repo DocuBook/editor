@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1](https://github.com/DocuBook/editor/compare/v0.5.0...v0.5.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* **ai:** Return starts a new line in the composer on touch keyboards ([#351](https://github.com/DocuBook/editor/issues/351)) ([434e280](https://github.com/DocuBook/editor/commit/434e280f7010a88f6a07008029916b6fd16d088d))
+
+
+### CI
+
+* publish the release image without a manual dispatch; cancel superseded PR runs only ([#349](https://github.com/DocuBook/editor/issues/349)) ([4f48d46](https://github.com/DocuBook/editor/commit/4f48d4644054ce3a6a56feb6be336114640e9fd7))
+* **release:** release notes without heading icons, with a Contributors section ([#352](https://github.com/DocuBook/editor/issues/352)) ([7641108](https://github.com/DocuBook/editor/commit/7641108db69fb8f1abd015361911bbccce99c987))
+
 ## v0.5.0 — 2026-10-26
 
 
