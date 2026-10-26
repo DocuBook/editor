@@ -52,9 +52,10 @@ interface AiSettingsState {
    *  exclusions; unmeasured providers/models are treated as text-only. */
   probeTools: Record<string, Record<string, boolean>>
   /** Each configured provider's DEFAULT model, exactly as the backend holds it
-   *  (the endpoint saved in Settings, or the env model). Written only by
-   *  hydration, never by a composer pick: it is the one fallback when a
-   *  provider's live model list cannot be fetched. */
+   *  (the endpoint saved in Settings, or the env model). Written only from a
+   *  backend payload — hydration, or the re-read after a Settings save/revoke —
+   *  never by a composer pick: it is the one fallback when a provider's live
+   *  model list cannot be fetched. */
   defaultModels: Record<string, string>
   /** True once the composer has picked a model this session. Composer picks are
    *  session-local (the backend is only told on an explicit Settings save), so a
@@ -170,9 +171,10 @@ export function subscribeAiSettingsHydration(listener: AiSettingsHydrationListen
   return () => aiSettingsHydrationListeners.delete(listener)
 }
 
-/** Map the backend payload onto store state. Pure so it can be reasoned about
- *  (and tested) without the async command around it. */
-function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> {
+/** The per-provider rows of a backend payload, mapped ONCE for every consumer:
+ *  hydration applies them together with the selection, a Settings save/revoke
+ *  adopts them alone (`adoptBackendEndpoints`). */
+function backendEndpointRows(cfg: BackendAiSettings) {
   const models: Record<string, string> = {}
   const baseUrls: Record<string, string> = {}
   const probeTools: Record<string, Record<string, boolean>> = {}
@@ -181,6 +183,34 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
     if (endpoint.baseUrl) baseUrls[provider] = endpoint.baseUrl
     probeTools[provider] = { ...endpoint.probes }
   }
+  /** Env-controlled custom endpoints: the base URL the backend will use is the
+   *  env one, so what the UI renders must be what the transport sends. */
+  if (cfg.env) {
+    baseUrls[CUSTOM_PROVIDER_ID] = cfg.env.baseUrl
+    models[CUSTOM_PROVIDER_ID] = cfg.env.model
+  }
+  const defaultModels = Object.fromEntries(Object.entries(models).filter(([, value]) => !!value))
+  return { models, baseUrls, probeTools, defaultModels }
+}
+
+/** Apply ONLY the per-provider data of a payload the caller already fetched: the
+ *  saved list, every provider's stored model and base URL, and the default models.
+ *  The live selection is left alone — a composer pick is newer than any fetch —
+ *  and so is the probe map: `recordToolProbe` writes the store before the
+ *  backend, so a payload fetched before that write landed would erase a fresh
+ *  measurement. ProviderForm calls this after its save/revoke re-read, because
+ *  hydration runs from the app root on boot and window focus only: without it a
+ *  provider saved this session had no default model in the store, so the picker
+ *  had no fallback row for it until the window was next refocused. */
+export function adoptBackendEndpoints(cfg: BackendAiSettings): void {
+  const { models, baseUrls, defaultModels } = backendEndpointRows(cfg)
+  useAiSettings.setState({ savedProviders: [...new Set(cfg.savedProviders)], models, baseUrls, defaultModels })
+}
+
+/** Map the backend payload onto store state. Pure so it can be reasoned about
+ *  (and tested) without the async command around it. */
+function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> {
+  const { models, baseUrls, probeTools, defaultModels } = backendEndpointRows(cfg)
   /** `savedProviders` is the server list verbatim: it is derived from the keys the
    *  backend actually holds, so a browser-local provider the server does not know
    *  no longer exists as a concept — `endpoints` is the same set by construction. */
@@ -189,12 +219,6 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
    *  once anything is configured) must not clear the provider the user has open
    *  — only the DATA is authoritative there, not the absence of a selection. */
   const currentProvider = active || useAiSettings.getState().provider
-  /** Env-controlled custom endpoints: the base URL the backend will use is the
-   *  env one, so what the UI renders must be what the transport sends. */
-  if (cfg.env) {
-    baseUrls[CUSTOM_PROVIDER_ID] = cfg.env.baseUrl
-    models[CUSTOM_PROVIDER_ID] = cfg.env.model
-  }
   /** Model precedence, most authoritative first: the endpoint the server names as
    *  active, then anything the server has for the selected provider. Nothing else
    *  — a catalog bootstrap model no longer exists (a hardcoded id the provider may
@@ -220,7 +244,7 @@ function applyBackendSettings(cfg: BackendAiSettings): Partial<AiSettingsState> 
     model: preserveSelection ? live.model : model,
     savedProviders: cfg.savedProviders,
     models,
-    defaultModels: Object.fromEntries(Object.entries(models).filter(([, value]) => !!value)),
+    defaultModels,
     baseUrls,
     probeTools,
   }

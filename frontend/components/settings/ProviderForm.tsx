@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
 import { Eye, EyeOff, Check, Loader, RefreshCw } from 'lucide-react'
-import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
+import { useAiSettings, CUSTOM_PROVIDER_ID, fetchAiSettingsShared, adoptBackendEndpoints, setSavedProviders, subscribeAiSettingsHydration, type BackendAiSettings, type BackendEndpoint } from '../../stores/aiSettings'
 import { resolveProbeModel, parseProbeResult, recordToolProbe, resetToolProbeBackoff } from '../../utils/aiProbe'
 import { fetchProviderModels } from '../../utils/modelDiscovery'
 import { FORM_DIVIDER_CLASS, FORM_DIVIDER_FIRST_CLASS } from './SettingsSection'
@@ -124,7 +124,12 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
     setBackendLoading(false)
     if (!settings) return
     setBackendCfg(settings)
-    setSavedProviders(settings.savedProviders)
+    /** The store adopts the payload's provider rows too, not just the saved list:
+     *  a save/revoke here is the one backend write that app-root hydration (boot
+     *  and window focus) does not follow, so a provider saved this session must
+     *  get its default model into the store now — the picker's only fallback row
+     *  for it — rather than when the window is next refocused. */
+    adoptBackendEndpoints(settings)
   }
   /* oxlint-disable react/set-state-in-effect -- initial async load from the backend */
   useEffect(() => { void refreshBackend() }, [])

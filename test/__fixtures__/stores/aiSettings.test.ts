@@ -7,7 +7,7 @@ const { storage: localStorage, values: storage } = createMemoryStorage();
 vi.stubGlobal("localStorage", localStorage);
 vi.stubGlobal("window", { localStorage });
 
-const { useAiSettings, hydrateAiSettings, setSavedProviders, fetchAiSettingsShared } = await import("../../../frontend/stores/aiSettings");
+const { useAiSettings, hydrateAiSettings, setSavedProviders, fetchAiSettingsShared, adoptBackendEndpoints } = await import("../../../frontend/stores/aiSettings");
 
 // The store talks to the backend through the ipc bridge; hydration is the only
 // path under test here, so the bridge is mocked per test.
@@ -25,6 +25,7 @@ const DEFAULTS = {
   models: {},
   baseUrls: {},
   probeTools: {},
+  defaultModels: {},
   dirtySelection: false,
 };
 
@@ -307,6 +308,38 @@ describe("aiSettings store", () => {
     await expect(hydrateAiSettings()).resolves.toBe(true);
     expect(useAiSettings.getState().provider).toBe("opencode-go");
     expect(useAiSettings.getState().savedProviders).toEqual(["opencode-go"]);
+  });
+
+  it("adoptBackendEndpoints applies the provider rows but neither the selection nor the probes", () => {
+    // ProviderForm's save/revoke re-read lands here. The rows (saved list, stored
+    // model + base URL, default models) follow the payload; the live composer pick
+    // is newer than any fetch, and a probe recorded in the store before its
+    // set_probe write landed must not be erased by a payload that predates it.
+    useAiSettings.setState({
+      provider: "deepseek",
+      model: "picked-this-session",
+      dirtySelection: true,
+      probeTools: { deepseek: { "picked-this-session": true } },
+    });
+
+    adoptBackendEndpoints({
+      active: "opencode-go",
+      endpoints: {
+        'opencode-go': { baseUrl: "https://opencode.ai/zen/go/v1", model: "deepseek-v4-flash", probes: { "deepseek-v4-flash": false }, hasKey: true },
+        deepseek: { baseUrl: "https://api.deepseek.com", model: "", probes: {}, hasKey: true },
+      },
+      savedProviders: ["opencode-go", "deepseek"],
+    });
+
+    const s = useAiSettings.getState();
+    expect(s.savedProviders).toEqual(["opencode-go", "deepseek"]);
+    expect(s.models).toEqual({ 'opencode-go': "deepseek-v4-flash", deepseek: "" });
+    expect(s.baseUrls).toEqual({ 'opencode-go': "https://opencode.ai/zen/go/v1", deepseek: "https://api.deepseek.com" });
+    // A provider with no stored model gets no fallback row.
+    expect(s.defaultModels).toEqual({ 'opencode-go': "deepseek-v4-flash" });
+    expect(s.provider).toBe("deepseek");
+    expect(s.model).toBe("picked-this-session");
+    expect(s.probeTools).toEqual({ deepseek: { "picked-this-session": true } });
   });
 
   it("setSavedProviders replaces with the server list", () => {

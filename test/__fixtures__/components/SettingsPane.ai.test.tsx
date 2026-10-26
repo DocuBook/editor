@@ -68,7 +68,7 @@ beforeEach(() => {
   backend.custom = { source: 'file', baseUrl: '', hasKey: false, model: '' }
   useAiSettings.setState({
     provider: '', model: '', apiKey: '', savedProviders: [],
-    apiKeys: {}, models: {}, baseUrls: {}, probeTools: {},
+    apiKeys: {}, models: {}, baseUrls: {}, probeTools: {}, defaultModels: {},
   })
   useSettings.setState({ open: true, section: 'ai-provider' })
   invoke.mockReset()
@@ -463,6 +463,32 @@ describe('SettingsPane — save', () => {
     expect(commands).toContain('set_api_key')
     expect(inSection('opencode-go', 'Base URL')!.readOnly).toBe(true)
     expect(buttonsIn('opencode-go')).toContain('Revoke')
+  })
+
+  /** The default model the backend now holds must reach the store from the
+   *  save's own re-read: app-root hydration runs on boot and window focus only,
+   *  so until then the picker had no fallback row for a provider saved this
+   *  session when its live model list failed. */
+  it('puts the saved default model into the store without waiting for a focus hydration', async () => {
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    const key = inSection('opencode-go', 'API Key')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(key, 'sk-new-key')
+      key.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    configure('opencode-go', { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'deepseek-v4-flash' })
+    act(() => sectionOf('opencode-go').querySelector<HTMLButtonElement>('button.px-3\\.5')!.click())
+    await settle()
+
+    const state = useAiSettings.getState()
+    expect(state.defaultModels['opencode-go']).toBe('deepseek-v4-flash')
+    expect(state.models['opencode-go']).toBe('deepseek-v4-flash')
+    expect(state.baseUrls['opencode-go']).toBe('https://opencode.ai/zen/go/v1')
+    expect(state.savedProviders).toEqual(['opencode-go'])
   })
 
   /** Each form saves ITS provider with ITS model. The active provider's live
