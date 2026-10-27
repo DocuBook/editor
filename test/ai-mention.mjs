@@ -63,7 +63,7 @@ await runSuite('ai-mention', {
    *  Frames run in registration order, so a frame awaited here runs after it. */
   const retype = async (value, delay = 25) => {
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
-    await page.keyboard.press('Meta+a')
+    await page.keyboard.press('ControlOrMeta+a')
     await page.keyboard.type(value, { delay })
   }
 
