@@ -226,6 +226,43 @@ describe('composer model picker', () => {
     expect(rowsIn('DeepSeek').map((row) => row.textContent)).toEqual(['deepseek-v4-flash', 'deepseek-chat'])
   })
 
+  /** All three providers configured: every group lists its own endpoint's
+   *  models, fetched with its own base URL, in the Settings page's order —
+   *  even though the web server hands `savedProviders` over in a random order
+   *  on every read (keys.json is a hash map). */
+  it('lists all three configured providers, each from its own endpoint, in a stable order', async () => {
+    fetchProviderModels.mockImplementation(async (provider: string) =>
+      provider === 'openai-compatible' ? [{ id: 'custom-model', name: 'Custom' }] : serveModels(provider))
+    const endpoints = {
+      'openai-compatible': { baseUrl: 'https://kenari.id/v1', model: 'custom-model', probes: {}, hasKey: true },
+      'opencode-go': { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'deepseek-v4-flash', probes: {}, hasKey: true },
+      deepseek: { baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat', probes: {}, hasKey: true },
+    }
+    const ipc = await import('../../../frontend/lib/ipc')
+    const invokeSpy = vi.spyOn(ipc, 'invoke')
+    const hydrateWith = async (savedProviders: string[]) => {
+      invokeSpy.mockResolvedValue(JSON.stringify({ active: 'opencode-go', endpoints, savedProviders }))
+      await act(async () => { await hydrateAiSettings() })
+    }
+    renderComposer()
+
+    for (const order of [['deepseek', 'openai-compatible', 'opencode-go'], ['opencode-go', 'deepseek', 'openai-compatible']]) {
+      await hydrateWith(order)
+      openPicker()
+      await settle()
+
+      expect(groupNames()).toEqual(['OpenAI Compatible', 'Opencode Go', 'DeepSeek'])
+      expect(rowsIn('OpenAI Compatible').map((row) => row.textContent)).toEqual(['custom-model'])
+      expect(rowsIn('Opencode Go').map((row) => row.textContent)).toEqual(['deepseek-v4-flash', 'deepseek-reasoner'])
+      expect(rowsIn('DeepSeek').map((row) => row.textContent)).toEqual(['deepseek-v4-flash', 'deepseek-chat'])
+      openPicker()
+    }
+    expect(fetchProviderModels).toHaveBeenCalledWith('openai-compatible', 'https://kenari.id/v1')
+    expect(fetchProviderModels).toHaveBeenCalledWith('opencode-go', 'https://opencode.ai/zen/go/v1')
+    expect(fetchProviderModels).toHaveBeenCalledWith('deepseek', 'https://api.deepseek.com')
+    invokeSpy.mockRestore()
+  })
+
   it('picks the provider of the group when two providers serve the same model id', async () => {
     useAiSettings.setState({
       provider: 'opencode-go',
