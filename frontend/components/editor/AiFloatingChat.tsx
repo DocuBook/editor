@@ -51,6 +51,10 @@ const optionId = (position: number) => `mention-option-${position}`
 
 /** `aria-controls` target for the composer while the picker is open. */
 const MENTION_LISTBOX_ID = 'mention-listbox'
+/** Group header inside a stacked panel (a provider in the model picker, the
+ *  prompt list's own title). */
+const PANEL_HEADER_CLASS = 'px-2.5 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted'
+
 /** Group header of a provider in the model picker. Two providers can serve the
  *  same model id (OpenCode Go and DeepSeek both list `deepseek-v4-flash`), and
  *  the pick decides which provider is billed, so rows sit under their
@@ -82,10 +86,12 @@ const mentionRowClass = (selected: boolean) =>
  *  modal does for its path column. */
 const mentionMetaClass = (selected: boolean) => (selected ? 'text-on-accent opacity-80' : 'text-muted')
 
-/** Model picker row chrome: the active model keeps a persistent highlight so a
- *  long list still shows what is selected at a glance. The hover tint is only
- *  on unselected rows, or hovering would paint over the highlight. */
-const modelRowClass = (selected: boolean, highlighted = false) =>
+/** Row chrome of the panels stacked into the composer card — the model picker
+ *  and the prompt list share it, so the two read as one design. The active
+ *  model keeps a persistent highlight so a long list still shows what is
+ *  selected at a glance. The hover tint is only on unselected rows, or hovering
+ *  would paint over the highlight. */
+const panelRowClass = (selected: boolean, highlighted = false) =>
   'flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] ' +
   (selected ? 'bg-accent text-on-accent' : highlighted ? 'bg-surface-active' : 'hover:bg-surface-active')
 
@@ -500,11 +506,22 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  picks from. Its index is also each row's DOM id, for aria-activedescendant. */
   const modelMatches = visibleModelGroups.flatMap((group) => group.models.map((option) => ({ provider: group.id, model: option })))
   const modelOptionId = (position: number) => `ai-model-option-${position}`
+  /** The model picker and the prompt list (the Zap button's) are one-at-a-time:
+   *  both stack onto the composer, and two open panels buried the prompt box.
+   *  Opening the picker only HIDES the list — the AI menu it opened at the caret
+   *  stays, so the prompt typed after the model switch still lands there. */
   const openModelPicker = () => {
+    setExpanded(false)
     setModelQuery('')
     setModelHighlight(-1)
     setModelPickerOpen(true)
     void loadModels()
+  }
+  /** The other direction: showing the prompt list closes the picker. Only the
+   *  toggle path — Send (the same button with text in the box) leaves it alone. */
+  const togglePromptList = () => {
+    if (!expanded) setModelPickerOpen(false)
+    useAiChat.getState().togglePrompts()
   }
   /** Focus the search box when it appears, except where focusing raises a soft
    *  keyboard: on a phone that would cover the list the reader came to scan. */
@@ -637,14 +654,14 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
       <div id="ai-model-listbox" ref={modelListRef} style={modelListMax === undefined ? undefined : { maxHeight: modelListMax }} className="max-h-64 overflow-y-auto overscroll-contain p-1" role="listbox" aria-label="AI models">
       {visibleModelGroups.map((group) => (
         <div key={group.id} role="group" aria-labelledby={`ai-model-group-${group.id}`}>
-          <div id={`ai-model-group-${group.id}`} role="presentation" className="px-2.5 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted">{group.label}</div>
+          <div id={`ai-model-group-${group.id}`} role="presentation" className={PANEL_HEADER_CLASS}>{group.label}</div>
           {group.models.map((option) => {
             const active = group.id === provider && option === model
             const position = modelPosition++
             const highlighted = position === modelHighlight
             /** `title` carries the full id: the row truncates, and two ids that
              *  differ only at the end look identical once cut. */
-            return <button key={`${group.id}:${option}`} id={modelOptionId(position)} ref={(node) => { if (active) modelActiveRef.current = node; if (highlighted) modelHighlightRef.current = node }} role="option" aria-selected={active} title={option} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(group.id, option)} className={modelRowClass(active, highlighted)}><span className="min-w-0 flex-1 truncate font-mono">{option}</span>{active && <Check size={11} className="shrink-0" />}</button>
+            return <button key={`${group.id}:${option}`} id={modelOptionId(position)} ref={(node) => { if (active) modelActiveRef.current = node; if (highlighted) modelHighlightRef.current = node }} role="option" aria-selected={active} title={option} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(group.id, option)} className={panelRowClass(active, highlighted)}><span className="min-w-0 flex-1 truncate font-mono">{option}</span>{active && <Check size={11} className="shrink-0" />}</button>
           })}
           {group.status === 'loading' && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">Loading models…</div>}
           {group.status === 'error' && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">Could not load models</div>}
@@ -653,6 +670,19 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
       ))}
       {modelFilter && !modelMatches.length && <div role="presentation" className="px-2.5 py-1.5 text-[11px] text-muted">No matching models</div>}
       </div>
+    </div>
+  )
+
+  /** The Zap button's prompt list, stacked into the card exactly like the model
+   *  picker (same panel, header and rows) instead of chips floating above it.
+   *  It never shares the card with the status bar — the list only exists in
+   *  `user-input`, the bar only while AI works, waits for review or failed —
+   *  and the picker closes it (one panel at a time), so it simply sits on top. */
+  const promptListOpen = aiConfigured && !selectionPromptOpen && status === 'user-input' && expanded && !hasInput && items.length > 0
+  const promptPanel = promptListOpen && (
+    <div className="ai-chat-panel flex flex-col border-b border-border-subtle p-1" role="group" aria-labelledby="ai-prompt-group">
+      <div id="ai-prompt-group" role="presentation" className={PANEL_HEADER_CLASS}>Suggestions</div>
+      {items.map((item) => <button key={item.key} onClick={item.onItemClick} onMouseDown={(event) => event.preventDefault()} className={panelRowClass(false)}><span className="flex w-4 shrink-0 items-center justify-center text-accent [&_svg]:size-3.5">{item.icon}</span><span className="min-w-0 truncate">{item.title}</span></button>)}
     </div>
   )
 
@@ -686,7 +716,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
               ends in an ellipsis, so a long gateway id cannot crowd the row. */}
           <span className="min-w-0 max-w-32 truncate font-mono sm:max-w-52">{model || 'Select model'}</span><ChevronsUpDown size={11} className="shrink-0" />
         </button>
-        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? (enterSends ? 'Send prompt (Enter)' : 'Send prompt') : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : expanded ? <X size={16} /> : <Zap size={16} />}</button>}
+        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : togglePromptList} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? (enterSends ? 'Send prompt (Enter)' : 'Send prompt') : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : expanded ? <X size={16} /> : <Zap size={16} />}</button>}
       </div>
     </>
   )
@@ -696,7 +726,6 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const statusBar = status === 'thinking' || status === 'generating' || status === 'ai-writing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><Loader2 size={13} className="animate-spin text-accent" /><span className="text-xs text-foreground-secondary">{status === 'thinking' ? 'Thinking…' : status === 'generating' ? 'Generating…' : 'Writing…'}</span><button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className="ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Stop</button></div> : status === 'user-reviewing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><span className="text-xs text-foreground-secondary">Review the changes</span><div className="ml-auto flex items-center gap-2"><button onClick={revert} onMouseDown={(event) => event.preventDefault()} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Revert</button><button onClick={accept} onMouseDown={(event) => event.preventDefault()} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover"><Check size={11} />Accept <span className="ml-1 inline-flex items-center gap-0.5 opacity-80"><Command size={10} /><CornerDownLeft size={10} /></span></button></div></div> : status === 'error' ? <div className="ai-chat-status border-b border-border-subtle px-3 py-2"><div className="wrap-break-word text-[11px] text-danger">{typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}</div>{outOfRetries && <div className="mt-1 text-[10px] text-muted">Retry limit reached — rephrase the prompt or cancel.</div>}<div className="mt-2 flex justify-end gap-2"><button onClick={() => { setExpanded(false); ai.rejectChanges() }} className="cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 text-[11px] text-foreground-secondary hover:text-foreground">Cancel</button><button disabled={outOfRetries} onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className="flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 text-[11px] text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35"><RotateCcw size={11} />Retry</button></div></div> : null
 
   return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
-    {aiConfigured && !selectionPromptOpen && status === 'user-input' && expanded && !hasInput && items.length > 0 && <div className="relative z-30 flex max-w-full flex-col items-end gap-2 overflow-x-hidden">{items.map((item) => <button key={item.key} onClick={item.onItemClick} onMouseDown={(event) => event.preventDefault()} className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer"><span className="flex w-5 shrink-0 items-center justify-center text-accent">{item.icon}</span>{item.title}</button>)}</div>}
-    <div ref={surfaceRef} className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{statusBar}{modelPicker}{promptInput}</div>
+    <div ref={surfaceRef} className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{promptPanel}{statusBar}{modelPicker}{promptInput}</div>
   </div>
 }

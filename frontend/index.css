@@ -704,23 +704,19 @@ body .code-block-language-empty {
 }
 
 /* AI chat surfaces are flat — no box-shadow anywhere in the panel. The chat
-   bubble (composer textarea) and the prompt/FAB list both sit on the app's base
-   background token, so they stay identical in light and dark and need no tonal
-   invention: the hairline border alone separates them from the document.
-   Deliberately NOT --color-surface-active (the pressed/hover token), which reads
-   as a disabled/negative state when used as a resting surface. Chips keep the
-   shared `ui-popover` class (and its radius/border) but drop its elevation. */
-.editor-ai-floating .ui-popover,
+   bubble sits on the app's base background token, so it stays identical in light
+   and dark and needs no tonal invention: the hairline border alone separates it
+   from the document. Deliberately NOT --color-surface-active (the pressed/hover
+   token), which reads as a disabled/negative state when used as a resting
+   surface. The prompt list and the model picker are panels INSIDE it, so they
+   inherit this background rather than carrying their own. */
 .editor-ai-floating .ai-chat-surface {
     background: var(--color-background);
     box-shadow: none;
 }
-.editor-ai-floating .ui-popover:hover {
-    background: var(--color-surface-hover);
-}
-/* Keyboard focus cue without a Tailwind ring: `ring-*` is a box-shadow, so the
-   flat panel uses an inset outline instead. */
-.editor-ai-floating .ui-popover:focus-visible {
+/* Keyboard focus cue for the stacked panels' rows, without a Tailwind ring:
+   `ring-*` is a box-shadow, so the flat panel uses an inset outline instead. */
+.editor-ai-floating .ai-chat-panel button:focus-visible {
     outline: 2px solid var(--color-accent);
     outline-offset: -2px;
 }
@@ -737,8 +733,8 @@ body .code-block-language-empty {
         transform: none;
     }
 }
-/* The model picker panel stacks into the card the same way, so it enters the
-   same way. */
+/* The prompt list and the model picker stack into the card the same way, so
+   they enter the same way. */
 .editor-ai-floating .ai-chat-status,
 .editor-ai-floating .ai-chat-panel {
     animation: ai-status-in 140ms ease-out;

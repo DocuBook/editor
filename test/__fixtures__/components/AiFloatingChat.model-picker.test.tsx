@@ -79,8 +79,8 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function renderComposer() {
-  const ai = makeAi()
+function renderComposer(aiMenuState: any = 'closed') {
+  const ai = makeAi(aiMenuState)
   useEditorStore.setState({
     blockEditor: {
       getExtension: vi.fn(() => ai),
@@ -554,6 +554,59 @@ describe('composer model picker', () => {
         offset.mockRestore()
         delete (window as { visualViewport?: unknown }).visualViewport
       }
+    })
+  })
+
+  /** The picker and the Zap button's prompt list both stack onto the composer;
+   *  two open at once buried the prompt box, so opening one closes the other. */
+  describe('one panel at a time with the prompt list', () => {
+    const promptToggle = () => document.querySelector<HTMLButtonElement>('[aria-label="Show AI prompts"], [aria-label="Hide AI prompts"]')!
+    const configureOne = () => useAiSettings.setState({ provider: 'opencode-go', model: 'deepseek-v4-flash', savedProviders: ['opencode-go'], models: { 'opencode-go': 'deepseek-v4-flash' }, baseUrls: {} })
+
+    it('collapses the prompt list when the model picker opens, keeping the caret anchor', async () => {
+      configureOne()
+      // The prompt list is up: the AI menu sits at the caret in user-input.
+      const ai = renderComposer({ blockId: 'b1', status: 'user-input' })
+      act(() => useAiChat.setState({ expanded: true }))
+      expect(promptToggle().getAttribute('aria-label')).toBe('Hide AI prompts')
+
+      openPicker()
+      await settle()
+
+      expect(document.querySelector('#ai-model-listbox')).not.toBeNull()
+      expect(useAiChat.getState().expanded).toBe(false)
+      expect(promptToggle().getAttribute('aria-label')).toBe('Show AI prompts')
+      // Only the list is hidden — the menu anchored at the caret stays open, so
+      // the prompt typed after picking a model still lands there.
+      expect(ai.closeAIMenu).not.toHaveBeenCalled()
+      expect(ai.store.state.aiMenuState).toEqual({ blockId: 'b1', status: 'user-input' })
+    })
+
+    it('closes the model picker when the prompt list opens', async () => {
+      configureOne()
+      renderComposer({ blockId: 'b1', status: 'user-input' })
+      openPicker()
+      await settle()
+      expect(document.querySelector('#ai-model-listbox')).not.toBeNull()
+
+      act(() => promptToggle().click())
+      await settle()
+
+      expect(useAiChat.getState().expanded).toBe(true)
+      expect(document.querySelector('#ai-model-listbox')).toBeNull()
+      expect(document.querySelector('[aria-label="Select AI model"]')!.getAttribute('aria-expanded')).toBe('false')
+    })
+
+    it('hiding the prompt list leaves a closed picker closed', async () => {
+      configureOne()
+      renderComposer({ blockId: 'b1', status: 'user-input' })
+      act(() => useAiChat.setState({ expanded: true }))
+
+      act(() => promptToggle().click())
+      await settle()
+
+      expect(useAiChat.getState().expanded).toBe(false)
+      expect(document.querySelector('#ai-model-listbox')).toBeNull()
     })
   })
 })
