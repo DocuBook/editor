@@ -56,16 +56,12 @@ pub fn set_api_key(
     model: Option<String>,
     base_url: Option<String>,
 ) -> Result<(), String> {
-    let previous_key = crate::keychain::get_key(provider).ok();
-    let previous_selection = load_selection(&app);
-    if previous_key.is_some() && previous_selection.endpoints.contains_key(provider) {
-        return Err("Provider is already configured; revoke it before changing settings".into());
-    }
-    crate::keychain::set_key(provider, key)?;
     // The endpoint records where the key will actually be sent. A supplied URL is
-    // bound to the provider BEFORE persisting (exact catalog host only); an omitted
-    // URL falls back to the catalog default and must NOT erase a URL already on
-    // file — `validate_base_url` re-checks it at send time either way.
+    // bound to the provider BEFORE anything is persisted (exact catalog host only):
+    // validating after the keychain write left the key stored with no endpoint
+    // whenever the URL was refused. An omitted URL falls back to the catalog
+    // default and must NOT erase a URL already on file — `validate_base_url`
+    // re-checks it at send time either way.
     let base_url = match base_url.filter(|u| !u.is_empty()) {
         Some(url) => {
             if provider == crate::agent::CUSTOM_PROVIDER_ID {
@@ -77,6 +73,12 @@ pub fn set_api_key(
         }
         None => None,
     };
+    let previous_key = crate::keychain::get_key(provider).ok();
+    let previous_selection = load_selection(&app);
+    if previous_key.is_some() && previous_selection.endpoints.contains_key(provider) {
+        return Err("Provider is already configured; revoke it before changing settings".into());
+    }
+    crate::keychain::set_key(provider, key)?;
     let mut selection = load_selection(&app);
     {
         let endpoint = selection.endpoints.entry(provider.to_string()).or_default();
@@ -440,15 +442,24 @@ pub async fn ai_settings(app: tauri::AppHandle) -> Result<String, String> {
 }
 
 /// Runtime model discovery. API keys stay in the keychain, never in webview state.
+///
+/// `api_key` is the draft key typed in Settings but not saved yet — the one case
+/// where discovery must run before the keychain holds anything: a first-time save
+/// with a blank Model discovers the model it validates against. Mirrors the web
+/// server's `list_models`; without it, that discovery always failed on desktop.
 #[tauri::command]
 pub async fn list_models(
     app: tauri::AppHandle,
     provider: String,
     base_url: String,
+    api_key: Option<String>,
 ) -> Result<String, String> {
     let resolved = resolve_base_url(&load_selection(&app), &provider, &base_url)?;
-    let key = crate::keychain::get_key(&provider)
-        .map_err(|_| "No API key found — save one in Settings -> AI".to_string())?;
+    let key = match api_key.filter(|k| !k.is_empty()) {
+        Some(draft) => draft,
+        None => crate::keychain::get_key(&provider)
+            .map_err(|_| "No API key found — save one in Settings -> AI".to_string())?,
+    };
     let client = pin_custom_endpoint(
         reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())

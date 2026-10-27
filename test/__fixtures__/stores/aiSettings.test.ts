@@ -342,6 +342,37 @@ describe("aiSettings store", () => {
     expect(s.probeTools).toEqual({ deepseek: { "picked-this-session": true } });
   });
 
+  it("adoptBackendEndpoints adopts the backend's active provider when the store has none", () => {
+    // First-ever save: hydration found nothing, so the store has no selection.
+    // The backend made the saved provider active; leaving the store on '' kept
+    // the composer disabled until a focus re-hydration.
+    useAiSettings.setState({ provider: "", model: "", dirtySelection: false });
+
+    adoptBackendEndpoints({
+      active: "deepseek",
+      endpoints: { deepseek: { baseUrl: "https://api.deepseek.com", model: "deepseek-chat", probes: {}, hasKey: true } },
+      savedProviders: ["deepseek"],
+    });
+
+    expect(useAiSettings.getState().provider).toBe("deepseek");
+    expect(useAiSettings.getState().model).toBe("deepseek-chat");
+  });
+
+  it("adoptBackendEndpoints leaves the selection empty after the active provider is revoked", () => {
+    // Revoke clears `active` server-side on purpose: chat must not silently move
+    // to another configured provider.
+    useAiSettings.setState({ provider: "", model: "" });
+
+    adoptBackendEndpoints({
+      active: "",
+      endpoints: { deepseek: { baseUrl: "https://api.deepseek.com", model: "deepseek-chat", probes: {}, hasKey: true } },
+      savedProviders: ["deepseek"],
+    });
+
+    expect(useAiSettings.getState().provider).toBe("");
+    expect(useAiSettings.getState().model).toBe("");
+  });
+
   it("setSavedProviders replaces with the server list", () => {
     useAiSettings.setState({ savedProviders: ["openai-compatible"] });
     setSavedProviders(["opencode-go"]);

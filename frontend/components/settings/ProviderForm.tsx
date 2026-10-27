@@ -117,8 +117,11 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
       try {
         const parsed = JSON.parse(custom)
         setCustomCfg(parsed)
-        // Env model is forced — sync the store so transport + probe align.
-        if (parsed.source === 'env' && parsed.model) useAiSettings.getState().setModel(useAiSettings.getState().provider, parsed.model)
+        /** Env model is forced — sync the store so transport + probe align. Filed
+         *  under the CUSTOM provider, the one the env override controls: keying it
+         *  on the active provider wrote the env model into whatever provider chat
+         *  was on, so opening Settings sent that provider a model it does not serve. */
+        if (parsed.source === 'env' && parsed.model) useAiSettings.getState().setModel(CUSTOM_PROVIDER_ID, parsed.model)
       } catch { /* keep the previous config rather than rendering a half-parsed one */ }
     }
     setBackendLoading(false)
@@ -217,7 +220,10 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
     || ''
 
   const handleSave = async () => {
-    if (!provider || !keyInput || !baseUrlInput.trim()) return
+    /** A pasted key often carries a trailing space or newline; sent as-is it
+     *  fails the Authorization header and reads as a rejected key. */
+    const key = keyInput.trim()
+    if (!provider || !key || !baseUrlInput.trim()) return
     setSaving(true)
     // A blank field falls back to the catalog default, so a built-in provider can
     // still be saved without the user retyping its canonical URL.
@@ -229,7 +235,7 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
        *  discovered from the endpoint itself. With neither, there is nothing to
        *  validate against: the backend rejects an empty model, so surface the
        *  next step instead of sending a request guaranteed to fail. */
-      const probeModel = effectiveModel() || await discoverModel(provider, isCustom ? baseUrl : '', keyInput)
+      const probeModel = effectiveModel() || await discoverModel(provider, isCustom ? baseUrl : '', key)
       if (!probeModel) {
         toast.error('Enter a model, or check the Base URL so one can be discovered')
         return
@@ -237,15 +243,26 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
       /** Validate BEFORE persisting: the key must actually work against the
        *  SELECTED provider. Otherwise picking provider A + pasting provider B's
        *  key stores a dead key that fails at ask_ai time. */
-      const result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: keyInput })
+      let result: string
+      try {
+        result = await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: key })
+      } catch (e) {
+        /** Key rejected — do NOT persist. test_connection throws on auth/network
+         *  failure, which means this key is wrong for the selected provider. The
+         *  backend's reason is kept: a model the gateway does not serve fails
+         *  here too, and blaming only the key sent users after the wrong field. */
+        toast.error(`API key rejected for this provider — ${String(e)}`)
+        console.error(e)
+        return
+      }
       const tools = parseProbeResult(result)
       // test_connection resolved → key is valid for this provider. Persist. The
       // custom path validates any public host; the catalog path allowlists the
       // host AND binds the key to this provider.
       if (isCustom) {
-        await invoke('set_custom_endpoint', { provider, baseUrl, key: keyInput, model: probeModel })
+        await invoke('set_custom_endpoint', { provider, baseUrl, key, model: probeModel })
       } else {
-        await invoke('set_api_key', { provider, baseUrl, key: keyInput, model: probeModel })
+        await invoke('set_api_key', { provider, baseUrl, key, model: probeModel })
       }
       /** Persist measured tool-call support so the badge + transport use it (not
        *  the conservative unmeasured default) — an explicit set_probe, since no
@@ -267,9 +284,10 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
         toast.success('API key saved')
       }
     } catch (e) {
-      /** Key rejected — do NOT persist. test_connection throws on auth/network
-       *  failure, which means this key is wrong for the selected provider. */
-      toast.error('API key rejected for this provider — check the key')
+      /** The key passed test_connection, so this is the PERSIST step failing
+       *  (host not allowed, provider already configured, unwritable data dir).
+       *  Reporting it as a rejected key hid the backend's actual reason. */
+      toast.error(`Could not save — ${String(e)}`)
       console.error(e)
     } finally {
       /** ALWAYS clears the spin: the early `return`s above (no model to probe
@@ -280,7 +298,8 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   }
 
   const handleTest = async () => {
-    if (locked || !provider || !keyInput || !baseUrlInput.trim()) return
+    const key = keyInput.trim()
+    if (locked || !provider || !key || !baseUrlInput.trim()) return
     setTesting(true)
     try {
       const p = providers.find(x => x.id === provider)
@@ -288,14 +307,14 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
       // Same resolution as save: a model held by this form/composer, else one
       // discovered from the endpoint (a bare Test on a fresh provider must not
       // send an empty model).
-      const probeModel = effectiveModel() || await discoverModel(provider, isCustom ? baseUrl : '', keyInput)
+      const probeModel = effectiveModel() || await discoverModel(provider, isCustom ? baseUrl : '', key)
       if (!probeModel) {
         toast.error('Enter a model, or check the Base URL so one can be discovered')
         return
       }
       // Test ONLY checks connectivity — it does not measure or persist tool-call
       // support: that happens when the key is saved, and on a composer pick.
-      await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: keyInput })
+      await invoke<string>('test_connection', { provider, model: probeModel, baseUrl, apiKey: key })
       toast.success('Connection OK')
     } catch (e) {
       toast.error(String(e))
@@ -405,12 +424,12 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
                     {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
-                <button onClick={handleSave} disabled={!keyInput || saving || !baseUrlInput.trim()}
+                <button onClick={handleSave} disabled={!keyInput.trim() || saving || !baseUrlInput.trim()}
                   className="px-3.5 py-[7px] text-xs rounded-md bg-accent text-on-accent border-none whitespace-nowrap flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-default">
                   {saving ? <Loader size={12} className="animate-spin" /> : <Check size={12} />}
                   {saving ? '...' : 'Save'}
                 </button>
-                <button onClick={handleTest} disabled={!keyInput || testing || !baseUrlInput.trim()}
+                <button onClick={handleTest} disabled={!keyInput.trim() || testing || !baseUrlInput.trim()}
                   aria-label="Check connection" title="Check connection"
                   className="p-[7px] rounded-md bg-success-surface text-success border border-success-border cursor-pointer flex items-center justify-center hover:bg-success hover:text-on-accent disabled:opacity-40 disabled:cursor-default">
                   {testing ? <Loader size={13} className="animate-spin" /> : <RefreshCw size={13} />}
