@@ -78,10 +78,12 @@ describe('AI floating composer', () => {
 
     const textarea = document.querySelector('textarea')!
     expect(textarea).not.toBeNull()
-    expect(document.querySelector('[aria-label="Show AI prompts"]')).not.toBeNull()
+    expect(document.querySelector('[aria-label="Show AI prompts"] .lucide-zap')).not.toBeNull()
 
     act(() => (document.querySelector('[aria-label="Show AI prompts"]') as HTMLButtonElement).click())
     expect(document.body.textContent).toContain('Continue Writing')
+    // The open list turns the trigger into a close control.
+    expect(document.querySelector('[aria-label="Hide AI prompts"] .lucide-x')).not.toBeNull()
     expect(document.body.textContent).toContain('Summarize')
     const floating = document.querySelector('.editor-ai-floating')!
     const promptAction = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue Writing')!
