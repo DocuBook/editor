@@ -559,6 +559,32 @@ const CONTEXT_BEFORE_RATIO = 0.4;
 /** Marker inserted at the anchored block so the model knows where the caret is;
  *  text-only models never see a cursor otherwise. */
 export const CURSOR_MARKER = "<!-- cursor -->";
+/** Plain text the Markdown exporter passes through unescaped; it stands in for
+ *  `CURSOR_MARKER`, which the exporter would escape as prose. */
+const CURSOR_PLACEHOLDER = "DOCUBOOKCURSORMARKER";
+
+/** A copy of `blocks` with the placeholder at the end of block `anchorId`'s own
+ *  text, so the marker sits on the caret block's line and no list around it is
+ *  split or renumbered. A block without inline text (a table, an image) gets
+ *  the placeholder as a paragraph after it instead. `null` when the block is
+ *  not in `blocks`. */
+function withCursorPlaceholder(blocks: readonly any[], anchorId: string): any[] | null {
+  let found = false;
+  const placeholder = (text: string) => ({ type: "text", text, styles: {} });
+  const walk = (items: readonly any[]): any[] =>
+    items.flatMap((block: any) => {
+      const copy = block?.children?.length ? { ...block, children: walk(block.children) } : block;
+      if (block?.id !== anchorId) return [copy];
+      found = true;
+      if (Array.isArray(block.content)) {
+        const text = block.content.length ? ` ${CURSOR_PLACEHOLDER}` : CURSOR_PLACEHOLDER;
+        return [{ ...copy, content: [...block.content, placeholder(text)] }];
+      }
+      return [copy, { type: "paragraph", content: [placeholder(CURSOR_PLACEHOLDER)] }];
+    });
+  const marked = walk(blocks);
+  return found ? marked : null;
+}
 
 /**
  * Cursor-anchored Markdown context for the text-only (non-tool) path.
@@ -605,38 +631,36 @@ export function buildDocumentContext(editor: any, cursor: DocumentCursorSnapshot
     const selCtx = describeSelection(editor, cursor);
     const anchorId = cursor.anchorId;
     const block = anchorId ? findBlock(editor, anchorId) : null;
-    if (!block) {
-      const md = editor.blocksToMarkdownLossy(editor.document);
-      return trimContext(md, MAX) + selCtx;
+    const document = Array.isArray(editor.document) ? editor.document : [];
+    const marked = block ? withCursorPlaceholder(document, block.id) : null;
+    const md = marked ? editor.blocksToMarkdownLossy(marked) : "";
+    const at = md.indexOf(CURSOR_PLACEHOLDER);
+    if (!block || at < 0) {
+      return trimContext(editor.blocksToMarkdownLossy(editor.document), MAX) + selCtx;
     }
 
-    // Render the document up to and including the anchored block's siblings.
-    // Splitting on the anchor's own Markdown is lossy for repeated text, so
-    // walk real block boundaries instead: parent index for top-level blocks,
-    // sibling index for nested ones.
-    const flat = flattenBlocks(Array.isArray(editor.document) ? editor.document : []);
-    const anchorIndex = flat.indexOf(block);
-    const before = flat.slice(0, anchorIndex);
-    const after = flat.slice(anchorIndex + 1);
-
-    const beforeMd = before.length ? editor.blocksToMarkdownLossy(before) : "";
-    const anchorMd = editor.blocksToMarkdownLossy([block]);
-    const afterMd = after.length ? editor.blocksToMarkdownLossy(after) : "";
+    // One rendering of the whole tree, with the marker where the placeholder
+    // landed. Rendering flattened slices instead repeated every nested block
+    // (a parent's Markdown already holds its children) and put the marker
+    // after a stray top-level copy of a nested caret block.
+    const beforeMd = md.slice(0, at);
+    const afterMd = md.slice(at + CURSOR_PLACEHOLDER.length);
 
     // Anchor block must survive verbatim: it carries the caret and the style
-    // the continuation has to match. Budget the rest around it.
-    const anchorBudget = anchorMd.length + CURSOR_MARKER.length;
-    const remaining = Math.max(0, MAX - anchorBudget);
+    // the continuation has to match. Its own text ends right before the
+    // marker (its children follow it), so the head keeps that text whole plus
+    // the indentation it has in place (two columns per nesting level on each
+    // of its lines). Budget the rest around it.
+    const anchorMd = editor.blocksToMarkdownLossy([{ ...block, children: [] }]);
+    const depth = nestingDepths(document).get(String(block.id)) ?? 0;
+    const anchorLength = anchorMd.length + anchorMd.split("\n").length * 2 * depth;
+    const remaining = Math.max(0, MAX - anchorLength - CURSOR_MARKER.length);
     const beforeBudget = Math.floor(remaining * CONTEXT_BEFORE_RATIO);
     const afterBudget = remaining - beforeBudget;
 
-    const head = tailTruncate(beforeMd, beforeBudget);
+    const head = tailTruncate(beforeMd, anchorLength + beforeBudget);
     const tail = headTruncate(afterMd, afterBudget);
-
-    const marked = /\n$/.test(anchorMd)
-      ? anchorMd + CURSOR_MARKER + "\n"
-      : anchorMd + "\n" + CURSOR_MARKER + "\n";
-    return head + marked + tail + selCtx;
+    return head + CURSOR_MARKER + tail + selCtx;
   } catch {
     return "";
   }
