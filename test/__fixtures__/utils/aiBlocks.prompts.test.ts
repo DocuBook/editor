@@ -3,7 +3,7 @@ import {
   AI_MARKDOWN_INSTRUCTION,
   buildAiPrompt,
 } from "../../../frontend/utils/aiPrompt";
-import { buildTaskFormattingRules, extractDelimitedContent, AI_CONTENT_OPEN, AI_CONTENT_CLOSE } from "../../../frontend/utils/aiBlocks";
+import { buildTaskFormattingRules, extractDelimitedContent, extractDelimitedReply, AI_CONTENT_OPEN, AI_CONTENT_CLOSE, AI_CONTENT_REPLACE_OPEN } from "../../../frontend/utils/aiBlocks";
 
 describe("buildAiPrompt", () => {
   const documentState = {
@@ -169,6 +169,25 @@ describe("text-mode content contract", () => {
     expect(extractDelimitedContent(`${AI_CONTENT_OPEN}payload${AI_CONTENT_CLOSE}`)).toBe(
       "payload",
     );
+  });
+
+  /** Without a selection, a reply is inserted after the caret block unless it
+   *  opens with the replace tag; the prompt states that tag and the parser
+   *  must resolve it, or a "fix this paragraph" reply duplicates the paragraph. */
+  it("states the replace tag and resolves it, plain tags staying inserts", () => {
+    const { messages } = buildAiPrompt({
+      mode: "text",
+      messages: [{ role: "user", content: "fix the spelling" }],
+      documentMarkdown: "Teh fox <!-- cursor -->",
+      selectedMarkdown: "",
+      userText: "fix the spelling",
+      taskRules: "",
+    });
+    expect(messages[0].content).toContain(AI_CONTENT_REPLACE_OPEN);
+    expect(extractDelimitedReply(`${AI_CONTENT_REPLACE_OPEN}The fox${AI_CONTENT_CLOSE}`)).toEqual({ content: "The fox", replace: true });
+    expect(extractDelimitedReply(`note <CONTENT  Replace >The fox</content>`)).toEqual({ content: "The fox", replace: true });
+    expect(extractDelimitedReply(`${AI_CONTENT_OPEN}More text${AI_CONTENT_CLOSE}`)).toEqual({ content: "More text", replace: false });
+    expect(extractDelimitedReply(`<content replaced>x</content>`)).toBeNull();
   });
 
   it("leaves tool mode without the delimiters", () => {

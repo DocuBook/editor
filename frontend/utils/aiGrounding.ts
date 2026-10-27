@@ -15,7 +15,7 @@
 import {
   AI_CONTENT_OPEN,
   buildApplyDocumentInput,
-  extractDelimitedContent,
+  extractDelimitedReply,
   filterMeaningfulOperations,
   flattenBlocks,
   suffixOperationIds,
@@ -29,6 +29,10 @@ export type EditMode = "tool" | "text";
  *  output gate and the write all read it. */
 export interface EditScope {
   selectedBlocks?: readonly any[];
+  /** For a cursor request: the block the text prompt's cursor marker ends. A
+   *  reply opened with `<content replace>` replaces it instead of being
+   *  inserted after it. */
+  anchorId?: string;
 }
 
 /** Shared by every source of reference material. */
@@ -116,9 +120,11 @@ export async function groundTextOutput(
   text: string,
   scope: EditScope,
 ): Promise<{ payload: string | null; parsed: boolean; input: any | null }> {
-  const payload = extractDelimitedContent(text);
-  if (!payload) return { payload: null, parsed: false, input: null };
-  const parsed = await buildApplyDocumentInput(editor, payload, scope.selectedBlocks ?? null);
+  const reply = extractDelimitedReply(text);
+  if (!reply) return { payload: null, parsed: false, input: null };
+  const payload = reply.content;
+  const replaceBlockId = reply.replace && !scope.selectedBlocks?.length ? scope.anchorId : undefined;
+  const parsed = await buildApplyDocumentInput(editor, payload, scope.selectedBlocks ?? null, replaceBlockId);
   if (!parsed) return { payload, parsed: false, input: null };
   return { payload, parsed: true, input: filterMeaningfulOperations(editor, { input: parsed }, scope.selectedBlocks)?.input ?? null };
 }

@@ -156,6 +156,12 @@ describe("inheritFormatOnReplace", () => {
     expect(result[0].level).toBe(2);
   });
 
+  it("inherits a BlockNote block's props, where its heading level lives", () => {
+    const orig = [{ id: "h1", type: "heading", props: { level: 2, textAlignment: "center" } }];
+    const parsed = [{ type: "paragraph", props: { textAlignment: "left" }, content: [{ type: "text", text: "Intro" }] }];
+    expect(inheritFormatOnReplace(orig, parsed)[0]).toMatchObject({ type: "heading", props: { level: 2, textAlignment: "center" } });
+  });
+
   it("inherits bullet list format", () => {
     const orig = [{ id: "l1", type: "bulletListItem" }];
     const parsed = [
