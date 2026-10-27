@@ -5,6 +5,7 @@ use futures_util::StreamExt;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, USER_AGENT};
 use reqwest::Url;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -17,7 +18,7 @@ const MAX_REDIRECTS: usize = 5;
 const MAX_BODY_BYTES: usize = 5 * 1024 * 1024;
 /// Extracted text kept for the model (paged by `read_context_result`).
 const MAX_TEXT_BYTES: usize = 4 * 1024 * 1024;
-/// Links taken from one page into the provenance ledger.
+/// Raw-page anchors offered to the provenance ledger after the links the text shows.
 const MAX_PAGE_LINKS: usize = 100;
 const MAX_TITLE_CHARS: usize = 300;
 const ACCEPTED_TYPES: [&str; 4] = ["text/html", "application/xhtml+xml", "text/plain", "text/markdown"];
@@ -84,8 +85,8 @@ pub async fn fetch(
         // HTML parsing is CPU-bound (up to MAX_BODY_BYTES): keep it off the async workers.
         let final_url = url.clone();
         let (page, links) = tokio::task::spawn_blocking(move || {
-            let (page, plain) = extract(&requested, &final_url, &content_type, &body, body_truncated);
-            let links = page_links(&final_url, &content_type, &body, &plain);
+            let (page, shown) = extract(&requested, &final_url, &content_type, &body, body_truncated);
+            let links = page_links(&final_url, &content_type, &body, shown);
             (page, links)
         })
         .await
@@ -161,15 +162,15 @@ async fn read_capped(response: reqwest::Response) -> Result<(Vec<u8>, bool), Too
 }
 
 /// Turn the body into readable text; HTML goes through Readability, with a
-/// whole-body fallback for pages it cannot score. Also returns the page's plain
-/// text, which is what gets scanned for URLs.
-fn extract(requested: &str, url: &Url, content_type: &str, body: &[u8], body_truncated: bool) -> (FetchedPage, String) {
+/// whole-body fallback for pages it cannot score. Also returns the link URLs
+/// the text shows the model.
+fn extract(requested: &str, url: &Url, content_type: &str, body: &[u8], body_truncated: bool) -> (FetchedPage, Vec<String>) {
     let raw = String::from_utf8_lossy(body);
-    let (title, text, plain) = if content_type.contains("html") {
+    let (title, text, shown) = if content_type.contains("html") {
         html_text(&raw, url)
     } else {
-        let raw = raw.into_owned();
-        (String::new(), raw.clone(), raw)
+        let shown = ledger::extract_urls(&raw);
+        (String::new(), raw.into_owned(), shown)
     };
     let text = collapse_blank_lines(&text);
     let (text, text_truncated) = cap_bytes(text, MAX_TEXT_BYTES);
@@ -181,17 +182,18 @@ fn extract(requested: &str, url: &Url, content_type: &str, body: &[u8], body_tru
         text,
         truncated: body_truncated || text_truncated,
     };
-    (page, plain)
+    (page, shown)
 }
 
-/// Title, main content as Markdown, and its plain text.
+/// Title, main content as Markdown, and the link URLs it shows: link targets
+/// first, then bare URLs in the prose.
 ///
 /// Markdown keeps what plain text flattens: headings, list items, table cells,
-/// code blocks and link targets. URLs are still read from the plain text, since
-/// Markdown escapes the dots of a bare URL in prose.
-fn html_text(html: &str, url: &Url) -> (String, String, String) {
+/// code blocks and link targets. Bare URLs are still read from the plain text,
+/// since Markdown escapes their dots.
+fn html_text(html: &str, url: &Url) -> (String, String, Vec<String>) {
     let article = dom_smoothie::Readability::new(html, Some(url.as_str()), None).and_then(|mut readability| readability.parse());
-    match article {
+    let (title, (text, mut shown), plain) = match article {
         Ok(article) if !article.text_content.trim().is_empty() => {
             let content = dom_query::Document::from(article.content.as_ref());
             (article.title, markdown(&content, url), article.text_content.to_string())
@@ -203,10 +205,13 @@ fn html_text(html: &str, url: &Url) -> (String, String, String) {
             let plain = document.select("body").text().to_string();
             (title, markdown(&document, url), plain)
         }
-    }
+    };
+    shown.extend(ledger::extract_urls(&plain));
+    (title, text, shown)
 }
 
-/// Markdown of the document's body, with links and images made absolute.
+/// Markdown of the document's body, with links and images made absolute, and
+/// the link targets it kept, in document order.
 ///
 /// Readability already absolutises its own output; the whole-body fallback has
 /// not been, and a relative `/docs` link is useless to the model. An image
@@ -217,9 +222,10 @@ fn html_text(html: &str, url: &Url) -> (String, String, String) {
 /// is already there goes: `title` attributes (usually the link text again),
 /// links to a fragment of this same page (a wiki article has hundreds of
 /// citation jumps), and the padding of table separator rows.
-fn markdown(document: &dom_query::Document, base: &Url) -> String {
+fn markdown(document: &dom_query::Document, base: &Url) -> (String, Vec<String>) {
     let mut page = base.clone();
     page.set_fragment(None);
+    let mut links = Vec::new();
     for anchor in document.select("a[href]").iter() {
         anchor.remove_attr("title");
         match anchor.attr("href").and_then(|href| base.join(href.trim()).ok()) {
@@ -230,6 +236,7 @@ fn markdown(document: &dom_query::Document, base: &Url) -> String {
                     anchor.remove_attr("href");
                 } else {
                     anchor.set_attr("href", &target);
+                    links.push(target);
                 }
             }
             // `javascript:`, `mailto:` and unparsable targets keep only their text.
@@ -250,7 +257,7 @@ fn markdown(document: &dom_query::Document, base: &Url) -> String {
         Some(body) => body.md(None).to_string(),
         None => document.md(None).to_string(),
     };
-    compact_table_rules(&markdown)
+    (compact_table_rules(&markdown), links)
 }
 
 /// Shorten table separator rows (`| ------ | --- |` to `| - | - |`) outside
@@ -293,27 +300,35 @@ fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
-/// Absolute http(s) links of the page (anchors and URLs in the text).
-fn page_links(base: &Url, content_type: &str, body: &[u8], text: &str) -> Vec<String> {
-    let mut links = Vec::new();
+/// Absolute http(s) links of the page for the ledger: the ones the extracted
+/// text shows the model (`shown`) first, then the raw page's anchors, deduplicated
+/// and capped at what the ledger takes from one source. Nav and sidebar anchors
+/// come first in the raw page, so they must not use up the cap.
+fn page_links(base: &Url, content_type: &str, body: &[u8], shown: Vec<String>) -> Vec<String> {
+    let mut anchors = Vec::new();
     if content_type.contains("html") {
         let document = dom_query::Document::from(String::from_utf8_lossy(body).as_ref());
         for anchor in document.select("a[href]").iter() {
-            if links.len() >= MAX_PAGE_LINKS {
+            if anchors.len() >= MAX_PAGE_LINKS {
                 break;
             }
             if let Some(href) = anchor.attr("href") {
                 if let Ok(link) = base.join(href.trim()) {
                     if matches!(link.scheme(), "http" | "https") {
-                        links.push(link.to_string());
+                        anchors.push(link.to_string());
                     }
                 }
             }
         }
     }
-    links.extend(ledger::extract_urls(text));
-    links.truncate(MAX_PAGE_LINKS * 2);
-    links
+    let mut seen = HashSet::new();
+    shown
+        .into_iter()
+        .chain(anchors)
+        .filter_map(|link| ledger::normalize(&link))
+        .filter(|link| seen.insert(link.clone()))
+        .take(ledger::MAX_URLS_PER_SOURCE)
+        .collect()
 }
 
 /// Squeeze runs of blank lines and trailing spaces left by extraction.
@@ -388,7 +403,7 @@ npm run build</code></pre>
 
     #[test]
     fn html_keeps_its_structure_as_markdown() {
-        let (page, plain) = extract("https://e.example/guide", &url("https://e.example/guide"), "text/html", GUIDE.as_bytes(), false);
+        let (page, shown) = extract("https://e.example/guide", &url("https://e.example/guide"), "text/html", GUIDE.as_bytes(), false);
         assert_eq!(page.title, "Install guide");
         for expected in [
             "## Requirements",
@@ -401,10 +416,21 @@ npm run build</code></pre>
             assert!(page.text.contains(expected), "missing {expected:?} in:\n{}", page.text);
         }
         assert!(!page.text.contains("Home"), "navigation is not main content");
-        // Markdown escapes the dots of a bare URL; links are read from the plain text.
+        // Markdown escapes the dots of a bare URL; bare URLs are read from the plain text.
         assert!(page.text.contains("https://notes\\.example"));
-        let links = page_links(&url("https://e.example/guide"), "text/html", GUIDE.as_bytes(), &plain);
-        assert!(links.contains(&"https://notes.example/v1.2".to_string()), "{links:?}");
+        assert_eq!(shown, ["https://e.example/docs/faq", "https://notes.example/v1.2"]);
+    }
+
+    #[test]
+    fn links_the_text_shows_are_not_crowded_out_by_navigation() {
+        let nav: String = (0..2 * MAX_PAGE_LINKS).map(|i| format!(r#"<a href="/n{i}">n{i}</a>"#)).collect();
+        let html = GUIDE.replace(r#"<a href="/">Home</a>"#, &nav);
+        let base = url("https://e.example/guide");
+        let (page, shown) = extract(base.as_str(), &base, "text/html", html.as_bytes(), false);
+        assert!(page.text.contains("[FAQ](https://e.example/docs/faq)"), "{}", page.text);
+        let links = page_links(&base, "text/html", html.as_bytes(), shown);
+        assert_eq!(&links[..3], ["https://e.example/docs/faq", "https://notes.example/v1.2", "https://e.example/n0"]);
+        assert_eq!(links.len(), 2 + MAX_PAGE_LINKS);
     }
 
     #[test]
@@ -424,7 +450,8 @@ npm run build</code></pre>
     #[test]
     fn markup_that_repeats_the_page_is_dropped() {
         let html = r##"<body><p>Markdown<a href="#cite_note-1">[1]</a> is a <a href="/wiki/Markup" title="Markup">markup language</a>; see <a href="https://e.example/wiki/Page#History">its history</a> and <a href="/wiki/Other#Top">another page</a>.</p></body>"##;
-        let text = markdown(&dom_query::Document::from(html), &url("https://e.example/wiki/Page"));
+        let (text, links) = markdown(&dom_query::Document::from(html), &url("https://e.example/wiki/Page"));
+        assert_eq!(links, ["https://e.example/wiki/Markup", "https://e.example/wiki/Other#Top"]);
         assert!(text.contains("[markup language](https://e.example/wiki/Markup)"), "{text}");
         assert!(!text.contains("\"Markup\""), "title attribute kept: {text}");
         assert!(text.contains("Markdown\\[1\\]") && !text.contains("cite_note"), "{text}");
@@ -439,10 +466,11 @@ npm run build</code></pre>
     }
 
     #[test]
-    fn links_are_absolutised_and_non_http_dropped() {
-        let html = br#"<body><a href="/docs">d</a><a href="https://other.example/x">o</a><a href="mailto:a@b.c">m</a><a href="javascript:x()">j</a></body>"#;
-        let links = page_links(&url("https://e.example/start"), "text/html", html, "see https://text.example/y.");
-        assert_eq!(links, ["https://e.example/docs", "https://other.example/x", "https://text.example/y"]);
+    fn links_are_absolutised_deduplicated_and_non_http_dropped() {
+        let html = br#"<body><a href="/docs">d</a><a href="https://other.example/x">o</a><a href="mailto:a@b.c">m</a><a href="javascript:x()">j</a><a href="/docs#top">t</a></body>"#;
+        let shown = vec!["https://text.example/y".to_string(), "https://e.example/docs".to_string()];
+        let links = page_links(&url("https://e.example/start"), "text/html", html, shown);
+        assert_eq!(links, ["https://text.example/y", "https://e.example/docs", "https://other.example/x"]);
     }
 
     #[test]
