@@ -92,7 +92,7 @@ await runSuite('ai-debug', {
   ok('prompt open/close preserves raw Markdown bytes', readFileSync(`${vaultPath}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
 
   // Select the document content so the AI edit path (update ops) is exercised
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('ControlOrMeta+a')
 
   // Open the AI menu (Ctrl+Alt+L) and submit — the menu input autofocuses
   await page.keyboard.press('Control+Alt+L')
@@ -126,7 +126,7 @@ await runSuite('ai-debug', {
   aiState.probes['mock-model'] = true
   await page.reload({ waitUntil: 'domcontentloaded' })
   await openNote(page)
-  await page.keyboard.press('Meta+a')
+  await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
   await page.keyboard.type('summarize the note')
