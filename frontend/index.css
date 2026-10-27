@@ -56,9 +56,6 @@
     --color-success-surface: rgb(16 185 129 / 15%);
     --color-success-border: rgb(16 185 129 / 30%);
     --color-overlay: rgb(0 0 0 / 45%);
-    /* Blur behind every modal (`.ui-backdrop`). Kept moderate: it is a full-
-       screen filter, and the 2015 Intel MacBook on macOS 12 is a target. */
-    --backdrop-blur: 8px;
     --color-shadow: rgb(0 0 0 / 35%);
     /* Elevated floating surfaces. Two tiers only: popovers (menus, selects)
        sit close to their anchor; dialogs (modals) sit above the whole shell.
@@ -382,6 +379,10 @@ html[data-toolbar-popup-open] .bn-editor {
      only, dropping blur on engines that have the standard property but not the
      alias. Separate rules survive to the build output.
    - Plain class selectors only, no `:has()` (Safari 15.4 has none).
+   - The blur radius is a literal, not a var(): some WebKit builds silently
+     drop a backdrop-filter whose value holds var() (WebKit bugs 289800 on
+     WebKitGTK in Tauri, 297620 on Safari 18). Kept moderate at 8px: it is a
+     full-screen filter, and the 2015 Intel MacBook on macOS 12 is a target.
    - `body .mobile-sidebar-drawer-overlay` outranks Mantine's own Overlay rule,
      which BlockNote re-imports unlayered (same reason as the drawer overrides
      below). */
@@ -392,13 +393,13 @@ body .mobile-sidebar-drawer-overlay {
 @supports (backdrop-filter: blur(1px)) {
     .ui-backdrop,
     body .mobile-sidebar-drawer-overlay {
-        backdrop-filter: blur(var(--backdrop-blur));
+        backdrop-filter: blur(8px);
     }
 }
 @supports (-webkit-backdrop-filter: blur(1px)) {
     .ui-backdrop,
     body .mobile-sidebar-drawer-overlay {
-        -webkit-backdrop-filter: blur(var(--backdrop-blur));
+        -webkit-backdrop-filter: blur(8px);
     }
 }
 

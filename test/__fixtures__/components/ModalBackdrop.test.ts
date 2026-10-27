@@ -80,9 +80,9 @@ describe('modal backdrop', () => {
   it('blurs the backdrop with each vendor form in its own @supports rule', () => {
     const standard = supportsBlocks('(backdrop-filter: blur(1px))')
     const prefixed = supportsBlocks('(-webkit-backdrop-filter: blur(1px))')
-    expect(standard.some((block) => /\.ui-backdrop[^{]*\{ ?backdrop-filter: blur\(var\(--backdrop-blur\)\);? ?\}/.test(block))).toBe(true)
-    expect(prefixed.some((block) => /\.ui-backdrop[^{]*\{ ?-webkit-backdrop-filter: blur\(var\(--backdrop-blur\)\);? ?\}/.test(block))).toBe(true)
-    expect(css).toMatch(/--backdrop-blur: \d+px;/)
+    // A literal radius: some WebKit builds drop a backdrop-filter holding var().
+    expect(standard.some((block) => /\.ui-backdrop[^{]*\{ ?backdrop-filter: blur\(\d+px\);? ?\}/.test(block))).toBe(true)
+    expect(prefixed.some((block) => /\.ui-backdrop[^{]*\{ ?-webkit-backdrop-filter: blur\(\d+px\);? ?\}/.test(block))).toBe(true)
   })
 
   it('keeps dialog and popover surfaces opaque and unfiltered', () => {
