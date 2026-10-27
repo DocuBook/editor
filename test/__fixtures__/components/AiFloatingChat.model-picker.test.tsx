@@ -345,4 +345,215 @@ describe('composer model picker', () => {
     expect(fetchProviderModels).toHaveBeenCalledTimes(2)
     expect(rowsIn('Opencode Go').map((row) => row.textContent)).toEqual(['current-model'])
   })
+
+  describe('search', () => {
+    /** 8 + 6 = 14 models across two providers: over the threshold of 10. */
+    const serveMany = async (provider: string) => provider === 'opencode-go'
+      ? ['glm-5', 'kimi-k2', 'qwen3-coder', 'deepseek-v4-flash', 'deepseek-reasoner', 'minimax-m2', 'gpt-oss-120b', 'llama-4-scout'].map((id) => ({ id, name: id }))
+      : ['deepseek-chat', 'deepseek-v4-flash', 'deepseek-coder', 'deepseek-math', 'deepseek-vl', 'deepseek-r2'].map((id) => ({ id, name: id }))
+    const configureTwo = () => useAiSettings.setState({
+      provider: 'opencode-go',
+      model: 'glm-5',
+      savedProviders: ['opencode-go', 'deepseek'],
+      models: { 'opencode-go': 'glm-5', deepseek: 'deepseek-chat' },
+      baseUrls: {},
+    })
+    const searchBox = () => document.querySelector<HTMLInputElement>('input[aria-label="Search models"]')
+    const type = (value: string) => act(() => {
+      const input = searchBox()!
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const press = (key: string) => act(() => {
+      searchBox()!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+    })
+    const optionTexts = () => Array.from(document.querySelectorAll('#ai-model-listbox [role="option"]')).map((row) => row.textContent)
+
+    it('shows no search box for a short list', async () => {
+      configureTwo()
+      renderComposer()
+      openPicker()
+      await settle()
+
+      // serveModels: 2 + 2 models — scanning beats typing.
+      expect(optionTexts()).toHaveLength(4)
+      expect(searchBox()).toBeNull()
+    })
+
+    it('shows a search box over ten models and filters across every provider', async () => {
+      fetchProviderModels.mockImplementation(serveMany)
+      configureTwo()
+      renderComposer()
+      openPicker()
+      await settle()
+
+      expect(optionTexts()).toHaveLength(14)
+      expect(searchBox()).not.toBeNull()
+      // Outside the listbox: a combobox input is not a valid listbox child.
+      expect(searchBox()!.closest('[role="listbox"]')).toBeNull()
+      expect(searchBox()!.getAttribute('aria-controls')).toBe('ai-model-listbox')
+
+      type('V4')
+      // Case-insensitive, and the same id under both providers stays in both groups.
+      expect(groupNames()).toEqual(['Opencode Go', 'DeepSeek'])
+      expect(optionTexts()).toEqual(['deepseek-v4-flash', 'deepseek-v4-flash'])
+
+      type('coder')
+      expect(groupNames()).toEqual(['Opencode Go', 'DeepSeek'])
+      expect(optionTexts()).toEqual(['qwen3-coder', 'deepseek-coder'])
+
+      type('math')
+      // A group without a match is hidden rather than left as an empty header.
+      expect(groupNames()).toEqual(['DeepSeek'])
+
+      type('no-such-model')
+      expect(optionTexts()).toEqual([])
+      expect(document.querySelector('#ai-model-listbox')!.textContent).toContain('No matching models')
+    })
+
+    it('Enter picks the first match, arrows move the highlight first', async () => {
+      fetchProviderModels.mockImplementation(serveMany)
+      configureTwo()
+      renderComposer()
+      openPicker()
+      await settle()
+
+      type('coder')
+      // Typing highlights the first match and points the combobox at it.
+      expect(searchBox()!.getAttribute('aria-activedescendant')).toBe('ai-model-option-0')
+      press('ArrowDown')
+      expect(searchBox()!.getAttribute('aria-activedescendant')).toBe('ai-model-option-1')
+      press('Enter')
+      await settle()
+
+      // The second match belongs to DeepSeek, so the pick switches provider too.
+      expect(useAiSettings.getState().provider).toBe('deepseek')
+      expect(useAiSettings.getState().model).toBe('deepseek-coder')
+      expect(document.querySelector('#ai-model-listbox')).toBeNull()
+
+      openPicker()
+      await settle()
+      // A fresh open starts unfiltered.
+      expect(searchBox()!.value).toBe('')
+      expect(optionTexts()).toHaveLength(14)
+      type('glm')
+      press('Enter')
+      await settle()
+      expect(useAiSettings.getState().provider).toBe('opencode-go')
+      expect(useAiSettings.getState().model).toBe('glm-5')
+    })
+
+    it('Escape closes only the model picker, not the composer', async () => {
+      fetchProviderModels.mockImplementation(serveMany)
+      configureTwo()
+      const ai = renderComposer()
+      openPicker()
+      await settle()
+      type('deep')
+
+      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+      await settle()
+
+      expect(document.querySelector('#ai-model-listbox')).toBeNull()
+      expect(document.activeElement).toBe(document.querySelector('[aria-label="Select AI model"]'))
+      expect(ai.closeAIMenu).not.toHaveBeenCalled()
+      // The selection is untouched.
+      expect(useAiSettings.getState().model).toBe('glm-5')
+    })
+
+    it('holds Escape back while the search box is composing', async () => {
+      fetchProviderModels.mockImplementation(serveMany)
+      configureTwo()
+      const ai = renderComposer()
+      openPicker()
+      await settle()
+
+      // Android IMEs deliver the strip-cancel Escape with isComposing: false.
+      act(() => { searchBox()!.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })) })
+      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+      await settle()
+
+      expect(document.querySelector('#ai-model-listbox')).not.toBeNull()
+      expect(ai.closeAIMenu).not.toHaveBeenCalled()
+    })
+
+    it('carries the full model id in a tooltip on the truncated trigger and rows', async () => {
+      const long = 'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct'
+      useAiSettings.setState({ provider: 'opencode-go', model: long, savedProviders: ['opencode-go'], models: { 'opencode-go': long }, baseUrls: {} })
+      fetchProviderModels.mockImplementation(async () => [{ id: long, name: long }])
+      renderComposer()
+
+      const trigger = document.querySelector('[aria-label="Select AI model"]')!
+      expect(trigger.getAttribute('title')).toContain(long)
+      expect(trigger.querySelector('span')!.className).toMatch(/\btruncate\b/)
+      openPicker()
+      await settle()
+      expect(document.querySelector('#ai-model-listbox [role="option"]')!.getAttribute('title')).toBe(long)
+    })
+  })
+
+  describe('placement and height', () => {
+    it('stacks inside the composer card above the prompt, like the status bar', async () => {
+      useAiSettings.setState({ provider: 'opencode-go', model: 'deepseek-v4-flash', savedProviders: ['opencode-go'], models: { 'opencode-go': 'deepseek-v4-flash' }, baseUrls: {} })
+      renderComposer()
+      openPicker()
+      await settle()
+
+      const listbox = document.querySelector('#ai-model-listbox')!
+      const surface = document.querySelector('.ai-chat-surface')!
+      const prompt = document.querySelector('textarea[aria-label="AI prompt"]')!
+      // In the card, not a popover floating over it…
+      expect(surface.contains(listbox)).toBe(true)
+      const positioned: Element[] = []
+      for (let node = listbox.parentElement; node && node !== surface; node = node.parentElement) {
+        if (node.classList.contains('absolute')) positioned.push(node)
+      }
+      expect(positioned).toEqual([])
+      // …and above the prompt in document order.
+      expect(listbox.compareDocumentPosition(prompt) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    })
+
+    it('fits the list into the visual viewport and re-fits when the keyboard opens', async () => {
+      /** Card: bottom edge at 700px, 300px tall, of which the list is 200px —
+       *  so 100px of the card is everything else (prompt, toolbar). */
+      const viewport = Object.assign(new EventTarget(), { offsetTop: 0, height: 900 })
+      Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+      const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        return (this.classList.contains('ai-chat-surface') ? { top: 400, bottom: 700, height: 300, left: 0, right: 300, width: 300, x: 0, y: 400 } : { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0 }) as DOMRect
+      })
+      const offset = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+        return this.id === 'ai-model-listbox' ? 200 : 0
+      })
+      try {
+        useAiSettings.setState({ provider: 'opencode-go', model: 'deepseek-v4-flash', savedProviders: ['opencode-go'], models: { 'opencode-go': 'deepseek-v4-flash' }, baseUrls: {} })
+        renderComposer()
+        openPicker()
+        await settle()
+        const cap = () => (document.querySelector('#ai-model-listbox') as HTMLElement).style.maxHeight
+
+        // Plenty of room above the card: the 16rem cap.
+        expect(cap()).toBe('256px')
+
+        // Keyboard up: only 400px visible, the card's bottom (700) is behind it.
+        // Room = 400 − 56 (tab bar) − 100 (rest of the card) = 244.
+        viewport.height = 400
+        act(() => { viewport.dispatchEvent(new Event('resize')) })
+        expect(cap()).toBe('244px')
+
+        // A landscape phone with the keyboard up: never below three rows.
+        viewport.height = 200
+        act(() => { viewport.dispatchEvent(new Event('resize')) })
+        expect(cap()).toBe('96px')
+
+        // Keyboard down again: back to the cap.
+        viewport.height = 900
+        act(() => { viewport.dispatchEvent(new Event('resize')) })
+        expect(cap()).toBe('256px')
+      } finally {
+        rect.mockRestore()
+        offset.mockRestore()
+        delete (window as { visualViewport?: unknown }).visualViewport
+      }
+    })
+  })
 })

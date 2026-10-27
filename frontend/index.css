@@ -737,11 +737,15 @@ body .code-block-language-empty {
         transform: none;
     }
 }
-.editor-ai-floating .ai-chat-status {
+/* The model picker panel stacks into the card the same way, so it enters the
+   same way. */
+.editor-ai-floating .ai-chat-status,
+.editor-ai-floating .ai-chat-panel {
     animation: ai-status-in 140ms ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
-    .editor-ai-floating .ai-chat-status {
+    .editor-ai-floating .ai-chat-status,
+    .editor-ai-floating .ai-chat-panel {
         animation: none;
     }
 }

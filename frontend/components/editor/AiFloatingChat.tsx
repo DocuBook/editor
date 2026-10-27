@@ -85,9 +85,25 @@ const mentionMetaClass = (selected: boolean) => (selected ? 'text-on-accent opac
 /** Model picker row chrome: the active model keeps a persistent highlight so a
  *  long list still shows what is selected at a glance. The hover tint is only
  *  on unselected rows, or hovering would paint over the highlight. */
-const modelRowClass = (selected: boolean) =>
-  'flex w-full cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] ' +
-  (selected ? 'bg-accent text-on-accent' : 'hover:bg-surface-active')
+const modelRowClass = (selected: boolean, highlighted = false) =>
+  'flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-[11px] ' +
+  (selected ? 'bg-accent text-on-accent' : highlighted ? 'bg-surface-active' : 'hover:bg-surface-active')
+
+/** Above this many models (every provider's list together) the picker grows a
+ *  search box: a short list is faster to scan than to type into, while a
+ *  gateway serving dozens of models is unusable without a filter. */
+const MODEL_SEARCH_THRESHOLD = 10
+
+/** Model list height bounds, in px. The list grows the composer card upward, so
+ *  its cap is the room actually visible above the card's bottom edge: the
+ *  visual viewport (what is left above an on-screen keyboard) minus the tab bar
+ *  and the rest of the card. Never taller than 16rem, never shorter than three
+ *  rows — below that the list is no longer scannable, and the card may then
+ *  overlap the tab bar rather than offer an unusable sliver. */
+const MODEL_LIST_MAX = 256
+const MODEL_LIST_MIN = 96
+/** Room kept clear at the top of the visible area: the 48px tab bar plus a gap. */
+const MODEL_LIST_TOP_GAP = 56
 
 
 /** True while BlockNote's mobile formatting toolbar (0.55) is up — the strip
@@ -110,6 +126,17 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const setModel = useAiSettings((s) => s.setModel)
   const markSelectionDirty = useAiSettings((s) => s.markSelectionDirty)
   const [modelPickerOpen, setModelPickerOpen] = useState(false)
+  /** Model search text and the keyboard-highlighted match (-1 = none yet). Both
+   *  reset on every open, so a stale filter never hides a list. */
+  const [modelQuery, setModelQuery] = useState('')
+  const [modelHighlight, setModelHighlight] = useState(-1)
+  const modelSearchRef = useRef<HTMLInputElement>(null)
+  const modelHighlightRef = useRef<HTMLButtonElement>(null)
+  /** The card and the model list inside it, measured to fit the list into the
+   *  visible height (see MODEL_LIST_MAX). `undefined` until the first measure. */
+  const surfaceRef = useRef<HTMLDivElement>(null)
+  const modelListRef = useRef<HTMLDivElement>(null)
+  const [modelListMax, setModelListMax] = useState<number>()
   const defaultModels = useAiSettings((s) => s.defaultModels)
   const [modelOptions, setModelOptions] = useState<Record<string, ProviderModels>>({})
   /** Identity of the latest discovery: a slow reply from an earlier open must
@@ -218,7 +245,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   }, [dismissable, close, editor])
 
   useEffect(() => {
-    if (!expanded && !isOpen && !picker) return
+    if (!expanded && !isOpen && !picker && !modelPickerOpen) return
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       /** Escape is the IME's own cancel while it composes. This listener sits on
@@ -229,6 +256,11 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
        *  the ones that emit the cancel Escape only after `compositionend`. */
       if (event.isComposing || composingRef.current) return
       if (performance.now() - compositionEndedAtRef.current < POST_COMPOSITION_ESCAPE_MS) return
+      /** The model picker sits on top of everything else in the composer, so it
+       *  is the first thing Escape closes — with the search box focused, closing
+       *  the whole composer instead would throw the typed filter away with it.
+       *  Focus goes back to the trigger that opened it. */
+      if (modelPickerOpen) { event.preventDefault(); event.stopPropagation(); setModelPickerOpen(false); modelTriggerRef.current?.focus(); return }
       if (picker) { event.preventDefault(); event.stopPropagation(); setPicker(null); return }
       event.preventDefault()
       /** One Escape leaves the composer *and* hands the caret back to the
@@ -243,7 +275,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     }
     window.addEventListener('keydown', dismissOnEscape, true)
     return () => window.removeEventListener('keydown', dismissOnEscape, true)
-  }, [expanded, isOpen, close, picker, editor])
+  }, [expanded, isOpen, close, picker, editor, modelPickerOpen])
 
   /** Grow the prompt textarea with its content (multi-line prompts must stay
    *  readable) and shrink back when cleared. CSS max-h caps the growth; longer
@@ -454,6 +486,73 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
       : defaultModels[id] ? [defaultModels[id]] : []
     return { id, label: providerGroupLabel(id), status: entry.status, models }
   })
+  /** The search box appears once the lists hold more than the threshold, counted
+   *  BEFORE filtering so it cannot vanish under the user's own query. A query
+   *  matches model ids, case-insensitively; a group with no match is hidden. */
+  const modelSearch = modelGroups.reduce((sum, group) => sum + group.models.length, 0) > MODEL_SEARCH_THRESHOLD
+  const modelFilter = modelSearch ? modelQuery.trim().toLowerCase() : ''
+  const visibleModelGroups = modelFilter
+    ? modelGroups
+      .map((group) => ({ ...group, models: group.models.filter((option) => option.toLowerCase().includes(modelFilter)) }))
+      .filter((group) => group.models.length > 0)
+    : modelGroups
+  /** Every visible row in display order — what the arrow keys walk and Enter
+   *  picks from. Its index is also each row's DOM id, for aria-activedescendant. */
+  const modelMatches = visibleModelGroups.flatMap((group) => group.models.map((option) => ({ provider: group.id, model: option })))
+  const modelOptionId = (position: number) => `ai-model-option-${position}`
+  const openModelPicker = () => {
+    setModelQuery('')
+    setModelHighlight(-1)
+    setModelPickerOpen(true)
+    void loadModels()
+  }
+  /** Focus the search box when it appears, except where focusing raises a soft
+   *  keyboard: on a phone that would cover the list the reader came to scan. */
+  useEffect(() => {
+    if (modelPickerOpen && modelSearch && !softKeyboardOnFocus()) modelSearchRef.current?.focus()
+  }, [modelPickerOpen, modelSearch])
+  useEffect(() => {
+    if (modelHighlight >= 0) modelHighlightRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [modelHighlight])
+  /** IME-aware list height. The visual viewport is what the reader sees: on iOS
+   *  an open keyboard shrinks only it (the layout viewport keeps its height), on
+   *  Android `interactive-widget=resizes-content` shrinks both — measuring the
+   *  visual one covers both engines. Re-fit whenever it resizes or scrolls (the
+   *  keyboard coming up or down, a rotation) and whenever the card itself
+   *  changes height (the prompt growing, the search box appearing). The card's
+   *  height minus the list's is everything else in it, which the list must not
+   *  push out of view. */
+  useEffect(() => {
+    if (!modelPickerOpen) return
+    const fit = () => {
+      const surface = surfaceRef.current
+      const list = modelListRef.current
+      if (!surface || !list) return
+      const viewport = window.visualViewport
+      const visibleTop = viewport ? viewport.offsetTop : 0
+      const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight
+      const rect = surface.getBoundingClientRect()
+      const rest = rect.height - list.offsetHeight
+      const room = Math.min(rect.bottom, visibleBottom) - visibleTop - MODEL_LIST_TOP_GAP - rest
+      setModelListMax(Math.max(MODEL_LIST_MIN, Math.min(MODEL_LIST_MAX, Math.floor(room))))
+    }
+    fit()
+    const viewport = window.visualViewport
+    viewport?.addEventListener('resize', fit)
+    viewport?.addEventListener('scroll', fit)
+    window.addEventListener('resize', fit)
+    /** Setting the cap changes the card's height, which re-runs `fit` once and
+     *  lands on the same value (the rest of the card is unchanged), so the
+     *  observer settles instead of looping. jsdom has no ResizeObserver. */
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(fit)
+    if (surfaceRef.current) observer?.observe(surfaceRef.current)
+    return () => {
+      viewport?.removeEventListener('resize', fit)
+      viewport?.removeEventListener('scroll', fit)
+      window.removeEventListener('resize', fit)
+      observer?.disconnect()
+    }
+  }, [modelPickerOpen])
   /** Opening the picker over a long model list must land on the active model:
    *  the listbox is max-h-64 + overflow-y-auto, so the current selection can
    *  sit below the fold, invisible. Re-runs as each provider's list lands, so
@@ -473,6 +572,9 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
      *  (which may still be retrying from boot) not to clobber it with the
      *  backend's stale active model. */
     markSelectionDirty()
+    /** The search box unmounts with the picker; leaving focus on it would drop
+     *  focus to <body>. The trigger is where it came from. */
+    if (document.activeElement === modelSearchRef.current) modelTriggerRef.current?.focus()
     setModelPickerOpen(false)
     /** Measure the pick now, while the user types the prompt: an unmeasured
      *  model runs text-only. Resolved like the transport resolves it, so an
@@ -493,20 +595,64 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   if (!ai) return null
 
+  /** Arrow keys walk the visible rows, Enter picks the highlighted one — or the
+   *  first match when the reader typed and went straight to Enter. Escape is the
+   *  composer-wide window handler's (it closes this picker first). */
+  const onModelSearchKey = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.nativeEvent.isComposing) return
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (!modelMatches.length) return
+      const step = event.key === 'ArrowDown' ? 1 : -1
+      setModelHighlight((current) => current < 0 ? (step > 0 ? 0 : modelMatches.length - 1) : (current + step + modelMatches.length) % modelMatches.length)
+      return
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      const target = modelMatches[modelHighlight] ?? (modelFilter ? modelMatches[0] : undefined)
+      if (target) selectModel(target.provider, target.model)
+    }
+  }
+  /** Rows are numbered across groups (one sequence for the whole list), so the
+   *  running position is threaded through the group render. */
+  let modelPosition = 0
+  /** A panel INSIDE the composer card, stacked above the prompt the way the
+   *  "Writing… / Stop" status bar is — not a popover floating over the card. It
+   *  takes the card's full width (model ids are long; a fixed 16rem box clipped
+   *  them on a phone while the composer had room to spare), and the card grows
+   *  upward from its anchored bottom edge to make room. Flat like the status
+   *  bar: no own border, background or shadow, just the hairline below it. */
   const modelPicker = modelPickerOpen && (
-    <div id="ai-model-listbox" ref={modelPickerRef} className="absolute bottom-full left-0 z-50 mb-2 max-h-64 w-64 overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg" role="listbox" aria-label="AI models">
-      {modelGroups.map((group) => (
+    <div ref={modelPickerRef} className="ai-chat-panel flex flex-col border-b border-border-subtle">
+      {modelSearch && (
+        <div className="px-2 pt-2">
+          <input ref={modelSearchRef} type="text" value={modelQuery} onChange={(event) => { setModelQuery(event.target.value); setModelHighlight(event.target.value.trim() ? 0 : -1) }} onKeyDown={onModelSearchKey}
+            placeholder="Search models…" aria-label="Search models" role="combobox" aria-expanded="true" aria-controls="ai-model-listbox" aria-autocomplete="list"
+            aria-activedescendant={modelHighlight >= 0 && modelHighlight < modelMatches.length ? modelOptionId(modelHighlight) : undefined}
+            autoComplete="off" spellCheck={false} enterKeyHint="go"
+            onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false; compositionEndedAtRef.current = performance.now() }}
+            className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none placeholder:font-sans placeholder:text-muted focus:border-accent" />
+        </div>
+      )}
+      <div id="ai-model-listbox" ref={modelListRef} style={modelListMax === undefined ? undefined : { maxHeight: modelListMax }} className="max-h-64 overflow-y-auto overscroll-contain p-1" role="listbox" aria-label="AI models">
+      {visibleModelGroups.map((group) => (
         <div key={group.id} role="group" aria-labelledby={`ai-model-group-${group.id}`}>
           <div id={`ai-model-group-${group.id}`} role="presentation" className="px-2.5 pt-2 pb-1 text-[9px] font-semibold uppercase tracking-wide text-muted">{group.label}</div>
           {group.models.map((option) => {
             const active = group.id === provider && option === model
-            return <button key={`${group.id}:${option}`} ref={active ? modelActiveRef : undefined} role="option" aria-selected={active} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(group.id, option)} className={modelRowClass(active)}><span className="truncate font-mono">{option}</span>{active && <Check size={11} className="ml-auto shrink-0" />}</button>
+            const position = modelPosition++
+            const highlighted = position === modelHighlight
+            /** `title` carries the full id: the row truncates, and two ids that
+             *  differ only at the end look identical once cut. */
+            return <button key={`${group.id}:${option}`} id={modelOptionId(position)} ref={(node) => { if (active) modelActiveRef.current = node; if (highlighted) modelHighlightRef.current = node }} role="option" aria-selected={active} title={option} onMouseDown={(event) => event.preventDefault()} onClick={() => selectModel(group.id, option)} className={modelRowClass(active, highlighted)}><span className="min-w-0 flex-1 truncate font-mono">{option}</span>{active && <Check size={11} className="shrink-0" />}</button>
           })}
           {group.status === 'loading' && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">Loading models…</div>}
           {group.status === 'error' && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">Could not load models</div>}
           {group.status === 'ok' && group.models.length === 0 && <div role="presentation" className="px-2.5 py-1 text-[11px] text-muted">No models found</div>}
         </div>
       ))}
+      {modelFilter && !modelMatches.length && <div role="presentation" className="px-2.5 py-1.5 text-[11px] text-muted">No matching models</div>}
+      </div>
     </div>
   )
 
@@ -535,9 +681,10 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
         }} rows={1} enterKeyHint={enterSends ? 'send' : 'enter'} role="combobox" aria-label="AI prompt" aria-expanded={pickerOpen} aria-controls={pickerOpen ? MENTION_LISTBOX_ID : undefined} aria-autocomplete="list" aria-activedescendant={pickerOpen && activeEntry ? optionId(activeIndex) : undefined} disabled={!promptEnabled} placeholder={aiConfigured ? 'Message the Agent, @ to include context' : 'Configure API key in Settings (⌘,)'} title={aiConfigured ? (enterSends ? 'Enter to send · Shift+Enter for new line' : 'Return for new line · arrow button to send') : 'Configure an API key in Settings (⌘,)'} className="min-h-7 max-h-30 min-w-0 flex-1 resize-none overflow-y-auto border-none bg-transparent px-1.5 py-1.5 text-[13px] leading-relaxed text-foreground outline-none placeholder:text-muted disabled:cursor-not-allowed disabled:opacity-60" />
       </div>
       <div className="relative flex min-w-0 items-center justify-between gap-2 px-2 pb-2">
-        {modelPicker}
-        <button ref={modelTriggerRef} type="button" disabled={!aiConfigured} onClick={() => { setModelPickerOpen((open) => !open); if (!modelPickerOpen) void loadModels() }} aria-label="Select AI model" title={aiConfigured ? 'Select AI model' : 'Configure an API key in Settings (⌘,)'} aria-expanded={modelPickerOpen} aria-controls={modelPickerOpen ? 'ai-model-listbox' : undefined} className="flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-[10px] text-muted hover:bg-surface-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent">
-          <span className="max-w-52 truncate font-mono">{model || 'Select model'}</span><ChevronsUpDown size={11} />
+        <button ref={modelTriggerRef} type="button" disabled={!aiConfigured} onClick={() => { if (modelPickerOpen) setModelPickerOpen(false); else openModelPicker() }} aria-label="Select AI model" title={aiConfigured ? (model ? `Select AI model (${model})` : 'Select AI model') : 'Configure an API key in Settings (⌘,)'} aria-expanded={modelPickerOpen} aria-controls={modelPickerOpen ? 'ai-model-listbox' : undefined} className="flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted hover:bg-surface-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent sm:px-2">
+          {/* Narrower below 640px: the label caps at 8rem there (13rem above) and
+              ends in an ellipsis, so a long gateway id cannot crowd the row. */}
+          <span className="min-w-0 max-w-32 truncate font-mono sm:max-w-52">{model || 'Select model'}</span><ChevronsUpDown size={11} className="shrink-0" />
         </button>
         {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? (enterSends ? 'Send prompt (Enter)' : 'Send prompt') : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : expanded ? <X size={16} /> : <Zap size={16} />}</button>}
       </div>
@@ -550,6 +697,6 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
 
   return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
     {aiConfigured && !selectionPromptOpen && status === 'user-input' && expanded && !hasInput && items.length > 0 && <div className="relative z-30 flex max-w-full flex-col items-end gap-2 overflow-x-hidden">{items.map((item) => <button key={item.key} onClick={item.onItemClick} onMouseDown={(event) => event.preventDefault()} className="ui-popover relative flex min-h-10 min-w-37 items-center gap-3 px-4 py-2.5 text-left text-xs font-medium text-foreground cursor-pointer"><span className="flex w-5 shrink-0 items-center justify-center text-accent">{item.icon}</span>{item.title}</button>)}</div>}
-    <div className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{statusBar}{promptInput}</div>
+    <div ref={surfaceRef} className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{statusBar}{modelPicker}{promptInput}</div>
   </div>
 }
