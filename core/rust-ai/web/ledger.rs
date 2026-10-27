@@ -84,18 +84,34 @@ pub fn record<'a>(context_id: &str, urls: impl IntoIterator<Item = &'a str>) {
 }
 
 /// Report whether `url` was seen in this prompt turn.
+///
+/// An `https` URL is also allowed when its `http` form was seen: models upgrade
+/// a pasted `http://` link on their own, and the upgrade keeps host, port, path
+/// and query, so it cannot carry anything the seen URL did not. A downgrade to
+/// `http` is not allowed.
 pub fn allows(context_id: &str, url: &str) -> bool {
     let Some(url) = normalize(url) else {
         return false;
     };
+    let insecure = http_form(&url);
     let mut ledger = ledger();
     match ledger.get_mut(context_id) {
         Some(entry) if entry.touched.elapsed() <= CONTEXT_TTL => {
             entry.touched = Instant::now();
-            entry.urls.contains(&url)
+            entry.urls.contains(&url) || insecure.is_some_and(|insecure| entry.urls.contains(&insecure))
         }
         _ => false,
     }
+}
+
+/// The `http` form of a normalized `https` URL; `None` for any other scheme.
+fn http_form(url: &str) -> Option<String> {
+    let mut url = Url::parse(url).ok()?;
+    if url.scheme() != "https" {
+        return None;
+    }
+    url.set_scheme("http").ok()?;
+    Some(url.to_string())
 }
 
 /// Find absolute http(s) URLs in free text, trimming trailing punctuation.
@@ -147,6 +163,20 @@ mod tests {
         assert!(!allows("turn-a", "https://example.com/docs?leak=secret"));
         assert!(!allows("turn-a", "ftp://example.com/x"));
         assert!(!allows("turn-b", "https://example.com/docs"));
+    }
+
+    #[test]
+    fn an_http_url_may_be_fetched_over_https_but_not_the_reverse() {
+        record("turn-upgrade", ["http://docubook.pro/docs?page=2", "https://secure.example/a"]);
+        assert!(allows("turn-upgrade", "https://docubook.pro/docs?page=2"));
+        assert!(allows("turn-upgrade", "https://docubook.pro:443/docs?page=2#top"));
+        assert!(allows("turn-upgrade", "http://docubook.pro/docs?page=2"));
+        // Only the scheme may change: not the path, the query, the port or the host.
+        assert!(!allows("turn-upgrade", "https://docubook.pro/docs?page=3"));
+        assert!(!allows("turn-upgrade", "https://docubook.pro/other"));
+        assert!(!allows("turn-upgrade", "https://docubook.pro:8443/docs?page=2"));
+        assert!(!allows("turn-upgrade", "https://www.docubook.pro/docs?page=2"));
+        assert!(!allows("turn-upgrade", "http://secure.example/a"));
     }
 
     #[test]
