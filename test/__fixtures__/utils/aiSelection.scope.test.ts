@@ -237,12 +237,16 @@ describe('nested blocks', () => {
     expect(parent.block).not.toContain('Nested child')
     expect(cursor.blocks.find((entry: any) => entry.id === 'b2$')?.block).toContain('Nested child')
     expect(count(texts(cursor.blocks), 'Nested child')).toBe(1)
+    // The HTML no longer shows nesting, so a nested entry carries its depth.
+    expect(parent.depth).toBeUndefined()
+    expect(cursor.blocks.find((entry: any) => entry.id === 'b2$')?.depth).toBe(1)
 
     select(ed, pos(ed, 'b1', 'Parent'), pos(ed, 'c', 'Done') + 'Done'.length)
     const transport = operationsTransport([])
     await prompt(ed, transport, 'rewrite', true)
     const state = transport.requests[0].messages[0].metadata.documentState
     expect(state.selectedBlocks.map((entry: any) => entry.id)).toEqual(['b1$', 'b2$', 'c$'])
+    expect(state.selectedBlocks.map((entry: any) => entry.depth)).toEqual([undefined, 1, undefined])
     expect(state.selectedBlocks[0].block).not.toContain('Nested child')
     expect(count(texts(state.selectedBlocks), 'Nested child')).toBe(1)
     // The surrounding blocks are context only: no ids, and none of the selection.

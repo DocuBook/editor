@@ -228,6 +228,25 @@ async function ownBlockHtml(editor: any, block: any): Promise<string> {
   return editor.blocksToHTMLLossy([{ ...block, children: [] }]);
 }
 
+/** How many levels each block of the document is nested. `ownBlockHtml` drops
+ *  every nesting cue from the HTML, so a nested entry carries it as `depth`. */
+function nestingDepths(blocks: readonly any[] | null | undefined): Map<string, number> {
+  const depths = new Map<string, number>();
+  const walk = (items: readonly any[] | null | undefined, depth: number) =>
+    (Array.isArray(items) ? items : []).forEach((block: any) => {
+      depths.set(String(block?.id ?? ""), depth);
+      walk(block?.children, depth + 1);
+    });
+  walk(blocks, 0);
+  return depths;
+}
+
+/** A document-state entry: the block's own HTML, with `depth` when nested. */
+async function blockEntry(editor: any, block: any, depths: Map<string, number>, id?: string): Promise<any> {
+  const depth = depths.get(String(block?.id ?? "")) ?? 0;
+  return { ...(id ? { id } : {}), ...(depth ? { depth } : {}), block: await ownBlockHtml(editor, block) };
+}
+
 /** Blocks shown around a selection, on each side. */
 const SELECTION_CONTEXT_BLOCKS = 2;
 
@@ -237,6 +256,7 @@ const SELECTION_CONTEXT_BLOCKS = 2;
  *  mistaken for an unselected block. */
 async function selectionDocumentState(editor: any, selected: readonly any[]): Promise<any> {
   const documentBlocks = flattenBlocks(editor?.document);
+  const depths = nestingDepths(editor?.document);
   const selectedBlocks = flattenBlocks(selected);
   const selectedIds = new Set(selectedBlocks.map((block: any) => String(block?.id ?? "")));
   const selectedIndexes = documentBlocks
@@ -252,12 +272,12 @@ async function selectionDocumentState(editor: any, selected: readonly any[]): Pr
     isEmptyDocument: isEmptyDocument(editor, documentBlocks),
     selection: true,
     selectedBlocks: await Promise.all(
-      selectedBlocks.map(async (block: any) => ({ id: `${String(block.id)}$`, block: await ownBlockHtml(editor, block) })),
+      selectedBlocks.map((block: any) => blockEntry(editor, block, depths, `${String(block.id)}$`)),
     ),
     blocks: await Promise.all(
       context
         .filter((block) => !selectedIds.has(String(block?.id)))
-        .map(async (block) => ({ block: await ownBlockHtml(editor, block) })),
+        .map((block) => blockEntry(editor, block, depths)),
     ),
   };
 }
@@ -271,7 +291,8 @@ export async function buildHtmlDocumentState(editor: any, useSelection = false):
   // takes focus and the AI extension makes the editor read-only while a request
   // is running, so getTextCursorPosition() can resolve to a stale block.
   const cursor = resolveActiveBlockId(editor) || editor?.getTextCursorPosition?.()?.block?.id
-  const blocks = await Promise.all(documentBlocks.map(async (block: any) => ({ id: `${block.id}$`, block: await ownBlockHtml(editor, block) })))
+  const depths = nestingDepths(editor?.document)
+  const blocks = await Promise.all(documentBlocks.map((block: any) => blockEntry(editor, block, depths, `${block.id}$`)))
   const withCursor = blocks.flatMap((block: any) => block.id === `${cursor}$` ? [block, { cursor: true }] : [block])
   return { selection: false, isEmptyDocument: isEmptyDocument(editor, documentBlocks), blocks: withCursor }
 }
