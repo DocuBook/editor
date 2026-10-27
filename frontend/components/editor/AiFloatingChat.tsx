@@ -630,6 +630,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
             placeholder="Search models…" aria-label="Search models" role="combobox" aria-expanded="true" aria-controls="ai-model-listbox" aria-autocomplete="list"
             aria-activedescendant={modelHighlight >= 0 && modelHighlight < modelMatches.length ? modelOptionId(modelHighlight) : undefined}
             autoComplete="off" spellCheck={false} enterKeyHint="go"
+            onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false; compositionEndedAtRef.current = performance.now() }}
             className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[11px] text-foreground outline-none placeholder:font-sans placeholder:text-muted focus:border-accent" />
         </div>
       )}

@@ -461,6 +461,22 @@ describe('composer model picker', () => {
       expect(useAiSettings.getState().model).toBe('glm-5')
     })
 
+    it('holds Escape back while the search box is composing', async () => {
+      fetchProviderModels.mockImplementation(serveMany)
+      configureTwo()
+      const ai = renderComposer()
+      openPicker()
+      await settle()
+
+      // Android IMEs deliver the strip-cancel Escape with isComposing: false.
+      act(() => { searchBox()!.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })) })
+      act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+      await settle()
+
+      expect(document.querySelector('#ai-model-listbox')).not.toBeNull()
+      expect(ai.closeAIMenu).not.toHaveBeenCalled()
+    })
+
     it('carries the full model id in a tooltip on the truncated trigger and rows', async () => {
       const long = 'accounts/fireworks/models/qwen3-coder-480b-a35b-instruct'
       useAiSettings.setState({ provider: 'opencode-go', model: long, savedProviders: ['opencode-go'], models: { 'opencode-go': long }, baseUrls: {} })
