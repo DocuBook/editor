@@ -17,7 +17,8 @@ if (!Array.prototype.toSpliced) {
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { MantineProvider } from '@mantine/core'
-import '@mantine/core/styles.css'
+/** Mantine's styles are imported by index.css, inside the cascade layer order it
+ *  declares — see the top of that file. */
 import './index.css'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'

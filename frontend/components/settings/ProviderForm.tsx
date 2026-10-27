@@ -354,7 +354,7 @@ export default function ProviderForm({ provider, first }: { provider: string; fi
   }
 
   const revokeDialog = confirmRevoke && (
-    <div role="alertdialog" aria-modal="true" aria-label="Revoke provider" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
+    <div role="alertdialog" aria-modal="true" aria-label="Revoke provider" className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop"
       onClick={cancelRevoke} onKeyDown={e => { if (e.key === 'Escape') cancelRevoke() }}>
       <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
         <div className="text-sm font-semibold mb-1">Revoke {selectedProvider?.name ?? provider}?</div>

@@ -1,4 +1,19 @@
+/* Cascade layer order, declared before anything else so it is the one in force.
+   Mantine's stylesheet goes into its own `mantine` layer (the `.layer.css`
+   build), between Tailwind's preflight (`base`) and its `utilities`:
+   - above `base`, so preflight's `button { background-color: transparent }`
+     cannot strip Mantine's components;
+   - below `utilities`, so a Tailwind class wins over Mantine's global reset.
+     Unlayered, that reset (`input, button, textarea, select { font: inherit }`)
+     beat every layered utility, and every `text-*` / `font-*` class on a
+     button or input in the app silently did nothing.
+   `properties` (Tailwind's `--tw-*` fallbacks) keeps its place at the bottom:
+   listed later, it would outrank `utilities` and reset `--tw-shadow` & co. in
+   the engines that use the fallback. Unlayered CSS (this file's own rules,
+   BlockNote's `@blocknote/mantine/style.css`) still outranks every layer. */
+@layer properties, theme, base, mantine, components, utilities;
 @import "tailwindcss";
+@import "@mantine/core/styles.layer.css";
 
 /* Semantic color contract. Components consume only these tokens through
    Tailwind utilities or var(); each new theme must override the full set. */
@@ -41,12 +56,14 @@
     --color-success-surface: rgb(16 185 129 / 15%);
     --color-success-border: rgb(16 185 129 / 30%);
     --color-overlay: rgb(0 0 0 / 45%);
+    /* Blur behind every modal (`.ui-backdrop`). Kept moderate: it is a full-
+       screen filter, and the 2015 Intel MacBook on macOS 12 is a target. */
+    --backdrop-blur: 8px;
     --color-shadow: rgb(0 0 0 / 35%);
     /* Elevated floating surfaces. Two tiers only: popovers (menus, selects)
        sit close to their anchor; dialogs (modals) sit above the whole shell.
-       The raised (translucent) variant feeds the dialogs-only blur block
-       further down. */
-    --color-surface-raised: rgb(22 22 24 / 82%);
+       Both are opaque — the frosted glass is the modal backdrop around them
+       (`.ui-backdrop`, further down), never the surface carrying text. */
     --shadow-popover: 0 4px 12px var(--color-shadow);
     --shadow-dialog: 0 25px 50px -12px var(--color-shadow);
 }
@@ -88,7 +105,6 @@
     --color-success-border: #10b981;
     --color-overlay: rgb(9 9 11 / 40%);
     --color-shadow: rgb(9 9 11 / 22%);
-    --color-surface-raised: rgb(246 246 247 / 82%);
     --shadow-popover: 0 4px 12px var(--color-shadow);
     --shadow-dialog: 0 25px 50px -12px var(--color-shadow);
 }
@@ -323,10 +339,9 @@ html[data-toolbar-popup-open] .bn-editor {
    Every overlay owns surface bg, border, radius, and elevation here, so
    call sites cannot drift into ad-hoc shadow/radius strings.
 
-   Elevation is a box-shadow, NOT a backdrop-filter: the app's oldest target
-   (WKWebView macOS 12 / Safari 15) does not reliably render backdrop blur.
-   Popovers keep the opaque surface + shadow; only dialogs opt into the
-   blur/translucency enhancement layered on below. */
+   Elevation is a box-shadow, NOT a backdrop-filter, and surfaces stay
+   opaque: the blur lives on the modal backdrop instead (`.ui-backdrop` below,
+   which explains why). */
 .ui-popover,
 .ui-dialog {
     background: var(--color-surface);
@@ -341,40 +356,49 @@ html[data-toolbar-popup-open] .bn-editor {
     box-shadow: var(--shadow-dialog);
 }
 
-/* Blur the content behind the dialog surface — progressive enhancement only,
-   and dialogs only. Popovers keep the opaque surface + shadow: they sit close
-   to their anchor, so translucency there reads as bleed-through rather than
-   elevation.
+/* Modal backdrop — the one dimmed, frosted layer every modal sits on: the
+   search and shortcuts dialogs, the vault picker, every confirm alertdialog,
+   and the mobile sidebar drawer (Mantine's Overlay, via its class name). The
+   glass effect is THIS layer — the page behind a modal blurred and dimmed —
+   while the dialog on top stays an opaque surface.
 
-   Guarded by @supports so an engine without blur keeps the opaque surface
-   above instead of a translucent panel with nothing behind it.
+   Why the blur is not on the dialog (it used to be: a translucent surface
+   with its own backdrop-filter):
+   - An engine can report `@supports` for backdrop-filter and still paint no
+     blur. WKWebView on macOS 12 does not render it reliably, and Playwright's
+     WebKit build paints none at all. A translucent dialog then showed the
+     page's text, sharp, straight through its own content. On the backdrop,
+     a missing blur degrades to the plain dim it always had, and no text sits
+     on it.
+   - A backdrop-filter makes its element the containing block of `position:
+     fixed` descendants, which once misplaced the settings dropdowns inside a
+     dialog (f60e9fa). The backdrop is itself a full-viewport fixed box, so the
+     containing block it creates is the viewport's own rectangle.
 
-   Safari 15 (the oldest supported target, see vite.config.ts build.target)
-   reports @supports true via its -webkit- alias, so the shadow is deliberately
-   NOT removed here: Safari 15 needs it as the separation cue, and keeping it
-   costs nothing on engines where blur does render.
-
-   The two vendor forms are declared in separate rules on purpose. Lightning
-   CSS transpiles against `safari15` and collapses same-rule prefixed pairs to
-   -webkit- only, which would drop blur on engines that implement the standard
-   property but not the alias. Separate rules survive to the build output. */
+   Old-engine requirements (WKWebView on macOS 12, Safari 15.4+):
+   - `-webkit-backdrop-filter` is required, because unprefixed is Safari 18+.
+     Prefixed and standard forms sit in separate @supports rules: Lightning CSS
+     transpiles against `safari15` and collapses a same-rule pair to -webkit-
+     only, dropping blur on engines that have the standard property but not the
+     alias. Separate rules survive to the build output.
+   - Plain class selectors only, no `:has()` (Safari 15.4 has none).
+   - `body .mobile-sidebar-drawer-overlay` outranks Mantine's own Overlay rule,
+     which BlockNote re-imports unlayered (same reason as the drawer overrides
+     below). */
+.ui-backdrop,
+body .mobile-sidebar-drawer-overlay {
+    background: var(--color-overlay);
+}
 @supports (backdrop-filter: blur(1px)) {
-    .ui-dialog {
-        backdrop-filter: blur(12px) saturate(140%);
+    .ui-backdrop,
+    body .mobile-sidebar-drawer-overlay {
+        backdrop-filter: blur(var(--backdrop-blur));
     }
 }
 @supports (-webkit-backdrop-filter: blur(1px)) {
-    .ui-dialog {
-        -webkit-backdrop-filter: blur(12px) saturate(140%);
-    }
-}
-
-/* Translucency is gated on blur support so the dialog surface only becomes
-   see-through when it can actually diffuse what is behind it. Engines that
-   fail both guards above keep --color-surface. */
-@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    .ui-dialog {
-        background: var(--color-surface-raised);
+    .ui-backdrop,
+    body .mobile-sidebar-drawer-overlay {
+        -webkit-backdrop-filter: blur(var(--backdrop-blur));
     }
 }
 

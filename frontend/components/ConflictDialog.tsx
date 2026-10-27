@@ -61,7 +61,7 @@ export default function ConflictDialog({ conflict, onResolve, onClose }: Conflic
       role="alertdialog"
       aria-modal="true"
       aria-label="Resolve file conflict"
-      className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
+      className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop"
       onClick={onClose}
       onKeyDown={e => { if (e.key === 'Escape') onClose() }}
     >

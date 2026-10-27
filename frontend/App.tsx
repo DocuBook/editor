@@ -300,7 +300,7 @@ export default function App() {
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}
       {confirmCloseVault && (
-        <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={() => setConfirmCloseVault(false)}>
+        <div role="alertdialog" aria-modal="true" aria-label="Close vault" className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop" onClick={() => setConfirmCloseVault(false)}>
           <div className="ui-popover p-4 w-72" onClick={e => e.stopPropagation()}>
             <div className="text-sm font-semibold mb-1">Close vault?</div>
             <div className="text-xs text-foreground-secondary mb-4">Unsaved changes will be saved before closing.</div>

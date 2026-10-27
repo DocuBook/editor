@@ -414,7 +414,7 @@ function SyncBar() {
 
       {confirmAbort && (
         <OverlayPortal>
-          <div role="alertdialog" aria-modal="true" aria-label="Abort in-progress operation" tabIndex={-1} ref={abortRef} className="fixed inset-0 z-220 flex items-center justify-center bg-overlay outline-none" onClick={cancelAbort} onKeyDown={e => { if (e.key === 'Escape') cancelAbort() }}>
+          <div role="alertdialog" aria-modal="true" aria-label="Abort in-progress operation" tabIndex={-1} ref={abortRef} className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop outline-none" onClick={cancelAbort} onKeyDown={e => { if (e.key === 'Escape') cancelAbort() }}>
             <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
               <div className="text-sm font-semibold mb-1">Abort the {confirmAbort}?</div>
               <div className="text-xs text-foreground-secondary mb-4">Every uncommitted change made during the {confirmAbort} is discarded — resolved and unresolved files alike, staged or not — and the branch returns to its previous state.</div>

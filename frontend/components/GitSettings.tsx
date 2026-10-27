@@ -217,7 +217,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
       {err && <div className="text-[11px] text-danger mt-2">{err}</div>}
 
       {confirmRemove && (
-        <div role="alertdialog" aria-modal="true" aria-label="Remove remote" className="fixed inset-0 z-220 flex items-center justify-center bg-overlay" onClick={cancelRemove} onKeyDown={e => { if (e.key === 'Escape') cancelRemove() }}>
+        <div role="alertdialog" aria-modal="true" aria-label="Remove remote" className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop" onClick={cancelRemove} onKeyDown={e => { if (e.key === 'Escape') cancelRemove() }}>
           <div className="ui-popover p-4 w-80" onClick={e => e.stopPropagation()}>
             <div className="text-sm font-semibold mb-1">Remove remote “{confirmRemove.name}”?</div>
             <div className="text-xs text-foreground-secondary mb-2 break-all font-mono">{confirmRemove.url}</div>
