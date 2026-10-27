@@ -140,7 +140,8 @@ describe("buildDocumentContext", () => {
       return {
         document: blocks,
         blocksToMarkdownLossy: (value: any[]) =>
-          value.map((block: any) => block.content[0].text).join("\n\n") + "\n",
+          // Every text node, as the real exporter renders them.
+          value.map((block: any) => block.content.map((item: any) => item.text).join("")).join("\n\n") + "\n",
         getSelection: () => undefined,
         getTextCursorPosition: () => ({ block: { id: "stale-first" } }),
         getExtension: () => ({
