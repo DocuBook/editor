@@ -11,7 +11,8 @@ import { BlockNoteEditor } from '@blocknote/core'
 import { TextSelection } from 'prosemirror-state'
 import { afterEach, describe, expect, it } from 'vitest'
 import { getSchema } from '../../../frontend/components/editor/setup'
-import { buildDocumentContext, CURSOR_MARKER } from '../../../frontend/utils/aiBlocks'
+import { buildDocumentContext, buildHtmlDocumentState, CURSOR_MARKER } from '../../../frontend/utils/aiBlocks'
+import { injectDocumentStateMessages } from '../../../frontend/utils/aiPromptState'
 
 let editor: any
 
@@ -150,3 +151,53 @@ describe('cursor-mode Markdown context', () => {
     expect(context.length).toBeLessThanOrEqual(12000 + CURSOR_MARKER.length + 200)
   })
 })
+
+/**
+ * Cursor-mode document state for the tool path (Path A). The caret used to be
+ * an entry between blocks; between a parent and its first child, "add after
+ * the block before" and "before the block after" land at different depths, and
+ * after an empty caret block it put new content below the empty line.
+ */
+describe('cursor-mode tool document state', () => {
+  const promptText = (state: any) =>
+    injectDocumentStateMessages([{ id: 'u', role: 'user', parts: [{ type: 'text', text: 'write' }], metadata: { documentState: state } }])[0]
+      .parts.map((part: any) => part.text).join('\n')
+
+  it('marks the caret on its block, with no entry between blocks', async () => {
+    const ed = nestedDocument()
+    caret(ed, 'b1', 2)
+    const state = await buildHtmlDocumentState(ed, false)
+    expect(state.blocks.map((entry: any) => entry.id)).toEqual(['h$', 'p1$', 'b1$', 'b2$', 'p2$'])
+    expect(state.blocks.filter((entry: any) => entry.caret).map((entry: any) => entry.id)).toEqual(['b1$'])
+    expect(state.blocks.some((entry: any) => 'cursor' in entry)).toBe(false)
+    expect(state.caretBlockEmpty).toBe(false)
+    expect(promptText(state)).toContain('caret is in the block marked caret: true')
+    expect(promptText(state)).not.toContain('The caret block is empty')
+  })
+
+  it('flags an empty caret block, bullet or paragraph, and says to write into it', async () => {
+    const ed = create([
+      { id: 'p1', type: 'paragraph', content: 'Before' },
+      { id: 'e', type: 'paragraph', content: '' },
+      { id: 'l', type: 'bulletListItem', content: '' },
+      { id: 'p2', type: 'paragraph', content: 'After' },
+    ])
+    for (const id of ['e', 'l']) {
+      caret(ed, id)
+      const state = await buildHtmlDocumentState(ed, false)
+      expect(state.blocks.find((entry: any) => entry.caret)?.id).toBe(`${id}$`)
+      expect(state.caretBlockEmpty).toBe(true)
+      expect(promptText(state)).toContain('The caret block is empty: to write at the caret, YOU MUST update that block first')
+    }
+  })
+
+  it('keeps the empty-document instruction for a document that is only its placeholder', async () => {
+    const ed = editor = BlockNoteEditor.create({ schema: getSchema() as any })
+    caret(ed, ed.document[0].id)
+    const state = await buildHtmlDocumentState(ed, false)
+    expect(state.isEmptyDocument).toBe(true)
+    expect(promptText(state)).toContain('Because the document is empty')
+    expect(promptText(state)).not.toContain('The caret block is empty')
+  })
+})
+
