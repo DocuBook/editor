@@ -204,7 +204,19 @@ function backendEndpointRows(cfg: BackendAiSettings) {
  *  had no fallback row for it until the window was next refocused. */
 export function adoptBackendEndpoints(cfg: BackendAiSettings): void {
   const { models, baseUrls, defaultModels } = backendEndpointRows(cfg)
-  useAiSettings.setState({ savedProviders: [...new Set(cfg.savedProviders)], models, baseUrls, defaultModels })
+  const savedProviders = [...new Set(cfg.savedProviders)]
+  /** The selection is adopted ONLY when there is none to protect: the live
+   *  provider is empty (first-ever save) or no longer configured. A save makes
+   *  the saved provider active server-side, but leaving the store on '' kept the
+   *  composer disabled — "configure AI first" right after configuring it — until
+   *  a window focus happened to re-hydrate. A live pick always names a saved
+   *  provider, so it never falls into this branch. */
+  const live = useAiSettings.getState()
+  const stale = !live.provider || !savedProviders.includes(live.provider)
+  const selection = stale && cfg.active && savedProviders.includes(cfg.active)
+    ? { provider: cfg.active, model: models[cfg.active] || '' }
+    : {}
+  useAiSettings.setState({ savedProviders, models, baseUrls, defaultModels, ...selection })
 }
 
 /** Map the backend payload onto store state. Pure so it can be reasoned about

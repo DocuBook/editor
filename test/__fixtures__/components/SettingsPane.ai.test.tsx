@@ -648,4 +648,94 @@ describe('SettingsPane — save', () => {
     expect(invoke.mock.calls.find(c => c[0] === 'test_connection')![1]).toMatchObject({ model: 'typed-model' })
     expect(invoke.mock.calls.find(c => c[0] === 'set_custom_endpoint')![1]).toMatchObject({ model: 'typed-model' })
   })
+
+  /** A first-ever save leaves the store with no provider (hydration found
+   *  nothing configured). The backend makes the saved provider active, and the
+   *  store must follow from the save's own re-read — otherwise the composer
+   *  stays "not configured" until a window focus happens to re-hydrate. */
+  it('makes a first-ever saved provider the active selection', async () => {
+    await render()
+
+    const key = inSection('opencode-go', 'API Key')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(key, 'sk-new-key')
+      key.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    configure('opencode-go', { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'discovered-model' })
+    act(() => sectionOf('opencode-go').querySelector<HTMLButtonElement>('button.px-3\\.5')!.click())
+    await settle()
+
+    const state = useAiSettings.getState()
+    expect(state.provider).toBe('opencode-go')
+    expect(state.model).toBe('discovered-model')
+  })
+
+  /** A pasted key with surrounding whitespace is validated and stored trimmed —
+   *  sent as-is it broke the Authorization header and read as a rejected key. */
+  it('trims the pasted API key before validating and saving it', async () => {
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    const key = inSection('opencode-go', 'API Key')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(key, '  sk-new-key\n')
+      key.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    configure('opencode-go', { baseUrl: 'https://opencode.ai/zen/go/v1', model: 'discovered-model' })
+    act(() => sectionOf('opencode-go').querySelector<HTMLButtonElement>('button.px-3\\.5')!.click())
+    await settle()
+
+    expect(invoke.mock.calls.find(c => c[0] === 'list_models')![1]).toMatchObject({ apiKey: 'sk-new-key' })
+    expect(invoke.mock.calls.find(c => c[0] === 'test_connection')![1]).toMatchObject({ apiKey: 'sk-new-key' })
+    expect(invoke.mock.calls.find(c => c[0] === 'set_api_key')![1]).toMatchObject({ key: 'sk-new-key' })
+  })
+
+  /** The key passed test_connection, so a failing persist is NOT a rejected key:
+   *  the toast carries the backend's reason instead of "check the key". */
+  it('reports a persist failure with the backend reason, not as a rejected key', async () => {
+    useAiSettings.setState({ provider: 'opencode-go' })
+    await render()
+
+    const key = inSection('opencode-go', 'API Key')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(key, 'sk-new-key')
+      key.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const base = invoke.getMockImplementation()!
+    invoke.mockImplementation(async (command: string, args: any) => {
+      if (command === 'set_api_key') throw 'Cannot write /data/keys.json: permission denied'
+      return base(command, args)
+    })
+    act(() => sectionOf('opencode-go').querySelector<HTMLButtonElement>('button.px-3\\.5')!.click())
+    await settle()
+
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError.mock.calls[0][0]).toMatch(/Could not save.*permission denied/)
+    expect(toastError.mock.calls[0][0]).not.toMatch(/rejected/)
+    expect(toastSuccess).not.toHaveBeenCalled()
+  })
+})
+
+describe('SettingsPane — env-controlled custom provider and the active provider', () => {
+  /** The env model belongs to the custom provider only. Opening Settings while
+   *  chat is on another provider must not file the env model under THAT one —
+   *  the composer would then send it a model it does not serve. */
+  it('does not write the env model into the active provider', async () => {
+    configure('opencode-go', { model: 'go-model' })
+    backend.env = { baseUrl: 'https://env.example/v1', model: 'env-model', hasKey: true }
+    backend.custom = { source: 'env', baseUrl: 'https://env.example/v1', hasKey: true, model: 'env-model' }
+    useAiSettings.setState({ provider: 'opencode-go', model: 'go-model', models: { 'opencode-go': 'go-model' }, savedProviders: ['opencode-go'] })
+    await render()
+
+    const state = useAiSettings.getState()
+    expect(state.provider).toBe('opencode-go')
+    expect(state.model).toBe('go-model')
+    expect(state.models['opencode-go']).toBe('go-model')
+    expect(state.models['openai-compatible']).toBe('env-model')
+  })
 })
