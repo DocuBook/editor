@@ -46,7 +46,7 @@ export function injectDocumentStateMessages(messages: any[]): any[] {
           JSON.stringify(state.blocks || []),
         ]
       : [
-          `There is no active selection. This is the latest state of the document (ignore previous documents, you MUST issue operations against this latest version of the document). The cursor is BETWEEN two blocks as indicated by cursor: true. Each block is listed with its own content only; a nested block is listed separately, after its parent, with depth: how many levels it is nested. Deleting a block also deletes the blocks nested under it.\n${state.isEmptyDocument ? 'Because the document is empty, YOU MUST first update the empty block before adding new blocks.' : 'Prefer updating existing blocks over removing and adding (but this also depends on the user\'s question).'}`,
+          `There is no active selection. This is the latest state of the document (ignore previous documents, you MUST issue operations against this latest version of the document). The user's caret is in the block marked caret: true. Each block is listed with its own content only; a nested block is listed separately, after its parent, with depth: how many levels it is nested. Deleting a block also deletes the blocks nested under it.\n${state.isEmptyDocument ? 'Because the document is empty, YOU MUST first update the empty block before adding new blocks.' : `${state.caretBlockEmpty ? 'The caret block is empty: to write at the caret, YOU MUST update that block first, then add any further blocks after it. ' : ''}Prefer updating existing blocks over removing and adding (but this also depends on the user's question).`}`,
           JSON.stringify(state.blocks || []),
         ]
     return [

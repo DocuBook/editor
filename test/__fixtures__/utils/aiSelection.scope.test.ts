@@ -439,3 +439,62 @@ describe('cursor requests in text mode', () => {
   })
 })
 
+/** Cursor requests in tool mode: the operations the caret instructions ask
+ *  for pass the grounding gate and land where the caret is. */
+describe('cursor requests in tool mode', () => {
+  async function cursorOperations(ed: any, operations: any[], id: string, at: string) {
+    useAiSettings.setState({ provider: 'deepseek', model: 'm', probeTools: { deepseek: { m: true } }, savedProviders: ['deepseek'] })
+    const sent: string[] = []
+    let attempt = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      sent.push(JSON.parse(body.messages).map((message: any) => String(message.content)).join('\n'))
+      attempt++
+      const encoder = new TextEncoder()
+      return new Response(new ReadableStream({
+        start(controller) {
+          for (const [event, payload] of [
+            ['ai:tool_call', { toolCallId: 'tool-0', providerToolCallId: `p-${attempt}`, toolName: 'applyDocumentOperations', input: { operations } }],
+            ['ai:done', { provider: 'deepseek', truncated: false }],
+          ] as Array<[string, object]>) {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify({ requestId: body.requestId, ...payload })}\n\n`))
+          }
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    select(ed, pos(ed, id, at), pos(ed, id, at))
+    const ai = await prompt(ed, createAiTransport({ getEditor: () => ed }), 'write here', false)
+    return { ai, sent, attempts: () => attempt }
+  }
+
+  it('writes into an empty caret block, leaving no blank line behind', async () => {
+    const ed = mount([
+      { id: 'p1', type: 'paragraph', content: 'Before' },
+      { id: 'e', type: 'paragraph', content: '' },
+      { id: 'p2', type: 'paragraph', content: 'After' },
+    ])
+    const { ai, sent, attempts } = await cursorOperations(ed, [
+      { type: 'update', id: 'e$', block: '<p>Written here</p>' },
+      { type: 'add', referenceId: 'e$', position: 'after', blocks: ['<p>And more</p>'] },
+    ], 'e', '')
+    expect(sent[0]).toContain('"id":"e$","caret":true')
+    expect(sent[0]).toContain('The caret block is empty')
+    expect(attempts()).toBe(1)
+    expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
+    expect(await markdown(ed)).toBe('Before\n\nWritten here\n\nAnd more\n\nAfter')
+  })
+
+  it('adds after a caret parent item past the items nested under it', async () => {
+    const ed = mount([
+      { id: 'b1', type: 'bulletListItem', content: 'Parent item', children: [{ id: 'b2', type: 'bulletListItem', content: 'Nested child' }] },
+      { id: 'p', type: 'paragraph', content: 'After' },
+    ])
+    const { sent } = await cursorOperations(ed, [
+      { type: 'add', referenceId: 'b1$', position: 'after', blocks: ['<ul><li>Next item</li></ul>'] },
+    ], 'b1', 'Parent')
+    expect(sent[0]).toContain('"id":"b1$","caret":true')
+    expect(await markdown(ed)).toBe('* Parent item\n  * Nested child\n* Next item\n\nAfter')
+  })
+})
+

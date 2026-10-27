@@ -40,7 +40,7 @@ describe("buildAiPrompt", () => {
       documentState: {
         selection: false,
         isEmptyDocument: true,
-        blocks: [{ id: "empty$", block: "<p></p>", cursor: true }],
+        blocks: [{ id: "empty$", caret: true, block: "<p></p>" }],
       },
       documentMarkdown: "",
       selectedMarkdown: "",

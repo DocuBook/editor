@@ -201,6 +201,15 @@ function isEmptyParagraph(block: any): boolean {
   );
 }
 
+/** A block with inline content but no text yet: an empty paragraph, bullet or
+ *  heading the user created to write into. Blocks without inline content (a
+ *  table, an image) are never empty in this sense. */
+function hasNoText(block: any): boolean {
+  return Array.isArray(block?.content) && block.content.every((item: any) =>
+    item?.type === "text" && String(item.text ?? "").length === 0,
+  );
+}
+
 function isEmptyDocument(editor: any, documentBlocks: any[]): boolean {
   const topLevel = Array.isArray(editor?.document) ? editor.document : [];
   return topLevel.length === 1 && documentBlocks.length === 1 && isEmptyParagraph(topLevel[0]);
@@ -293,8 +302,18 @@ export async function buildHtmlDocumentState(editor: any, useSelection = false):
   const cursor = resolveActiveBlockId(editor) || editor?.getTextCursorPosition?.()?.block?.id
   const depths = nestingDepths(editor?.document)
   const blocks = await Promise.all(documentBlocks.map((block: any) => blockEntry(editor, block, depths, `${block.id}$`)))
-  const withCursor = blocks.flatMap((block: any) => block.id === `${cursor}$` ? [block, { cursor: true }] : [block])
-  return { selection: false, isEmptyDocument: isEmptyDocument(editor, documentBlocks), blocks: withCursor }
+  // The caret is marked on its block, not as an entry between blocks: between a
+  // parent and its first child, "after the block before" and "before the block
+  // after" land at different depths.
+  const caretBlock = cursor ? documentBlocks.find((block: any) => block?.id === cursor) : undefined
+  const marked = blocks.map((entry: any) => (caretBlock && entry.id === `${caretBlock.id}$` ? { id: entry.id, caret: true, ...entry } : entry))
+  return {
+    selection: false,
+    isEmptyDocument: isEmptyDocument(editor, documentBlocks),
+    /** The caret sits in a block with no text yet: the place to write is that block. */
+    caretBlockEmpty: !!caretBlock && hasNoText(caretBlock),
+    blocks: marked,
+  }
 }
 
 export function createSelectionAwareDocumentStateBuilder(defaultBuilder: any) {

@@ -44,11 +44,10 @@ describe("buildHtmlDocumentState", () => {
     const state = await buildHtmlDocumentState(editor);
 
     expect(state.blocks).toEqual([
-      { id: "anchored$", block: "<p>anchored</p>" },
-      { cursor: true },
+      { id: "anchored$", caret: true, block: "<p>anchored</p>" },
       { id: "stale$", block: "<p>stale</p>" },
     ]);
-    expect(state.blocks.findIndex((block: any) => block.cursor)).toBe(1);
+    expect(state.blocks.filter((block: any) => block.caret)).toHaveLength(1);
   });
 });
 

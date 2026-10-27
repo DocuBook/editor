@@ -40,7 +40,7 @@ const TOOL_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 You're manipulating a text document using HTML blocks. Follow applyDocumentOperations JSON schema. IDs include trailing $.
 List items are one block per item: \`<ul><li>item1</li></ul>\` is valid, \`<ul><li>item1</li><li>item2</li></ul>\` is not (consecutive items are merged automatically).
 For a code block, put the language in a \`data-language\` attribute on the <code> element inside <pre>.
-Without a selection, first work out which part of the document the request is about; take the cursor into account. To insert at the cursor (unless told otherwise), add after the block before the cursor (\`referenceId\` of that block, position \`after\`), or before the block below it.
+Without a selection, first work out which part of the document the request is about; take the caret into account. To insert at the caret (unless told otherwise), add after the block marked \`caret: true\` (its id as \`referenceId\`, position \`after\`); when that block is empty, update it instead.
 Math blocks MUST use one HTML block per operation: <math display="block"><annotation encoding="application/x-tex">LATEX</annotation></math>. Inline math inside text uses <math display="inline"><annotation encoding="application/x-tex">LATEX</annotation></math>. Never emit Markdown delimiters (\\(...\\), \\[...\\], $...$, $$...$$) inside HTML tool arguments.`;
 
 const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
