@@ -191,7 +191,7 @@ The AI can call two read-only tools before it proposes an edit. Both are **off b
 | Tool | What it does |
 | --- | --- |
 | `web_search` | Searches the web and returns 1–10 results with title, URL and snippet (5 by default, set in Settings) |
-| `web_fetch` | Reads one page and returns its main text (HTML, plain text, or Markdown) |
+| `web_fetch` | Reads one page (HTML, plain text, or Markdown) and returns its main content as Markdown, keeping headings, lists, tables, code blocks and links |
 
 **Search providers**
 
