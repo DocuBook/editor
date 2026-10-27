@@ -207,7 +207,7 @@ pub fn ready_tools() -> Vec<ToolSpec> {
     if config.fetch_enabled {
         tools.push(ToolSpec {
             name: WEB_FETCH_TOOL,
-            description: "Fetch one web page and return its main text. Only URLs from the user's prompt, the document, or earlier web_search/web_fetch results can be fetched; never build URLs yourself.".into(),
+            description: "Fetch one web page and return its main content as Markdown (headings, lists, tables, code and absolute link URLs kept). Only URLs from the user's prompt, the document, or earlier web_search/web_fetch results can be fetched; never build URLs yourself.".into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
