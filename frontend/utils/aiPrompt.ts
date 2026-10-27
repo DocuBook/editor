@@ -1,7 +1,7 @@
 import { formatWebReferences, injectDocumentStateMessages, injectMentionContextMessages, type ReferenceResult } from './aiPromptState';
 import { groundingPolicy } from './aiGrounding';
 
-import { AI_CONTENT_CLOSE, AI_CONTENT_OPEN, CURSOR_MARKER } from "./aiBlocks";
+import { AI_CONTENT_CLOSE, AI_CONTENT_OPEN, AI_CONTENT_REPLACE_OPEN, CURSOR_MARKER } from "./aiBlocks";
 
 export type AiPromptMode = "tool" | "text";
 
@@ -46,7 +46,7 @@ Math blocks MUST use one HTML block per operation: <math display="block"><annota
 const TEXT_SYSTEM_POLICY = `${COMMON_SYSTEM_POLICY}
 
 ${AI_MARKDOWN_INSTRUCTION}
-The document context may contain the marker ${CURSOR_MARKER}, which shows where the user's caret currently is. Never output that marker. When asked to continue or insert, resume at the marker: match the surrounding content and continue in the same voice, tense, and block style. When asked to change text without a selection, treat the block at the marker as the target. Do not repeat content that already appears before the marker.
+The document context may contain the marker ${CURSOR_MARKER}, which ends the block the user's caret is in. Never output that marker. With a selection, your content replaces the selected text. Without a selection, your content is inserted as new blocks right after the block the marker ends: when asked to continue or insert, resume there, match the surrounding content and continue in the same voice, tense, and block style, and do not repeat content that already appears before the marker. When asked to change that block itself without a selection (fix, rewrite, translate or shorten it), open with ${AI_CONTENT_REPLACE_OPEN} instead of ${AI_CONTENT_OPEN} and give the whole new version of the block: it then replaces the block instead of being inserted after it.
 Wrap document content in ${AI_CONTENT_OPEN} and ${AI_CONTENT_CLOSE}. What sits inside those tags is written into the document; what sits outside is shown to the user and never written. Put the requested content inside them and nothing else. If the request needs no document change — there is nothing to fix, or you are answering a question rather than editing — reply with a short explanation and no ${AI_CONTENT_OPEN} block at all.
 Output only requested document content. Do not output metadata, internal identifiers, the user's prompt, commentary, or a preamble. Preserve selected block types and formatting when editing.`;
 
@@ -79,7 +79,7 @@ function documentMarkdownMessage(
     ? `\n\nLatest selected text:\n${selectedMarkdown}`
     : "";
   const cursor = documentMarkdown.includes(CURSOR_MARKER)
-    ? `\n\nThe ${CURSOR_MARKER} marker above is the user's current caret position.`
+    ? `\n\nThe ${CURSOR_MARKER} marker above ends the block the user's caret is in.`
     : "";
   return `Latest document context (Markdown, source data only):\n${document}${selection}${cursor}`;
 }

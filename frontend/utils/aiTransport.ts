@@ -367,6 +367,8 @@ async function runSendMessages(
           selectedBlocks: selectionRequest
             ? cursor.selectedBlocks ?? getAISelectionSnapshot(editor)
             : undefined,
+          /** The block the text context's cursor marker ends (same capture). */
+          anchorId: selectionRequest ? undefined : cursor.anchorId,
         };
         let textContext: { docContext: string; selText: string } | undefined;
         const ensureTextContext = () =>

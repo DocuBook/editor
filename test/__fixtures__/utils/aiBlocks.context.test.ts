@@ -202,7 +202,7 @@ describe("buildDocumentContext", () => {
         (message) => message.role === "assistant",
       )?.content;
       expect(contextMessage).toContain(CURSOR_MARKER);
-      expect(contextMessage).toContain("caret position");
+      expect(contextMessage).toContain("ends the block the user's caret is in");
     });
 
     it("tells the text policy how to use the cursor marker", () => {

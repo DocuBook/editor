@@ -857,11 +857,14 @@ export function latestUserText(messages: any[]): string {
 /** Literal delimiters stated to the model in the text-only (Path B) prompt. */
 export const AI_CONTENT_OPEN = "<content>";
 export const AI_CONTENT_CLOSE = "</content>";
+/** Opening tag of a cursor reply that replaces the block the cursor marker
+ *  ends, instead of being inserted after it. */
+export const AI_CONTENT_REPLACE_OPEN = "<content replace>";
 
 /** Matchers are kept separate from the constants above so a casing or spacing
  *  variant the model invents still resolves, instead of silently failing the
  *  reply into the no-write path. A test pins the two together. */
-const CONTENT_OPEN = /<content\s*>/i;
+const CONTENT_OPEN = /<content(\s+replace)?\s*>/i;
 const CONTENT_CLOSE = /<\/content\s*>/gi;
 
 /**
@@ -878,6 +881,12 @@ const CONTENT_CLOSE = /<\/content\s*>/gi;
  * non-empty payload — callers must treat that as "nothing to write".
  */
 export function extractDelimitedContent(text: unknown): string | null {
+  return extractDelimitedReply(text)?.content ?? null;
+}
+
+/** `extractDelimitedContent`, plus whether the reply opened with
+ *  `AI_CONTENT_REPLACE_OPEN`: a cursor reply that replaces the caret block. */
+export function extractDelimitedReply(text: unknown): { content: string; replace: boolean } | null {
   if (typeof text !== "string") return null;
   const open = CONTENT_OPEN.exec(text);
   if (!open) return null;
@@ -888,7 +897,7 @@ export function extractDelimitedContent(text: unknown): string | null {
   const close = closes[closes.length - 1];
   if (!close || close.index === undefined) return null;
   const content = rest.slice(0, close.index).trim();
-  return content.length ? content : null;
+  return content.length ? { content, replace: !!open[1] } : null;
 }
 
 /**
@@ -904,6 +913,9 @@ export async function buildApplyDocumentInput(
   /** The request's selection (its cut blocks), `null` for a cursor request.
    *  Omitted only by legacy callers, which fall back to the live selection. */
   selection?: readonly any[] | null,
+  /** For a cursor request: the caret block to replace, when the reply opened
+   *  with `AI_CONTENT_REPLACE_OPEN`. Without it the reply is inserted. */
+  replaceBlockId?: string,
 ): Promise<any | null> {
   if (!editor || !fullText?.trim()) return null;
   try {
@@ -928,6 +940,10 @@ export async function buildApplyDocumentInput(
       }
       selectedBlocks = sel?.blocks?.length ? sel.blocks : getAISelectionSnapshot(editor);
     }
+    /** A replacing cursor reply maps onto the caret block (and the blocks
+     *  nested under it) exactly as a reply maps onto a selection. */
+    const replaced = !selectedBlocks?.length && replaceBlockId ? findBlock(editor, replaceBlockId) : null;
+    if (replaced) selectedBlocks = [replaced];
     if (selectedBlocks?.length) {
       /** Both sides are flattened, so a nested item maps onto the nested item
        *  it replies to. An update writes only a block's own content and keeps
@@ -1025,6 +1041,8 @@ const INLINE_CONTENT_TYPES = AI_FORMATTING_RULES.preserveFormatOnReplace;
  * When replacing a selection, re-apply the original block's format onto AI output.
  * If the model returned a plain paragraph but the original block was a heading/list/
  * blockquote (with inline content), inherit type + level so formatting is preserved.
+ * A BlockNote block keeps its level (and a checklist item its state) in `props`,
+ * so the original's props come along; without them a heading became level 1.
  */
 export function inheritFormatOnReplace(original: any[], parsed: any[]): any[] {
   return parsed.map((block, i) => {
@@ -1034,7 +1052,12 @@ export function inheritFormatOnReplace(original: any[], parsed: any[]): any[] {
       block.type === "paragraph" &&
       INLINE_CONTENT_TYPES.includes(orig.type)
     ) {
-      return { ...block, type: orig.type, level: orig.level };
+      return {
+        ...block,
+        type: orig.type,
+        level: orig.level,
+        ...(orig.props ? { props: { ...(block.props ?? {}), ...orig.props } } : {}),
+      };
     }
     return block;
   });

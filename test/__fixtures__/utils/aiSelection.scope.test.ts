@@ -366,3 +366,76 @@ describe('nested blocks', () => {
     expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED child\n* [x] Done task\n\nOutro')
   })
 })
+
+/**
+ * Cursor requests in text mode. Without a selection a reply is inserted after
+ * the caret block, so "fix the spelling of this paragraph" used to leave the
+ * misspelt paragraph and add a corrected copy below it. A reply opened with
+ * `<content replace>` now replaces the caret block (the model decides, as with
+ * tool mode's update/add), and still goes through review.
+ */
+describe('cursor requests in text mode', () => {
+  async function cursorReply(ed: any, reply: string, id: string, at: string) {
+    useAiSettings.setState({ provider: 'deepseek', model: 'm', probeTools: { deepseek: { m: false } }, savedProviders: ['deepseek'] })
+    const sent: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      sent.push(JSON.parse(body.messages).map((message: any) => String(message.content)).join('\n'))
+      const encoder = new TextEncoder()
+      return new Response(new ReadableStream({
+        start(controller) {
+          for (const [event, payload] of [
+            ['ai:token', { token: reply }],
+            ['ai:done', { provider: 'deepseek', truncated: false }],
+          ] as Array<[string, object]>) {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify({ requestId: body.requestId, ...payload })}\n\n`))
+          }
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    select(ed, pos(ed, id, at), pos(ed, id, at))
+    const ai = await prompt(ed, createAiTransport({ getEditor: () => ed }), 'fix the spelling of this paragraph', false)
+    return { ai, sent }
+  }
+
+  it('replaces the caret paragraph in place when the reply says so', async () => {
+    const ed = mount([
+      { id: 'a', type: 'paragraph', content: 'Teh quick brwon fox.' },
+      { id: 'b', type: 'paragraph', content: 'Next paragraph.' },
+    ])
+    const { ai, sent } = await cursorReply(ed, '<content replace>The quick brown fox.</content>', 'a', 'quick')
+    expect(sent[0]).toContain('Teh quick brwon fox. <!-- cursor -->')
+    expect(sent[0]).toContain('<content replace>')
+    expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
+    expect(await markdown(ed)).toBe('The quick brown fox.\n\nNext paragraph.')
+  })
+
+  it('still inserts a plain reply after the caret block', async () => {
+    const ed = mount([
+      { id: 'a', type: 'paragraph', content: 'First paragraph.' },
+      { id: 'b', type: 'paragraph', content: 'Next paragraph.' },
+    ])
+    await cursorReply(ed, '<content>Inserted paragraph.</content>', 'a', 'First')
+    expect(await markdown(ed)).toBe('First paragraph.\n\nInserted paragraph.\n\nNext paragraph.')
+  })
+
+  it('replaces a caret list item together with the items nested under it', async () => {
+    const ed = mount([
+      { id: 'b1', type: 'bulletListItem', content: 'Parnet item', children: [{ id: 'b2', type: 'bulletListItem', content: 'Nestde child' }] },
+      { id: 'p', type: 'paragraph', content: 'After' },
+    ])
+    await cursorReply(ed, '<content replace>* Parent item\n  * Nested child</content>', 'b1', 'Parnet')
+    expect(await markdown(ed)).toBe('* Parent item\n  * Nested child\n\nAfter')
+  })
+
+  it('keeps the caret block a heading when the replacing reply is a plain paragraph', async () => {
+    const ed = mount([
+      { id: 'h', type: 'heading', props: { level: 2 }, content: 'Teh title' },
+      { id: 'p', type: 'paragraph', content: 'Body' },
+    ])
+    await cursorReply(ed, '<content replace>The title</content>', 'h', 'title')
+    expect(await markdown(ed)).toBe('## The title\n\nBody')
+  })
+})
+
