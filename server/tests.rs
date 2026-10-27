@@ -370,6 +370,42 @@ mod api_tests {
     }
 
     #[tokio::test]
+    async fn ai_settings_lists_every_configured_provider_in_a_stable_order() {
+        // Regression: savedProviders came straight out of the keys.json HashMap,
+        // whose iteration order is reseeded on every load — so with all three
+        // providers configured the composer's picker groups reshuffled on each
+        // re-read. Every read must list all three, in the Settings page's order.
+        let (app, _) = router();
+        let (_, h, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({ "email": "a@b.c", "password": "Password1!" }),
+        )
+        .await;
+        let cookie = session_cookie(&h);
+
+        for (command, body) in [
+            ("/api/set_api_key", json!({ "provider": "deepseek", "key": "sk-ds", "baseUrl": "https://api.deepseek.com", "model": "deepseek-chat" })),
+            ("/api/set_custom_endpoint", json!({ "provider": "openai-compatible", "key": "sk-custom", "baseUrl": "https://kenari.id/v1", "model": "custom-model" })),
+            ("/api/set_api_key", json!({ "provider": "opencode-go", "key": "sk-go", "baseUrl": "https://opencode.ai/zen/go/v1", "model": "deepseek-v4-flash" })),
+        ] {
+            let (s, _, b) = post_with(&app, command, body, Some(&cookie)).await;
+            assert_eq!(s, StatusCode::OK, "{command}: {b}");
+        }
+
+        for _ in 0..20 {
+            let (s, _, b) = post_with(&app, "/api/ai_settings", json!({}), Some(&cookie)).await;
+            assert_eq!(s, StatusCode::OK, "{b}");
+            let saved = result_json(&b)["savedProviders"].clone();
+            assert_eq!(
+                saved,
+                json!(["openai-compatible", "opencode-go", "deepseek"]),
+                "{b}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn setup_admin_token_required_via_http() {
         let state = test_state();
         state.auth.config.lock().unwrap().setup_token = Some("tok-secret-1".to_string());

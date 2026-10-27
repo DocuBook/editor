@@ -1,9 +1,27 @@
 import { create } from 'zustand'
 import { invoke } from '../lib/ipc'
+import { PROVIDERS } from '../data/providers'
 
 /** Synthetic provider id for user-configured OpenAI-compatible endpoints — shared
  *  with SettingsPane and the Rust backend (agent::CUSTOM_PROVIDER_ID). */
 export const CUSTOM_PROVIDER_ID = 'openai-compatible'
+
+/** The order providers are listed in everywhere — the Settings page's order:
+ *  the custom endpoint first, then the catalog. */
+const PROVIDER_ORDER = [CUSTOM_PROVIDER_ID, ...PROVIDERS.map(p => p.id)]
+
+/** A provider list in PROVIDER_ORDER, deduplicated; ids outside it go last,
+ *  alphabetically. The web server derives `savedProviders` from a hash map that
+ *  iterates in a fresh random order on every read, so taken verbatim the
+ *  composer's provider groups reshuffled on each hydration (window focus), and
+ *  the `savedProviders[0]` fallback picked a different provider each time. */
+export function orderProviders(ids: string[]): string[] {
+  const rank = (id: string) => {
+    const index = PROVIDER_ORDER.indexOf(id)
+    return index === -1 ? PROVIDER_ORDER.length : index
+  }
+  return [...new Set(ids)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+}
 
 /** One configured provider as the backend reports it (`ai_settings.endpoints`). */
 export interface BackendEndpoint {
@@ -308,7 +326,7 @@ export async function fetchAiSettings(): Promise<BackendAiSettings | null> {
       active: typeof settings.active === 'string' ? settings.active : '',
       endpoints: parsed,
       savedProviders: Array.isArray(settings.savedProviders)
-        ? settings.savedProviders.filter((id): id is string => typeof id === 'string')
+        ? orderProviders(settings.savedProviders.filter((id): id is string => typeof id === 'string'))
         : [],
       env: parseEnv(settings.env),
     }

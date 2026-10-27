@@ -677,6 +677,21 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             if env.is_some() && !saved.iter().any(|p| p == agent::CUSTOM_PROVIDER_ID) {
                 saved.push(agent::CUSTOM_PROVIDER_ID.to_string());
             }
+            // keys.json loads into a HashMap, which iterates in a fresh random
+            // order on every read: unsorted, the composer's provider groups
+            // reshuffled on each re-read and the UI's "first saved provider"
+            // fallback changed with them. Ranked like the Settings page: the
+            // custom endpoint, then the catalog order.
+            saved.sort_by_key(|p| {
+                if p == agent::CUSTOM_PROVIDER_ID {
+                    0
+                } else {
+                    1 + agent::PROVIDER_IDS
+                        .iter()
+                        .position(|id| id == p)
+                        .unwrap_or(agent::PROVIDER_IDS.len())
+                }
+            });
             let cfg = state.auth.config.lock().unwrap_or_else(|e| e.into_inner());
             // Server-side guard: the active pointer can name an endpoint that is no
             // longer there (hand-edited config), so it is resolved, not echoed.
