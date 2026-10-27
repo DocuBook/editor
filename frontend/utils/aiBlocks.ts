@@ -562,12 +562,15 @@ export const CURSOR_MARKER = "<!-- cursor -->";
 /** Plain text the Markdown exporter passes through unescaped; it stands in for
  *  `CURSOR_MARKER`, which the exporter would escape as prose. */
 const CURSOR_PLACEHOLDER = "DOCUBOOKCURSORMARKER";
+/** Source blocks (`meta.code` in the editor schema): their inline content is
+ *  code, so a marker inside it would read as part of the source. */
+const SOURCE_BLOCK_TYPES = new Set(["codeBlock", "mathBlock", "diagram"]);
 
 /** A copy of `blocks` with the placeholder at the end of block `anchorId`'s own
  *  text, so the marker sits on the caret block's line and no list around it is
- *  split or renumbered. A block without inline text (a table, an image) gets
- *  the placeholder as a paragraph after it instead. `null` when the block is
- *  not in `blocks`. */
+ *  split or renumbered. A block without inline text (a table, an image) or
+ *  holding source code gets the placeholder as a paragraph after it instead.
+ *  `null` when the block is not in `blocks`. */
 function withCursorPlaceholder(blocks: readonly any[], anchorId: string): any[] | null {
   let found = false;
   const placeholder = (text: string) => ({ type: "text", text, styles: {} });
@@ -576,7 +579,7 @@ function withCursorPlaceholder(blocks: readonly any[], anchorId: string): any[] 
       const copy = block?.children?.length ? { ...block, children: walk(block.children) } : block;
       if (block?.id !== anchorId) return [copy];
       found = true;
-      if (Array.isArray(block.content)) {
+      if (Array.isArray(block.content) && !SOURCE_BLOCK_TYPES.has(block.type)) {
         const text = block.content.length ? ` ${CURSOR_PLACEHOLDER}` : CURSOR_PLACEHOLDER;
         return [{ ...copy, content: [...block.content, placeholder(text)] }];
       }
