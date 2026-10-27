@@ -17,6 +17,7 @@ import {
   buildApplyDocumentInput,
   extractDelimitedContent,
   filterMeaningfulOperations,
+  flattenBlocks,
   suffixOperationIds,
   validateOperationsSemantics,
 } from "./aiBlocks";
@@ -64,7 +65,8 @@ const stripSuffix = (id: unknown) => String(id ?? "").replace(/\$$/, "");
 /** Why an operation reaches outside the selection, or null when it stays in. */
 function selectionScopeError(input: any, scope: EditScope): string | null {
   if (!scope.selectedBlocks?.length || !Array.isArray(input?.operations)) return null;
-  const selected = new Set(scope.selectedBlocks.map((block) => stripSuffix(block?.id)));
+  // A selected block's children are selected too, and each is written through its own id.
+  const selected = new Set(flattenBlocks(scope.selectedBlocks).map((block) => stripSuffix(block?.id)));
   for (const op of input.operations) {
     const target = op?.type === "add" ? op.referenceId : op?.id;
     if (target && !selected.has(stripSuffix(target))) {
