@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import { Maximize2, ArrowUp, Check, RotateCcw, Loader2, X, FileText, Folder, ChevronsUpDown, Command, CornerDownLeft } from 'lucide-react'
+import { Zap, ArrowUp, Check, RotateCcw, Loader2, X, FileText, Folder, ChevronsUpDown, Command, CornerDownLeft } from 'lucide-react'
 import type { AiMenuState } from '../../utils/aiExtension'
 import { getDefaultAIMenuItems } from '../../utils/aiMenu'
 import { useEditorStore } from '../../stores/editor'
@@ -539,7 +539,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
         <button ref={modelTriggerRef} type="button" disabled={!aiConfigured} onClick={() => { setModelPickerOpen((open) => !open); if (!modelPickerOpen) void loadModels() }} aria-label="Select AI model" title={aiConfigured ? 'Select AI model' : 'Configure an API key in Settings (⌘,)'} aria-expanded={modelPickerOpen} aria-controls={modelPickerOpen ? 'ai-model-listbox' : undefined} className="flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-[10px] text-muted hover:bg-surface-active hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent">
           <span className="max-w-52 truncate font-mono">{model || 'Select model'}</span><ChevronsUpDown size={11} />
         </button>
-        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? (enterSends ? 'Send prompt (Enter)' : 'Send prompt') : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : <Maximize2 size={16} />}</button>}
+        {(hasInput || !selectionPromptOpen) && <button onClick={hasInput ? submit : () => useAiChat.getState().togglePrompts()} onMouseDown={(event) => event.preventDefault()} disabled={!aiConfigured || (hasInput ? !canPrompt : !canTogglePrompts)} aria-label={hasInput ? 'Send prompt' : expanded ? 'Hide AI prompts' : 'Show AI prompts'} aria-expanded={!hasInput && canTogglePrompts ? expanded : undefined} title={hasInput ? (enterSends ? 'Send prompt (Enter)' : 'Send prompt') : 'AI prompts'} className={'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-35 ' + (hasInput ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'bg-transparent text-foreground hover:bg-surface-active')}>{hasInput ? <ArrowUp size={16} /> : expanded ? <X size={16} /> : <Zap size={16} />}</button>}
       </div>
     </>
   )
