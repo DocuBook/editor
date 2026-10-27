@@ -123,6 +123,18 @@ describe('cursor-mode Markdown context', () => {
     expect(context.indexOf('After')).toBeGreaterThan(marker)
   })
 
+  it('puts the marker after a caret code block, outside its fence', () => {
+    const ed = create([
+      { id: 'p1', type: 'paragraph', content: 'Before' },
+      { id: 'c', type: 'codeBlock', props: { language: 'python' }, content: 'x = 1' },
+      { id: 'p2', type: 'paragraph', content: 'After' },
+    ])
+    caret(ed, 'c', 2)
+    const context = body(buildDocumentContext(ed))
+    expect(count(context, CURSOR_MARKER)).toBe(1)
+    expect(context).toContain(`x = 1\n\`\`\`\n\n${CURSOR_MARKER}\n\nAfter`)
+  })
+
   it('keeps a nested caret block whole when a long document is cut', () => {
     const filler = (prefix: string) => Array.from({ length: 60 }, (_, i) => ({ id: `${prefix}${i}`, type: 'paragraph', content: `Filler ${prefix}${i} ` + 'text '.repeat(40) }))
     const ed = create([
