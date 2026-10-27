@@ -40,13 +40,13 @@ export function injectDocumentStateMessages(messages: any[]): any[] {
     if (!state) return [message]
     const context = state.selection
       ? [
-          'This is the latest state of the selection (ignore previous selections, you MUST issue operations against this latest version of the selection). Each block is listed with its own content only; a nested block is listed separately, right after its parent. Deleting a block also deletes the blocks nested under it:',
+          'This is the latest state of the selection (ignore previous selections, you MUST issue operations against this latest version of the selection). Each block is listed with its own content only; a nested block is listed separately, after its parent, with depth: how many levels it is nested. Deleting a block also deletes the blocks nested under it:',
           JSON.stringify(state.selectedBlocks || []),
           'These are the blocks just before and after the selection, for context only (the selected blocks are not repeated here). You MUST NOT issue operations against them; you MUST issue operations against the selection:',
           JSON.stringify(state.blocks || []),
         ]
       : [
-          `There is no active selection. This is the latest state of the document (ignore previous documents, you MUST issue operations against this latest version of the document). The cursor is BETWEEN two blocks as indicated by cursor: true. Each block is listed with its own content only; a nested block is listed separately, right after its parent. Deleting a block also deletes the blocks nested under it.\n${state.isEmptyDocument ? 'Because the document is empty, YOU MUST first update the empty block before adding new blocks.' : 'Prefer updating existing blocks over removing and adding (but this also depends on the user\'s question).'}`,
+          `There is no active selection. This is the latest state of the document (ignore previous documents, you MUST issue operations against this latest version of the document). The cursor is BETWEEN two blocks as indicated by cursor: true. Each block is listed with its own content only; a nested block is listed separately, after its parent, with depth: how many levels it is nested. Deleting a block also deletes the blocks nested under it.\n${state.isEmptyDocument ? 'Because the document is empty, YOU MUST first update the empty block before adding new blocks.' : 'Prefer updating existing blocks over removing and adding (but this also depends on the user\'s question).'}`,
           JSON.stringify(state.blocks || []),
         ]
     return [
