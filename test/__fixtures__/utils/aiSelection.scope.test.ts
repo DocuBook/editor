@@ -344,6 +344,12 @@ describe('nested blocks', () => {
     expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n  * ANOTHER CHILD\n* [x] Done task\n\nOutro')
   })
 
+  it('Path B adds a top-level item a reply appends at the top level', async () => {
+    const ed = nested()
+    await textReply(ed, '* PARENT ITEM\n  * NESTED CHILD\n* NEW TOP', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n* NEW TOP\n* [x] Done task\n\nOutro')
+  })
+
   it('Path B maps a reply that flattened the list onto the items in order, keeping their nesting', async () => {
     const ed = nested()
     await textReply(ed, '* PARENT ITEM\n* NESTED CHILD', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)

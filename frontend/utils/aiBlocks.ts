@@ -923,9 +923,17 @@ export async function buildApplyDocumentInput(
         }));
       const extras = formatted.slice(selected.length);
       if (extras.length) {
+        /** Insert at the first extra's depth in the reply: a top-level extra goes
+         *  after the last top-level selected block, a nested one after the last
+         *  selected block at its level. Both depths are relative to the cut. */
+        const depth = nestingDepths(parsed).get(String(extras[0]?.id ?? "")) ?? 0;
+        let anchor = selectedBlocks[selectedBlocks.length - 1];
+        for (let level = 0; level < depth && anchor?.children?.length; level++) {
+          anchor = anchor.children[anchor.children.length - 1];
+        }
         operations.push({
           type: "add",
-          referenceId: selected[selected.length - 1]?.id + "$",
+          referenceId: anchor?.id + "$",
           position: "after",
           blocks: extras.map(ownHtml),
         });
