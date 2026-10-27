@@ -88,14 +88,20 @@ describe('AI floating composer', () => {
     const floating = document.querySelector('.editor-ai-floating')!
     const promptAction = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Continue Writing')!
     expect(floating.classList.contains('z-50')).toBe(true)
-    expect(promptAction.classList.contains('ui-popover')).toBe(true)
+    // The list is a panel stacked INSIDE the composer card, above the prompt
+    // box — styled like the model picker, not chips floating over the card.
+    const surface = floating.querySelector('.ai-chat-surface')!
+    const panel = promptAction.closest('.ai-chat-panel')!
+    expect(panel).not.toBeNull()
+    expect(surface.contains(panel)).toBe(true)
+    expect(panel.compareDocumentPosition(textarea) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(panel.getAttribute('role')).toBe('group')
+    expect(document.getElementById(panel.getAttribute('aria-labelledby')!)?.textContent).toBe('Suggestions')
     expect(promptAction.querySelector('span')?.classList.contains('text-accent')).toBe(true)
-    // The horizontal-overflow guard belongs to the quick-prompt rail, NOT to
-    // `.editor-ai-floating`: the @mention dropdown renders above that box
-    // (`bottom-full`), so clipping there made every suggestion unclickable and
-    // left Tab/Enter as the only way to accept a mention (no Tab on touch).
-    const promptRail = floating.firstElementChild!
-    expect(promptRail.classList.contains('overflow-x-hidden')).toBe(true)
+    // `.editor-ai-floating` must never clip horizontally: the @mention dropdown
+    // renders above that box (`bottom-full`), so clipping there made every
+    // suggestion unclickable and left Tab/Enter as the only way to accept a
+    // mention (no Tab on touch).
     expect(floating.classList.contains('overflow-x-hidden')).toBe(false)
 
     act(() => promptAction.click())
