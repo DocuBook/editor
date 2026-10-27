@@ -202,7 +202,7 @@ On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` switches `
 
 **What the AI can and cannot open**
 
-- `web_fetch` only opens URLs that already appeared in the current prompt: in your message, in the document, or in an earlier search result or page it read. It cannot invent a URL, so a malicious page cannot steer it to an address carrying your notes.
+- `web_fetch` only opens URLs that already appeared in the current prompt: in your message, in the document, or in an earlier search result or page it read. It cannot invent a URL, so a malicious page cannot steer it to an address carrying your notes. The only change it may make is reading an `http://` link over `https://`.
 - Pages are fetched from your computer (desktop) or from the server (web). Private, loopback, link-local and cloud-metadata addresses are always blocked, every redirect is re-checked (at most 5), and only ports 80 and 443 are used.
 - Each page is capped at 5 MB and 20 seconds; a search at 15 seconds. One prompt can make at most 8 tool calls over 4 rounds.
 - Results reach the model as untrusted reference data, and every change still goes through your accept/reject review.
