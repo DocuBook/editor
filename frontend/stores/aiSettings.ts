@@ -195,8 +195,9 @@ function backendEndpointRows(cfg: BackendAiSettings) {
 
 /** Apply ONLY the per-provider data of a payload the caller already fetched: the
  *  saved list, every provider's stored model and base URL, and the default models.
- *  The live selection is left alone — a composer pick is newer than any fetch —
- *  and so is the probe map: `recordToolProbe` writes the store before the
+ *  A saved live selection is left alone — a composer pick is newer than any
+ *  fetch; an empty or unsaved one adopts `cfg.active` (see below) — and so is
+ *  the probe map: `recordToolProbe` writes the store before the
  *  backend, so a payload fetched before that write landed would erase a fresh
  *  measurement. ProviderForm calls this after its save/revoke re-read, because
  *  hydration runs from the app root on boot and window focus only: without it a
