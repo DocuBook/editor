@@ -905,23 +905,37 @@ export async function buildApplyDocumentInput(
       selectedBlocks = sel?.blocks?.length ? sel.blocks : getAISelectionSnapshot(editor);
     }
     if (selectedBlocks?.length) {
-      const formatted = inheritFormatOnReplace([...selectedBlocks], parsed);
+      /** Both sides are flattened, so a nested item maps onto the nested item
+       *  it replies to. An update writes only a block's own content and keeps
+       *  its children, so a reply mapped onto the top-level blocks alone left
+       *  every selected nested item unchanged. */
+      const selected = flattenBlocks(selectedBlocks);
+      const formatted = inheritFormatOnReplace(selected, flattenBlocks(parsed));
+      const ownHtml = (block: any) => editor.blocksToHTMLLossy([{ ...block, children: [] }]);
       /** Update ops map 1:1 onto the selection; extra blocks (model returned more than selected)
        *  become an add-op after the last selected block — never an "undefined$" id that fails validation. */
       const operations: any[] = formatted
-        .slice(0, selectedBlocks.length)
+        .slice(0, selected.length)
         .map((block: any, i: number) => ({
           type: "update",
-          id: selectedBlocks[i]?.id + "$",
-          block: editor.blocksToHTMLLossy([block]),
+          id: selected[i]?.id + "$",
+          block: ownHtml(block),
         }));
-      const extras = formatted.slice(selectedBlocks.length);
+      const extras = formatted.slice(selected.length);
       if (extras.length) {
+        /** Insert at the first extra's depth in the reply: a top-level extra goes
+         *  after the last top-level selected block, a nested one after the last
+         *  selected block at its level. Both depths are relative to the cut. */
+        const depth = nestingDepths(parsed).get(String(extras[0]?.id ?? "")) ?? 0;
+        let anchor = selectedBlocks[selectedBlocks.length - 1];
+        for (let level = 0; level < depth && anchor?.children?.length; level++) {
+          anchor = anchor.children[anchor.children.length - 1];
+        }
         operations.push({
           type: "add",
-          referenceId: selectedBlocks[selectedBlocks.length - 1]?.id + "$",
+          referenceId: anchor?.id + "$",
           position: "after",
-          blocks: extras.map((b: any) => editor.blocksToHTMLLossy([b])),
+          blocks: extras.map(ownHtml),
         });
       }
       return { type: "applyDocumentOperations", operations };

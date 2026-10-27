@@ -298,6 +298,64 @@ describe('nested blocks', () => {
     expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n* [x] Done task\n\nOutro')
   })
 
+  /** Path B: the model answers in Markdown, which keeps the nesting. */
+  async function textReply(ed: any, reply: string, from: number, to: number) {
+    useAiSettings.setState({ provider: 'deepseek', model: 'm', probeTools: { deepseek: { m: false } }, savedProviders: ['deepseek'] })
+    let shown = ''
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      const context = JSON.parse(body.messages).map((message: any) => String(message.content)).join('\n')
+      shown = context.split('Latest selected text:\n')[1]?.split('\n\nThe ')[0]?.trim() ?? ''
+      const encoder = new TextEncoder()
+      return new Response(new ReadableStream({
+        start(controller) {
+          for (const [event, payload] of [
+            ['ai:token', { token: `<content>${reply}</content>` }],
+            ['ai:done', { provider: 'deepseek', truncated: false }],
+          ] as Array<[string, object]>) {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify({ requestId: body.requestId, ...payload })}\n\n`))
+          }
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    select(ed, from, to)
+    const ai = await prompt(ed, createAiTransport({ getEditor: () => ed }), 'uppercase', true)
+    return { ai, shown }
+  }
+
+  it('Path B edits a selected nested item', async () => {
+    const ed = nested()
+    const { ai, shown } = await textReply(ed, '* PARENT ITEM\n  * NESTED CHILD', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    expect(shown).toBe('* Parent item\n  * Nested child')
+    expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n* [x] Done task\n\nOutro')
+  })
+
+  it('Path B writes a partly selected nested item only where the selection covers it', async () => {
+    const ed = nested()
+    await textReply(ed, '* PARENT ITEM\n  * NESTED', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'Nested') + 'Nested'.length)
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED child\n* [x] Done task\n\nOutro')
+  })
+
+  it('Path B keeps the nested items a reply adds after the selection', async () => {
+    const ed = nested()
+    await textReply(ed, '* PARENT ITEM\n  * NESTED CHILD\n  * ANOTHER CHILD', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n  * ANOTHER CHILD\n* [x] Done task\n\nOutro')
+  })
+
+  it('Path B adds a top-level item a reply appends at the top level', async () => {
+    const ed = nested()
+    await textReply(ed, '* PARENT ITEM\n  * NESTED CHILD\n* NEW TOP', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n* NEW TOP\n* [x] Done task\n\nOutro')
+  })
+
+  it('Path B maps a reply that flattened the list onto the items in order, keeping their nesting', async () => {
+    const ed = nested()
+    await textReply(ed, '* PARENT ITEM\n* NESTED CHILD', pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n* [x] Done task\n\nOutro')
+  })
+
   it('writes a partly selected nested item only where the selection covers it', async () => {
     const ed = nested()
     select(ed, pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'Nested') + 'Nested'.length)
