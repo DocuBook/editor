@@ -12,6 +12,7 @@ import { TextSelection } from 'prosemirror-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSchema } from '../../../frontend/components/editor/setup'
 import { buildHtmlDocumentState, captureAISelection, createSelectionAwareDocumentStateBuilder, openAIMenuAtAnchor } from '../../../frontend/utils/aiBlocks'
+import { injectDocumentStateMessages } from '../../../frontend/utils/aiPromptState'
 import { AIExtension } from '../../../frontend/utils/aiExtension'
 import { createAiTransport } from '../../../frontend/utils/aiTransport'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
@@ -208,5 +209,98 @@ describe('one scope for both paths (real transport)', () => {
     expect(prompts[1]).toContain('Use ONLY the selected blocks')
     expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
     expect(await markdown(ed)).toBe('alpha BETA gamma\n\nsecond paragraph')
+  })
+})
+
+/**
+ * Nested blocks. An update writes only the block's own content (its children
+ * are kept), so each block must be shown, scoped and written as itself: a
+ * parent's HTML used to carry its children too, which showed them twice and
+ * made a selected nested item impossible to edit (its edits inside the
+ * parent's HTML were dropped, and its own id was "outside the selection").
+ */
+describe('nested blocks', () => {
+  const nested = () => mount([
+    { id: 'p', type: 'paragraph', content: 'Intro' },
+    { id: 'b1', type: 'bulletListItem', content: 'Parent item', children: [{ id: 'b2', type: 'bulletListItem', content: 'Nested child' }] },
+    { id: 'c', type: 'checkListItem', props: { checked: true }, content: 'Done task' },
+    { id: 'end', type: 'paragraph', content: 'Outro' },
+  ])
+  const texts = (entries: any[]) => entries.map((entry: any) => entry.block ?? '').join('\n')
+  const count = (haystack: string, needle: string) => haystack.split(needle).length - 1
+
+  it('lists every block once, as its own content, with or without a selection', async () => {
+    const ed = nested()
+    const cursor = await buildHtmlDocumentState(ed, false)
+    const parent = cursor.blocks.find((entry: any) => entry.id === 'b1$')
+    expect(parent.block).toContain('Parent item')
+    expect(parent.block).not.toContain('Nested child')
+    expect(cursor.blocks.find((entry: any) => entry.id === 'b2$')?.block).toContain('Nested child')
+    expect(count(texts(cursor.blocks), 'Nested child')).toBe(1)
+
+    select(ed, pos(ed, 'b1', 'Parent'), pos(ed, 'c', 'Done') + 'Done'.length)
+    const transport = operationsTransport([])
+    await prompt(ed, transport, 'rewrite', true)
+    const state = transport.requests[0].messages[0].metadata.documentState
+    expect(state.selectedBlocks.map((entry: any) => entry.id)).toEqual(['b1$', 'b2$', 'c$'])
+    expect(state.selectedBlocks[0].block).not.toContain('Nested child')
+    expect(count(texts(state.selectedBlocks), 'Nested child')).toBe(1)
+    // The surrounding blocks are context only: no ids, and none of the selection.
+    expect(state.blocks.every((entry: any) => entry.id === undefined)).toBe(true)
+    expect(texts(state.blocks)).not.toMatch(/Parent item|Nested child|Done task/)
+    expect(texts(state.blocks)).toContain('Intro')
+  })
+
+  it('tells the model the context surrounds the selection rather than being the whole document', async () => {
+    const ed = nested()
+    select(ed, pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    const transport = operationsTransport([])
+    await prompt(ed, transport, 'rewrite', true)
+    const [context] = injectDocumentStateMessages(transport.requests[0].messages)
+    const text = context.parts.map((part: any) => part.text).join('\n')
+    expect(text).not.toContain('entire document')
+    expect(text).toContain('not repeated')
+  })
+
+  it('Path A edits a selected nested item through its own id', async () => {
+    useAiSettings.setState({ provider: 'deepseek', model: 'm', probeTools: { deepseek: { m: true } }, savedProviders: ['deepseek'] })
+    const ed = nested()
+    let attempt = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      attempt++
+      const operations = [
+        { type: 'update', id: 'b1$', block: '<ul><li>PARENT ITEM</li></ul>' },
+        { type: 'update', id: 'b2$', block: '<ul><li>NESTED CHILD</li></ul>' },
+      ]
+      return new Response(new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+          for (const [event, payload] of [
+            ['ai:tool_call', { toolCallId: 'tool-0', providerToolCallId: `p-${attempt}`, toolName: 'applyDocumentOperations', input: { operations } }],
+            ['ai:done', { provider: 'deepseek', truncated: false }],
+          ] as Array<[string, object]>) {
+            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify({ requestId: body.requestId, ...payload })}\n\n`))
+          }
+          controller.close()
+        },
+      }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+    select(ed, pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'child') + 'child'.length)
+    const ai = await prompt(ed, createAiTransport({ getEditor: () => ed }), 'uppercase', true)
+
+    expect(attempt).toBe(1)
+    expect(ai.store.state.aiMenuState.status).toBe('user-reviewing')
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED CHILD\n* [x] Done task\n\nOutro')
+  })
+
+  it('writes a partly selected nested item only where the selection covers it', async () => {
+    const ed = nested()
+    select(ed, pos(ed, 'b1', 'Parent'), pos(ed, 'b2', 'Nested') + 'Nested'.length)
+    await prompt(ed, operationsTransport([
+      { type: 'update', id: 'b1$', block: '<ul><li>PARENT ITEM</li></ul>' },
+      { type: 'update', id: 'b2$', block: '<ul><li>NESTED</li></ul>' },
+    ]), 'uppercase', true)
+    expect(await markdown(ed)).toBe('Intro\n\n* PARENT ITEM\n  * NESTED child\n* [x] Done task\n\nOutro')
   })
 })

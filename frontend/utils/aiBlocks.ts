@@ -91,7 +91,7 @@ export function replaceSelectedBlockContent(editor: any, blockId: string, block:
   const snapshot = editor && typeof editor === "object"
     ? aiSelectionSnapshots.get(editor)
     : undefined;
-  const original = snapshot?.blocks.find((item) => item?.id === blockId);
+  const original = flattenBlocks(snapshot?.blocks).find((item) => item?.id === blockId);
   if (!snapshot || !original) return false;
   const view = editor?.prosemirrorView;
   if (!view || view.state.doc !== snapshot.doc || !editor.insertInlineContent) {
@@ -206,72 +206,80 @@ function isEmptyDocument(editor: any, documentBlocks: any[]): boolean {
   return topLevel.length === 1 && documentBlocks.length === 1 && isEmptyParagraph(topLevel[0]);
 }
 
+/** Every block in document order, each followed by its descendants; a block
+ *  reached twice (a selection listing a parent and its child) is kept once. */
+export function flattenBlocks(blocks: readonly any[] | null | undefined): any[] {
+  const seen = new Set<string>();
+  const walk = (items: readonly any[] | null | undefined): any[] =>
+    (Array.isArray(items) ? items : []).flatMap((block: any) => {
+      const id = String(block?.id ?? "");
+      if (id && seen.has(id)) return [];
+      if (id) seen.add(id);
+      return [block, ...walk(block?.children)];
+    });
+  return walk(blocks);
+}
+
+/** HTML of a block's own content, without its children. An update writes only
+ *  that content and keeps the children, and every child is listed, scoped and
+ *  written as a block of its own; carrying the children in the parent's HTML
+ *  too showed them to the model twice, under two ids. */
+async function ownBlockHtml(editor: any, block: any): Promise<string> {
+  return editor.blocksToHTMLLossy([{ ...block, children: [] }]);
+}
+
+/** Blocks shown around a selection, on each side. */
+const SELECTION_CONTEXT_BLOCKS = 2;
+
+/** Document state for a selection request: the selected blocks with their ids,
+ *  and up to `SELECTION_CONTEXT_BLOCKS` blocks on each side as id-less context.
+ *  The selection is not repeated in the context, so nothing in it can be
+ *  mistaken for an unselected block. */
+async function selectionDocumentState(editor: any, selected: readonly any[]): Promise<any> {
+  const documentBlocks = flattenBlocks(editor?.document);
+  const selectedBlocks = flattenBlocks(selected);
+  const selectedIds = new Set(selectedBlocks.map((block: any) => String(block?.id ?? "")));
+  const selectedIndexes = documentBlocks
+    .map((block, index) => (selectedIds.has(String(block?.id)) ? index : -1))
+    .filter((index) => index >= 0);
+  const context = selectedIndexes.length
+    ? documentBlocks.slice(
+        Math.max(0, Math.min(...selectedIndexes) - SELECTION_CONTEXT_BLOCKS),
+        Math.max(...selectedIndexes) + SELECTION_CONTEXT_BLOCKS + 1,
+      )
+    : [];
+  return {
+    isEmptyDocument: isEmptyDocument(editor, documentBlocks),
+    selection: true,
+    selectedBlocks: await Promise.all(
+      selectedBlocks.map(async (block: any) => ({ id: `${String(block.id)}$`, block: await ownBlockHtml(editor, block) })),
+    ),
+    blocks: await Promise.all(
+      context
+        .filter((block) => !selectedIds.has(String(block?.id)))
+        .map(async (block) => ({ block: await ownBlockHtml(editor, block) })),
+    ),
+  };
+}
+
 export async function buildHtmlDocumentState(editor: any, useSelection = false): Promise<any> {
-  const flatten = (blocks: any[]): any[] => blocks.flatMap((block) => [block, ...(block?.children?.length ? flatten(block.children) : [])])
-  const documentBlocks = flatten(Array.isArray(editor?.document) ? editor.document : [])
-  const emptyDocument = isEmptyDocument(editor, documentBlocks)
   if (useSelection) {
-    const selected = editor?.getSelectionCutBlocks?.()?.blocks || editor?.getSelection?.()?.blocks || []
-    return {
-      isEmptyDocument: emptyDocument,
-      selection: true,
-      selectedBlocks: await Promise.all(selected.map(async (block: any) => ({ id: `${block.id}$`, block: await editor.blocksToHTMLLossy([block]) }))),
-      blocks: await Promise.all(documentBlocks.map(async (block: any) => ({ block: await editor.blocksToHTMLLossy([block]) }))),
-    }
+    return selectionDocumentState(editor, editor?.getSelectionCutBlocks?.()?.blocks || editor?.getSelection?.()?.blocks || [])
   }
+  const documentBlocks = flattenBlocks(editor?.document)
   // Cursor mode must use the menu anchor, not the live cursor. The composer
   // takes focus and the AI extension makes the editor read-only while a request
   // is running, so getTextCursorPosition() can resolve to a stale block.
   const cursor = resolveActiveBlockId(editor) || editor?.getTextCursorPosition?.()?.block?.id
-  const blocks = await Promise.all(documentBlocks.map(async (block: any) => ({ id: `${block.id}$`, block: await editor.blocksToHTMLLossy([block]) })))
+  const blocks = await Promise.all(documentBlocks.map(async (block: any) => ({ id: `${block.id}$`, block: await ownBlockHtml(editor, block) })))
   const withCursor = blocks.flatMap((block: any) => block.id === `${cursor}$` ? [block, { cursor: true }] : [block])
-  return { selection: false, isEmptyDocument: emptyDocument, blocks: withCursor }
+  return { selection: false, isEmptyDocument: isEmptyDocument(editor, documentBlocks), blocks: withCursor }
 }
 
 export function createSelectionAwareDocumentStateBuilder(defaultBuilder: any) {
   return async (request: any) => {
     if (!request?.selectedBlocks?.length) return defaultBuilder(request);
-    const editor = request.editor;
-    const flatten = (blocks: any[]): any[] => blocks.flatMap((block) => [
-      block,
-      ...(block?.children?.length ? flatten(block.children) : []),
-    ]);
-    const documentBlocks = flatten(Array.isArray(editor?.document) ? editor.document : []);
-    const selectedIds = new Set(
-      request.selectedBlocks.map((block: any) => String(block?.id ?? "")),
-    );
-    const selectedIndexes = documentBlocks
-      .map((block, index) => selectedIds.has(String(block?.id)) ? index : -1)
-      .filter((index) => index >= 0);
-    const first = selectedIndexes.length ? Math.min(...selectedIndexes) : 0;
-    const last = selectedIndexes.length ? Math.max(...selectedIndexes) : -1;
-    const contextBlocks = last >= 0
-      ? documentBlocks.slice(Math.max(0, first - 2), last + 3)
-      : [];
-    const convert = async (block: any) => ({
-      id: block.id,
-      block: await editor.blocksToHTMLLossy([block]),
-    });
-    const selectedBlocks = await Promise.all(
-      request.selectedBlocks.map(convert),
-    );
-    const selectedSet = new Set(selectedBlocks.map((block: any) => block.id));
-    const blocks = await Promise.all(
-      contextBlocks
-        .filter((block) => !selectedSet.has(block.id))
-        .map(async (block) => ({
-          block: await editor.blocksToHTMLLossy([block]),
-        })),
-    );
-    return {
-      isEmptyDocument: documentBlocks.length === 0,
-      selection: true,
-      selectedBlocks: selectedBlocks.map((block: any) => ({
-        ...block,
-        id: `${String(block.id)}$`,
-      })),
-      blocks,
-    };
+    return selectionDocumentState(request.editor, request.selectedBlocks);
   };
 }
 
@@ -531,15 +539,6 @@ const CONTEXT_BEFORE_RATIO = 0.4;
  *  text-only models never see a cursor otherwise. */
 export const CURSOR_MARKER = "<!-- cursor -->";
 
-/** Locate the anchored block's index in the flattened document so the window
- *  can be centred on it. Returns -1 when the block cannot be resolved. */
-function flattenBlocks(blocks: any[]): any[] {
-  return blocks.flatMap((block) => [
-    block,
-    ...(block?.children?.length ? flattenBlocks(block.children) : []),
-  ]);
-}
-
 /**
  * Cursor-anchored Markdown context for the text-only (non-tool) path.
  *
@@ -743,7 +742,7 @@ function updateIsMeaningful(
 ): { meaningful: boolean; block: string } | null {
   if (!op?.id || typeof op.block !== "string") return null;
   const clean = stripSuffix(op.id);
-  const current = scopeBlocks?.find((block) => block?.id === clean) ?? findBlock(editor, op.id);
+  const current = flattenBlocks(scopeBlocks).find((block) => block?.id === clean) ?? findBlock(editor, op.id);
   if (!current || typeof editor?.blocksToHTMLLossy !== "function") return null;
   const requestedHtml = sanitizeBlockHtml(editor, op.block);
   if (requestedHtml === null) return null;
