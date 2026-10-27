@@ -2,10 +2,11 @@
 //! content as Markdown.
 
 use futures_util::StreamExt;
-use reqwest::header::{ACCEPT, CONTENT_TYPE, LOCATION, USER_AGENT};
+use reqwest::header::{HeaderValue, ACCEPT, CONTENT_TYPE, LOCATION, RETRY_AFTER, USER_AGENT};
 use reqwest::Url;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use std::future::Future;
 use std::time::Duration;
 use tokio::sync::watch;
 
@@ -23,6 +24,15 @@ const MAX_PAGE_LINKS: usize = 100;
 const MAX_TITLE_CHARS: usize = 300;
 const ACCEPTED_TYPES: [&str; 4] = ["text/html", "application/xhtml+xml", "text/plain", "text/markdown"];
 const ACCEPT_HEADER: &str = "text/html,application/xhtml+xml,text/plain;q=0.9,text/markdown;q=0.9";
+/// Statuses that mean "not now" rather than "no": worth one more try.
+const RETRY_STATUSES: [u16; 5] = [408, 429, 502, 503, 504];
+/// Wait before the retry when the server does not say how long.
+const RETRY_DELAY: Duration = Duration::from_secs(1);
+/// Longest `Retry-After` honoured; a longer one fails at once instead of
+/// holding the model's turn.
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(5);
+/// Bytes of an unlabelled body inspected to decide whether it is HTML or text.
+const SNIFF_BYTES: usize = 512;
 
 /// Extracted page returned to the model.
 #[derive(Debug, Clone, PartialEq)]
@@ -58,11 +68,10 @@ pub async fn fetch(
         return Err(ToolError::url_not_in_context());
     }
     let requested = url.to_string();
+    // One retry for the whole fetch, not one per redirect hop.
+    let mut retry_left = true;
     for _ in 0..=MAX_REDIRECTS {
-        let response = tokio::select! {
-            response = send(&url) => response?,
-            _ = cancelled.changed() => return Err(cancelled_error()),
-        };
+        let response = send_retrying(|| send(&url), &mut retry_left, cancelled).await?;
         let status = response.status();
         if status.is_redirection() {
             url = redirect_target(&url, &response)?;
@@ -71,16 +80,23 @@ pub async fn fetch(
         if !status.is_success() {
             return Err(ToolError::url_not_accessible(format!("the page answered HTTP {}", status.as_u16())));
         }
-        let content_type = media_type(&response);
-        if !ACCEPTED_TYPES.contains(&content_type.as_str()) {
+        let labelled = media_type(&response);
+        if !labelled.is_empty() && !ACCEPTED_TYPES.contains(&labelled.as_str()) {
             return Err(ToolError::unsupported_content_type(format!(
-                "{} is not supported; only HTML and plain text pages can be read",
-                if content_type.is_empty() { "an unlabelled body" } else { content_type.as_str() }
+                "{labelled} is not supported; only HTML and plain text pages can be read"
             )));
         }
         let (body, body_truncated) = tokio::select! {
             body = read_capped(response) => body?,
             _ = cancelled.changed() => return Err(cancelled_error()),
+        };
+        // Some servers send pages without a Content-Type: judge them by their first bytes.
+        let content_type = if labelled.is_empty() {
+            sniff_media_type(&body)
+                .ok_or_else(|| ToolError::unsupported_content_type("an unlabelled body that is neither HTML nor text is not supported"))?
+                .to_string()
+        } else {
+            labelled
         };
         // HTML parsing is CPU-bound (up to MAX_BODY_BYTES): keep it off the async workers.
         let final_url = url.clone();
@@ -98,23 +114,112 @@ pub async fn fetch(
     Err(ToolError::url_not_accessible(format!("more than {MAX_REDIRECTS} redirects")))
 }
 
+/// One send attempt: the outer error is the guard refusing the host (never
+/// retried); the inner one is the transport failing, which `send_retrying` may
+/// try again.
+type Sent = Result<Result<reqwest::Response, reqwest::Error>, ToolError>;
+
 /// Resolve, pin and send one GET for a single hop.
-async fn send(url: &Url) -> Result<reqwest::Response, ToolError> {
+async fn send(url: &Url) -> Sent {
     let (host, addrs) = net_guard::resolve_public(url).await?;
     let client = net_guard::pinned_client(&host, &addrs, CONNECT_TIMEOUT, FETCH_TIMEOUT)?;
-    client
+    Ok(client
         .get(url.clone())
         .header(ACCEPT, ACCEPT_HEADER)
         .header(USER_AGENT, concat!("DocuBook-Editor/", env!("CARGO_PKG_VERSION"), " (+https://github.com/DocuBook/editor)"))
         .send()
-        .await
-        .map_err(|error| {
-            if error.is_timeout() {
-                ToolError::url_not_accessible("the page timed out")
-            } else {
-                ToolError::url_not_accessible("the page could not be reached")
+        .await)
+}
+
+/// Run `send`, and run it once more while `retry_left` holds when the server
+/// answers "not now" (`RETRY_STATUSES`) or the connection fails before a reply.
+///
+/// A timeout is not retried: it has already used the whole request budget.
+/// A `Retry-After` longer than `MAX_RETRY_WAIT`, or given as a date, is not
+/// waited out; the status goes back to the model instead.
+async fn send_retrying<F, Fut>(
+    mut send: F,
+    retry_left: &mut bool,
+    cancelled: &mut watch::Receiver<bool>,
+) -> Result<reqwest::Response, ToolError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Sent>,
+{
+    loop {
+        let sent = tokio::select! {
+            sent = send() => sent?,
+            _ = cancelled.changed() => return Err(cancelled_error()),
+        };
+        let wait = match &sent {
+            Ok(response) => retry_wait(response.status().as_u16(), response.headers().get(RETRY_AFTER)),
+            Err(error) => (!error.is_timeout()).then_some(RETRY_DELAY),
+        };
+        match wait {
+            Some(wait) if *retry_left => {
+                *retry_left = false;
+                drop(sent);
+                tokio::select! {
+                    _ = tokio::time::sleep(wait) => {}
+                    _ = cancelled.changed() => return Err(cancelled_error()),
+                }
             }
-        })
+            _ => {
+                return sent.map_err(|error| {
+                    if error.is_timeout() {
+                        ToolError::url_not_accessible("the page timed out")
+                    } else {
+                        ToolError::url_not_accessible("the page could not be reached")
+                    }
+                })
+            }
+        }
+    }
+}
+
+/// How long to wait before retrying a response with `status`, or `None` when
+/// it should not be retried.
+fn retry_wait(status: u16, retry_after: Option<&HeaderValue>) -> Option<Duration> {
+    if !RETRY_STATUSES.contains(&status) {
+        return None;
+    }
+    let Some(retry_after) = retry_after else {
+        return Some(RETRY_DELAY);
+    };
+    retry_after
+        .to_str()
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .filter(|wait| *wait <= MAX_RETRY_WAIT)
+}
+
+/// Media type of a body that came without a `Content-Type`: `text/html` when it
+/// opens like an HTML document (the WHATWG sniffing signatures), `text/plain`
+/// when its first bytes are UTF-8 text, `None` for anything else.
+fn sniff_media_type(body: &[u8]) -> Option<&'static str> {
+    let head = &body[..body.len().min(SNIFF_BYTES)];
+    let head = head.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(head);
+    let text = match std::str::from_utf8(head) {
+        Ok(text) => text,
+        // The sample may end inside a character; that is still text.
+        Err(error) if error.error_len().is_none() => std::str::from_utf8(&head[..error.valid_up_to()]).ok()?,
+        Err(_) => return None,
+    };
+    if text.chars().any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\x0c')) {
+        return None;
+    }
+    const TAGS: [&str; 17] = [
+        "<!doctype html", "<html", "<head", "<script", "<iframe", "<h1", "<div", "<font", "<table", "<a", "<style", "<title",
+        "<b", "<body", "<br", "<p", "<!--",
+    ];
+    let start = text.trim_start_matches([' ', '\t', '\n', '\r', '\x0c']).as_bytes();
+    let is_html = TAGS.iter().any(|tag| {
+        start.len() > tag.len()
+            && start[..tag.len()].eq_ignore_ascii_case(tag.as_bytes())
+            && matches!(start[tag.len()], b' ' | b'>')
+    });
+    Some(if is_html { "text/html" } else { "text/plain" })
 }
 
 /// Validate a redirect's `Location` with the same rules as the first URL.
@@ -478,6 +583,136 @@ npm run build</code></pre>
         let (text, truncated) = cap_bytes("aé".repeat(4), 4);
         assert_eq!(text, "aéa");
         assert!(truncated);
+    }
+
+    #[test]
+    fn only_transient_statuses_are_retried_and_long_waits_are_not_honoured() {
+        let header = |value: &'static str| HeaderValue::from_static(value);
+        assert_eq!(retry_wait(503, None), Some(RETRY_DELAY));
+        assert_eq!(retry_wait(429, Some(&header("2"))), Some(Duration::from_secs(2)));
+        assert_eq!(retry_wait(502, Some(&header(" 0 "))), Some(Duration::ZERO));
+        assert_eq!(retry_wait(429, Some(&header("60"))), None);
+        assert_eq!(retry_wait(503, Some(&header("Wed, 21 Oct 2026 07:28:00 GMT"))), None);
+        for status in [200, 301, 400, 403, 404, 500] {
+            assert_eq!(retry_wait(status, None), None, "{status} must not be retried");
+        }
+    }
+
+    #[test]
+    fn unlabelled_bodies_are_sniffed_as_html_text_or_refused() {
+        for html in ["\u{feff}  <!DOCTYPE html><html>", "<html lang=\"en\">", "\n<p>Hello", "<a href=\"/x\">x</a>", "<!-- built --><div>"] {
+            assert_eq!(sniff_media_type(html.as_bytes()), Some("text/html"), "{html:?}");
+        }
+        for text in ["# Title\n\nSome *markdown*.", "<abbr>not a sniffed tag</abbr>", "<?xml version=\"1.0\"?>", ""] {
+            assert_eq!(sniff_media_type(text.as_bytes()), Some("text/plain"), "{text:?}");
+        }
+        // A sample that ends inside a multi-byte character is still text.
+        let cut = format!("a{}", "é".repeat(SNIFF_BYTES)).into_bytes();
+        assert!(std::str::from_utf8(&cut[..SNIFF_BYTES]).is_err(), "the sample must end inside a character");
+        assert_eq!(sniff_media_type(&cut), Some("text/plain"));
+        assert_eq!(sniff_media_type(b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"), None);
+        assert_eq!(sniff_media_type(b"text\0with a NUL"), None);
+        assert_eq!(sniff_media_type(&[0xff, 0xfe, b'a', 0]), None);
+    }
+
+    /// Serve `responses` in order, one per connection, and count the requests.
+    async fn serve(responses: Vec<&'static str>) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}/page", listener.local_addr().unwrap());
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        tokio::spawn(async move {
+            for response in responses {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let mut head = Vec::new();
+                let mut buf = [0u8; 1024];
+                while !head.windows(4).any(|w| w == b"\r\n\r\n") {
+                    match socket.read(&mut buf).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => head.extend_from_slice(&buf[..n]),
+                    }
+                }
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (base, hits)
+    }
+
+    const UNAVAILABLE_NOW: &str = "HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+    const OK_PAGE: &str = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+
+    /// `send` without the SSRF guard, so the retry loop can run against loopback.
+    fn plain_send(url: &str) -> impl FnMut() -> std::pin::Pin<Box<dyn Future<Output = Sent> + Send>> {
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let url = url.to_string();
+        move || {
+            let request = client.get(&url);
+            Box::pin(async move { Ok(request.send().await) })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_transient_status_is_retried_once() {
+        let (_cancel, mut cancelled) = watch::channel(false);
+        let (url, hits) = serve(vec![UNAVAILABLE_NOW, OK_PAGE]).await;
+        let mut retry_left = true;
+        let response = send_retrying(plain_send(&url), &mut retry_left, &mut cancelled).await.unwrap();
+        assert_eq!((response.status().as_u16(), hits.load(std::sync::atomic::Ordering::SeqCst), retry_left), (200, 2, false));
+
+        // The retry is spent: a second "not now" goes back to the caller as is.
+        let (url, hits) = serve(vec![UNAVAILABLE_NOW, UNAVAILABLE_NOW, OK_PAGE]).await;
+        let mut retry_left = true;
+        let response = send_retrying(plain_send(&url), &mut retry_left, &mut cancelled).await.unwrap();
+        assert_eq!((response.status().as_u16(), hits.load(std::sync::atomic::Ordering::SeqCst)), (503, 2));
+        let (url, hits) = serve(vec![UNAVAILABLE_NOW, OK_PAGE]).await;
+        let response = send_retrying(plain_send(&url), &mut retry_left, &mut cancelled).await.unwrap();
+        assert_eq!((response.status().as_u16(), hits.load(std::sync::atomic::Ordering::SeqCst)), (503, 1), "one retry per fetch, not per hop");
+    }
+
+    #[tokio::test]
+    async fn a_long_retry_after_is_not_waited_out() {
+        let (_cancel, mut cancelled) = watch::channel(false);
+        let (url, hits) = serve(vec!["HTTP/1.1 429 Too Many Requests\r\nRetry-After: 120\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", OK_PAGE]).await;
+        let mut retry_left = true;
+        let response = send_retrying(plain_send(&url), &mut retry_left, &mut cancelled).await.unwrap();
+        assert_eq!((response.status().as_u16(), hits.load(std::sync::atomic::Ordering::SeqCst), retry_left), (429, 1, true));
+    }
+
+    #[tokio::test]
+    async fn a_refused_connection_is_retried_then_reported() {
+        let (_cancel, mut cancelled) = watch::channel(false);
+        // Bind and drop: nothing listens on the port any more.
+        let closed = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
+        let attempts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut inner = plain_send(&format!("http://{closed}/"));
+        let counter = attempts.clone();
+        let send = move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            inner()
+        };
+        let mut retry_left = true;
+        let error = send_retrying(send, &mut retry_left, &mut cancelled).await.unwrap_err();
+        assert_eq!((error.code, error.message.as_str()), ("url_not_accessible", "the page could not be reached"));
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn stop_cancels_the_wait_before_a_retry() {
+        let (cancel, mut cancelled) = watch::channel(false);
+        let (url, hits) = serve(vec!["HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n", OK_PAGE]).await;
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            let _ = cancel.send(true);
+        });
+        let started = std::time::Instant::now();
+        let mut retry_left = true;
+        let error = send_retrying(plain_send(&url), &mut retry_left, &mut cancelled).await.unwrap_err();
+        assert_eq!(error.message, "request cancelled");
+        assert!(started.elapsed() < RETRY_DELAY, "the {RETRY_DELAY:?} wait was not cut short");
+        assert_eq!(hits.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

@@ -218,7 +218,8 @@ On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` switches `
 | `tool_not_enabled` | The tool is off in Settings → AI → Web Tools |
 | `url_not_in_context` | The URL was not in your prompt, the document, or an earlier result — paste it into the prompt |
 | `url_not_allowed` | Blocked address, port, scheme, or credentials in the URL |
-| `unsupported_content_type` | The page is not HTML or text (PDFs and images are not read) |
+| `url_not_accessible` | The page could not be reached, timed out, or answered an error status. A busy server (408, 429, 502–504) or a dropped connection gets one more try after a short wait |
+| `unsupported_content_type` | The page is not HTML or text (PDFs and images are not read). A page sent without a `Content-Type` is read when it starts like HTML or text |
 | `unauthorized` | Tavily rejected the API key — save a new one |
 | `rate_limited` / `quota_exceeded` | The provider is throttling (Tavily's rate limit, or a SearXNG instance with `limiter: true` — set it to `false` in `settings.yml`), or the Tavily plan's credits are used up |
 | *SearXNG refused JSON output* | Add `json` under `search.formats` in the instance's `settings.yml` |
