@@ -192,7 +192,7 @@ export function TabBar({ sidebarOpen, isDesktop, sidebarToggleRef, onToggleSideb
 
       {showTabCount && tabsOpen && (
         <div ref={tabsMenuRef} id={TABS_MENU_ID} role="menu" aria-label="Open tabs" onKeyDown={onTabsMenuKeyDown}
-          className="ui-popover absolute inset-x-4 top-full z-100 mt-1 max-h-[60vh] overflow-y-auto overscroll-contain p-1 supports-[height:100dvh]:max-h-[min(60vh,calc(100dvh-6rem))]">
+          className="ui-popover absolute inset-x-4 top-full z-100 mt-1 max-h-[min(60vh,calc(100dvh-6rem))] overflow-y-auto overscroll-contain p-1">
           {tabs.map(open => (
             <button key={open.path} role="menuitemradio" aria-checked={open.path === activeTab} tabIndex={-1}
               onClick={() => selectTab(open.path)}

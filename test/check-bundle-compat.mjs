@@ -68,37 +68,9 @@ try {
   process.exit(1);
 }
 
-/** eslint-plugin-compat flags any regex literal containing `?<=` / `?<!`,
- *  even escaped (langium matches the text "(?<=" to detect lookarounds).
- *  A real lookbehind group is an unescaped `(?<=` / `(?<!` outside a
- *  character class — that one is a SyntaxError on Safari < 16.4 and must
- *  still fail. */
-function hasRealLookbehind(literal) {
-  // `/pattern/flags` for a regex literal; the plugin also reports the quoted
-  // string passed to `new RegExp("…")`, which may contain an unescaped `/`
-  // and whose own escapes (`"\\("` is one escaped paren) must be decoded first.
-  const pattern = literal.startsWith("/")
-    ? literal.slice(1, literal.lastIndexOf("/"))
-    : literal.slice(1, -1).replace(/\\(.)/g, "$1");
-  const stripped = pattern.replace(/\\./g, "").replace(/\[[^\]]*\]/g, "");
-  return /\(\?<[=!]/.test(stripped);
-}
-
-const sources = new Map();
 let jsCount = 0;
 for (const d of report.diagnostics) {
   const span = d.labels?.[0]?.span;
-  if (d.message.startsWith("Lookbehind ") && span) {
-    if (!sources.has(d.filename)) sources.set(d.filename, readFileSync(join(root, d.filename)));
-    // oxlint spans are UTF-8 byte offsets: slice the bytes, not the decoded string.
-    const literal = sources.get(d.filename).subarray(span.offset, span.offset + span.length).toString("utf8");
-    // A misaligned slice would silently drop the finding, so fail loudly instead.
-    if (!/^[/"'`]/.test(literal)) {
-      console.error(`Cannot locate the regex reported at ${d.filename}:${span.line}:${span.column}: got ${JSON.stringify(literal)}`);
-      process.exit(1);
-    }
-    if (!hasRealLookbehind(literal)) continue;
-  }
   jsCount++;
   failures.push(`JS  ${d.filename}:${span?.line}:${span?.column} — ${d.message}`);
 }

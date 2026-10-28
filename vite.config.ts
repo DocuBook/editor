@@ -1,38 +1,10 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { blocknoteMathWhitespaceCompat, tiptapViewProxyCompat } from './frontend/utils/viteCompatPlugins.js'
 
-/**
- * Safari 15 (WKWebView, Tauri on macOS 12) doesn't support regex lookbehind.
- * marked@16 has a runtime feature-detection (`new RegExp("(?<=1)(?<!1)")` in
- * try/catch → falls back to a lookbehind-free pattern), but rolldown's oxc
- * const-eval evaluates that regex on the build machine (Node 22, which DOES
- * support lookbehind) and folds the detection to `true` — baking the broken
- * regex into the bundle.
- *
- * Same spirit as frontend/utils/iteratorPolyfill.ts: fix at our layer, don't
- * patch node_modules. This plugin rewrites the detection into an array-join
- * form oxc can't statically evaluate, so the check runs at runtime: Safari 15
- * throws → marked uses its built-in fallback. Verified: `new RegExp(["(?<=",
- * "1)(?<!1)"].join(""))` is NOT folded by rolldown (see test in git history).
- */
-function markedLookbehindCompat(): Plugin {
-  return {
-    name: 'marked-lookbehind-compat',
-    transform(code, id) {
-      if (!id.includes('/marked/lib/marked.esm.js')) return
-      if (!code.includes('new RegExp("(?<=1)(?<!1)")')) return
-      return code.replace(
-        'new RegExp("(?<=1)(?<!1)")',
-        'new RegExp(["(?<=","1)(?<!1)"].join(""))',
-      )
-    },
-  }
-}
-
 export default defineConfig({
-  plugins: [react(), tailwindcss(), markedLookbehindCompat(), blocknoteMathWhitespaceCompat(), tiptapViewProxyCompat()],
+  plugins: [react(), tailwindcss(), blocknoteMathWhitespaceCompat(), tiptapViewProxyCompat()],
   clearScreen: false,
   server: { port: 5173, strictPort: true, proxy: { '/api': 'http://localhost:4282' } },
   envPrefix: ['VITE_', 'TAURI_'],
@@ -67,17 +39,14 @@ export default defineConfig({
     },
   },
   // Dev dep pre-bundle needs its own target: `build.target` only applies to
-  // the build, not to the dev optimizer. Without this, mermaid's `static {`
-  // blocks survive into the pre-bundle and WKWebView (Safari 15) chokes.
+  // the build, not to the dev optimizer. Without this, dependency syntax newer
+  // than the engine floor survives into the pre-bundle.
   optimizeDeps: {
-    // marked must flow through the dev transform pipeline (its lookbehind
-    // detection needs the runtime rewrite), so it is excluded from the
-    // pre-bundle. The @blocknote/tiptap compat transforms (shared module
+    // The @blocknote/tiptap compat transforms (shared module
     // frontend/utils/viteCompatPlugins) run DURING the rolldown optimize pass
-    // instead — deps stay pre-bundled (fast dev cold start) and the patches
-    // land in the bundled output (verified: the fresh prebundle contains the
-    // domAtPos guard + MATH whitespace preserve).
-    exclude: ['marked'],
+    // — deps stay pre-bundled (fast dev cold start) and the patches land in
+    // the bundled output (verified: the fresh prebundle contains the domAtPos
+    // guard + MATH whitespace preserve).
     rolldownOptions: {
       transform: { target: ['es2021', 'chrome151', 'safari17.6'] },
       // Merged with Vite's own dep plugin: our transform hooks run on the dep

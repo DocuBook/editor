@@ -372,10 +372,10 @@ html[data-toolbar-popup-open] .bn-editor {
      dialog (f60e9fa). The backdrop is itself a full-viewport fixed box, so the
      containing block it creates is the viewport's own rectangle.
 
-   Old-engine requirements (WKWebView on macOS 12, Safari 15.4+):
+   Old-engine requirements (WKWebView on macOS 12.7, Safari 17.6+):
    - `-webkit-backdrop-filter` is required, because unprefixed is Safari 18+.
      Prefixed and standard forms sit in separate @supports rules: Lightning CSS
-     transpiles against `safari15` and collapses a same-rule pair to -webkit-
+     transpiles against the build target and collapses a same-rule pair to -webkit-
      only, dropping blur on engines that have the standard property but not the
      alias. Separate rules survive to the build output.
    - Plain class selectors only, no `:has()` (Safari 15.4 has none).
@@ -809,13 +809,9 @@ body .code-block-language-empty {
    to the same `1.25rem` the `bottom-5` utility already sets.
 
    `dvh` tracks the visible viewport, so the shell never overflows and nothing has to
-   scroll. Gate: `dvh` is Chrome/Edge 108+, Safari 15.4+ (caniuse: viewport unit
-   variants) and the oldest targets here are safari15 / chrome105
-   (vite.config.ts build.target) — those keep the `h-screen` (100vh) fallback. */
-@supports (height: 100dvh) {
-    #root .editor-shell {
-        height: 100dvh;
-    }
+   scroll. `dvh` is below the engine floor (.browserslistrc), so it needs no gate. */
+#root .editor-shell {
+    height: 100dvh;
 }
 
 /* Tab boundaries live on the strip, not on every tab: a divider only between
@@ -850,22 +846,4 @@ body .code-block-language-empty {
 .tab-close-btn:hover {
   background: var(--color-surface-active);
   color: var(--color-foreground-quaternary);
-}
-
-/* Safari 15 / macOS 12 WKWebView does not support `overflow: clip`, which
-   BlockNote uses to visually collapse closed math/diagram source popups.
-   `hidden` keeps the editable source mounted, unlike `display: none`.
-   Deliberately NOT prefixed with `#root`: an id would outrank BlockNote's own
-   `.bn-source-block-popup` popup rules and re-open the #263 regression. These
-   selectors stay at the vendor's class specificity. */
-@supports not (overflow: clip) {
-  .bn-preview-with-source-popup:not([data-open="true"])
-    .bn-source-block-popup {
-    overflow: hidden;
-  }
-  .bn-code-block-source-popup-input-empty [data-node-view-content-react] {
-    display: inline-block;
-    min-height: 1em;
-    min-width: 1px;
-  }
 }

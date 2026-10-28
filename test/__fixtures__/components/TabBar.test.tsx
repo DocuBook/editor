@@ -252,9 +252,8 @@ describe('responsive tabs', () => {
     expect(badge.className).toContain('text-accent')
 
     const menu = document.querySelector<HTMLElement>('[role="menu"]')!
-    // dvh cap shrinks with the IME; 60vh is the no-dvh fallback.
-    expect(menu.className).toContain('max-h-[60vh]')
-    expect(menu.className).toContain('supports-[height:100dvh]:max-h-[min(60vh,calc(100dvh-6rem))]')
+    // dvh cap shrinks with the IME.
+    expect(menu.className).toContain('max-h-[min(60vh,calc(100dvh-6rem))]')
     expect(menu.className).toContain('overflow-y-auto')
     expect(menu.className).toContain('overscroll-contain')
 

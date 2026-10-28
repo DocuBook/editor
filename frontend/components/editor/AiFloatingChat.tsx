@@ -297,11 +297,11 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  readable) and shrink back when cleared. CSS max-h caps the growth; longer
    *  prompts scroll inside the box.
    *
-   *  caniuse audit (app minimum target = Safari 15): scrollHeight + style
+   *  caniuse audit (app minimum target = Safari 17.6): scrollHeight + style
    *  height + resize-none + overflow-y-auto are all baseline (~2015), so no
    *  gating needed. Deliberately NOT using `field-sizing: content` — Chrome
    *  123+ / Safari 18.4+ only, which would silently break the auto-grow on
-   *  Safari 15. */
+   *  Safari 17.6. */
   useEffect(() => {
     const el = inputRef.current
     if (!el) return
