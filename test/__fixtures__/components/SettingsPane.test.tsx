@@ -77,7 +77,7 @@ describe('SettingsPane — surfaces in the editor container', () => {
     // No fixed overlay captures pointer events — the workspace stays usable.
     const pane = document.querySelector('[data-testid="settings-container"]')!
     expect(pane.className).not.toContain('fixed')
-    expect(pane.className).not.toContain('bg-overlay')
+    expect(pane.className).not.toContain('ui-backdrop')
   })
 })
 

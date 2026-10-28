@@ -27,7 +27,7 @@ export default function PermissionDialog({ pane, message, detail, onClose }: Per
         role="alertdialog"
         aria-modal="true"
         aria-label="Permission required"
-        className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
+        className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop"
         onClick={onClose}
         onKeyDown={e => { if (e.key === 'Escape') onClose() }}
       >

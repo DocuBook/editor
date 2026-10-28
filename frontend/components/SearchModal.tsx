@@ -54,7 +54,7 @@ export default function SearchModal({ onClose, onSelect }: { onClose: () => void
   }, [selectedIdx])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] max-sm:px-4 bg-overlay" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[10vh] max-sm:px-4 ui-backdrop" onClick={onClose}>
       <div className="ui-dialog w-[500px] max-w-full max-h-[50vh] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
           <Search size={16} className="text-muted shrink-0" />

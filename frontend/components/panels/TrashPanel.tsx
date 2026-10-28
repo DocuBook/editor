@@ -94,7 +94,7 @@ export default function TrashPanel({ items, loading, error, busy, onRestore, onD
             role="alertdialog"
             aria-modal="true"
             aria-label="Delete permanently"
-            className="fixed inset-0 z-220 flex items-center justify-center bg-overlay"
+            className="fixed inset-0 z-220 flex items-center justify-center ui-backdrop"
             onClick={closeConfirm}
             onKeyDown={e => { if (e.key === 'Escape') closeConfirm() }}
           >

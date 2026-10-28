@@ -47,7 +47,7 @@ export default function VaultPicker({ onPick }: { onPick: (path: string | null) 
   const item = 'w-full flex items-center gap-2 px-3 py-2 rounded-md text-[13px] cursor-pointer bg-transparent border-none text-left transition-colors'
 
   return (
-    <div className="fixed inset-0 flex items-start justify-center pt-[20vh] bg-overlay" onClick={() => onPick(null)}>
+    <div className="fixed inset-0 flex items-start justify-center pt-[20vh] ui-backdrop" onClick={() => onPick(null)}>
       <div className="ui-dialog w-[360px] overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-4 py-3 border-b border-border-subtle">
           <h2 className="text-[13px] font-semibold text-foreground">Open Vault</h2>
