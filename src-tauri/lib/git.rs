@@ -31,7 +31,7 @@ pub async fn git_init(branch: String, state: State<'_, AppState>) -> Result<Stri
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).init(&branch)?)
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.init(&branch)?)
             .map_err(|e| e.to_string())
     })
     .await
@@ -99,7 +99,7 @@ pub async fn git_fetch(name: String, state: State<'_, AppState>) -> Result<(), S
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        crate::git::Git::open(&repo_path).fetch_remote(&name)
+        crate::git::Git::open_exclusive(&repo_path)?.fetch_remote(&name)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -117,7 +117,7 @@ pub async fn git_pull(
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).pull(request))
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.pull(request))
             .map_err(|e| e.to_string())
     })
     .await
@@ -137,7 +137,7 @@ pub async fn git_remote_merge(
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).merge_remote(&name, &branch))
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.merge_remote(&name, &branch))
             .map_err(|e| e.to_string())
     })
     .await
@@ -157,7 +157,7 @@ pub async fn git_rebase(
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).rebase_remote(&name, &branch))
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.rebase_remote(&name, &branch))
             .map_err(|e| e.to_string())
     })
     .await
@@ -172,7 +172,7 @@ pub async fn git_rebase_continue(state: State<'_, AppState>) -> Result<String, S
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).rebase_continue())
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.rebase_continue())
             .map_err(|e| e.to_string())
     })
     .await
@@ -187,7 +187,7 @@ pub async fn git_rebase_abort(state: State<'_, AppState>) -> Result<(), String> 
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        crate::git::Git::open(&repo_path).rebase_abort()
+        crate::git::Git::open_exclusive(&repo_path)?.rebase_abort()
     })
     .await
     .map_err(|e| e.to_string())?
@@ -201,7 +201,7 @@ pub async fn git_merge_abort(state: State<'_, AppState>) -> Result<(), String> {
         None => return Err("No vault".into()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        crate::git::Git::open(&repo_path).merge_abort()
+        crate::git::Git::open_exclusive(&repo_path)?.merge_abort()
     })
     .await
     .map_err(|e| e.to_string())?
@@ -251,7 +251,7 @@ pub async fn git_stage(path: Option<String>, state: State<'_, AppState>) -> Resu
         None => return Err("No vault".to_string()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        let g = crate::git::Git::open(&repo_path);
+        let g = crate::git::Git::open_exclusive(&repo_path)?;
         match path {
             Some(p) if !p.is_empty() => g.stage_path(&p),
             _ => g.add_all(),
@@ -269,7 +269,7 @@ pub async fn git_commit(message: String, state: State<'_, AppState>) -> Result<S
     };
     // git commit can take a moment on large repos — off the main thread.
     let res = tauri::async_runtime::spawn_blocking(move || {
-        serde_json::to_string(&crate::git::Git::open(&repo_path).commit_all(&message))
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.commit_all(&message))
             .map_err(|e| e.to_string())
     })
     .await
@@ -289,7 +289,7 @@ pub async fn git_push_only(
     // git push hits the network — off the main thread.
     let res = tauri::async_runtime::spawn_blocking(move || {
         let target = remote.as_deref().filter(|name| !name.is_empty());
-        serde_json::to_string(&crate::git::Git::open(&repo_path).push_checked_to(target))
+        serde_json::to_string(&crate::git::Git::open_exclusive(&repo_path)?.push_checked_to(target))
             .map_err(|e| e.to_string())
     })
     .await
@@ -320,7 +320,7 @@ pub async fn git_create_branch(branch: String, state: State<'_, AppState>) -> Re
         None => return Err("No vault".to_string()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        crate::git::Git::open(&repo_path).create_branch(&branch)
+        crate::git::Git::open_exclusive(&repo_path)?.create_branch(&branch)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -337,7 +337,7 @@ pub async fn git_checkout(
         None => return Err("No vault".to_string()),
     };
     tauri::async_runtime::spawn_blocking(move || {
-        crate::git::Git::open(&repo_path).checkout_branch(&branch, remote)
+        crate::git::Git::open_exclusive(&repo_path)?.checkout_branch(&branch, remote)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -357,12 +357,17 @@ pub async fn git_status(state: State<'_, AppState>) -> Result<String, String> {
         if !g.is_repo() {
             return serde_json::json!({ "isRepo": false, "hasRemote": false, "branch": "", "upstream": "", "status": "", "ahead": 0, "behind": 0, "pushTarget": "", "hasCommits": false, "remotes": [], "state": "clean" });
         }
-        let ws = g.status_with_branch().unwrap_or_default();
+        // A failed scan (corrupt or unreadable index) must not read as a
+        // clean tree: the panel shows `error` instead of "Working tree is clean".
+        let (ws, error) = match g.status_with_branch() {
+            Ok(ws) => (ws, String::new()),
+            Err(error) => (Default::default(), error),
+        };
         let remotes = g
             .remotes()
             .map(|list| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>())
             .unwrap_or_default();
-        serde_json::json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind, "pushTarget": g.push_target(), "hasCommits": g.has_commits(), "remotes": remotes, "state": ws.state })
+        serde_json::json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind, "pushTarget": g.push_target(), "hasCommits": g.has_commits(), "remotes": remotes, "state": ws.state, "error": error })
     })
     .await
     .map_err(|e| e.to_string())?;

@@ -429,7 +429,8 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             None => Err("No vault".into()),
         },
         "git_init" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-            Some(g) => serde_json::to_string(&g.init(&s("branch"))?).map_err(|e| e.to_string()),
+            Some(g) => serde_json::to_string(&git::Git::open_exclusive(&g.repo_path)?.init(&s("branch"))?)
+                .map_err(|e| e.to_string()),
             None => Err("No vault".into()),
         },
         "git_stage" => {
@@ -440,7 +441,7 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 Some(g) => g.repo_path.clone(),
                 None => return Err("No vault".to_string()),
             };
-            let g = git::Git::open(&repo_path);
+            let g = git::Git::open_exclusive(&repo_path)?;
             let r = if path.is_empty() {
                 g.add_all()
             } else {
@@ -457,12 +458,17 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 .map(|g| git::Git::open(&g.repo_path));
             match repo.as_ref() {
                 Some(g) if g.is_repo() => {
-                    let ws = g.status_with_branch().unwrap_or_default();
+                    // A failed scan (corrupt or unreadable index) must not read as a
+                    // clean tree: the panel shows `error` instead of "Working tree is clean".
+                    let (ws, error) = match g.status_with_branch() {
+                        Ok(ws) => (ws, String::new()),
+                        Err(error) => (Default::default(), error),
+                    };
                     let remotes = g
                         .remotes()
                         .map(|list| list.into_iter().map(|(name, _)| name).collect::<Vec<_>>())
                         .unwrap_or_default();
-                    Ok(json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind, "pushTarget": g.push_target(), "hasCommits": g.has_commits(), "remotes": remotes, "state": ws.state }).to_string())
+                    Ok(json!({ "isRepo": true, "hasRemote": g.has_remote(), "branch": ws.branch, "upstream": ws.upstream, "status": ws.status.trim(), "ahead": ws.ahead, "behind": ws.behind, "pushTarget": g.push_target(), "hasCommits": g.has_commits(), "remotes": remotes, "state": ws.state, "error": error }).to_string())
                 }
                 _ => Ok(r#"{"isRepo":false,"hasRemote":false,"branch":"","upstream":"","status":"","ahead":0,"behind":0,"pushTarget":"","hasCommits":false,"remotes":[],"state":"clean"}"#.to_string()),
             }

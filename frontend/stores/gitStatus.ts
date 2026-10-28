@@ -29,9 +29,12 @@ interface GitStatusState {
   /** In-progress git operation (`clean`, `merge`, `rebase`, …): the UI offers
    *  Continue/Abort instead of starting a new sync. */
   repoState: string
+  /** Status scan failure (corrupt or unreadable index) — '' when it succeeded.
+   *  Without it a failed scan would read as a clean working tree. */
+  error: string
 }
 
-const EMPTY_GIT_STATUS: GitStatusState = { isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean' }
+const EMPTY_GIT_STATUS: GitStatusState = { isRepo: false, hasRemote: false, branch: '', upstream: '', status: '', ahead: 0, behind: 0, pushTarget: '', hasCommits: false, remotes: [], repoState: 'clean', error: '' }
 
 export const useGitStatus = create<GitStatusState>(() => EMPTY_GIT_STATUS)
 
@@ -62,7 +65,7 @@ export async function pollGitStatus(force = false) {
     const s = await invoke<string>('git_status')
     if (!current()) return
     const d = JSON.parse(s)
-    useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', upstream: d.upstream || '', status: d.status || '', ahead: d.ahead ?? 0, behind: d.behind ?? 0, pushTarget: d.pushTarget || '', hasCommits: d.hasCommits === true, remotes: Array.isArray(d.remotes) ? d.remotes : [], repoState: d.state || 'clean' })
+    useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', upstream: d.upstream || '', status: d.status || '', ahead: d.ahead ?? 0, behind: d.behind ?? 0, pushTarget: d.pushTarget || '', hasCommits: d.hasCommits === true, remotes: Array.isArray(d.remotes) ? d.remotes : [], repoState: d.state || 'clean', error: typeof d.error === 'string' ? d.error : '' })
   } catch {
     if (!current()) return
     // Transient backend failure — let the next event probe again instead of
