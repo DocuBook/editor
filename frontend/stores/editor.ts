@@ -50,8 +50,10 @@ interface EditorState {
   setFlushEditor: (fn: (() => void | Promise<void>) | null) => void
   undo: () => void
   redo: () => void
-  /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it. */
-  openFile: (path: string, name: string, createIfMissing?: boolean) => Promise<void>
+  /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it.
+   *  missingIsDeleted: a missing file is expected (a deletion opened from the
+   *  Changes panel) — mark the tab deleted instead of showing an error. */
+  openFile: (path: string, name: string, createIfMissing?: boolean, missingIsDeleted?: boolean) => Promise<void>
   /** Open a file as a read-only diff in the editor surface (Changes panel).
    *  `staged` picks the range: index-vs-HEAD when true, worktree-vs-index when false. */
   openDiff: (path: string, name: string, staged: boolean) => Promise<void>
@@ -197,7 +199,7 @@ export const useEditorStore = create<EditorState>()(
   undo: () => { try { get().blockEditor?.undo() } catch {}; get().setUndoRedoState() },
   redo: () => { try { get().blockEditor?.redo() } catch {}; get().setUndoRedoState() },
 
-  openFile: async (path, name, createIfMissing = false) => {
+  openFile: async (path, name, createIfMissing = false, missingIsDeleted = false) => {
     if (get().activeTab !== path) {
       try { await get().flushEditor() } catch (error) {
         logger.error('editor_exit_failed', { error })
@@ -229,6 +231,12 @@ export const useEditorStore = create<EditorState>()(
           return
         } catch { /* fall through to the error state below */ }
       }
+      if (missingIsDeleted && notFound) {
+        // Deleted in the working tree: an empty, unsaveable tab is the truth.
+        get().setContent(path, '')
+        set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: null, deleted: true } : t) })
+        return
+      }
       console.error(e)
       // Failed read must not leave the tab stuck on "Loading…" — render an
       // empty editor instead, and tell the user why.
@@ -241,7 +249,8 @@ export const useEditorStore = create<EditorState>()(
   openDiff: async (path, name, staged) => {
     // Reuse the normal open path so tab identity, flushing, and the loaded
     // content all match a regular open — then flag this tab as a diff view.
-    await get().openFile(path, name)
+    // A deletion has no file to read — that is not an error for a diff.
+    await get().openFile(path, name, false, true)
     set({ tabs: get().tabs.map(t => t.path === path ? { ...t, view: 'diff', diffStaged: staged } : t) })
   },
 

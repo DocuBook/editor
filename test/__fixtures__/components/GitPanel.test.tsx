@@ -204,6 +204,19 @@ describe('GitPanel', () => {
     expect(document.body.textContent).toContain('Nothing here counts as staged until you do')
   })
 
+  it('shows quoted status paths readably and stages them by their quoted identity', async () => {
+    gitState.status = 'UU "notes/line\\nbreak.md"\n?? notes/trailing.md '
+    renderPanel()
+
+    expect(groupPaths('Changes')).toEqual(['notes/trailing.md '])
+    const stage = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+      .find(button => button.getAttribute('aria-label') === 'Stage notes/line\nbreak.md')!
+    act(() => stage.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_stage', { path: '"notes/line\\nbreak.md"' })
+  })
+
   it('stages a conflicted path and re-polls the status', async () => {
     gitState.status = 'UU notes/conflicted.md'
     renderPanel()

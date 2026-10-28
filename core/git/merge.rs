@@ -113,6 +113,9 @@ impl Git {
         }
         let conflicts = merge_conflicts(&repo)?;
         if !conflicts.is_empty() {
+            // Bind the marker to this exact MERGE_HEAD file. If writing fails
+            // the HEAD-pair marker still guards Abort, as before.
+            let _ = stamp_app_merge(&repo, original_head, annotated.id());
             return Ok((
                 false,
                 format!("{target} has conflicts — resolve them and commit"),
@@ -271,7 +274,13 @@ impl Git {
         if !matches!(repo.state(), RepositoryState::Merge) {
             return Err("No merge in progress".into());
         }
-        let (original_head, expected_merge_head) = app_merge_heads(&repo)?;
+        let (original_head, expected_merge_head, stamp) = app_merge_heads(&repo)?;
+        // The marker outlives a merge aborted with system Git; a later system
+        // merge of the same commits would match the HEAD pair, but it writes
+        // a new MERGE_HEAD file, so its fingerprint no longer matches.
+        if stamp.is_some() && stamp != merge_head_fingerprint(&repo) {
+            return Err("Cannot abort this merge because it was not started by this app".into());
+        }
         let current_head = repo
             .head()
             .and_then(|head| head.peel_to_commit())
@@ -308,7 +317,37 @@ fn mark_app_merge(repo: &Repository, original: git2::Oid, other: git2::Oid) -> R
     .map_err(|error| error.to_string())
 }
 
-fn app_merge_heads(repo: &Repository) -> Result<(git2::Oid, git2::Oid), String> {
+/** Re-write the marker with a fingerprint of the MERGE_HEAD file that
+ *  `repo.merge` just created (size, mtime, inode). */
+fn stamp_app_merge(repo: &Repository, original: git2::Oid, other: git2::Oid) -> Result<(), String> {
+    let stamp = merge_head_fingerprint(repo).ok_or("MERGE_HEAD is missing")?;
+    std::fs::write(
+        repo.path().join(APP_MERGE_MARKER),
+        format!("{original}\n{other}\n{stamp}\n"),
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn merge_head_fingerprint(repo: &Repository) -> Option<String> {
+    let metadata = std::fs::metadata(repo.path().join("MERGE_HEAD")).ok()?;
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos();
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&metadata);
+    #[cfg(not(unix))]
+    let inode = 0u64;
+    Some(format!("{}:{modified}:{inode}", metadata.len()))
+}
+
+/** Original HEAD, expected MERGE_HEAD, and the MERGE_HEAD fingerprint — absent
+ *  in a marker written before the merge ran or by an older app version. */
+type AppMergeHeads = (git2::Oid, git2::Oid, Option<String>);
+
+fn app_merge_heads(repo: &Repository) -> Result<AppMergeHeads, String> {
     let value = std::fs::read_to_string(repo.path().join(APP_MERGE_MARKER)).map_err(|_| {
         "Cannot abort this merge because it was not started by this app".to_string()
     })?;
@@ -321,7 +360,12 @@ fn app_merge_heads(repo: &Repository) -> Result<(git2::Oid, git2::Oid), String> 
         .next()
         .and_then(|value| value.parse().ok())
         .ok_or("Cannot abort this merge because its recovery marker is invalid")?;
-    Ok((original, other))
+    let stamp = lines
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    Ok((original, other, stamp))
 }
 
 fn short_commit(commit: &str) -> String {
@@ -594,5 +638,45 @@ mod tests {
             "local only\n"
         );
         cleanup(&[&dir, &seed_dir, &remote_dir]);
+    }
+
+    #[test]
+    fn merge_abort_refuses_a_system_merge_that_reuses_a_stale_marker() {
+        let (dir, g, remote_dir, clone_dir) =
+            diverged_pair("sync-merge-stale-marker", "theirs\n", "ours\n");
+        commit_file(&g, &dir, "b.md", "base b\n", "add b");
+        assert!(!g.merge_remote("origin", "main").success);
+
+        // The user aborts in a terminal (the app marker is left behind) ...
+        let repo = g.repository().unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        repo.reset(head.as_object(), ResetType::Hard, None).unwrap();
+        repo.cleanup_state().unwrap();
+        assert!(repo.path().join(APP_MERGE_MARKER).exists());
+
+        // ... then merges the same commit again with system Git, which keeps
+        // unrelated local edits. MERGE_HEAD is a new file with a new stamp.
+        let theirs = repo
+            .reference_to_annotated_commit(
+                &repo.find_reference("refs/remotes/origin/main").unwrap(),
+            )
+            .unwrap();
+        repo.merge(&[&theirs], None, None).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(repo.path().join("MERGE_HEAD"))
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
+            .unwrap();
+        std::fs::write(dir.join("b.md"), "local edit\n").unwrap();
+
+        let error = g.merge_abort().unwrap_err();
+        assert!(error.contains("not started by this app"), "{error}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("b.md")).unwrap(),
+            "local edit\n"
+        );
+        assert_eq!(g.repository().unwrap().state(), RepositoryState::Merge);
+        cleanup(&[&dir, &remote_dir, &clone_dir]);
     }
 }

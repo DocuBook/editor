@@ -10,6 +10,7 @@ pub mod diff;
 pub mod fetch;
 pub mod identity;
 pub mod merge;
+pub(crate) mod paths;
 pub mod pull;
 pub mod push;
 pub mod rebase;
@@ -191,7 +192,11 @@ pub(crate) fn remote_callbacks(config: Config) -> RemoteCallbacks<'static> {
                 }
             }
 
-            if let Some(home) = std::env::var_os("HOME") {
+            // Windows usually has no HOME; its profile directory holds `.ssh`.
+            if let Some(home) = std::env::var_os("HOME")
+                .filter(|home| !home.is_empty())
+                .or_else(|| std::env::var_os("USERPROFILE"))
+            {
                 let ssh_dir = std::path::PathBuf::from(home).join(".ssh");
                 let keys = ["id_ed25519", "id_ecdsa", "id_rsa"];
                 while ssh_attempt <= keys.len() {

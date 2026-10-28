@@ -193,7 +193,7 @@ pub(super) fn merge_conflicts(repo: &Repository) -> Result<Vec<String>, String> 
         let conflict = conflict.map_err(git_error)?;
         let entry = conflict.our.or(conflict.their).or(conflict.ancestor);
         if let Some(entry) = entry {
-            let path = String::from_utf8_lossy(&entry.path).to_string();
+            let path = super::paths::quote_path(&entry.path);
             if !path.is_empty() && !paths.contains(&path) {
                 paths.push(path);
             }

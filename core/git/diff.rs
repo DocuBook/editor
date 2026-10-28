@@ -5,7 +5,7 @@
 //! rendered patch — computing the line diff itself keeps the view dependency-free.
 
 use git2::Repository;
-use std::path::{Component, Path};
+use std::path::Path;
 
 use super::{git_error, Git};
 
@@ -17,14 +17,9 @@ impl Git {
     /// A side that does not exist — a newly added or deleted file — is an empty
     /// string, so the frontend renders it as a full insertion or deletion.
     pub fn diff_file(&self, path: &str, staged: bool) -> Result<String, String> {
-        let relative = Path::new(path);
-        if relative.is_absolute()
-            || relative
-                .components()
-                .any(|component| !matches!(component, Component::Normal(_)))
-        {
-            return Err("Diff path must be repository-relative".to_string());
-        }
+        let path = super::paths::repo_relative(path)
+            .map_err(|_| "Diff path must be repository-relative".to_string())?;
+        let path = path.as_path();
         let repo = self.repository()?;
         let head = repo.head().ok().and_then(|head| head.peel_to_tree().ok());
         let index = repo.index().map_err(git_error)?;
@@ -46,8 +41,8 @@ impl Git {
 }
 
 /// Blob content at `path` in `tree`, empty when the path is absent there.
-fn tree_content(repo: &Repository, tree: &git2::Tree<'_>, path: &str) -> String {
-    tree.get_path(Path::new(path))
+fn tree_content(repo: &Repository, tree: &git2::Tree<'_>, path: &Path) -> String {
+    tree.get_path(path)
         .ok()
         .and_then(|entry| entry.to_object(repo).ok())
         .and_then(|object| object.peel_to_blob().ok())
@@ -56,16 +51,16 @@ fn tree_content(repo: &Repository, tree: &git2::Tree<'_>, path: &str) -> String 
 }
 
 /// Staged blob content for `path`, empty when it is not in the index.
-fn index_content(repo: &Repository, index: &git2::Index, path: &str) -> String {
+fn index_content(repo: &Repository, index: &git2::Index, path: &Path) -> String {
     index
-        .get_path(Path::new(path), 0)
+        .get_path(path, 0)
         .and_then(|entry| repo.find_blob(entry.id).ok())
         .map(|blob| String::from_utf8_lossy(blob.content()).to_string())
         .unwrap_or_default()
 }
 
 /// Working-tree content for `path`, empty when the file is gone or unreadable.
-fn worktree_content(repo: &Repository, path: &str) -> String {
+fn worktree_content(repo: &Repository, path: &Path) -> String {
     let workdir = match repo.workdir().and_then(|dir| dir.canonicalize().ok()) {
         Some(workdir) => workdir,
         None => return String::new(),
