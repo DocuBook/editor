@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.6.0 — 2026-10-28
+
+
+### Features
+
+* **ai:** [@mention](https://github.com/mention) list stacks in the composer card like the other panels ([#369](https://github.com/DocuBook/editor/issues/369)) ([8ab9f7c](https://github.com/DocuBook/editor/commit/8ab9f7c7a00d9412c4e8c474d2ecf1bac9aef174))
+* **ai:** model picker stacks in the composer card, with search ([#366](https://github.com/DocuBook/editor/issues/366)) ([349ab05](https://github.com/DocuBook/editor/commit/349ab051dcd087862cda493065244de2c91a2986))
+* **ai:** prompt suggestions stack in the composer card like the model picker ([#367](https://github.com/DocuBook/editor/issues/367)) ([00dc477](https://github.com/DocuBook/editor/commit/00dc4773d37fb355b35d8264390ad8d518d33f53))
+* **ai:** web_fetch returns the page's main content as Markdown ([#356](https://github.com/DocuBook/editor/issues/356)) ([ca689bc](https://github.com/DocuBook/editor/commit/ca689bc89b68ca9e7a5fd396f617a9c294b10827))
+* **ui:** close button on every toast ([#371](https://github.com/DocuBook/editor/issues/371)) ([d3c5f15](https://github.com/DocuBook/editor/commit/d3c5f1577a1352ac2aeb525e61fcbe353e91b6d0))
+* **ui:** flat 2D panda app icon ([8245315](https://github.com/DocuBook/editor/commit/8245315e4257216978701f14646f94b63fee0769))
+
+
+### Bug Fixes
+
+* **ai:** a text-mode cursor reply can replace the caret block ([278f567](https://github.com/DocuBook/editor/commit/278f5672b86d58f5476ff9043c0b4e1499fadffb))
+* **ai:** carry a nested block's depth in the tool-mode document state ([69cf1a6](https://github.com/DocuBook/editor/commit/69cf1a6a87dc2ddb166636640b18e126fff46440))
+* **ai:** composer text uses the full width before wrapping ([#353](https://github.com/DocuBook/editor/issues/353)) ([0290caf](https://github.com/DocuBook/editor/commit/0290caf773c0b9bf9d50fc0d9e19e7221d25abd6))
+* **ai:** harden the [@mention](https://github.com/mention) prompt pipeline ([#370](https://github.com/DocuBook/editor/issues/370)) ([e11f4bf](https://github.com/DocuBook/editor/commit/e11f4bff82d68b9c55828f2918945768fa97d34d))
+* **ai:** keep the cursor marker outside a caret code block's fence ([76e7f4c](https://github.com/DocuBook/editor/commit/76e7f4c5ed18e3ba08680af40dc1f265adfc0a6b))
+* **ai:** list configured providers in a stable order ([#365](https://github.com/DocuBook/editor/issues/365)) ([f48161f](https://github.com/DocuBook/editor/commit/f48161f2880c87e611c734449c185022459db0a4))
+* **ai:** quick-prompt trigger shows a Zap icon, and X while the list is open ([#355](https://github.com/DocuBook/editor/issues/355)) ([c3eb4c8](https://github.com/DocuBook/editor/commit/c3eb4c83cd1f30666f54b3b4cd0098ef617bda4b))
+* **ai:** settings save keeps the right model, selection and key ([#364](https://github.com/DocuBook/editor/issues/364)) ([fed2d32](https://github.com/DocuBook/editor/commit/fed2d32bb4dfb781063305bc73433b49ac823e4c))
+* **ai:** show, scope and write nested blocks as themselves in tool mode ([353f46d](https://github.com/DocuBook/editor/commit/353f46d47494340741d49a5cfc0a19be2170a462))
+* **ai:** tell the model that deleting a block deletes its nested blocks ([d6885dd](https://github.com/DocuBook/editor/commit/d6885dd66e962a93d8ff6d6b848a8c03a9f86eb5))
+* **ai:** text mode writes a reply onto selected nested items too ([#361](https://github.com/DocuBook/editor/issues/361)) ([c8bfeb5](https://github.com/DocuBook/editor/commit/c8bfeb554a2aa6d6c2ce0d07078c5b2344a591a0))
+* **ai:** text-mode cursor context shows every block once, lists intact ([93eae88](https://github.com/DocuBook/editor/commit/93eae881a68457a4671e62419dc0eb650ebfe40f))
+* **ai:** tool mode marks the caret on its block, and writes into an empty one ([#363](https://github.com/DocuBook/editor/issues/363)) ([529b3ec](https://github.com/DocuBook/editor/commit/529b3ec3739a7ced644e30b4846dccc7d26fb7d7))
+* **ai:** web_fetch may read a seen http:// link over https:// ([#357](https://github.com/DocuBook/editor/issues/357)) ([f686b19](https://github.com/DocuBook/editor/commit/f686b19d59ff36864484ad6a4eb31982557d76e5))
+* **ai:** web_fetch retries a transient failure once and sniffs unlabelled pages ([#359](https://github.com/DocuBook/editor/issues/359)) ([1c1f3fb](https://github.com/DocuBook/editor/commit/1c1f3fbc09f63df1828715e809f691aa4f525b40))
+* **deps:** bump pulldown-cmark to 0.13.5 (RUSTSEC-2026-0414) ([0b82728](https://github.com/DocuBook/editor/commit/0b82728849626b159159a5f48e90e54c8bb0e5da))
+* **ui:** layer Mantine's CSS; frosted modal backdrop with opaque dialogs ([#368](https://github.com/DocuBook/editor/issues/368)) ([0c30efe](https://github.com/DocuBook/editor/commit/0c30efe45ebc4704a7fa7383b66161fb2107173b))
+
 ## v0.5.1 — 2026-10-26
 
 
