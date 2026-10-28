@@ -333,6 +333,35 @@ describe('GitPanel', () => {
     expect(pollGitStatus).toHaveBeenCalled()
   })
 
+  it('keeps Commit disabled while a merge still lists conflicted files', () => {
+    gitState.repoState = 'merge'
+    gitState.status = 'UU notes/conflicted.md\nM. notes/resolved.md'
+    renderPanel()
+
+    const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(input, 'merge origin/main')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="git-commit"]')!.disabled).toBe(true)
+  })
+
+  it('refreshes status when a merge fails without conflicts', async () => {
+    gitState.behind = 1
+    invoke.mockImplementation(async command => command === 'git_remote_merge'
+      ? syncOutcome({ success: false, message: '', error: 'merge step failed' })
+      : '')
+    renderPanel()
+    openSync()
+
+    act(() => syncButton('Merge')!.click())
+    await flush()
+
+    expect(document.body.textContent).toContain('merge step failed')
+    expect(pollGitStatus).toHaveBeenCalled()
+  })
+
   it('fills the commit textarea through the Rust-backed AI message flow', async () => {
     gitState.status = '.M notes/active.md'
     invoke.mockResolvedValue(JSON.stringify({ status: gitState.status }))

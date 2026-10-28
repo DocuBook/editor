@@ -155,12 +155,8 @@ pub(crate) fn clear_app_merge_marker(repo: &Repository) -> Result<(), String> {
 }
 
 pub(super) fn fast_forward(repo: &Repository, id: git2::Oid, target: &str) -> Result<(), String> {
-    let object = repo.find_object(id, None).map_err(git_error)?;
-    let mut checkout = CheckoutBuilder::new();
-    checkout.safe();
-    repo.checkout_tree(&object, Some(&mut checkout))
-        .map_err(git_error)?;
-
+    // Resolve the branch before touching the worktree: a detached HEAD must be
+    // refused while the index and files still match HEAD.
     let head_name = repo
         .find_reference("HEAD")
         .map_err(git_error)?
@@ -169,12 +165,22 @@ pub(super) fn fast_forward(repo: &Repository, id: git2::Oid, target: &str) -> Re
         .flatten()
         .map(|name| name.to_string())
         .ok_or("Cannot fast-forward a detached HEAD")?;
+
+    let object = repo.find_object(id, None).map_err(git_error)?;
+    let mut checkout = CheckoutBuilder::new();
+    checkout.safe();
+    repo.checkout_tree(&object, Some(&mut checkout))
+        .map_err(git_error)?;
     repo.reference(&head_name, id, true, "fast-forward merge")
         .map_err(git_error)?;
 
+    // Only adopt `target` as upstream when none is configured: pulling from a
+    // second remote must not silently redirect later pushes.
     if let Some(short) = head_name.strip_prefix("refs/heads/") {
         if let Ok(mut local) = repo.find_branch(short, BranchType::Local) {
-            let _ = local.set_upstream(Some(target));
+            if local.upstream().is_err() {
+                let _ = local.set_upstream(Some(target));
+            }
         }
     }
     Ok(())
@@ -248,5 +254,56 @@ mod tests {
         assert!(!merge.error.contains("No git remote"), "{}", merge.error);
 
         cleanup(&[&dir, &remote_dir]);
+    }
+
+    fn behind_origin(
+        tag: &str,
+    ) -> (
+        std::path::PathBuf,
+        crate::git::Git,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        use crate::git::test_util::{clone_local, commit_file};
+        let (remote_dir, url) = bare_remote(&format!("{tag}-remote"));
+        let (dir, g) = local_repo(tag);
+        commit_file(&g, &dir, "a.md", "base\n", "first");
+        attach_remote(&g, "origin", &url);
+        assert!(g.push_checked().success);
+        let (clone_dir, clone) = clone_local(&url, &format!("{tag}-clone"));
+        commit_file(&clone, &clone_dir, "b.md", "remote\n", "remote");
+        assert!(clone.push_checked().success);
+        (dir, g, remote_dir, clone_dir)
+    }
+
+    #[test]
+    fn fast_forward_keeps_an_existing_upstream() {
+        let (dir, g, remote_dir, clone_dir) = behind_origin("ff-upstream");
+        attach_remote(&g, "upstream", remote_dir.to_str().unwrap());
+        g.fetch_remote("upstream").unwrap();
+
+        let outcome = g.merge_remote("upstream", "main");
+        assert!(outcome.success, "{}{}", outcome.error, outcome.message);
+        let repo = g.repository().unwrap();
+        let main = repo.find_branch("main", git2::BranchType::Local).unwrap();
+        assert_eq!(
+            main.upstream().unwrap().name().unwrap(),
+            Some("origin/main")
+        );
+        cleanup(&[&dir, &remote_dir, &clone_dir]);
+    }
+
+    #[test]
+    fn fast_forward_on_detached_head_leaves_worktree_untouched() {
+        let (dir, g, remote_dir, clone_dir) = behind_origin("ff-detached");
+        g.fetch_remote("origin").unwrap();
+        let repo = g.repository().unwrap();
+        let head = repo.head().unwrap().target().unwrap();
+        repo.set_head_detached(head).unwrap();
+
+        assert!(!g.merge_remote("origin", "main").success);
+        assert!(!dir.join("b.md").exists());
+        assert!(g.status_with_branch().unwrap().status.trim().is_empty());
+        cleanup(&[&dir, &remote_dir, &clone_dir]);
     }
 }

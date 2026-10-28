@@ -95,6 +95,7 @@ impl Git {
         // still clean. Mark this exact HEAD pair before `repo.merge` so Abort can
         // reject merge states started by system Git instead of resetting them.
         crate::git::commit::ensure_commit_policy_supported(&repo)?;
+        crate::git::ensure_no_active_hooks(&repo, &["pre-merge-commit"])?;
         repo.author_from_env().map_err(identity_hint)?;
         repo.committer_from_env().map_err(identity_hint)?;
         let original_head = repo
@@ -170,7 +171,19 @@ impl Git {
             if !(status.is_wt_new() || status.is_wt_modified()) {
                 continue;
             }
-            let Ok(tree_entry) = tree.get_path(std::path::Path::new(path)) else {
+            let path_ref = std::path::Path::new(path);
+            // A remote *file* at a parent path (`notes` vs local `notes/a.md`)
+            // would replace the whole untracked directory on checkout.
+            if path_ref.ancestors().skip(1).any(|parent| {
+                !parent.as_os_str().is_empty()
+                    && tree
+                        .get_path(parent)
+                        .is_ok_and(|entry| entry.kind() != Some(git2::ObjectType::Tree))
+            }) {
+                blockers.push(path.to_string());
+                continue;
+            }
+            let Ok(tree_entry) = tree.get_path(path_ref) else {
                 continue; // the remote branch does not touch this path
             };
             let identical = tree_entry
@@ -474,7 +487,7 @@ mod tests {
 
         // The editor flow: resolve in the worktree, stage, commit.
         std::fs::write(dir.join("a.md"), "resolved\n").unwrap();
-        g.add_all().unwrap();
+        g.stage_path("a.md").unwrap();
         assert!(g.commit("resolve conflict").is_ok());
         let repo = g.repository().unwrap();
         assert_eq!(repo.state(), RepositoryState::Clean);
@@ -558,5 +571,28 @@ mod tests {
         assert!(g.status_with_branch().unwrap().status.trim().is_empty());
 
         cleanup(&[&dir, &remote_dir, &clone_dir]);
+    }
+
+    #[test]
+    fn adopt_refuses_a_remote_file_that_replaces_an_untracked_directory() {
+        let (remote_dir, url) = bare_remote("adopt-dir-file-remote");
+        let (seed_dir, seed) = local_repo("adopt-dir-file-seed");
+        commit_file(&seed, &seed_dir, "notes.md", "remote file\n", "seed");
+        attach_remote(&seed, "origin", &url);
+        assert!(seed.push_checked().success);
+
+        let (dir, g) = local_repo("adopt-dir-file");
+        attach_remote(&g, "origin", &url);
+        std::fs::create_dir_all(dir.join("notes.md")).unwrap();
+        std::fs::write(dir.join("notes.md/precious.md"), "local only\n").unwrap();
+        g.fetch_remote("origin").unwrap();
+
+        let outcome = g.merge_remote("origin", "main");
+        assert!(!outcome.success);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("notes.md/precious.md")).unwrap(),
+            "local only\n"
+        );
+        cleanup(&[&dir, &seed_dir, &remote_dir]);
     }
 }
