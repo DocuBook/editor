@@ -174,13 +174,21 @@ fn resolve_initial_branch(branch: &str) -> Result<String, String> {
 }
 
 fn clone_name(url: &str) -> Option<String> {
-    let name = url.trim_end_matches('/').rsplit('/').next()?.to_string();
+    // `git@host:repo.git` has no `/`: the name follows the scp-style colon.
+    let name = url
+        .trim_end_matches('/')
+        .rsplit(['/', ':'])
+        .next()?
+        .to_string();
     let name = name.strip_suffix(".git").unwrap_or(&name).to_string();
+    // Characters Windows rejects in a folder name would fail only after the
+    // network clone, so refuse them up front.
     if name.is_empty()
         || name == "."
         || name.contains("..")
-        || name.contains('/')
-        || name.contains('\\')
+        || name.chars().any(|c| {
+            c.is_control() || matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
     {
         None
     } else {
@@ -212,6 +220,8 @@ mod tests {
             Some("repo")
         );
         assert_eq!(clone_name("https://host/a/b/").as_deref(), Some("b"));
+        assert_eq!(clone_name("git@host:repo.git").as_deref(), Some("repo"));
+        assert_eq!(clone_name("https://host/a/b%3F|c"), None);
     }
 
     #[test]

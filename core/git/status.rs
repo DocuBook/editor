@@ -206,7 +206,7 @@ fn status_lines(repo: &Repository) -> Result<String, String> {
     let statuses = repo.statuses(Some(&mut options)).map_err(git_error)?;
     let mut lines = Vec::with_capacity(statuses.len());
     for entry in statuses.iter() {
-        let path = String::from_utf8_lossy(entry.path_bytes());
+        let path = super::paths::quote_path(entry.path_bytes());
         let status = entry.status();
         // `git rm --cached` on a file still on disk: report the staged
         // deletion as well as the untracked file, like `git status`.

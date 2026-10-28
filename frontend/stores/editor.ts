@@ -34,6 +34,9 @@ export interface Tab {
   view?: 'diff'
   /** Whether the diff compares against HEAD (staged) — `'diff'` view only. */
   diffStaged?: boolean
+  /** Path as git status reports it, for `git_diff_file` — the C-quoted form when
+   *  the name needed quoting, while `path` stays the real vault path. */
+  diffPath?: string
 }
 
 export type EditMode = 'editor' | 'code'
@@ -50,11 +53,17 @@ interface EditorState {
   setFlushEditor: (fn: (() => void | Promise<void>) | null) => void
   undo: () => void
   redo: () => void
-  /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it. */
-  openFile: (path: string, name: string, createIfMissing?: boolean) => Promise<void>
+  /** createIfMissing: Obsidian-style — a wiki link to a missing note creates it.
+   *  onMissing: a missing file is expected (diffs from the Changes panel) —
+   *  `'deleted'` marks the tab deleted, `'quiet'` leaves it empty; neither toasts. */
+  openFile: (path: string, name: string, createIfMissing?: boolean, onMissing?: 'deleted' | 'quiet') => Promise<void>
   /** Open a file as a read-only diff in the editor surface (Changes panel).
-   *  `staged` picks the range: index-vs-HEAD when true, worktree-vs-index when false. */
-  openDiff: (path: string, name: string, staged: boolean) => Promise<void>
+   *  `staged` picks the range: index-vs-HEAD when true, worktree-vs-index when false.
+   *  `deleted`: git status reports a deletion, so a missing file marks the tab
+   *  deleted — a failed read alone cannot tell.
+   *  `gitPath`: the status form of `path` (quoted when the name needed it), used
+   *  for the diff; `path` is the decoded vault path the tab is keyed by. */
+  openDiff: (path: string, name: string, staged: boolean, deleted?: boolean, gitPath?: string) => Promise<void>
   switchTab: (path: string) => Promise<void>
   /** Rename an open file: remaps the tab's path+name so saves, git status and
    *  wiki backlinks keep targeting the NEW path. Flushes first so in-flight WYSIWYG
@@ -197,7 +206,7 @@ export const useEditorStore = create<EditorState>()(
   undo: () => { try { get().blockEditor?.undo() } catch {}; get().setUndoRedoState() },
   redo: () => { try { get().blockEditor?.redo() } catch {}; get().setUndoRedoState() },
 
-  openFile: async (path, name, createIfMissing = false) => {
+  openFile: async (path, name, createIfMissing = false, onMissing) => {
     if (get().activeTab !== path) {
       try { await get().flushEditor() } catch (error) {
         logger.error('editor_exit_failed', { error })
@@ -205,7 +214,7 @@ export const useEditorStore = create<EditorState>()(
         return
       }
     }
-    if (get().tabs.find(t => t.path === path)) { set({ activeTab: path, tabs: get().tabs.map(t => t.path === path ? { ...t, view: undefined, diffStaged: undefined } : t) }); return }
+    if (get().tabs.find(t => t.path === path)) { set({ activeTab: path, tabs: get().tabs.map(t => t.path === path ? { ...t, view: undefined, diffStaged: undefined, diffPath: undefined } : t) }); return }
     set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false, baseVersion: null }], activeTab: path })
     // Binary/image files are previewed via asset URL, never read as UTF-8 text.
     if (isBinaryPath(path)) return
@@ -229,6 +238,12 @@ export const useEditorStore = create<EditorState>()(
           return
         } catch { /* fall through to the error state below */ }
       }
+      if (onMissing && notFound) {
+        // Deleted in the working tree: an empty, unsaveable tab is the truth.
+        get().setContent(path, '')
+        set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: null, deleted: onMissing === 'deleted' } : t) })
+        return
+      }
       console.error(e)
       // Failed read must not leave the tab stuck on "Loading…" — render an
       // empty editor instead, and tell the user why.
@@ -238,11 +253,15 @@ export const useEditorStore = create<EditorState>()(
     }
   },
 
-  openDiff: async (path, name, staged) => {
+  openDiff: async (path, name, staged, deleted = false, gitPath = path) => {
     // Reuse the normal open path so tab identity, flushing, and the loaded
     // content all match a regular open — then flag this tab as a diff view.
-    await get().openFile(path, name)
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, view: 'diff', diffStaged: staged } : t) })
+    // A deletion has no file to read — that is not an error for a diff. Nor is
+    // a name that is not valid UTF-8: only its quoted status form addresses it,
+    // which git understands and the file commands do not.
+    const unaddressable = path === gitPath && gitPath.startsWith('"')
+    await get().openFile(path, name, false, deleted ? 'deleted' : unaddressable ? 'quiet' : undefined)
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, view: 'diff', diffStaged: staged, diffPath: gitPath } : t) })
   },
 
   switchTab: async (path) => {

@@ -204,6 +204,19 @@ describe('GitPanel', () => {
     expect(document.body.textContent).toContain('Nothing here counts as staged until you do')
   })
 
+  it('shows quoted status paths readably and stages them by their quoted identity', async () => {
+    gitState.status = 'UU "notes/line\\nbreak.md"\n?? notes/trailing.md '
+    renderPanel()
+
+    expect(groupPaths('Changes')).toEqual(['notes/trailing.md '])
+    const stage = Array.from(document.querySelectorAll<HTMLButtonElement>('button[aria-label]'))
+      .find(button => button.getAttribute('aria-label') === 'Stage notes/line\nbreak.md')!
+    act(() => stage.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_stage', { path: '"notes/line\\nbreak.md"' })
+  })
+
   it('stages a conflicted path and re-polls the status', async () => {
     gitState.status = 'UU notes/conflicted.md'
     renderPanel()
@@ -236,7 +249,7 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false, false, 'notes/sub/conflicted.md')
   })
 
   it('leaves an ordinary conflict-free merge conflict row unstaged', () => {
@@ -256,7 +269,18 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false, false, 'notes/sub/deep.md')
+  })
+
+  it('tells the diff a row is a deletion only when status says so', () => {
+    gitState.status = '.D notes/gone.md\n.M "notes/ lead.md"'
+    renderPanel()
+
+    act(() => rowByPath('notes/gone.md')!.click())
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/gone.md', 'gone.md', false, true, 'notes/gone.md')
+    act(() => rowByPath('notes/ lead.md')!.click())
+    // Opened under the real vault path; git keeps the quoted status form.
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/ lead.md', ' lead.md', false, false, '"notes/ lead.md"')
   })
 
   it('uses the Sync menu instead of a standalone refresh action', () => {

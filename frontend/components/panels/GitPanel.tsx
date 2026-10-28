@@ -9,6 +9,7 @@ import { useClickOutside } from '../../hooks/useClickOutside'
 import SidebarPopover from '../SidebarPopover'
 import OverlayPortal from '../OverlayPortal'
 import { autoCommitMessage } from '../../utils/commitMessage'
+import { displayGitPath, vaultPathOf } from '../../utils/gitPath'
 import { toast } from 'sonner'
 
 interface GitEntry {
@@ -103,12 +104,21 @@ interface PullOutcome extends SyncOutcome {
   behind: number
 }
 
+/** Paths are taken verbatim: names with edge spaces are real, and the backend
+ *  quotes any path that would not survive this line format. */
 const parseStatus = (status: string): GitEntry[] => status
   .split('\n')
-  .map(line => line.replace(/\s+$/, ''))
+  .map(line => line.replace(/\r$/, ''))
   .filter(line => line.length >= 4)
-  .map(line => ({ x: line[0], y: line[1], path: line.slice(3).trim() }))
+  .map(line => ({ x: line[0], y: line[1], path: line.slice(3) }))
   .filter(entry => entry.path.length > 0)
+
+/** File name and folder of a status path, for display. */
+const pathParts = (path: string) => {
+  const shown = displayGitPath(path)
+  const slash = shown.lastIndexOf('/')
+  return { shown, name: shown.slice(slash + 1) || shown, folder: slash > 0 ? shown.slice(0, slash) : '' }
+}
 
 const statusLabel = (entry: GitEntry) => {
   const code = entry.y !== '.' ? entry.y : entry.x
@@ -124,16 +134,24 @@ const conflictOf = (entry: GitEntry) =>
   entry.x === 'U' || entry.y === 'U' ||
   (entry.x === entry.y && (entry.x === 'A' || entry.x === 'D'))
 
+const deletedOf = (entry: GitEntry) => entry.x === 'D' || entry.y === 'D'
+
+type EditorOpenDiff = ReturnType<typeof useEditorStore.getState>['openDiff']
+
+/** Open a row's diff under its real vault path (so the file can be read and the
+ *  tab matches one opened from the tree), keeping the status form for git. */
+const openEntryDiff = (openDiff: EditorOpenDiff, entry: GitEntry, name: string, staged: boolean) =>
+  openDiff(vaultPathOf(entry.path) ?? entry.path, name, staged, deletedOf(entry), entry.path)
+
 function ChangeRow({ entry, staged }: { entry: GitEntry; staged: boolean }) {
   const openDiff = useEditorStore(state => state.openDiff)
-  const name = entry.path.split('/').pop() || entry.path
-  const folder = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : ''
+  const { shown, name, folder } = pathParts(entry.path)
 
   return (
     <button
       type="button"
-      onClick={() => void openDiff(entry.path, name, staged)}
-      title={entry.path}
+      onClick={() => void openEntryDiff(openDiff, entry, name, staged)}
+      title={shown}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left cursor-pointer hover:bg-surface-active"
     >
       <span className={'flex size-5 shrink-0 items-center justify-center rounded text-[10px] font-mono ' + (staged ? 'bg-success-surface text-success' : 'bg-warning-surface text-warning')}>
@@ -153,15 +171,14 @@ function ChangeRow({ entry, staged }: { entry: GitEntry; staged: boolean }) {
  *  — the row opens the worktree-vs-index diff and adds an explicit Stage action. */
 function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (path: string) => void; disabled: boolean }) {
   const openDiff = useEditorStore(state => state.openDiff)
-  const name = entry.path.split('/').pop() || entry.path
-  const folder = entry.path.includes('/') ? entry.path.slice(0, entry.path.lastIndexOf('/')) : ''
+  const { shown, name, folder } = pathParts(entry.path)
 
   return (
     <div className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-active">
       <button
         type="button"
-        onClick={() => void openDiff(entry.path, name, false)}
-        title={entry.path}
+        onClick={() => void openEntryDiff(openDiff, entry, name, false)}
+        title={shown}
         className="flex min-w-0 flex-1 items-center gap-2 bg-transparent border-none p-0 text-left cursor-pointer text-foreground-secondary hover:text-foreground"
       >
         <span className="flex size-5 shrink-0 items-center justify-center rounded bg-danger-surface text-[10px] font-mono text-danger">U</span>
@@ -175,7 +192,7 @@ function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (
         type="button"
         onClick={() => onStage(entry.path)}
         disabled={disabled}
-        aria-label={`Stage ${entry.path}`}
+        aria-label={`Stage ${shown}`}
         title="Mark the conflicted file as resolved (stage it)"
         className="shrink-0 rounded border-none bg-surface-hover px-2 py-0.5 text-[10px] text-foreground-secondary cursor-pointer whitespace-nowrap hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
       >

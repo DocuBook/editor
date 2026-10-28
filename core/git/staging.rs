@@ -1,6 +1,6 @@
 //! Index staging through libgit2.
 
-use std::path::{Component, Path};
+use std::path::Path;
 
 use git2::IndexAddOption;
 
@@ -37,16 +37,11 @@ impl Git {
         index.write().map_err(git_error)
     }
 
-    /// Stage one repository-relative path, including deletion of a tracked file.
+    /// Stage one repository-relative path (plain or quoted as in status),
+    /// including deletion of a tracked file.
     pub fn stage_path(&self, path: &str) -> Result<(), String> {
-        let path = Path::new(path);
-        if path.as_os_str().is_empty()
-            || path
-                .components()
-                .any(|part| !matches!(part, Component::Normal(_)))
-        {
-            return Err("Invalid repository-relative path".into());
-        }
+        let path = super::paths::repo_relative(path)?;
+        let path = path.as_path();
 
         let repo = self.repository()?;
         let workdir = repo.workdir().ok_or("Repository has no working tree")?;
@@ -319,5 +314,47 @@ mod tests {
             .unwrap();
         assert_eq!(entry.mode, 0o120000);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unusual_file_names_round_trip_through_status_stage_and_diff() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let (dir, g) = crate::git::test_util::local_repo("stage-quoted");
+        let mut names: Vec<&[u8]> = Vec::new();
+        for name in [b"line\nbreak.md" as &[u8], b"caf\xe9.md", b" padded.md"] {
+            match std::fs::write(dir.join(std::ffi::OsStr::from_bytes(name)), "body\n") {
+                Ok(()) => names.push(name),
+                // APFS refuses non-UTF-8 names (EILSEQ), so that case only runs elsewhere.
+                Err(e)
+                    if cfg!(target_os = "macos")
+                        && std::str::from_utf8(name).is_err()
+                        && e.raw_os_error() == Some(92) => {}
+                Err(e) => panic!("{e}"),
+            }
+        }
+
+        let status = g.status_with_branch().unwrap().status;
+        let lines: Vec<&str> = status
+            .lines()
+            .filter(|line| line.starts_with("?? \""))
+            .collect();
+        assert_eq!(lines.len(), names.len(), "{status}");
+        for line in lines {
+            let path = &line[3..];
+            assert!(path.starts_with('"'), "{line}");
+            g.stage_path(path).unwrap();
+            let diff: serde_json::Value =
+                serde_json::from_str(&g.diff_file(path, true).unwrap()).unwrap();
+            assert_eq!(diff["new"], "body\n", "{line}");
+        }
+        let index = g.repository().unwrap().index().unwrap();
+        for name in names {
+            assert!(index
+                .get_path(std::path::Path::new(std::ffi::OsStr::from_bytes(name)), 0)
+                .is_some());
+        }
+        crate::git::test_util::cleanup(&[&dir]);
     }
 }
