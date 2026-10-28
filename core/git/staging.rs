@@ -322,9 +322,17 @@ mod tests {
         use std::os::unix::ffi::OsStrExt;
 
         let (dir, g) = crate::git::test_util::local_repo("stage-quoted");
-        let names: [&[u8]; 3] = [b"line\nbreak.md", b"caf\xe9.md", b" padded.md"];
-        for name in names {
-            std::fs::write(dir.join(std::ffi::OsStr::from_bytes(name)), "body\n").unwrap();
+        let mut names: Vec<&[u8]> = Vec::new();
+        for name in [b"line\nbreak.md" as &[u8], b"caf\xe9.md", b" padded.md"] {
+            match std::fs::write(dir.join(std::ffi::OsStr::from_bytes(name)), "body\n") {
+                Ok(()) => names.push(name),
+                // APFS refuses non-UTF-8 names (EILSEQ), so that case only runs elsewhere.
+                Err(e)
+                    if cfg!(target_os = "macos")
+                        && std::str::from_utf8(name).is_err()
+                        && e.raw_os_error() == Some(92) => {}
+                Err(e) => panic!("{e}"),
+            }
         }
 
         let status = g.status_with_branch().unwrap().status;
@@ -332,7 +340,7 @@ mod tests {
             .lines()
             .filter(|line| line.starts_with("?? \""))
             .collect();
-        assert_eq!(lines.len(), 3, "{status}");
+        assert_eq!(lines.len(), names.len(), "{status}");
         for line in lines {
             let path = &line[3..];
             assert!(path.starts_with('"'), "{line}");
