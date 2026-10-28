@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { displayGitPath } from '../../../frontend/utils/gitPath'
+import { displayGitPath, vaultPathOf } from '../../../frontend/utils/gitPath'
 
 describe('displayGitPath', () => {
   it('leaves plain and Unicode paths untouched', () => {
@@ -21,5 +21,12 @@ describe('displayGitPath', () => {
   it('returns malformed quoting unchanged', () => {
     expect(displayGitPath('"bad\\q"')).toBe('"bad\\q"')
     expect(displayGitPath('"')).toBe('"')
+  })
+
+  it('maps status paths to the vault path the file commands can read', () => {
+    expect(vaultPathOf('notes/a.md')).toBe('notes/a.md')
+    expect(vaultPathOf('" padded.md"')).toBe(' padded.md')
+    expect(vaultPathOf('"dir/caf\\303\\251.md"')).toBe('dir/café.md')
+    expect(vaultPathOf('"caf\\351.md"')).toBeNull()
   })
 })

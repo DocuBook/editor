@@ -249,7 +249,7 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false, false)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false, false, 'notes/sub/conflicted.md')
   })
 
   it('leaves an ordinary conflict-free merge conflict row unstaged', () => {
@@ -269,7 +269,7 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false, false)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false, false, 'notes/sub/deep.md')
   })
 
   it('tells the diff a row is a deletion only when status says so', () => {
@@ -277,9 +277,10 @@ describe('GitPanel', () => {
     renderPanel()
 
     act(() => rowByPath('notes/gone.md')!.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/gone.md', 'gone.md', false, true)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/gone.md', 'gone.md', false, true, 'notes/gone.md')
     act(() => rowByPath('notes/ lead.md')!.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('"notes/ lead.md"', ' lead.md', false, false)
+    // Opened under the real vault path; git keeps the quoted status form.
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/ lead.md', ' lead.md', false, false, '"notes/ lead.md"')
   })
 
   it('uses the Sync menu instead of a standalone refresh action', () => {

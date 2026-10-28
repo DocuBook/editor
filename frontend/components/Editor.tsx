@@ -130,7 +130,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
   /** Shared scroll container — all modes use the same container. */
   let inner: ReactNode
   if (diffView) {
-    inner = <DiffViewer key={file.path} path={file.path} name={file.name} staged={!!file.diffStaged} />
+    inner = <DiffViewer key={file.path} path={file.diffPath ?? file.path} name={file.name} staged={!!file.diffStaged} />
   } else if (kind === 'binary') {
     inner = <ImagePreview fileName={file.name} vaultPath={vaultPath} relPath={file.path} />
   } else if (file.content == null) {

@@ -9,7 +9,7 @@ import { useClickOutside } from '../../hooks/useClickOutside'
 import SidebarPopover from '../SidebarPopover'
 import OverlayPortal from '../OverlayPortal'
 import { autoCommitMessage } from '../../utils/commitMessage'
-import { displayGitPath } from '../../utils/gitPath'
+import { displayGitPath, vaultPathOf } from '../../utils/gitPath'
 import { toast } from 'sonner'
 
 interface GitEntry {
@@ -136,6 +136,13 @@ const conflictOf = (entry: GitEntry) =>
 
 const deletedOf = (entry: GitEntry) => entry.x === 'D' || entry.y === 'D'
 
+type EditorOpenDiff = ReturnType<typeof useEditorStore.getState>['openDiff']
+
+/** Open a row's diff under its real vault path (so the file can be read and the
+ *  tab matches one opened from the tree), keeping the status form for git. */
+const openEntryDiff = (openDiff: EditorOpenDiff, entry: GitEntry, name: string, staged: boolean) =>
+  openDiff(vaultPathOf(entry.path) ?? entry.path, name, staged, deletedOf(entry), entry.path)
+
 function ChangeRow({ entry, staged }: { entry: GitEntry; staged: boolean }) {
   const openDiff = useEditorStore(state => state.openDiff)
   const { shown, name, folder } = pathParts(entry.path)
@@ -143,7 +150,7 @@ function ChangeRow({ entry, staged }: { entry: GitEntry; staged: boolean }) {
   return (
     <button
       type="button"
-      onClick={() => void openDiff(entry.path, name, staged, deletedOf(entry))}
+      onClick={() => void openEntryDiff(openDiff, entry, name, staged)}
       title={shown}
       className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left cursor-pointer hover:bg-surface-active"
     >
@@ -170,7 +177,7 @@ function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (
     <div className="flex items-center gap-2 rounded px-2 py-1.5 hover:bg-surface-active">
       <button
         type="button"
-        onClick={() => void openDiff(entry.path, name, false, deletedOf(entry))}
+        onClick={() => void openEntryDiff(openDiff, entry, name, false)}
         title={shown}
         className="flex min-w-0 flex-1 items-center gap-2 bg-transparent border-none p-0 text-left cursor-pointer text-foreground-secondary hover:text-foreground"
       >
