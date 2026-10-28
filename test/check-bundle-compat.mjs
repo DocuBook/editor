@@ -41,8 +41,6 @@ const cssFiles = files.filter((f) => f.endsWith(".css")).map((f) => join("dist/a
  * Ignored per feature, so review a new usage before relying on this list.
  */
 const CSS_IGNORE = {
-  // Scroll chaining only (Mantine ScrollArea, TabBar `overscroll-contain`).
-  "css-overscroll-behavior": "cosmetic: scroll chaining past the end",
   // No touch input on macOS WKWebView; desktop browsers ignore it the same way.
   "css-touch-action": "no-op without touch input",
   // Mantine layout trims; text simply keeps its default line box.
@@ -52,10 +50,6 @@ const CSS_IGNORE = {
   // BlockNote numbered lists store attr() in a custom property and read it
   // back in `content`, where attr() is supported everywhere.
   "css3-attr": "attr() is consumed by `content`",
-  // Only Mantine Pagination and AppShell use these; the app renders neither.
-  // Our own dvh layout is @supports-gated in frontend/index.css.
-  "css-container-queries": "Mantine Pagination only (unused)",
-  "viewport-unit-variants": "Mantine AppShell only (unused)",
 };
 
 const failures = [];

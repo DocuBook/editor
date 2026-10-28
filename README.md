@@ -21,7 +21,7 @@ docker run -d --name docubook -p 8080:8080 \
   ghcr.io/docubook/editor
 ```
 
-Open [http://localhost:8080](http://localhost:8080) and create the admin account. The setup wizard asks for a one-time token that the server prints at first boot:
+Open [http://localhost:8080](http://localhost:8080) in Chrome 151+ or Safari 17.6+ (older browsers are not supported) and create the admin account. The setup wizard asks for a one-time token that the server prints at first boot:
 
 ```bash
 docker logs docubook | grep "one-time setup token"
@@ -154,7 +154,7 @@ Download the appropriate DMG from [Releases](https://github.com/DocuBook/editor/
 | `DocuBook Editor_<version>_aarch64.dmg` | Apple Silicon                         |
 | `DocuBook Editor_<version>_x64.dmg`     | Intel, or Apple Silicon via Rosetta 2 |
 
-Requires macOS 12.3 (Monterey) or later.
+Requires macOS 12.7 (Monterey) or later, with Safari updated to 17.6 or later. The app renders through the system WebKit, which updates with Safari, so macOS 12.0–12.6 or an older Safari cannot run it.
 
 Builds are not signed or notarized yet; Apple Developer signing will be added when sponsorship covers it. You can [sponsor the project on GitHub](https://github.com/sponsors/gitfromwildan). If Gatekeeper blocks the first launch, run once:
 

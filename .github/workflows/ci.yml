@@ -60,7 +60,7 @@ jobs:
       # cannot see dependencies or Tailwind output. Targets: .browserslistrc.
       - name: Build frontend (for the bundle compat guard)
         run: npx vite build
-      - name: Bundle compat guard (WKWebView Safari 15.4 / Chrome 105)
+      - name: Bundle compat guard (WKWebView Safari 17.6 / Chrome 151)
         run: npm run lint:compat
       - name: Check version consistency (manifests + locks + changelog section)
         run: |
@@ -278,7 +278,7 @@ jobs:
           - target: x86_64-apple-darwin
             arch: amd64
     # The runner version is only the build host. The app's support floor is
-    # bundle.macOS.minimumSystemVersion (macOS 12.3 = WKWebView Safari 15.4): rustc takes
+    # bundle.macOS.minimumSystemVersion (macOS 12.7 = WKWebView Safari 17.6): rustc takes
     # the deployment target from MACOSX_DEPLOYMENT_TARGET or its per-target
     # default (11.0 arm64 / 10.12 x86_64), never from the runner SDK, so the
     # floor is pinned below and verified on the shipped binary to keep the

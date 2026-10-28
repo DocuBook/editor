@@ -37,7 +37,7 @@ export default defineConfig({
   server: { port: 5173, strictPort: true, proxy: { '/api': 'http://localhost:4282' } },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
-    target: ['es2021', 'chrome105', 'safari15'],
+    target: ['es2021', 'chrome151', 'safari17.6'],
     minify: !process.env.TAURI_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_DEBUG,
     // Every chunk over this limit is already correctly split, so the warning no
@@ -79,7 +79,7 @@ export default defineConfig({
     // domAtPos guard + MATH whitespace preserve).
     exclude: ['marked'],
     rolldownOptions: {
-      transform: { target: ['es2021', 'chrome105', 'safari15'] },
+      transform: { target: ['es2021', 'chrome151', 'safari17.6'] },
       // Merged with Vite's own dep plugin: our transform hooks run on the dep
       // sources before bundling, so the patched code is what gets cached.
       plugins: [blocknoteMathWhitespaceCompat() as any, tiptapViewProxyCompat() as any] as any,
