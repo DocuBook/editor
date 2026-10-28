@@ -22,7 +22,10 @@ pub mod sync;
 #[cfg(test)]
 pub(crate) mod test_util;
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::ops::Deref;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use git2::{Config, Cred, Error, ErrorCode, RemoteCallbacks, Repository};
 
@@ -31,11 +34,56 @@ pub struct Git {
     pub repo_path: String,
 }
 
+/// Repositories with a mutating operation in flight. IPC handlers open each
+/// command on a fresh `Repository`, so without this a Commit could stage into
+/// the index mid-pull, or a checkout could land inside a rebase.
+static RUNNING: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
+
+/// A `Git` that holds the repository's operation slot until dropped.
+pub struct ExclusiveGit {
+    git: Git,
+    key: PathBuf,
+}
+
+impl Deref for ExclusiveGit {
+    type Target = Git;
+
+    fn deref(&self) -> &Git {
+        &self.git
+    }
+}
+
+impl Drop for ExclusiveGit {
+    fn drop(&mut self) {
+        RUNNING
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.key);
+    }
+}
+
 impl Git {
     pub fn open(path: &str) -> Self {
         Self {
             repo_path: path.to_string(),
         }
+    }
+
+    /// Open for a mutating operation (stage, commit, sync, checkout, …). Fails
+    /// fast instead of queueing: the UI already shows the running operation,
+    /// and a queued click would act on state the user has not seen yet.
+    /// Called once at the IPC boundary — core methods never take it, so
+    /// composite operations (pull → fetch → rebase) do not deadlock.
+    pub fn open_exclusive(path: &str) -> Result<ExclusiveGit, String> {
+        let key = std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path));
+        let mut running = RUNNING.lock().unwrap_or_else(|error| error.into_inner());
+        if !running.insert(key.clone()) {
+            return Err("Another Git operation is still running — wait for it to finish".into());
+        }
+        Ok(ExclusiveGit {
+            git: Self::open(path),
+            key,
+        })
     }
 
     pub(crate) fn repository(&self) -> Result<Repository, String> {
@@ -165,4 +213,20 @@ pub(crate) fn remote_callbacks(config: Config) -> RemoteCallbacks<'static> {
         ))
     });
     callbacks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{test_util, Git};
+
+    #[test]
+    fn exclusive_open_rejects_a_second_operation_until_released() {
+        let dir = test_util::temp_git_repo("exclusive");
+        let path = dir.to_str().unwrap();
+        let first = Git::open_exclusive(path).unwrap();
+        assert!(Git::open_exclusive(path).is_err());
+        drop(first);
+        assert!(Git::open_exclusive(path).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

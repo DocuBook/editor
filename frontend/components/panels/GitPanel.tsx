@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, File, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest, PencilSparkles, RefreshCw, Upload } from 'lucide-react'
 import { invoke } from '../../lib/ipc'
 import { useGitStatus, pollGitStatus } from '../../stores/gitStatus'
+import { useGitOperation, withGitOperation } from '../../stores/gitOperation'
 import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
 import { useClickOutside } from '../../hooks/useClickOutside'
@@ -21,6 +22,7 @@ interface BranchEntry { name: string; remote: boolean }
 function BranchSwitcher({ branch, open, onToggle }: { branch: string; open: boolean; onToggle: () => void }) {
   const [branches, setBranches] = useState<BranchEntry[]>([])
   const [busy, setBusy] = useState<string | null>(null)
+  const gitActive = useGitOperation(state => state.active)
   const [newBranchName, setNewBranchName] = useState('')
   const [error, setError] = useState('')
 
@@ -37,16 +39,18 @@ function BranchSwitcher({ branch, open, onToggle }: { branch: string; open: bool
   }
 
   const checkout = async (entry: BranchEntry, create = false) => {
-    if (busy || (!create && entry.name === branch)) return
+    if (busy || gitActive || (!create && entry.name === branch)) return
     setBusy(entry.name)
     setError('')
     try {
-      await invoke(create ? 'git_create_branch' : 'git_checkout', create ? { branch: entry.name } : { branch: entry.name, remote: entry.remote })
-      onToggle()
       const dirty = useEditorStore.getState().tabs.filter(tab => tab.dirty).length
-      await useEditorStore.getState().reloadAllTabs()
-      // The other branch can add or remove files — refresh the sidebar tree too.
-      await useVaultStore.getState().loadTree().catch(() => {})
+      await withGitOperation('branch switch', async () => {
+        await invoke(create ? 'git_create_branch' : 'git_checkout', create ? { branch: entry.name } : { branch: entry.name, remote: entry.remote })
+        onToggle()
+        await useEditorStore.getState().reloadAllTabs()
+        // The other branch can add or remove files — refresh the sidebar tree too.
+        await useVaultStore.getState().loadTree().catch(() => {})
+      })
       void pollGitStatus()
       toast.success((create ? 'Created and switched to ' : 'Switched to ') + entry.name + (dirty ? ` — ${dirty} unsaved tab${dirty > 1 ? 's' : ''} kept open` : ''))
     } catch (e) { setError(String(e)) }
@@ -69,12 +73,12 @@ function BranchSwitcher({ branch, open, onToggle }: { branch: string; open: bool
       </button>
       {open && <SidebarPopover side="bottom">
         <form onSubmit={e => { e.preventDefault(); const name = newBranchName.trim(); if (name) void checkout({ name, remote: false }, true) }} className="px-2 py-1.5 border-b border-border-subtle">
-          <input autoFocus value={newBranchName} onChange={e => setNewBranchName(e.target.value)} disabled={busy !== null} placeholder="Type to create a branch..." aria-label="Create branch" className="w-full min-w-0 bg-transparent border-none outline-none text-[12px] text-foreground placeholder:text-muted" />
+          <input autoFocus value={newBranchName} onChange={e => setNewBranchName(e.target.value)} disabled={busy !== null || !!gitActive} placeholder="Type to create a branch..." aria-label="Create branch" className="w-full min-w-0 bg-transparent border-none outline-none text-[12px] text-foreground placeholder:text-muted" />
         </form>
         <div className="max-h-[min(16rem,calc(100dvh-9rem))] overflow-y-auto py-1">
           {groups.map(([label, entries]) => entries.length > 0 && <section key={label}>
             <div className="px-2.5 pt-1.5 pb-1 text-[10px] uppercase tracking-wider text-foreground-subtle">{label}</div>
-            {entries.map(entry => <button type="button" key={entry.name} onClick={() => void checkout(entry)} disabled={busy !== null} className="flex w-full items-center gap-2 rounded border-none bg-transparent px-2.5 py-1.5 text-left text-[12px] text-foreground-secondary hover:bg-surface-active disabled:opacity-50">
+            {entries.map(entry => <button type="button" key={entry.name} onClick={() => void checkout(entry)} disabled={busy !== null || !!gitActive} className="flex w-full items-center gap-2 rounded border-none bg-transparent px-2.5 py-1.5 text-left text-[12px] text-foreground-secondary hover:bg-surface-active disabled:opacity-50">
               <GitBranch size={11} className="shrink-0 text-foreground-subtle" /><span className="min-w-0 flex-1 truncate">{entry.name}</span>
               {entry.name === branch && <Check size={12} className="shrink-0 text-accent" />}
               {busy === entry.name && <span className="shrink-0 text-[10px] text-muted">switching…</span>}
@@ -184,11 +188,12 @@ function ConflictRow({ entry, onStage, disabled }: { entry: GitEntry; onStage: (
 /** Remote sync actions. Conflicts are never resolved silently: a merge leaves
  *  the worktree for Commit, a rebase is kept on disk for Continue/Abort. */
 function SyncBar() {
-  const { branch, ahead = 0, behind = 0, hasRemote, hasCommits, pushTarget = '', remotes = [], repoState = 'clean' } = useGitStatus()
+  const { branch, upstream = '', ahead = 0, behind = 0, hasRemote, hasCommits, pushTarget = '', remotes = [], repoState = 'clean' } = useGitStatus()
   const [selected, setSelected] = useState('')
   const [activePopover, setActivePopover] = useState<'branch' | 'actions' | null>(null)
   const syncOpen = activePopover === 'actions'
   const [syncState, setSyncState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const gitActive = useGitOperation(state => state.active)
   const [activeAction, setActiveAction] = useState('')
   const [err, setErr] = useState('')
   const [notice, setNotice] = useState('')
@@ -207,10 +212,17 @@ function SyncBar() {
    *  push target keeps the panel usable instead of stranding it on a dead name. */
   const isSelectable = remotes.includes(selected)
   const activeRemote = isSelectable ? selected : pushTarget || remotes[0] || ''
-  /** Sidebar branch picker and this panel consume the same store field. Never
-   *  derive a second branch from an upstream label such as `origin/master`. */
-  const targetBranch = branch && !branch.startsWith('(') ? branch : ''
+  /** Sidebar branch picker and this panel consume the same store field. */
+  const localBranch = branch && !branch.startsWith('(') ? branch : ''
+  /** `behind` is counted against the configured upstream, so sync targets it
+   *  when it lives on the selected remote (`dev` tracking `origin/develop`).
+   *  Any other remote gets the same-named branch — never its default branch. */
+  const targetBranch = localBranch && activeRemote && upstream.startsWith(`${activeRemote}/`)
+    ? upstream.slice(activeRemote.length + 1)
+    : localBranch
   const busy = syncState === 'busy'
+  /** Any git operation — this bar's own or a commit/branch switch elsewhere. */
+  const blocked = busy || !!gitActive
   /** The UI only surfaces facts it can read from the repository state and never
    *  pre-judges whether an operation is legal — same contract as the Actions
    *  menu, where the backend owns that decision. The worktree is therefore not a
@@ -226,7 +238,7 @@ function SyncBar() {
    *  known locally, while the backend still decides if the operation can run. */
   const rebaseDisabledReason = !incoming || !hasCommits ? 'Nothing to rebase — remote has no new commits.' : ''
   const mergeDisabledReason = !incoming ? 'Nothing to merge — remote has no new commits.' : ''
-  const locked = !!syncDisabledReason || busy
+  const locked = !!syncDisabledReason || blocked
   const actionHint = (reason: string, title: string) => (!busy && reason ? reason : title)
 
   useEffect(() => {
@@ -236,10 +248,10 @@ function SyncBar() {
   }, [syncState])
 
   const run = async (label: string, action: () => Promise<boolean | void>) => {
-    if (busy) return
+    if (blocked) return
     setActiveAction(label); setSyncState('busy'); setErr(''); setNotice('')
     try {
-      const success = await action()
+      const success = await withGitOperation(label, action)
       setSyncState(success === false ? 'idle' : 'done')
       setActivePopover(null)
     } catch (e) {
@@ -348,8 +360,8 @@ function SyncBar() {
         {behind > 0 && <span className="text-[10px] text-muted">↓{behind}</span>}
         {rebasing || merging ? (
           <div className="flex items-center gap-1.5">
-          {rebasing && <button type="button" className={operationBtn} onClick={continueRebase} disabled={busy}>Continue</button>}
-          <button type="button" className={operationBtn} onClick={() => setConfirmAbort(rebasing ? 'rebase' : 'merge')} disabled={busy}>Abort</button>
+          {rebasing && <button type="button" className={operationBtn} onClick={continueRebase} disabled={blocked}>Continue</button>}
+          <button type="button" className={operationBtn} onClick={() => setConfirmAbort(rebasing ? 'rebase' : 'merge')} disabled={blocked}>Abort</button>
           </div>
         ) : (
           <span className="relative">
@@ -358,8 +370,8 @@ function SyncBar() {
               aria-label="Git sync actions"
               aria-expanded={syncOpen}
               onClick={() => setActivePopover(activePopover === 'actions' ? null : 'actions')}
-              disabled={!idle || busy}
-              title={activeRemote && targetBranch ? `Sync ${targetBranch} with ${activeRemote}` : 'Sync current branch'}
+              disabled={!idle || blocked}
+              title={activeRemote && targetBranch ? `Sync ${localBranch} with ${activeRemote}` : 'Sync current branch'}
               className="flex items-center gap-1 rounded px-2 py-1 text-[11px] cursor-pointer border-none bg-surface-hover text-foreground-secondary hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {busy && activeAction === 'pull' ? 'Pulling…' : busy && activeAction === 'fetch' ? 'Fetching…' : busy && activeAction === 'rebase' ? 'Rebasing…' : busy && activeAction === 'merge' ? 'Merging…' : syncState === 'error' ? 'Sync failed' : syncState === 'done' ? `${activeAction} done` : 'Actions'}
@@ -394,12 +406,12 @@ function SyncBar() {
               className={btn}
               onClick={rebaseRemote}
               disabled={locked || !incoming || !hasCommits}
-              title={hasCommits ? actionHint(rebaseDisabledReason, `Rebase ${targetBranch} onto ${activeRemote}/${targetBranch}`) : 'No local commits yet — Merge brings in the remote branch instead'}
+              title={hasCommits ? actionHint(rebaseDisabledReason, `Rebase ${localBranch} onto ${activeRemote}/${targetBranch}`) : 'No local commits yet — Merge brings in the remote branch instead'}
             >
               <GitBranch size={12} className={actionClass('rebase')} /> {actionLabel('rebase', 'Rebase', 'Rebasing…', 'Rebased')}
               {showHints && !busy && incoming && <span className="ml-auto text-[10px] text-muted">↓{behind}</span>}
             </button>
-            <button type="button" className={btn} onClick={mergeRemote} disabled={locked || !!mergeDisabledReason} title={actionHint(mergeDisabledReason, `Merge ${activeRemote}/${targetBranch} into ${targetBranch}`)}>
+            <button type="button" className={btn} onClick={mergeRemote} disabled={locked || !!mergeDisabledReason} title={actionHint(mergeDisabledReason, `Merge ${activeRemote}/${targetBranch} into ${localBranch}`)}>
               <GitMerge size={12} className={actionClass('merge')} /> {actionLabel('merge', 'Merge', 'Merging…', 'Merged')}
               {showHints && !busy && incoming && <span className="ml-auto text-[10px] text-muted">↓{behind}</span>}
             </button>
@@ -452,6 +464,7 @@ function GitActions() {
   const [message, setMessage] = useState('')
   const [commitState, setCommitState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
   const [pushState, setPushState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
+  const gitActive = useGitOperation(state => state.active)
   const [generating, setGenerating] = useState(false)
   const [commitNotice, setCommitNotice] = useState('')
   const [pushNotice, setPushNotice] = useState('')
@@ -463,7 +476,7 @@ function GitActions() {
   /** Commit stages everything first; with conflicts still listed that would
    *  record conflict markers, so each file must be resolved and staged first. */
   const hasConflicts = useMemo(() => parseStatus(status).some(conflictOf), [status])
-  const busy = commitState === 'busy' || pushState === 'busy'
+  const busy = commitState === 'busy' || pushState === 'busy' || !!gitActive
   const commitDisabled = !isRepo || hasUnsaved || !committableState || hasConflicts || (!hasChanges && !merging) || !message.trim() || busy || generating
   const pushDisabled = !isRepo || !hasRemote || (!!upstream && ahead <= 0) || busy
 
@@ -499,13 +512,15 @@ function GitActions() {
     setCommitState('busy')
     setCommitNotice('')
     try {
-      await invoke('git_stage')
-      const result = JSON.parse(await invoke<string>('git_commit', { message: commitMessage }))
-      if (result.error) { setCommitNotice(result.error); setCommitState('error'); return }
-      if (result.message === 'Nothing to commit') { setCommitState('idle'); toast.info('Nothing to commit'); return }
-      setMessage('')
-      setCommitNotice(result.commit ? `Committed ${result.commit.substring(0, 7)}` : 'Committed')
-      setCommitState('done')
+      await withGitOperation('commit', async () => {
+        await invoke('git_stage')
+        const result = JSON.parse(await invoke<string>('git_commit', { message: commitMessage }))
+        if (result.error) { setCommitNotice(result.error); setCommitState('error'); return }
+        if (result.message === 'Nothing to commit') { setCommitState('idle'); toast.info('Nothing to commit'); return }
+        setMessage('')
+        setCommitNotice(result.commit ? `Committed ${result.commit.substring(0, 7)}` : 'Committed')
+        setCommitState('done')
+      })
     } catch (error) {
       setCommitNotice(String(error))
       setCommitState('error')
@@ -519,11 +534,13 @@ function GitActions() {
     setPushState('busy')
     setPushNotice('')
     try {
-      const result = JSON.parse(await invoke<string>('git_push_only'))
-      if (result.error) { setPushNotice(result.error); setPushState('error'); return }
-      if (result.message === 'Nothing to push') { setPushState('idle'); toast.info('Nothing to push'); return }
-      setPushNotice('Pushed ✓')
-      setPushState('done')
+      await withGitOperation('push', async () => {
+        const result = JSON.parse(await invoke<string>('git_push_only'))
+        if (result.error) { setPushNotice(result.error); setPushState('error'); return }
+        if (result.message === 'Nothing to push') { setPushState('idle'); toast.info('Nothing to push'); return }
+        setPushNotice('Pushed ✓')
+        setPushState('done')
+      })
     } catch (error) {
       setPushNotice(String(error))
       setPushState('error')
@@ -588,9 +605,10 @@ function GitActions() {
 }
 
 export default function GitPanel() {
-  const { isRepo, branch, status, ahead, behind } = useGitStatus()
+  const { isRepo, branch, status, ahead, behind, error: statusError = '' } = useGitStatus()
   const [staging, setStaging] = useState('')
   const [stageError, setStageError] = useState('')
+  const gitActive = useGitOperation(state => state.active)
   const entries = useMemo(() => parseStatus(status), [status])
   /** Merging leaves a path with both an unresolved index entry and a worktree
    *  copy, so a conflicted path must live in exactly one group — never in both,
@@ -604,7 +622,7 @@ export default function GitPanel() {
   const stageConflict = async (path: string) => {
     setStaging(path)
     setStageError('')
-    try { await invoke('git_stage', { path }) }
+    try { await withGitOperation('stage', () => invoke('git_stage', { path })) }
     catch (error) { setStageError(String(error)) }
     finally {
       setStaging('')
@@ -630,7 +648,14 @@ export default function GitPanel() {
             <span>Vault is not a git repository.</span>
           </div>
         )}
-        {isRepo && entries.length === 0 && (
+        {isRepo && statusError && (
+          <div role="alert" className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-danger">
+            <AlertTriangle size={20} />
+            <span>Cannot read repository status.</span>
+            <span className="text-[10px] wrap-break-word text-foreground-subtle">{statusError}</span>
+          </div>
+        )}
+        {isRepo && !statusError && entries.length === 0 && (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-4 text-center text-foreground-subtle">
             <Check size={20} className="text-success" />
             <span>Working tree is clean.</span>
@@ -640,7 +665,7 @@ export default function GitPanel() {
           <section className="mb-3">
             <div className="mb-1 px-1 text-[10px] uppercase tracking-wider text-danger">Conflicts ({conflicts.length})</div>
             {conflicts.map(entry => (
-              <ConflictRow key={`conflict:${entry.path}`} entry={entry} onStage={stageConflict} disabled={staging === entry.path} />
+              <ConflictRow key={`conflict:${entry.path}`} entry={entry} onStage={stageConflict} disabled={staging === entry.path || !!gitActive} />
             ))}
             {stageError && <div role="alert" className="mt-1 px-1 text-[10px] text-danger wrap-break-word">{stageError}</div>}
             <div className="mt-1 flex items-start gap-1.5 px-1 text-[10px] text-muted">

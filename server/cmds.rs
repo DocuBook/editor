@@ -88,7 +88,7 @@ pub(crate) fn git_commit(state: &AppState, message: &str) -> Result<String, Stri
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).commit_all(message)).map_err(|e| e.to_string())
+    serde_json::to_string(&git::Git::open_exclusive(&repo_path)?.commit_all(message)).map_err(|e| e.to_string())
 }
 
 pub(crate) fn git_push_only(state: &AppState, remote: Option<&str>) -> Result<String, String> {
@@ -96,7 +96,7 @@ pub(crate) fn git_push_only(state: &AppState, remote: Option<&str>) -> Result<St
         Some(g) => g.repo_path.clone(),
         None => return Ok(r#"{"error":"No vault"}"#.to_string()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).push_checked_to(remote))
+    serde_json::to_string(&git::Git::open_exclusive(&repo_path)?.push_checked_to(remote))
         .map_err(|e| e.to_string())
 }
 
@@ -104,7 +104,8 @@ pub(crate) fn git_push_only(state: &AppState, remote: Option<&str>) -> Result<St
  *  Existing repositories are reported, never re-initialized. */
 pub(crate) fn git_init(state: &AppState, branch: &str) -> Result<String, String> {
     match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-        Some(g) => serde_json::to_string(&g.init(branch)?).map_err(|e| e.to_string()),
+        Some(g) => serde_json::to_string(&git::Git::open_exclusive(&g.repo_path)?.init(branch)?)
+            .map_err(|e| e.to_string()),
         None => Err("No vault".into()),
     }
 }
@@ -124,7 +125,7 @@ pub(crate) fn git_fetch(state: &AppState, name: &str) -> Result<String, String> 
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    git::Git::open(&repo_path)
+    git::Git::open_exclusive(&repo_path)?
         .fetch_remote(name)
         .map(|_| "null".into())
 }
@@ -138,7 +139,7 @@ pub(crate) fn git_pull(
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).pull(request)).map_err(|e| e.to_string())
+    serde_json::to_string(&git::Git::open_exclusive(&repo_path)?.pull(request)).map_err(|e| e.to_string())
 }
 
 /** Reconcile the current branch with `<name>/<branch>` (fast-forward, adopt, or
@@ -148,7 +149,7 @@ pub(crate) fn git_remote_merge(state: &AppState, name: &str, branch: &str) -> Re
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).merge_remote(name, branch))
+    serde_json::to_string(&git::Git::open_exclusive(&repo_path)?.merge_remote(name, branch))
         .map_err(|e| e.to_string())
 }
 
@@ -159,7 +160,7 @@ pub(crate) fn git_rebase(state: &AppState, name: &str, branch: &str) -> Result<S
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).rebase_remote(name, branch))
+    serde_json::to_string(&git::Git::open_exclusive(&repo_path)?.rebase_remote(name, branch))
         .map_err(|e| e.to_string())
 }
 
@@ -169,7 +170,7 @@ pub(crate) fn git_rebase_continue(state: &AppState) -> Result<String, String> {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    serde_json::to_string(&git::Git::open(&repo_path).rebase_continue())
+    serde_json::to_string(&git::Git::open_exclusive(&repo_path)?.rebase_continue())
         .map_err(|e| e.to_string())
 }
 
@@ -179,7 +180,7 @@ pub(crate) fn git_rebase_abort(state: &AppState) -> Result<String, String> {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    git::Git::open(&repo_path)
+    git::Git::open_exclusive(&repo_path)?
         .rebase_abort()
         .map(|_| "null".into())
 }
@@ -190,7 +191,7 @@ pub(crate) fn git_merge_abort(state: &AppState) -> Result<String, String> {
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".into()),
     };
-    git::Git::open(&repo_path)
+    git::Git::open_exclusive(&repo_path)?
         .merge_abort()
         .map(|_| "null".into())
 }
@@ -209,7 +210,7 @@ pub(crate) fn git_create_branch(state: &AppState, branch: &str) -> Result<String
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".to_string()),
     };
-    git::Git::open(&repo_path).create_branch(branch).map(|_| "null".into())
+    git::Git::open_exclusive(&repo_path)?.create_branch(branch).map(|_| "null".into())
 }
 
 pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Result<String, String> {
@@ -217,7 +218,7 @@ pub(crate) fn git_checkout(state: &AppState, branch: &str, remote: bool) -> Resu
         Some(g) => g.repo_path.clone(),
         None => return Err("No vault".to_string()),
     };
-    git::Git::open(&repo_path)
+    git::Git::open_exclusive(&repo_path)?
         .checkout_branch(branch, remote)
         .map(|_| "null".into())
 }

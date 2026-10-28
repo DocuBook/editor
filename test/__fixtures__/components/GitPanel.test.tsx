@@ -18,6 +18,7 @@ const gitState = vi.hoisted(() => ({
   hasCommits: true,
   remotes: ['origin'],
   repoState: 'clean',
+  error: '',
 }))
 
 const editorState = vi.hoisted(() => ({
@@ -51,6 +52,7 @@ vi.mock('../../../frontend/stores/vault', () => ({
 import { pollGitStatus } from '../../../frontend/stores/gitStatus'
 import { autoCommitMessage } from '../../../frontend/utils/commitMessage'
 import GitPanel from '../../../frontend/components/panels/GitPanel'
+import { useGitOperation } from '../../../frontend/stores/gitOperation'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -103,7 +105,8 @@ const pullOutcome = (overrides: Partial<{ success: boolean; state: string; strat
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
-  Object.assign(gitState, { isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: '', ahead: 0, behind: 0, pushTarget: 'origin', hasCommits: true, remotes: ['origin'], repoState: 'clean' })
+  Object.assign(gitState, { isRepo: true, hasRemote: true, branch: 'main', upstream: 'origin/main', status: '', ahead: 0, behind: 0, pushTarget: 'origin', hasCommits: true, remotes: ['origin'], repoState: 'clean', error: '' })
+  useGitOperation.setState({ active: '' })
   editorState.tabs[0].dirty = false
   invoke.mockClear()
 })
@@ -331,6 +334,81 @@ describe('GitPanel', () => {
     expect(invoke).toHaveBeenCalledWith('git_stage')
     expect(invoke).toHaveBeenCalledWith('git_commit', { message: 'docs: write manual message' })
     expect(pollGitStatus).toHaveBeenCalled()
+  })
+
+  it('shows a status scan failure instead of a clean working tree', () => {
+    gitState.error = 'index file corrupt'
+    renderPanel()
+
+    expect(document.body.textContent).toContain('Cannot read repository status.')
+    expect(document.body.textContent).toContain('index file corrupt')
+    expect(document.body.textContent).not.toContain('Working tree is clean.')
+  })
+
+  it('syncs against the upstream branch when it lives on the selected remote', async () => {
+    Object.assign(gitState, { branch: 'dev', upstream: 'origin/develop', behind: 1 })
+    invoke.mockResolvedValue(syncOutcome({ message: 'Fast-forwarded to origin/develop' }))
+    renderPanel()
+    openSync()
+
+    act(() => syncButton('Merge')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_remote_merge', { name: 'origin', branch: 'develop' })
+  })
+
+  it('syncs the same-named branch when the upstream is on another remote', async () => {
+    Object.assign(gitState, { branch: 'dev', upstream: 'upstream/develop', remotes: ['origin', 'upstream'], behind: 1 })
+    invoke.mockResolvedValue(syncOutcome({ message: 'Fast-forwarded to origin/dev' }))
+    renderPanel()
+    openSync()
+
+    act(() => syncButton('Merge')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_remote_merge', { name: 'origin', branch: 'dev' })
+  })
+
+  it('locks Commit, Push, Sync and conflict staging while another git operation runs', () => {
+    gitState.status = 'UU notes/conflicted.md\n.M notes/active.md'
+    gitState.ahead = 1
+    useGitOperation.setState({ active: 'pull' })
+    renderPanel()
+
+    const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(input, 'docs: wait')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="git-commit"]')!.disabled).toBe(true)
+    expect(document.querySelector<HTMLButtonElement>('[data-testid="git-push"]')!.disabled).toBe(true)
+    expect(syncMenuButton()!.disabled).toBe(true)
+    expect(stageButton('notes/conflicted.md')!.disabled).toBe(true)
+  })
+
+  it('holds the shared git lock for the duration of a commit', async () => {
+    gitState.status = '.M notes/active.md'
+    let finishCommit!: (value: string) => void
+    invoke.mockImplementation(async command => command === 'git_commit'
+      ? new Promise<string>(resolve => { finishCommit = resolve })
+      : '')
+    renderPanel()
+
+    const input = document.querySelector<HTMLTextAreaElement>('[aria-label="Commit message"]')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      setter.call(input, 'docs: lock')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => document.querySelector<HTMLButtonElement>('[data-testid="git-commit"]')!.click())
+    await flush()
+    expect(useGitOperation.getState().active).toBe('commit')
+    expect(syncMenuButton()!.disabled).toBe(true)
+
+    await act(async () => finishCommit(JSON.stringify({ success: true, commit: 'abcdef1234', message: 'Committed', error: '' })))
+    await flush()
+    expect(useGitOperation.getState().active).toBe('')
   })
 
   it('keeps Commit disabled while a merge still lists conflicted files', () => {

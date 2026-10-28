@@ -107,4 +107,15 @@ describe("git status polling", () => {
 
     expect(useGitStatus.getState().branch).toBe("");
   });
+
+  it("keeps a status scan error instead of reporting a clean tree", async () => {
+    invoke.mockResolvedValue(JSON.stringify({ ...JSON.parse(repoPayload()), error: "index file corrupt" }));
+    await pollGitStatus(true);
+    expect(useGitStatus.getState().isRepo).toBe(true);
+    expect(useGitStatus.getState().error).toBe("index file corrupt");
+
+    invoke.mockResolvedValue(repoPayload());
+    await pollGitStatus(true);
+    expect(useGitStatus.getState().error).toBe("");
+  });
 });
