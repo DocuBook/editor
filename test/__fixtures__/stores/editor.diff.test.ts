@@ -22,13 +22,26 @@ describe('editor store diff tabs', () => {
       return null
     })
 
-    await useEditorStore.getState().openDiff('notes/gone.md', 'gone.md', false)
+    await useEditorStore.getState().openDiff('notes/gone.md', 'gone.md', false, true)
 
     const tab = useEditorStore.getState().tabs.find(t => t.path === 'notes/gone.md')!
     expect(toast.error).not.toHaveBeenCalled()
     expect(tab.view).toBe('diff')
     expect(tab.deleted).toBe(true)
     expect(tab.content).toBe('')
+  })
+
+  it('does not mark a modified file deleted just because its quoted path cannot be read', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      if (cmd === 'read_file') throw new Error('No such file or directory (os error 2)')
+      return null
+    })
+
+    await useEditorStore.getState().openDiff('"notes/line\\nbreak.md"', 'line\nbreak.md', false)
+
+    const tab = useEditorStore.getState().tabs[0]
+    expect(tab.view).toBe('diff')
+    expect(tab.deleted).toBe(false)
   })
 
   it('still reports a missing file opened as a normal tab', async () => {

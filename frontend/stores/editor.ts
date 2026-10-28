@@ -55,8 +55,10 @@ interface EditorState {
    *  Changes panel) — mark the tab deleted instead of showing an error. */
   openFile: (path: string, name: string, createIfMissing?: boolean, missingIsDeleted?: boolean) => Promise<void>
   /** Open a file as a read-only diff in the editor surface (Changes panel).
-   *  `staged` picks the range: index-vs-HEAD when true, worktree-vs-index when false. */
-  openDiff: (path: string, name: string, staged: boolean) => Promise<void>
+   *  `staged` picks the range: index-vs-HEAD when true, worktree-vs-index when false.
+   *  `deleted`: git status reports a deletion, so a missing file marks the tab
+   *  deleted — a failed read alone cannot tell (quoted status paths never read). */
+  openDiff: (path: string, name: string, staged: boolean, deleted?: boolean) => Promise<void>
   switchTab: (path: string) => Promise<void>
   /** Rename an open file: remaps the tab's path+name so saves, git status and
    *  wiki backlinks keep targeting the NEW path. Flushes first so in-flight WYSIWYG
@@ -246,11 +248,11 @@ export const useEditorStore = create<EditorState>()(
     }
   },
 
-  openDiff: async (path, name, staged) => {
+  openDiff: async (path, name, staged, deleted = false) => {
     // Reuse the normal open path so tab identity, flushing, and the loaded
     // content all match a regular open — then flag this tab as a diff view.
     // A deletion has no file to read — that is not an error for a diff.
-    await get().openFile(path, name, false, true)
+    await get().openFile(path, name, false, deleted)
     set({ tabs: get().tabs.map(t => t.path === path ? { ...t, view: 'diff', diffStaged: staged } : t) })
   },
 

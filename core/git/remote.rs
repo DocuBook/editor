@@ -66,9 +66,10 @@ pub(crate) fn is_remote_url(url: &str) -> bool {
     let Some((host, path)) = url.split_once(':') else {
         return false;
     };
-    // `C:\repo`, `C:/repo` and `C:repo` are Windows drive paths, which Git
-    // treats as local — not scp-style `host:path`.
-    if host.len() == 1 && host.as_bytes()[0].is_ascii_alphabetic() {
+    // On Windows, `C:\repo`, `C:/repo` and `C:repo` are drive paths, which Git
+    // treats as local — not scp-style `host:path`. Elsewhere `a:repo` is a
+    // valid scp URL for a single-letter ssh host alias.
+    if cfg!(windows) && host.len() == 1 && host.as_bytes()[0].is_ascii_alphabetic() {
         return false;
     }
     let host = host.rsplit_once('@').map(|(_, h)| h).unwrap_or(host);
@@ -90,9 +91,10 @@ mod tests {
 
     #[test]
     fn windows_drive_paths_are_not_remote_urls() {
-        for local in [r"C:\repo", "C:/repo", "c:repo", r"..\x:y"] {
-            assert!(!is_remote_url(local), "{local}");
+        for drive in [r"C:\repo", "C:/repo", "c:repo"] {
+            assert_eq!(is_remote_url(drive), !cfg!(windows), "{drive}");
         }
+        assert!(!is_remote_url(r"..\x:y"));
         for remote in [
             "git@github.com:user/repo.git",
             "host:repo.git",

@@ -249,7 +249,7 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/conflicted.md', 'conflicted.md', false, false)
   })
 
   it('leaves an ordinary conflict-free merge conflict row unstaged', () => {
@@ -269,7 +269,17 @@ describe('GitPanel', () => {
     expect(row.textContent).toContain('notes/sub')
 
     act(() => row.click())
-    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false)
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/sub/deep.md', 'deep.md', false, false)
+  })
+
+  it('tells the diff a row is a deletion only when status says so', () => {
+    gitState.status = '.D notes/gone.md\n.M "notes/ lead.md"'
+    renderPanel()
+
+    act(() => rowByPath('notes/gone.md')!.click())
+    expect(editorState.openDiff).toHaveBeenCalledWith('notes/gone.md', 'gone.md', false, true)
+    act(() => rowByPath('notes/ lead.md')!.click())
+    expect(editorState.openDiff).toHaveBeenCalledWith('"notes/ lead.md"', ' lead.md', false, false)
   })
 
   it('uses the Sync menu instead of a standalone refresh action', () => {
