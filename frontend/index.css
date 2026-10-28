@@ -694,13 +694,13 @@ body .code-block-language-empty {
    ignores that syntax. Keep the floating composer responsive with the legacy
    min-width form supported by the app's oldest WKWebView.
 
-   Deliberately NO `overflow-x: hidden` here: the @mention dropdown is positioned
-   `bottom-full`, i.e. it renders ABOVE this box. `overflow-x: hidden` against a
-   `visible` overflow-y computes to `hidden auto`, which clipped the dropdown and
-   made every suggestion row unclickable (pointer hit-testing fell through to
-   `.editor-content`) — the mention could then only be accepted with the keyboard
-   (Tab/Enter). Horizontal overflow is guarded on the quick-prompt list, the only
-   child that can exceed the width, not on the box that hosts the dropdown. */
+   Deliberately NO `overflow-x: hidden` here. The @mention list once rendered
+   ABOVE this box (`bottom-full`), and `overflow-x: hidden` against a `visible`
+   overflow-y computes to `hidden auto`, which clipped it and made every row
+   unclickable (pointer hit-testing fell through to `.editor-content`) — a
+   mention could then only be accepted with Tab/Enter. All stacked lists are now
+   `.ai-chat-panel`s inside `.ai-chat-surface`; the guard stays so nothing placed
+   above the box again gets clipped. */
 .editor-ai-floating {
     width: calc(100% - 2rem);
     max-width: 100%;
@@ -733,8 +733,8 @@ body .code-block-language-empty {
    and dark and needs no tonal invention: the hairline border alone separates it
    from the document. Deliberately NOT --color-surface-active (the pressed/hover
    token), which reads as a disabled/negative state when used as a resting
-   surface. The prompt list and the model picker are panels INSIDE it, so they
-   inherit this background rather than carrying their own. */
+   surface. The prompt list, the model picker and the @mention list are panels
+   INSIDE it, so they inherit this background rather than carrying their own. */
 .editor-ai-floating .ai-chat-surface {
     background: var(--color-background);
     box-shadow: none;
@@ -758,8 +758,8 @@ body .code-block-language-empty {
         transform: none;
     }
 }
-/* The prompt list and the model picker stack into the card the same way, so
-   they enter the same way. */
+/* The prompt list, the model picker and the @mention list stack into the card
+   the same way, so they enter the same way. */
 .editor-ai-floating .ai-chat-status,
 .editor-ai-floating .ai-chat-panel {
     animation: ai-status-in 140ms ease-out;

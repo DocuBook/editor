@@ -98,10 +98,11 @@ describe('AI floating composer', () => {
     expect(panel.getAttribute('role')).toBe('group')
     expect(document.getElementById(panel.getAttribute('aria-labelledby')!)?.textContent).toBe('Suggestions')
     expect(promptAction.querySelector('span')?.classList.contains('text-accent')).toBe(true)
-    // `.editor-ai-floating` must never clip horizontally: the @mention dropdown
-    // renders above that box (`bottom-full`), so clipping there made every
+    // `.editor-ai-floating` must never clip horizontally. The @mention list
+    // once rendered above that box (`bottom-full`), so clipping there made every
     // suggestion unclickable and left Tab/Enter as the only way to accept a
-    // mention (no Tab on touch).
+    // mention (no Tab on touch). It now stacks inside the card; the guard
+    // stays so nothing placed above the box again gets clipped.
     expect(floating.classList.contains('overflow-x-hidden')).toBe(false)
 
     act(() => promptAction.click())

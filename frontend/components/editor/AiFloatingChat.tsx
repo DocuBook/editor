@@ -87,17 +87,13 @@ const parentOf = (path: string) => {
  *  inherited 1.5 is exactly what rendered, where `text-sm`'s 20px would not be. */
 const CONTROL_TEXT = 'text-[14px]'
 
-const mentionRowClass = (selected: boolean) =>
-  `flex min-h-10 w-full cursor-pointer items-center gap-2 rounded px-3 text-left ${CONTROL_TEXT} ` +
-  (selected ? 'bg-accent text-on-accent' : 'hover:bg-surface-active')
-
 /** Secondary text inside a row (`docs/notes`). `text-muted` is tuned for the
  *  dropdown surface, so on the accent it has to flip, exactly as the search
  *  modal does for its path column. */
 const mentionMetaClass = (selected: boolean) => (selected ? 'text-on-accent opacity-80' : 'text-muted')
 
-/** Row chrome of the panels stacked into the composer card — the model picker
- *  and the prompt list share it, so the two read as one design. The active
+/** Row chrome of the panels stacked into the composer card — the model picker,
+ *  the prompt list and the @mention list share it, so they read as one design. The active
  *  model keeps a persistent highlight so a long list still shows what is
  *  selected at a glance. The hover tint is only on unselected rows, or hovering
  *  would paint over the highlight. */
@@ -110,16 +106,17 @@ const panelRowClass = (selected: boolean, highlighted = false) =>
  *  gateway serving dozens of models is unusable without a filter. */
 const MODEL_SEARCH_THRESHOLD = 10
 
-/** Model list height bounds, in px. The list grows the composer card upward, so
+/** Height bounds of a stacked panel's list (the model picker's, the @mention
+ *  list's), in px. The list grows the composer card upward, so
  *  its cap is the room actually visible above the card's bottom edge: the
  *  visual viewport (what is left above an on-screen keyboard) minus the tab bar
  *  and the rest of the card. Never taller than 16rem, never shorter than three
  *  rows — below that the list is no longer scannable, and the card may then
  *  overlap the tab bar rather than offer an unusable sliver. */
-const MODEL_LIST_MAX = 256
-const MODEL_LIST_MIN = 96
+const PANEL_LIST_MAX = 256
+const PANEL_LIST_MIN = 96
 /** Room kept clear at the top of the visible area: the 48px tab bar plus a gap. */
-const MODEL_LIST_TOP_GAP = 56
+const PANEL_LIST_TOP_GAP = 56
 
 
 /** True while BlockNote's mobile formatting toolbar (0.55) is up — the strip
@@ -148,11 +145,14 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const [modelHighlight, setModelHighlight] = useState(-1)
   const modelSearchRef = useRef<HTMLInputElement>(null)
   const modelHighlightRef = useRef<HTMLButtonElement>(null)
-  /** The card and the model list inside it, measured to fit the list into the
-   *  visible height (see MODEL_LIST_MAX). `undefined` until the first measure. */
+  /** The card and the list of whichever stacked panel is open (the model
+   *  picker's or the @mention list's — never both, see `openModelPicker`),
+   *  measured to fit that list into the visible height (see PANEL_LIST_MAX).
+   *  `undefined` until the first measure. */
   const surfaceRef = useRef<HTMLDivElement>(null)
   const modelListRef = useRef<HTMLDivElement>(null)
-  const [modelListMax, setModelListMax] = useState<number>()
+  const mentionListRef = useRef<HTMLDivElement>(null)
+  const [panelListMax, setPanelListMax] = useState<number>()
   const defaultModels = useAiSettings((s) => s.defaultModels)
   const [modelOptions, setModelOptions] = useState<Record<string, ProviderModels>>({})
   /** Identity of the latest discovery: a slow reply from an earlier open must
@@ -412,6 +412,8 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
       const start = caret - match[1].length - 1
       setPicker({ start, end: caret, query: match[1] })
       setActiveOption(0)
+      /** One stacked list at a time: typing `@` replaces an open model picker. */
+      setModelPickerOpen(false)
     } else setPicker(null)
   }
 
@@ -522,6 +524,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  stays, so the prompt typed after the model switch still lands there. */
   const openModelPicker = () => {
     setExpanded(false)
+    setPicker(null)
     setModelQuery('')
     setModelHighlight(-1)
     setModelPickerOpen(true)
@@ -550,18 +553,18 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  height minus the list's is everything else in it, which the list must not
    *  push out of view. */
   useEffect(() => {
-    if (!modelPickerOpen) return
+    if (!modelPickerOpen && !pickerOpen) return
     const fit = () => {
       const surface = surfaceRef.current
-      const list = modelListRef.current
+      const list = modelListRef.current ?? mentionListRef.current
       if (!surface || !list) return
       const viewport = window.visualViewport
       const visibleTop = viewport ? viewport.offsetTop : 0
       const visibleBottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight
       const rect = surface.getBoundingClientRect()
       const rest = rect.height - list.offsetHeight
-      const room = Math.min(rect.bottom, visibleBottom) - visibleTop - MODEL_LIST_TOP_GAP - rest
-      setModelListMax(Math.max(MODEL_LIST_MIN, Math.min(MODEL_LIST_MAX, Math.floor(room))))
+      const room = Math.min(rect.bottom, visibleBottom) - visibleTop - PANEL_LIST_TOP_GAP - rest
+      setPanelListMax(Math.max(PANEL_LIST_MIN, Math.min(PANEL_LIST_MAX, Math.floor(room))))
     }
     fit()
     const viewport = window.visualViewport
@@ -579,7 +582,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
       window.removeEventListener('resize', fit)
       observer?.disconnect()
     }
-  }, [modelPickerOpen])
+  }, [modelPickerOpen, pickerOpen])
   /** Opening the picker over a long model list must land on the active model:
    *  the listbox is max-h-64 + overflow-y-auto, so the current selection can
    *  sit below the fold, invisible. Re-runs as each provider's list lands, so
@@ -661,7 +664,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
             className={`w-full rounded-md border border-border bg-background px-2.5 py-1.5 ${CONTROL_TEXT} text-foreground outline-none placeholder:text-muted focus:border-accent`} />
         </div>
       )}
-      <div id="ai-model-listbox" ref={modelListRef} style={modelListMax === undefined ? undefined : { maxHeight: modelListMax }} className="max-h-64 overflow-y-auto overscroll-contain p-1" role="listbox" aria-label="AI models">
+      <div id="ai-model-listbox" ref={modelListRef} style={panelListMax === undefined ? undefined : { maxHeight: panelListMax }} className="max-h-64 overflow-y-auto overscroll-contain p-1" role="listbox" aria-label="AI models">
       {visibleModelGroups.map((group) => (
         <div key={group.id} role="group" aria-labelledby={`ai-model-group-${group.id}`}>
           <div id={`ai-model-group-${group.id}`} role="presentation" className={PANEL_HEADER_CLASS}>{group.label}</div>
@@ -696,14 +699,32 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
     </div>
   )
 
+  /** The @mention list, stacked into the card right above the prompt box the
+   *  way the model picker and the suggestions are — not a popover floating over
+   *  the card. Its list shares their row chrome and the IME-aware height (it is
+   *  open while the reader types, so on a phone the keyboard is up). The prompt
+   *  box keeps focus and owns `aria-activedescendant`. In a row the folder hint
+   *  is what tells duplicate basenames apart, so it keeps its width (`shrink-0`,
+   *  capped at half the row) and the NAME truncates first: shrinking both cut a
+   *  long duplicate's hint to "d…" on a phone, where `docs` and `docs/notes`
+   *  then read the same. */
+  const mentionPanel = picker && (
+    <div className="ai-chat-panel flex flex-col border-b border-border-subtle p-1">
+      <div role="presentation" className={PANEL_HEADER_CLASS}>Context</div>
+      <div id={MENTION_LISTBOX_ID} ref={mentionListRef} role="listbox" aria-label="Mention files and folders" style={panelListMax === undefined ? undefined : { maxHeight: panelListMax }} className="max-h-64 overflow-y-auto overscroll-contain">
+        {visibleEntries.length ? visibleEntries.map((entry, position) => {
+          const selected = entry === activeEntry
+          return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} title={entry.path} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={panelRowClass(selected)}>{entry.type === '1' ? <Folder size={14} className="shrink-0" /> : <FileText size={14} className="shrink-0" />}<span className="min-w-0 truncate">{entry.name}</span>{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'max-w-[50%] shrink-0 truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}</button>
+        }) : <div className="px-2.5 py-1.5 text-[11px] text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}
+        {currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-2.5 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}
+      </div>
+    </div>
+  )
+
   const promptInput = (
     <>
       {mentions.length > 0 && <div className="flex flex-wrap gap-1 px-3 pt-2">{mentions.map((mention) => <span key={`${mention.start}:${mention.end}`} className="flex items-center gap-1 rounded-full bg-accent-subtle px-2 py-1 text-[11px] text-accent"><FileText size={11} />{mention.token}<button aria-label={`Remove @${mention.token}`} className="p-1 cursor-pointer hover:text-foreground" onClick={() => removeMention(mention)}><X size={11} /></button></span>)}</div>}
       {mentionNotice && <div className="px-3 pt-1 text-[10px] text-muted">{mentionNotice}</div>}
-      {picker && <div id={MENTION_LISTBOX_ID} role="listbox" aria-label="Mention files and folders" className="absolute bottom-full left-0 z-50 mb-2 max-h-56 w-full overflow-auto rounded-lg border border-border bg-surface p-1 shadow-lg">{visibleEntries.length ? visibleEntries.map((entry, position) => {
-          const selected = entry === activeEntry
-          return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={mentionRowClass(selected)}>{entry.type === '1' ? <Folder size={14} /> : <FileText size={14} />}{entry.name}{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}</button>
-        }) : <div className="px-3 py-2 text-xs text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}{currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-3 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}</div>}
       {/* The textarea owns the full width: a send button beside it reserved its
           column on every line, so text wrapped well before the bubble's edge. */}
       <div className="flex w-full min-w-0 px-2 pt-2">
@@ -736,6 +757,6 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const statusBar = status === 'thinking' || status === 'generating' || status === 'ai-writing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><Loader2 size={13} className="animate-spin text-accent" /><span className="text-xs text-foreground-secondary">{status === 'thinking' ? 'Thinking…' : status === 'generating' ? 'Generating…' : 'Writing…'}</span><button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className={`ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Stop</button></div> : status === 'user-reviewing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><span className="text-xs text-foreground-secondary">Review the changes</span><div className="ml-auto flex items-center gap-2"><button onClick={revert} onMouseDown={(event) => event.preventDefault()} className={`cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Revert</button><button onClick={accept} onMouseDown={(event) => event.preventDefault()} className={`flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 ${CONTROL_TEXT} text-on-accent hover:bg-accent-hover`}><Check size={11} />Accept <span className="ml-1 inline-flex items-center gap-0.5 opacity-80"><Command size={10} /><CornerDownLeft size={10} /></span></button></div></div> : status === 'error' ? <div className="ai-chat-status border-b border-border-subtle px-3 py-2"><div className="wrap-break-word text-[11px] text-danger">{typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}</div>{outOfRetries && <div className="mt-1 text-[10px] text-muted">Retry limit reached — rephrase the prompt or cancel.</div>}<div className="mt-2 flex justify-end gap-2"><button onClick={() => { setExpanded(false); ai.rejectChanges() }} className={`cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Cancel</button><button disabled={outOfRetries} onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className={`flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 ${CONTROL_TEXT} text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35`}><RotateCcw size={11} />Retry</button></div></div> : null
 
   return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
-    <div ref={surfaceRef} className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{promptPanel}{statusBar}{modelPicker}{promptInput}</div>
+    <div ref={surfaceRef} className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{promptPanel}{statusBar}{modelPicker}{mentionPanel}{promptInput}</div>
   </div>
 }

@@ -131,6 +131,14 @@ describe('composer @mention picker', () => {
     expect(labels).toHaveLength(2)
     expect(labels[0]).not.toBe(labels[1])
     expect(labels.some(label => label.includes('docs/notes'))).toBe(true)
+    // The hint must survive a long name: it keeps its width (capped at half the
+    // row) and the name truncates first. jsdom has no layout, so the contract
+    // is the classes; the rendered result was checked in Chromium and WebKit.
+    for (const row of Array.from(document.querySelectorAll('[role="option"]'))) {
+      expect(row.querySelector('span')!.className).toContain('truncate')
+      expect(row.querySelector('span + span')!.className).toMatch(/\bshrink-0\b/)
+      expect(row.querySelector('span + span')!.className).toContain('max-w-[50%]')
+    }
   })
 
   it('inserts the full nested path for an ambiguous basename', async () => {
@@ -210,13 +218,13 @@ describe('composer @mention picker', () => {
     expect(rows()[1].className).not.toContain('bg-accent')
     expect(rows()[1].className).toContain('hover:bg-surface-active')
     // The muted path label is tuned for the dropdown surface, so it flips too.
-    expect(rows()[0].querySelector('span')!.className).toContain('text-on-accent')
+    expect(rows()[0].querySelector('span + span')!.className).toContain('text-on-accent')
 
     act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
 
     expect(rows()[0].className).not.toContain('bg-accent')
     expect(rows()[1].className).toContain('bg-accent')
-    expect(rows()[0].querySelector('span')!.className).toContain('text-muted')
+    expect(rows()[0].querySelector('span + span')!.className).toContain('text-muted')
 
     // Enter commits the row carrying the highlight, not the first row.
     act(() => textarea().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
@@ -371,5 +379,82 @@ describe('composer @mention picker', () => {
 
     expect(document.querySelector('[role="listbox"]')).toBeNull()
     expect(textarea().value).toBe('summarise @change')
+  })
+})
+
+/** The @mention list stacks into the composer card like the status bar, the
+ *  model picker and the suggestions — it used to float above the card. */
+describe('composer @mention panel placement', () => {
+  const listbox = () => document.querySelector<HTMLElement>('#mention-listbox')
+  const modelListbox = () => document.querySelector('#ai-model-listbox')
+  const trigger = () => document.querySelector<HTMLButtonElement>('[aria-label="Select AI model"]')!
+
+  it('stacks inside the composer card, above the prompt box, headed Context', async () => {
+    render()
+    act(() => typeInto(textarea(), 'summarise @change'))
+    await settle()
+
+    const list = listbox()!
+    const surface = document.querySelector('.ai-chat-surface')!
+    expect(surface.contains(list)).toBe(true)
+    // No positioned popover between the list and the card…
+    const positioned: Element[] = []
+    for (let node = list.parentElement; node && node !== surface; node = node.parentElement) {
+      if (node.classList.contains('absolute')) positioned.push(node)
+    }
+    expect(positioned).toEqual([])
+    // …above the prompt box, in its own panel with the shared header.
+    expect(list.compareDocumentPosition(textarea()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const panel = list.closest('.ai-chat-panel')!
+    expect(panel).not.toBeNull()
+    expect(panel.textContent).toContain('Context')
+    // The prompt box still drives it.
+    expect(textarea().getAttribute('aria-controls')).toBe(list.id)
+  })
+
+  it('is one stacked list at a time with the model picker', async () => {
+    render()
+    act(() => trigger().click())
+    await settle()
+    expect(modelListbox()).not.toBeNull()
+
+    // Typing `@` replaces the open model picker…
+    act(() => typeInto(textarea(), 'summarise @change'))
+    await settle()
+    expect(listbox()).not.toBeNull()
+    expect(modelListbox()).toBeNull()
+
+    // …and opening the picker closes the @mention list.
+    act(() => trigger().click())
+    await settle()
+    expect(modelListbox()).not.toBeNull()
+    expect(listbox()).toBeNull()
+  })
+
+  it('fits the list into the visual viewport while the keyboard is up', async () => {
+    /** Card: bottom edge at 700px, 300px tall, of which the list is 200px. */
+    const viewport = Object.assign(new EventTarget(), { offsetTop: 0, height: 900 })
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      return (this.classList.contains('ai-chat-surface') ? { top: 400, bottom: 700, height: 300, left: 0, right: 300, width: 300, x: 0, y: 400 } : { top: 0, bottom: 0, height: 0, left: 0, right: 0, width: 0, x: 0, y: 0 }) as DOMRect
+    })
+    const offset = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.id === 'mention-listbox' ? 200 : 0
+    })
+    try {
+      render()
+      act(() => typeInto(textarea(), 'summarise @change'))
+      await settle()
+      expect(listbox()!.style.maxHeight).toBe('256px')
+
+      // Keyboard up: 400px visible → 400 − 56 (tab bar) − 100 (rest of card).
+      viewport.height = 400
+      act(() => { viewport.dispatchEvent(new Event('resize')) })
+      expect(listbox()!.style.maxHeight).toBe('244px')
+    } finally {
+      rect.mockRestore()
+      offset.mockRestore()
+      delete (window as { visualViewport?: unknown }).visualViewport
+    }
   })
 })
