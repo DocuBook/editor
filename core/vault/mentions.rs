@@ -83,13 +83,17 @@ pub fn resolve(vault: &super::Vault, request: ResolveRequest) -> Bundle {
     for (path, via) in paths {
         if path == exclude || !seen.insert(path.clone()) { skip(&mut bundle, path, SkipReason::Duplicate); continue; }
         if bundle.files.len() >= max_files || bundle.totals.chars >= max_total_chars { skip(&mut bundle, path, SkipReason::Budget); continue; }
+        // Read only what can be used: a note larger than this is still included,
+        // as its head, instead of being skipped whole as over budget.
         let read_limit = max_file_chars.max(max_total_chars).saturating_mul(4).saturating_add(256) as u64;
-        let content = match vault.read_bounded(&path, read_limit) { Ok(content) => content, Err(_) => { skip(&mut bundle, path, SkipReason::Budget); continue; } };
+        let (content, more) = match vault.read_prefix(&path, read_limit) { Ok(read) => read, Err(_) => { skip(&mut bundle, path, SkipReason::NotFound); continue; } };
         let chars: Vec<char> = content.chars().collect();
         let allowed = max_file_chars.min(max_total_chars.saturating_sub(bundle.totals.chars));
-        let truncated = chars.len() > allowed;
+        let truncated = more || chars.len() > allowed;
         let (content, used) = if truncated {
-            let marker: String = format!("\n[... truncated: {} chars]", chars.len().saturating_sub(allowed))
+            // Past the read limit the true remainder is unknown, so it is a floor.
+            let cut = chars.len().saturating_sub(allowed);
+            let marker: String = format!("\n[... truncated: {}{} chars]", cut, if more { "+" } else { "" })
                 .chars().take(allowed).collect();
             let keep = allowed.saturating_sub(marker.chars().count());
             (chars.iter().take(keep).collect::<String>() + &marker, allowed)
@@ -143,6 +147,20 @@ mod tests {
         for i in 0..(MENTION_MAX_SKIPPED + 20) { std::fs::write(root.join("docs").join(format!("img{i}.png")), "x").unwrap(); }
         let bundle = resolve(&vault, request(vec![folder("docs")], None));
         assert!(bundle.skipped.len() <= MENTION_MAX_SKIPPED, "skipped must stay bounded");
+    }
+    #[test] fn includes_the_head_of_a_note_larger_than_the_read_limit() {
+        // Regression: a note past the bounded read (~480 KB) was skipped whole as
+        // `budget`, so a mentioned large file reached the model as nothing at all.
+        let (root, vault) = vault();
+        std::fs::write(root.join("docs/huge.md"), format!("HEAD {}", "x".repeat(700_000))).unwrap();
+        let bundle = resolve(&vault, request(vec![file("docs/huge.md")], None));
+        assert_eq!(bundle.files.len(), 1, "skipped: {:?}", bundle.skipped);
+        let huge = &bundle.files[0];
+        assert!(huge.truncated);
+        assert!(huge.content.starts_with("HEAD "));
+        assert!(huge.content.chars().count() <= MENTION_MAX_FILE_CHARS);
+        assert!(huge.content.contains("chars]"));
+        assert!(bundle.skipped.is_empty(), "skipped: {:?}", bundle.skipped);
     }
     #[test] fn truncates_and_enforces_file_and_depth_budgets() {
         let (_root, vault) = vault();

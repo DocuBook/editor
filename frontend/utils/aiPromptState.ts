@@ -1,9 +1,17 @@
 import { frameReference } from './aiGrounding'
 
+/** A closing tag of the vault frame inside a note is neutralised, so a note
+ *  cannot end its `<file>` (or the whole `<vault_context>`) early and put the
+ *  rest of its text outside the untrusted-data frame — the same guard the web
+ *  results get in `formatWebReferences`. A note that merely documents XML
+ *  (`</file>` in a code block) would otherwise break the frame by accident. */
+const neutraliseVaultClosers = (text: string) => text.replace(/<\/(file|skipped|vault_context)/gi, '&lt;/$1')
+
 export function injectMentionContextMessages(messages: any[], context: any): any[] {
   if (!context || (!context.files?.length && !context.skipped?.length)) return messages
-  const files = (context.files || []).map((file: any) => `<file path="${String(file.path).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}" truncated="${file.truncated ? 'true' : 'false'}">\n${file.content}\n</file>`).join('\n')
-  const skipped = (context.skipped || []).map((item: any) => `${item.path}: ${item.reason}`).join('\n')
+  const files = (context.files || []).map((file: any) => `<file path="${escapeAttribute(String(file.path))}" truncated="${file.truncated ? 'true' : 'false'}">\n${neutraliseVaultClosers(String(file.content ?? ''))}\n</file>`).join('\n')
+  /** Skipped entries are vault paths, and a path may contain `<` / `>`. */
+  const skipped = (context.skipped || []).map((item: any) => `${escapeAttribute(String(item.path))}: ${escapeAttribute(String(item.reason))}`).join('\n')
   const block = frameReference('vault content', 'vault_context', `${files}${skipped ? `\n<skipped>\n${skipped}\n</skipped>` : ''}`)
   const latest = [...messages].map((message, index) => ({ message, index })).reverse().find(({ message }) => message?.role === 'user')?.index ?? -1
   const injected = { role: 'assistant', id: `assistant-vault-context-${latest >= 0 ? messages[latest]?.id || 'latest' : 'latest'}`, parts: [{ type: 'text', text: block }] }

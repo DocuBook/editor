@@ -332,6 +332,22 @@ impl Vault {
         self.read_bounded(path, max_bytes)
     }
 
+    /** The first `max_bytes` of a file as UTF-8 (lossy), and whether more
+     *  followed. For callers that truncate anyway (mention context): a large
+     *  note yields its head instead of failing like `read_bounded` does. Same
+     *  target resolution and traversal guard as `read_bounded`. */
+    pub(crate) fn read_prefix(&self, path: &str, max_bytes: u64) -> Result<(String, bool), String> {
+        let target = self.resolve_target(path).ok_or_else(|| format!("Read: not found: {path}"))?;
+        let file = std::fs::File::open(self.safe_path(&target)?).map_err(|e| format!("Read: {}", e))?;
+        let mut data = Vec::new();
+        file.take(max_bytes.saturating_add(1))
+            .read_to_end(&mut data)
+            .map_err(|e| format!("Read: {}", e))?;
+        let more = data.len() as u64 > max_bytes;
+        data.truncate(max_bytes as usize);
+        Ok((String::from_utf8_lossy(&data).to_string(), more))
+    }
+
     /// Read UTF-8 text with a byte limit; extension-less paths complete to .md/.mdx.
     pub fn read_bounded(&self, path: &str, max_bytes: u64) -> Result<String, String> {
         let target = self.resolve_target(path).ok_or_else(|| format!("Read: not found: {path}"))?;
