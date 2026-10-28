@@ -7,15 +7,30 @@ use git2::IndexAddOption;
 use super::{git_error, Git};
 
 impl Git {
-    /// Stage all additions, updates, and deletions while excluding `.trash/`.
+    /// Stage all additions, updates, and deletions while excluding `.trash/`
+    /// and untracked nested repositories.
     pub fn add_all(&self) -> Result<(), String> {
         let repo = self.repository()?;
+        let workdir = repo.workdir().ok_or("Repository has no working tree")?;
         let mut index = repo.index().map_err(git_error)?;
+        // `add_all` drops conflict entries and would stage files that still
+        // hold conflict markers; conflicts are resolved one path at a time.
+        if index.has_conflicts() {
+            return Err("Resolve merge conflicts and stage each file before committing".into());
+        }
         let mut update_filter = |path: &Path, _: &[u8]| skip_trash(path);
         index
             .update_all(["*"], Some(&mut update_filter))
             .map_err(git_error)?;
-        let mut add_filter = |path: &Path, _: &[u8]| skip_trash(path);
+        // libgit2 fails the whole call on an untracked directory that holds
+        // its own `.git` (a cloned repo inside the vault); leave it untracked.
+        let mut add_filter = |path: &Path, _: &[u8]| {
+            if workdir.join(path).join(".git").exists() {
+                1
+            } else {
+                skip_trash(path)
+            }
+        };
         index
             .add_all(["*"], IndexAddOption::DEFAULT, Some(&mut add_filter))
             .map_err(git_error)?;
@@ -38,6 +53,18 @@ impl Git {
         let mut index = repo.index().map_err(git_error)?;
         match std::fs::symlink_metadata(workdir.join(path)) {
             Ok(_) => {
+                // `add_path` follows symlinked parent directories; the leaf
+                // may be a symlink, but its directory must stay inside the vault.
+                let inside = match (
+                    workdir.canonicalize(),
+                    workdir.join(path).parent().map(Path::canonicalize),
+                ) {
+                    (Ok(root), Some(Ok(parent))) => parent.starts_with(root),
+                    _ => false,
+                };
+                if !inside {
+                    return Err("Path resolves outside the repository".into());
+                }
                 if index.get_path(path, 0).is_none()
                     && repo.status_should_ignore(path).map_err(git_error)?
                 {
@@ -46,6 +73,9 @@ impl Git {
                 index.add_path(path).map_err(git_error)?
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if index.get_path(path, 0).is_none() && index.conflict_get(path).is_err() {
+                    return Err("Path is not in the working tree or the index".into());
+                }
                 index.remove_path(path).map_err(git_error)?
             }
             Err(error) => return Err(error.to_string()),
@@ -199,6 +229,75 @@ mod tests {
         assert!(status.contains("D. old.md"));
         assert!(!status.contains(".trash/deleted.md"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn add_all_refuses_while_conflicts_are_unresolved() {
+        let (dir, g) = crate::git::test_util::local_repo("stage-all-conflict");
+        crate::git::test_util::commit_file(&g, &dir, "a.md", "base\n", "base");
+        let repo = g.repository().unwrap();
+        let mut index = repo.index().unwrap();
+        let entry = index.get_path(Path::new("a.md"), 0).unwrap();
+        index.remove_path(Path::new("a.md")).unwrap();
+        for stage in 1..=3u16 {
+            index
+                .add(&git2::IndexEntry {
+                    flags: (entry.flags & !0x3000) | (stage << 12),
+                    path: entry.path.clone(),
+                    ..entry
+                })
+                .unwrap();
+        }
+        index.write().unwrap();
+        std::fs::write(dir.join("a.md"), "<<<<<<< ours\n=======\n>>>>>>> theirs\n").unwrap();
+
+        assert!(g.add_all().is_err());
+        assert!(repo.index().unwrap().has_conflicts());
+        crate::git::test_util::cleanup(&[&dir]);
+    }
+
+    #[test]
+    fn add_all_skips_untracked_nested_repository() {
+        let dir = temp_git_repo("stage-all-nested");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("").unwrap();
+        std::fs::write(dir.join("a.md"), "a").unwrap();
+        git2::Repository::init(dir.join("sub")).unwrap();
+        std::fs::write(dir.join("sub/b.md"), "b").unwrap();
+
+        g.add_all().unwrap();
+        let index = g.repository().unwrap().index().unwrap();
+        assert!(index.get_path(Path::new("a.md"), 0).is_some());
+        assert!(index.get_path(Path::new("sub/b.md"), 0).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stage_path_rejects_unknown_missing_path() {
+        let dir = temp_git_repo("stage-missing");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("").unwrap();
+        assert!(g.stage_path("nope.md").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stage_path_rejects_file_behind_symlinked_directory() {
+        use std::os::unix::fs::symlink;
+
+        let dir = temp_git_repo("stage-symlink-dir");
+        let outside = temp_git_repo("stage-symlink-outside");
+        let g = Git::open(dir.to_str().unwrap());
+        g.init("").unwrap();
+        std::fs::write(outside.join("secret.md"), "SECRET").unwrap();
+        symlink(&outside, dir.join("linkdir")).unwrap();
+
+        assert!(g.stage_path("linkdir/secret.md").is_err());
+        let index = g.repository().unwrap().index().unwrap();
+        assert!(index.get_path(Path::new("linkdir/secret.md"), 0).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[cfg(unix)]

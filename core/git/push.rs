@@ -271,7 +271,14 @@ fn default_refspecs(
         .to_ascii_lowercase();
     let destination = match mode.as_str() {
         "nothing" => return Err("push.default is set to nothing".into()),
-        "matching" => return Ok((vec![":".into()], None, false)),
+        // libgit2 has no `:` matching refspec; refuse clearly instead of
+        // failing with "not a valid reference ''".
+        "matching" => {
+            return Err(
+                "push.default=matching is not supported; set push.default to simple or current"
+                    .into(),
+            )
+        }
         "current" => branch,
         "upstream" | "tracking" => {
             if remote != upstream_remote {

@@ -76,7 +76,8 @@ pub(crate) fn ensure_no_active_hooks(repo: &Repository, names: &[&str]) -> Resul
     let hooks_dir = match configured {
         Some(path) if path.is_absolute() => path,
         Some(path) => repo.workdir().unwrap_or_else(|| repo.path()).join(path),
-        None => repo.path().join("hooks"),
+        // Linked worktrees share hooks with the main repository.
+        None => repo.commondir().join("hooks"),
     };
 
     for name in names {

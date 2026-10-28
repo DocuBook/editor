@@ -80,4 +80,31 @@ describe("git status polling", () => {
     expect(invoke).toHaveBeenCalledTimes(2);
     expect(useGitStatus.getState().branch).toBe("main");
   });
+
+  it("ignores a status response that resolves after a newer poll", async () => {
+    let resolveOld!: (value: string) => void;
+    invoke.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveOld = resolve; }));
+    invoke.mockResolvedValueOnce(JSON.stringify({ ...JSON.parse(repoPayload()), branch: "new" }));
+
+    const older = pollGitStatus(true);
+    await pollGitStatus(true);
+    resolveOld(JSON.stringify({ ...JSON.parse(repoPayload()), branch: "old", status: "M. a.md" }));
+    await older;
+
+    expect(useGitStatus.getState().branch).toBe("new");
+    expect(useGitStatus.getState().status).toBe("");
+  });
+
+  it("ignores a status response that lands after the vault closed", async () => {
+    let resolveOld!: (value: string) => void;
+    invoke.mockImplementationOnce(() => new Promise<string>((resolve) => { resolveOld = resolve; }));
+    useGitStatus.setState({ branch: "" });
+
+    const pending = pollGitStatus(true);
+    useVaultStore.setState({ isOpen: false });
+    resolveOld(repoPayload());
+    await pending;
+
+    expect(useGitStatus.getState().branch).toBe("");
+  });
 });

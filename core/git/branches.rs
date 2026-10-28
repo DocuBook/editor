@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use git2::{build::CheckoutBuilder, Branch, BranchType, ErrorCode, ObjectType, Repository};
+use git2::{
+    build::CheckoutBuilder, Branch, BranchType, ErrorCode, ObjectType, Repository, RepositoryState,
+};
 use serde::Serialize;
 
 use super::{git_error, Git};
@@ -46,6 +48,7 @@ impl Git {
     pub fn create_branch(&self, name: &str) -> Result<(), String> {
         let name = valid_branch_name(name)?;
         let repo = self.repository()?;
+        ensure_clean_state(&repo)?;
         let head_commit = repo.head().and_then(|head| head.peel_to_commit());
         match head_commit {
             Ok(commit) => {
@@ -74,6 +77,7 @@ impl Git {
             return Err("Invalid branch name".into());
         }
         let repo = self.repository()?;
+        ensure_clean_state(&repo)?;
         if !remote {
             return checkout_local(&repo, valid_branch_name(name)?);
         }
@@ -125,6 +129,18 @@ fn valid_branch_name(name: &str) -> Result<&str, String> {
         Err("Invalid branch name".into())
     } else {
         Ok(name)
+    }
+}
+
+/// Switching branches mid-merge/rebase would carry MERGE_HEAD or the rebase
+/// state onto the other branch, and the next commit would be a bogus merge.
+fn ensure_clean_state(repo: &Repository) -> Result<(), String> {
+    match repo.state() {
+        RepositoryState::Clean => Ok(()),
+        state => Err(format!(
+            "Cannot switch branches while a {} is in progress — finish or abort it first",
+            super::status::state_name(state)
+        )),
     }
 }
 
@@ -278,5 +294,19 @@ mod tests {
         assert!(g.checkout_branch("origin", true).is_err());
         assert!(g.checkout_branch("origin/-x", true).is_err());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn branch_switch_is_refused_during_a_merge() {
+        use crate::git::test_util::{cleanup, diverged_pair};
+        let (dir, g, remote_dir, clone_dir) =
+            diverged_pair("branch-mid-merge", "theirs\n", "ours\n");
+        assert!(!g.merge_remote("origin", "main").success);
+        assert_eq!(g.repository().unwrap().state(), RepositoryState::Merge);
+
+        assert!(g.create_branch("other").is_err());
+        assert!(g.checkout_branch("origin/main", true).is_err());
+        assert_eq!(g.repository().unwrap().state(), RepositoryState::Merge);
+        cleanup(&[&dir, &remote_dir, &clone_dir]);
     }
 }

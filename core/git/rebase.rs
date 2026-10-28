@@ -57,6 +57,7 @@ impl Git {
         // Replaying commits creates one commit per step, so policy and identity
         // must stop the operation before the branch moves.
         crate::git::commit::ensure_commit_policy_supported(&repo)?;
+        crate::git::ensure_no_active_hooks(&repo, &["pre-rebase"])?;
         repo.committer_from_env().map_err(identity_hint)?;
         let name = self.resolve_remote(name)?;
         let branch = if branch.trim().is_empty() {
@@ -96,9 +97,16 @@ impl Git {
         let upstream = repo.find_annotated_commit(base).map_err(git_error)?;
         // `branch` is None so HEAD is rebased onto the remote tip, replaying only
         // the commits after the merge base (`upstream`).
+        // A failed init (e.g. an untracked file in the way) is cleaned up by
+        // libgit2 itself, which also clears the error message.
         let rebase = repo
             .rebase(None, Some(&upstream), Some(&onto), None)
-            .map_err(git_error)?;
+            .map_err(|error| match git_error(error) {
+                message if message.is_empty() || message == "no error" => {
+                    "Rebase could not start — local files would be overwritten by the incoming commits".to_string()
+                }
+                message => message,
+            })?;
         drop(rebase);
         let conflicts = self.apply_rebase(&repo)?;
         if conflicts.is_empty() {
@@ -120,8 +128,7 @@ impl Git {
         let mut rebase = repo.open_rebase(None).map_err(git_error)?;
         if rebase.operation_current().is_some() {
             let committer = repo.committer_from_env().map_err(identity_hint)?;
-            rebase
-                .commit(None, &committer, None)
+            commit_step(&mut rebase, &committer)
                 .map_err(|error| self.rebase_step_error(repo, error))?;
         }
         loop {
@@ -133,8 +140,7 @@ impl Git {
                     }
                     drop(index);
                     let committer = repo.committer_from_env().map_err(identity_hint)?;
-                    rebase
-                        .commit(None, &committer, None)
+                    commit_step(&mut rebase, &committer)
                         .map_err(|error| self.rebase_step_error(repo, error))?;
                 }
                 None => {
@@ -241,6 +247,19 @@ mod base {
     }
 }
 
+/// Commit the applied rebase step. A step whose changes already exist upstream
+/// (or whose conflict was resolved to the upstream side) is empty; libgit2
+/// reports that as `Applied`, and it is dropped like `git rebase --skip`.
+fn commit_step(
+    rebase: &mut git2::Rebase<'_>,
+    committer: &git2::Signature<'_>,
+) -> Result<(), git2::Error> {
+    match rebase.commit(None, committer, None) {
+        Err(error) if error.code() == git2::ErrorCode::Applied => Ok(()),
+        result => result.map(|_| ()),
+    }
+}
+
 fn is_rebase_state(state: RepositoryState) -> bool {
     matches!(
         state,
@@ -340,7 +359,7 @@ mod tests {
 
         // The editor flow: resolve in the worktree, stage, then Continue.
         std::fs::write(dir.join("a.md"), "resolved\n").unwrap();
-        g.add_all().unwrap();
+        g.stage_path("a.md").unwrap();
         let continued = g.rebase_continue();
         assert!(
             continued.success,
@@ -448,6 +467,34 @@ mod tests {
         assert_eq!(repo.head().unwrap().target(), head_before);
         assert_eq!(repo.state(), RepositoryState::Clean);
 
+        cleanup(&[&dir, &remote_dir, &clone_dir]);
+    }
+
+    #[test]
+    fn rebase_continue_drops_a_step_resolved_to_the_remote_side() {
+        let (dir, g, remote_dir, clone_dir) =
+            diverged_pair("sync-rebase-empty-step", "theirs\n", "ours\n");
+        assert_eq!(
+            g.rebase_remote("origin", "main").conflicts,
+            vec!["a.md".to_string()]
+        );
+
+        // Keeping the remote content makes the replayed commit empty.
+        std::fs::write(dir.join("a.md"), "theirs\n").unwrap();
+        g.stage_path("a.md").unwrap();
+        let continued = g.rebase_continue();
+        assert!(
+            continued.success,
+            "{}{}",
+            continued.error, continued.message
+        );
+
+        let repo = g.repository().unwrap();
+        assert_eq!(repo.state(), RepositoryState::Clean);
+        assert_eq!(
+            repo.head().unwrap().peel_to_commit().unwrap().id(),
+            repo.revparse_single("origin/main").unwrap().id()
+        );
         cleanup(&[&dir, &remote_dir, &clone_dir]);
     }
 }

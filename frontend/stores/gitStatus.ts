@@ -40,6 +40,11 @@ export const useGitStatus = create<GitStatusState>(() => EMPTY_GIT_STATUS)
  *  a forced call re-checks it — vault open, window focus, or `git init`. */
 let probed = false
 
+/** Bumped per request and on vault close: only the newest response may land, so
+ *  a slow scan of the previous vault (or one started before a commit) can never
+ *  overwrite fresher state. */
+let pollSeq = 0
+
 export async function pollGitStatus(force = false) {
   // Skip while unauthenticated (web login/setup screen): the server answers 401
   // for every poll, spamming the console — the poll only matters once a vault
@@ -51,11 +56,15 @@ export async function pollGitStatus(force = false) {
   // only forced events re-probe it instead of polling it every few seconds.
   if (!force && probed && !useGitStatus.getState().isRepo) return
   probed = true
+  const seq = ++pollSeq
+  const current = () => seq === pollSeq && useVaultStore.getState().isOpen
   try {
     const s = await invoke<string>('git_status')
+    if (!current()) return
     const d = JSON.parse(s)
     useGitStatus.setState({ isRepo: d.isRepo === true, hasRemote: d.hasRemote === true, branch: d.branch || '', upstream: d.upstream || '', status: d.status || '', ahead: d.ahead ?? 0, behind: d.behind ?? 0, pushTarget: d.pushTarget || '', hasCommits: d.hasCommits === true, remotes: Array.isArray(d.remotes) ? d.remotes : [], repoState: d.state || 'clean' })
   } catch {
+    if (!current()) return
     // Transient backend failure — let the next event probe again instead of
     // leaving the store permanently empty.
     probed = false
@@ -80,6 +89,7 @@ export function useGitStatusRefresh() {
       } else {
         // Forget repo-ness and clear stale branch/status from the previous vault.
         probed = false
+        pollSeq++
         useGitStatus.setState(EMPTY_GIT_STATUS)
       }
     })

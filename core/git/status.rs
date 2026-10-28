@@ -178,7 +178,7 @@ fn clamp_chars(value: &str, max: usize) -> String {
 }
 
 /** Stable machine-readable name for the repository state (`git status` style). */
-fn state_name(state: RepositoryState) -> &'static str {
+pub(super) fn state_name(state: RepositoryState) -> &'static str {
     match state {
         RepositoryState::Clean => "clean",
         RepositoryState::Merge => "merge",
@@ -199,14 +199,21 @@ fn status_lines(repo: &Repository) -> Result<String, String> {
     let mut options = StatusOptions::new();
     options
         .include_untracked(true)
-        .recurse_untracked_dirs(true)
-        .renames_head_to_index(true)
-        .renames_index_to_workdir(true);
+        .recurse_untracked_dirs(true);
+    // No rename detection: a rename entry carries only the old path, which
+    // would hide the new file from the Changes list. A rename shows as a
+    // deletion plus a new file, which stage/diff handle per path.
     let statuses = repo.statuses(Some(&mut options)).map_err(git_error)?;
     let mut lines = Vec::with_capacity(statuses.len());
     for entry in statuses.iter() {
         let path = String::from_utf8_lossy(entry.path_bytes());
-        let (index, worktree) = status_pair(entry.status());
+        let status = entry.status();
+        // `git rm --cached` on a file still on disk: report the staged
+        // deletion as well as the untracked file, like `git status`.
+        if status.is_index_deleted() && status.is_wt_new() {
+            lines.push(format!("D. {path}"));
+        }
+        let (index, worktree) = status_pair(status);
         lines.push(format!("{index}{worktree} {path}"));
     }
     Ok(lines.join("\n"))
@@ -314,5 +321,25 @@ mod tests {
         assert!(summary.contains("staged.md (+1 -0)"), "{summary}");
         assert!(summary.contains("+ queued"), "{summary}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn rename_and_untracked_staged_deletion_list_every_path() {
+        let (dir, g) = crate::git::test_util::local_repo("status-rename");
+        crate::git::test_util::commit_file(&g, &dir, "old.md", "same content\n", "first");
+        crate::git::test_util::commit_file(&g, &dir, "kept.md", "kept\n", "second");
+
+        std::fs::rename(dir.join("old.md"), dir.join("new.md")).unwrap();
+        let repo = g.repository().unwrap();
+        let mut index = repo.index().unwrap();
+        index.remove_path(std::path::Path::new("kept.md")).unwrap();
+        index.write().unwrap();
+
+        let status = g.status_with_branch().unwrap().status;
+        assert!(status.contains(".D old.md"), "{status}");
+        assert!(status.contains("?? new.md"), "{status}");
+        assert!(status.contains("D. kept.md"), "{status}");
+        assert!(status.contains("?? kept.md"), "{status}");
+        crate::git::test_util::cleanup(&[&dir]);
     }
 }

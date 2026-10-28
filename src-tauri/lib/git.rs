@@ -25,11 +25,17 @@ pub async fn git_clone(
 }
 
 #[tauri::command]
-pub fn git_init(branch: String, state: State<AppState>) -> Result<String, String> {
-    match state.git.lock().expect("lock").as_ref() {
-        Some(g) => serde_json::to_string(&g.init(&branch)?).map_err(|e| e.to_string()),
-        None => Err("No vault".into()),
-    }
+pub async fn git_init(branch: String, state: State<'_, AppState>) -> Result<String, String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".into()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        serde_json::to_string(&crate::git::Git::open(&repo_path).init(&branch)?)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -237,16 +243,22 @@ pub async fn git_diff_file(
     .map_err(|e| e.to_string())?
 }
 
+/// Staging the whole vault hashes every changed file — off the main thread.
 #[tauri::command]
-pub fn git_stage(path: Option<String>, state: State<AppState>) -> Result<(), String> {
-    let guard = state.git.lock().expect("lock");
-    match guard.as_ref() {
-        Some(g) => match path {
-            Some(p) if !p.is_empty() => g.stage_path(&p).map_err(|e| e.to_string()),
-            _ => g.add_all().map_err(|e| e.to_string()),
-        },
-        None => Err("No vault".to_string()),
-    }
+pub async fn git_stage(path: Option<String>, state: State<'_, AppState>) -> Result<(), String> {
+    let repo_path = match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.repo_path.clone(),
+        None => return Err("No vault".to_string()),
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let g = crate::git::Git::open(&repo_path);
+        match path {
+            Some(p) if !p.is_empty() => g.stage_path(&p),
+            _ => g.add_all(),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

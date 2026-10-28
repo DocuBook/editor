@@ -434,21 +434,28 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
         },
         "git_stage" => {
             let path = s("path");
-            match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-                Some(g) => {
-                    let r = if path.is_empty() {
-                        g.add_all()
-                    } else {
-                        g.stage_path(&path)
-                    };
-                    r.map_err(|e| e.to_string()).map(|_| "null".into())
-                }
-                None => Err("No vault".to_string()),
-            }
+            // Copy the root out so staging a large vault does not hold the
+            // git lock that every other git command (and close_vault) waits on.
+            let repo_path = match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                Some(g) => g.repo_path.clone(),
+                None => return Err("No vault".to_string()),
+            };
+            let g = git::Git::open(&repo_path);
+            let r = if path.is_empty() {
+                g.add_all()
+            } else {
+                g.stage_path(&path)
+            };
+            r.map_err(|e| e.to_string()).map(|_| "null".into())
         }
         "git_status" => {
-            let guard = state.git.lock().unwrap_or_else(|e| e.into_inner());
-            match guard.as_ref() {
+            let repo = state
+                .git
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+                .map(|g| git::Git::open(&g.repo_path));
+            match repo.as_ref() {
                 Some(g) if g.is_repo() => {
                     let ws = g.status_with_branch().unwrap_or_default();
                     let remotes = g

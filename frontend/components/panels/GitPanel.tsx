@@ -45,6 +45,8 @@ function BranchSwitcher({ branch, open, onToggle }: { branch: string; open: bool
       onToggle()
       const dirty = useEditorStore.getState().tabs.filter(tab => tab.dirty).length
       await useEditorStore.getState().reloadAllTabs()
+      // The other branch can add or remove files — refresh the sidebar tree too.
+      await useVaultStore.getState().loadTree().catch(() => {})
       void pollGitStatus()
       toast.success((create ? 'Created and switched to ' : 'Switched to ') + entry.name + (dirty ? ` — ${dirty} unsaved tab${dirty > 1 ? 's' : ''} kept open` : ''))
     } catch (e) { setError(String(e)) }
@@ -280,32 +282,43 @@ function SyncBar() {
     await pollGitStatus()
   })
 
+  // Each sync refreshes in `finally`: a failed step can still leave a merge or
+  // rebase on disk, and the panel must offer Continue/Abort for it.
   const mergeRemote = () => run('merge', async () => {
-    await invoke('git_fetch', { name: activeRemote })
-    const success = report(JSON.parse(await invoke<string>('git_remote_merge', { name: activeRemote, branch: targetBranch })))
-    await afterSync()
-    return success
+    try {
+      await invoke('git_fetch', { name: activeRemote })
+      return report(JSON.parse(await invoke<string>('git_remote_merge', { name: activeRemote, branch: targetBranch })))
+    } finally {
+      await afterSync()
+    }
   })
 
   const rebaseRemote = () => run('rebase', async () => {
-    await invoke('git_fetch', { name: activeRemote })
-    const success = report(JSON.parse(await invoke<string>('git_rebase', { name: activeRemote, branch: targetBranch })))
-    await afterSync()
-    return success
+    try {
+      await invoke('git_fetch', { name: activeRemote })
+      return report(JSON.parse(await invoke<string>('git_rebase', { name: activeRemote, branch: targetBranch })))
+    } finally {
+      await afterSync()
+    }
   })
 
   const continueRebase = () => run('continue', async () => {
-    const success = report(JSON.parse(await invoke<string>('git_rebase_continue')))
-    await afterSync()
-    return success
+    try {
+      return report(JSON.parse(await invoke<string>('git_rebase_continue')))
+    } finally {
+      await afterSync()
+    }
   })
 
   const abort = () => run('abort', async () => {
     const which = confirmAbort
     setConfirmAbort(null)
-    await invoke(which === 'merge' ? 'git_merge_abort' : 'git_rebase_abort')
-    setNotice(which === 'merge' ? 'Merge aborted' : 'Rebase aborted')
-    await afterSync()
+    try {
+      await invoke(which === 'merge' ? 'git_merge_abort' : 'git_rebase_abort')
+      setNotice(which === 'merge' ? 'Merge aborted' : 'Rebase aborted')
+    } finally {
+      await afterSync()
+    }
   })
 
   const btn = 'flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-[12px] cursor-pointer border-none bg-transparent text-foreground-secondary hover:bg-surface-active hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed'
@@ -447,8 +460,11 @@ function GitActions() {
   const merging = repoState === 'merge'
   const committableState = repoState === 'clean' || merging
   const hasChanges = status.trim().length > 0
+  /** Commit stages everything first; with conflicts still listed that would
+   *  record conflict markers, so each file must be resolved and staged first. */
+  const hasConflicts = useMemo(() => parseStatus(status).some(conflictOf), [status])
   const busy = commitState === 'busy' || pushState === 'busy'
-  const commitDisabled = !isRepo || hasUnsaved || !committableState || (!hasChanges && !merging) || !message.trim() || busy || generating
+  const commitDisabled = !isRepo || hasUnsaved || !committableState || hasConflicts || (!hasChanges && !merging) || !message.trim() || busy || generating
   const pushDisabled = !isRepo || !hasRemote || (!!upstream && ahead <= 0) || busy
 
   useEffect(() => {
@@ -469,7 +485,9 @@ function GitActions() {
       try { freshStatus = JSON.parse(await invoke<string>('git_status')).status || status } catch { /* current poll is enough */ }
       const fallbackName = tabs.find(tab => tab.path === activeTab)?.name
       // Lazy: a single-file change set is named without ever fetching the diff.
-      setMessage(await autoCommitMessage(freshStatus, fallbackName, () => invoke<string>('git_diff_summary')))
+      const generated = await autoCommitMessage(freshStatus, fallbackName, () => invoke<string>('git_diff_summary'))
+      // Manual text always wins: keep anything typed while the AI was working.
+      setMessage(typed => typed === message ? generated : typed)
     } finally {
       setGenerating(false)
     }
