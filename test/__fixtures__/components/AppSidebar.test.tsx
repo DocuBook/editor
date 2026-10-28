@@ -60,7 +60,8 @@ vi.mock('../../../frontend/stores/auth', () => ({
 }))
 vi.mock('../../../frontend/lib/ipc', () => ({ isTauri: false, listen: vi.fn(async () => () => {}), invoke: vi.fn() }))
 vi.mock('../../../frontend/utils/logger', () => ({ logger: { error: vi.fn() } }))
-vi.mock('sonner', () => ({ Toaster: () => null, toast: { error: vi.fn() } }))
+/* The real Toaster, so the toast describe below exercises what App configures. */
+vi.mock('sonner', async (importOriginal) => ({ ...(await importOriginal<typeof import('sonner')>()), toast: { error: vi.fn() } }))
 
 import App from '../../../frontend/App'
 import { useSettings } from '../../../frontend/stores/settings'
@@ -186,5 +187,23 @@ describe('responsive sidebar', () => {
 
     expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
+  })
+})
+
+describe('toasts', () => {
+  /** Every toast carries an X, so a message can be cleared before its timer runs
+   *  out — on a phone one sits over the composer's Cancel/Retry bar. */
+  it('dismisses a toast from its close button', async () => {
+    const { toast } = await vi.importActual<typeof import('sonner')>('sonner')
+    act(() => { toast.error('AI request failed. Please retry.') })
+    const close = await vi.waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-sonner-toast] [data-close-button]')
+      expect(button).not.toBeNull()
+      return button!
+    })
+    expect(close.getAttribute('aria-label')).toBe('Close toast')
+
+    act(() => close.click())
+    await vi.waitFor(() => expect(document.querySelector('[data-sonner-toast]')).toBeNull())
   })
 })
