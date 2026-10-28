@@ -13,9 +13,10 @@
  *   CSS — doiuse, failing only on features an engine lacks entirely.
  *         "Partial support" is not checked: caniuse marks hundreds of
  *         ordinary declarations partial, none of them actionable. Known
- *         blind spot: an unsupported VALUE of a supported property, e.g.
- *         `overflow: clip` (Safari 16) is only "partial overflow" — those
- *         still need the manual @supports fallbacks in frontend/index.css.
+ *         blind spot: an unsupported VALUE of a supported property is only
+ *         "partial" support of that property (as `overflow: clip` was below
+ *         Safari 16) — such a value needs a manual @supports fallback in
+ *         frontend/index.css.
  *
  * Run: npm run build && node test/check-bundle-compat.mjs
  */

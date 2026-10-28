@@ -378,7 +378,7 @@ html[data-toolbar-popup-open] .bn-editor {
      transpiles against the build target and collapses a same-rule pair to -webkit-
      only, dropping blur on engines that have the standard property but not the
      alias. Separate rules survive to the build output.
-   - Plain class selectors only, no `:has()` (Safari 15.4 has none).
+   - Plain class selectors only (no `:has()`).
    - The blur radius is a literal, not a var(): some WebKit builds silently
      drop a backdrop-filter whose value holds var() (WebKit bugs 289800 on
      WebKitGTK in Tauri, 297620 on Safari 18). Kept moderate at 8px: it is a
@@ -406,7 +406,7 @@ body .mobile-sidebar-drawer-overlay {
 /* UI shell — single source of truth for user-select on non-editor chrome.
    Applying user-select:none globally blocks drag/selection in WebKit, so
    UI shells opt in individually instead. The -webkit- prefix is REQUIRED on
-   WKWebView macOS 12 (Safari 15) — unprefixed user-select isn't honored there,
+   WKWebView macOS 12.7 (Safari 17.6) — unprefixed user-select isn't honored there,
    so taps/double-clicks still select the row text. */
 .ui-shell {
     -webkit-user-select: none;
@@ -690,9 +690,10 @@ body .code-block-language-empty {
     pointer-events: none;
 }
 
-/* Tailwind v4 emits range media queries for responsive utilities; Safari 15
-   ignores that syntax. Keep the floating composer responsive with the legacy
-   min-width form supported by the app's oldest WKWebView.
+/* The floating composer's responsive width uses the classic min-width media
+   query. It dates from the Safari 15 floor, which ignored the range media
+   queries Tailwind v4 emits (range syntax is Safari 16.4+); both forms work at
+   the Safari 17.6 floor.
 
    Deliberately NO `overflow-x: hidden` here. The @mention list once rendered
    ABOVE this box (`bottom-full`), and `overflow-x: hidden` against a `visible`

@@ -112,8 +112,8 @@ editor/
       failing fails the run. `test/check-*.mjs` are repository guards, not E2E suites.
 
       The mobile shell suite keeps runtime geometry checks and shipped artifact
-      pins for the dvh gate and viewport meta key. It does not pin negative CSS
-      strings or the composer rail's implementation-specific height.
+      pins for the viewport meta key. It does not pin negative CSS strings or
+      the composer rail's implementation-specific height.
 
      Browser coverage:
      - Local macOS runs Chromium through the installed Playwright browser
@@ -127,8 +127,8 @@ editor/
        `compat/compat` in `.oxlintrc.json` (our source) and
        `npm run lint:compat` (the built bundle, dependencies and Tailwind
        output included), both against `.browserslistrc`. Two blind spots:
-       neither sees an unsupported value of a supported CSS property (e.g.
-       `overflow: clip`), so keep the `@supports` fallbacks in
+       neither sees an unsupported value of a supported CSS property, so such
+       a value needs a manual caniuse check and an `@supports` fallback in
        `frontend/index.css`; and the JS rule only knows the APIs in its
        bundled snapshot, so newer ones (e.g. `Object.groupBy`, `URL.canParse`,
        `AbortSignal.timeout`) pass unflagged and need a manual caniuse check.

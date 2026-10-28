@@ -15,7 +15,7 @@
  *     translucent dialog let the page's text show through its own content.
  *  3. The blur ships both forms (-webkit- is required up to Safari 17) in
  *     SEPARATE @supports rules. Lightning CSS collapses a same-rule pair for the
- *     safari15 target. It uses no selector Safari 15.4 lacks. */
+ *     safari17.6 target. It uses plain class selectors only (no `:has()`). */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -96,7 +96,7 @@ describe('modal backdrop', () => {
     expect(css).not.toContain('--color-surface-raised')
   })
 
-  it('uses no selector that Safari 15.4 (macOS 12 WKWebView) cannot parse', () => {
+  it('uses plain class selectors only (no :has())', () => {
     for (const rule of [...rulesFor('.ui-backdrop'), ...rulesFor('.ui-dialog'), ...rulesFor('.ui-popover')]) {
       expect(rule.selectors).not.toMatch(/:has\(/)
     }
