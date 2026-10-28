@@ -131,6 +131,14 @@ describe('composer @mention picker', () => {
     expect(labels).toHaveLength(2)
     expect(labels[0]).not.toBe(labels[1])
     expect(labels.some(label => label.includes('docs/notes'))).toBe(true)
+    // The hint must survive a long name: it keeps its width (capped at half the
+    // row) and the name truncates first. jsdom has no layout, so the contract
+    // is the classes; the rendered result was checked in Chromium and WebKit.
+    for (const row of Array.from(document.querySelectorAll('[role="option"]'))) {
+      expect(row.querySelector('span')!.className).toContain('truncate')
+      expect(row.querySelector('span + span')!.className).toMatch(/\bshrink-0\b/)
+      expect(row.querySelector('span + span')!.className).toContain('max-w-[50%]')
+    }
   })
 
   it('inserts the full nested path for an ambiguous basename', async () => {

@@ -703,14 +703,18 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
    *  way the model picker and the suggestions are — not a popover floating over
    *  the card. Its list shares their row chrome and the IME-aware height (it is
    *  open while the reader types, so on a phone the keyboard is up). The prompt
-   *  box keeps focus and owns `aria-activedescendant`. */
+   *  box keeps focus and owns `aria-activedescendant`. In a row the folder hint
+   *  is what tells duplicate basenames apart, so it keeps its width (`shrink-0`,
+   *  capped at half the row) and the NAME truncates first: shrinking both cut a
+   *  long duplicate's hint to "d…" on a phone, where `docs` and `docs/notes`
+   *  then read the same. */
   const mentionPanel = picker && (
     <div className="ai-chat-panel flex flex-col border-b border-border-subtle p-1">
       <div role="presentation" className={PANEL_HEADER_CLASS}>Context</div>
       <div id={MENTION_LISTBOX_ID} ref={mentionListRef} role="listbox" aria-label="Mention files and folders" style={panelListMax === undefined ? undefined : { maxHeight: panelListMax }} className="max-h-64 overflow-y-auto overscroll-contain">
         {visibleEntries.length ? visibleEntries.map((entry, position) => {
           const selected = entry === activeEntry
-          return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} title={entry.path} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={panelRowClass(selected)}>{entry.type === '1' ? <Folder size={14} className="shrink-0" /> : <FileText size={14} className="shrink-0" />}<span className="min-w-0 truncate">{entry.name}</span>{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}</button>
+          return <button key={entry.path} ref={selected ? activeOptionRef : undefined} id={optionId(position)} role="option" aria-selected={selected} title={entry.path} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMention(entry)} className={panelRowClass(selected)}>{entry.type === '1' ? <Folder size={14} className="shrink-0" /> : <FileText size={14} className="shrink-0" />}<span className="min-w-0 truncate">{entry.name}</span>{ambiguousNames.has(entry.name.toLowerCase()) && parentOf(entry.path) && <span className={'max-w-[50%] shrink-0 truncate text-[10px] ' + mentionMetaClass(selected)}>{parentOf(entry.path)}</span>}</button>
         }) : <div className="px-2.5 py-1.5 text-[11px] text-muted">{currentIndex && currentIndex.unreadable > 0 && currentIndex.entries.length === 0 ? 'Could not read the vault — try again' : indexLoading ? 'Loading vault…' : 'No matching files or folders'}</div>}
         {currentIndex && currentIndex.unreadable > 0 && visibleEntries.length > 0 && <div className="px-2.5 py-1 text-[10px] text-muted">{currentIndex.unreadable} folder{currentIndex.unreadable === 1 ? '' : 's'} could not be read</div>}
       </div>
