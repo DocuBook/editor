@@ -2,10 +2,9 @@
 # (eslint-plugin-compat via oxlint, doiuse in test/check-bundle-compat.mjs) —
 # Vite and Tailwind do not consume this file.
 #
-# safari 17.6: WKWebView on the desktop floor, macOS 12.7
+# safari 15.4: WKWebView on the desktop floor, macOS 12.3
 #   (src-tauri/tauri.conf.json bundle.macOS.minimumSystemVersion). WKWebView
-#   follows the installed Safari; 17.6 is the newest Safari Monterey gets.
-# chrome 151: the Chromium the E2E suite runs (Playwright 1.62.1's Chrome for
-#   Testing) and the web build's floor (vite.config.ts build.target).
-safari >= 17.6
-chrome >= 151
+#   follows the installed Safari, so 12.3 is the oldest engine a user can have.
+# chrome 105: the web build's floor (vite.config.ts build.target).
+safari >= 15.4
+chrome >= 105

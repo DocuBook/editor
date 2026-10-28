@@ -4,7 +4,7 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 
 ## Prerequisites
 
-- **macOS** — desktop development only. CI uses macos-15 for lint/test/build/E2E (macos-14 runners retire on 2026-11-02; the pinned Playwright WebKit build also needs macOS 15+). The app itself targets macOS 12.7+ (WKWebView Safari 17.6) and the web build Chrome 151+ (the Chromium the E2E suite runs) / Safari 17.6+ — the build job pins and verifies that deployment target, and the compat lints hold the frontend to `.browserslistrc`. Users on macOS 12.0–12.6, an older Safari, or an older Chromium are not supported
+- **macOS** — desktop development only. CI uses macos-15 for lint/test/build/E2E (macos-14 runners retire on 2026-11-02; the pinned Playwright WebKit build also needs macOS 15+). The app itself targets macOS 12.3+ (WKWebView Safari 15.4) — the build job pins and verifies that deployment target, and the compat lints hold the frontend to `.browserslistrc`
 - **Node.js** 22.22.1 or newer — CI pins `22.23.4` (the newest dependency floor is `lint-staged` 17 at `>=22.22.1`; ESLint 10, pulled in by `eslint-plugin-compat`, needs `^22.13.0`); `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint. The Dockerfile's `node:22-alpine` floats on the same major
 - **npm**
 - **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically; includes `clippy` and `rustfmt`)
@@ -122,8 +122,8 @@ editor/
        then the Chromium/WebKit E2E matrix on macOS 15 as required by the
        pinned Playwright build.
      - That WebKit is the newest engine, not the oldest one we ship to:
-       desktop runs on the system WKWebView, down to Safari 17.6 on
-       macOS 12.7. The oldest engines are covered statically instead —
+       desktop runs on the system WKWebView, down to Safari 15.4 on
+       macOS 12.3. The oldest engines are covered statically instead —
        `compat/compat` in `.oxlintrc.json` (our source) and
        `npm run lint:compat` (the built bundle, dependencies and Tailwind
        output included), both against `.browserslistrc`. Two blind spots:
