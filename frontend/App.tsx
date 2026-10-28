@@ -320,8 +320,10 @@ export default function App() {
         />
       )}
       {/* `expand` keeps concurrent toasts spread out (one above the other) instead
-          of sonner's default collapsed stack, where they overlap until hovered. */}
-      <Toaster position="bottom-right" theme={colorScheme} richColors expand offset={{ bottom: 80, right: 16 }} mobileOffset={{ bottom: 96 }} />
+          of sonner's default collapsed stack, where they overlap until hovered.
+          `closeButton` gives every toast an X, so one can be dismissed before its
+          timer runs out (sonner leaves it off loading toasts). */}
+      <Toaster position="bottom-right" theme={colorScheme} richColors expand closeButton offset={{ bottom: 80, right: 16 }} mobileOffset={{ bottom: 96 }} />
     </div>
   )
 }
