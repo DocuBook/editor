@@ -17,6 +17,7 @@ vi.mock('../../../frontend/lib/ipc', () => ({
 
 import AiFloatingChat from '../../../frontend/components/editor/AiFloatingChat'
 import { invalidateMentionIndex } from '../../../frontend/utils/mentionIndex'
+import { parseMentions } from '../../../frontend/utils/aiMentions'
 import { useAiChat } from '../../../frontend/stores/aiChat'
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useEditorStore } from '../../../frontend/stores/editor'
@@ -167,6 +168,25 @@ describe('composer @mention picker', () => {
 
     expect(textarea().value).toBe('summarise @CHANGELOG.md ')
     expect(document.querySelector('[role="listbox"]')).toBeNull()
+  })
+
+  it('quotes a picked path the unquoted form cannot carry', async () => {
+    // Regression: only whitespace triggered quotes, so `@notes(1).md` was read
+    // back as `notes` (silently another file) and `@café.md` as `caf`.
+    tree[''] = [...(tree[''] as unknown[]), ...files(['notes(1).md', 'café.md'])]
+    render()
+    for (const [query, name, expected] of [['notes(', 'notes(1).md', 'summarise @"notes(1).md" '], ['caf', 'café.md', 'summarise @"café.md" ']] as const) {
+      act(() => typeInto(textarea(), `summarise @${query.replace('(', '')}`))
+      await settle()
+      const row = Array.from(document.querySelectorAll('[role="option"]')).find(node => node.textContent === name) as HTMLButtonElement
+      expect(row, name).toBeDefined()
+      act(() => {
+        row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+        row.click()
+      })
+      expect(textarea().value).toBe(expected)
+      expect(parseMentions(textarea().value).mentions.map(m => m.token)).toEqual([name])
+    }
   })
 
   it('inserts the row that was picked, not the one the keyboard highlighted', async () => {

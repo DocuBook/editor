@@ -9,7 +9,7 @@ import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
 import { toast } from 'sonner'
 import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
-import { parseMentions } from '../../utils/aiMentions'
+import { mentionText, parseMentions } from '../../utils/aiMentions'
 import { loadMentionIndex, type MentionEntry } from '../../utils/mentionIndex'
 import { observeMobileToolbar } from '../../utils/mobileToolbar'
 import { fetchProviderModels, type DiscoveredModel } from '../../utils/modelDiscovery'
@@ -420,7 +420,7 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const insertMention = (entry: TreeEntry) => {
     const folder = entry.type === '1'
     const token = entry.path + (folder ? '/' : '')
-    const quoted = /\s/.test(token) ? `@"${token}"` : `@${token}`
+    const quoted = mentionText(token)
     const current = inputRef.current
     const start = picker?.start ?? input.length
     const end = picker?.end ?? input.length
