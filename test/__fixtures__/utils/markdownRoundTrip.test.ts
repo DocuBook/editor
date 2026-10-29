@@ -51,7 +51,7 @@ describe('markdown round trip keeps typed text literal', () => {
     '---', '***', '___', '```', '~~~',
     'a*b*c', '_under_', '**bold**', '`tick`', '~~strike~~', '[a](b)', '![i](j)',
     '$x$ math', 'cost $5 and $x$ here', 'esc \\* star', 'esc \\( x \\)',
-    '[[Wiki Note]]', 'Text[^1]', 'Paid $5 and $10', '\\$a\\$', 'a \\$b\\$ c','snake_case_name', '2 * 3 * 4',
+    '[[Wiki Note]]', 'Text[^1]', 'Paid $5 and $10', '\\$a\\$', 'a \\$b\\$ c', 'snake_case_name', '2 * 3 * 4',
     'line\n# second', 'line\n- second', 'line\n---', 'line\n> q',
   ])('%j', (text) => {
     const [block, ...rest] = reload(text)

@@ -32,8 +32,11 @@ const isSpace = (ch: string | undefined) => ch === undefined || /\s/.test(ch)
 const isWord = (ch: string | undefined) => ch !== undefined && /[\p{L}\p{N}]/u.test(ch)
 
 /** Escape inline syntax in one stretch of text with no verbatim spans in it.
- *  A run edge counts as an unknown neighbour, so a delimiter there is escaped. */
-function escapeInline(text: string): string {
+ *  A run edge counts as an unknown neighbour, so a delimiter there is escaped.
+ *  `dollars`: also escape every `$` (the run holds a pair the load path would
+ *  read as math). A backslash before it is already doubled above, so `\$` here
+ *  always escapes the dollar itself. */
+function escapeInline(text: string, dollars: boolean): string {
   let out = ''
   for (let i = 0; i < text.length; i++) {
     const ch = text[i]
@@ -47,6 +50,7 @@ function escapeInline(text: string): string {
     else if (ch === '`') out += '\\`'
     else if (ch === '~' && (prev === '~' || next === '~')) out += '\\~'
     else if (ch === '[' && /^\[[^\]\n]*\]\(/.test(text.slice(i))) out += '\\['
+    else if (ch === '$' && dollars) out += '\\$'
     else out += ch
   }
   return out
@@ -68,16 +72,19 @@ function escapeLineStart(line: string): string {
 /** Escape one text run. `lineStart`: the run begins a line, so block syntax at
  *  its start (and after every newline in it) must be escaped too. */
 export function escapeMarkdownText(text: string, lineStart: boolean): string {
-  let escaped = ''
-  let last = 0
-  for (const match of text.matchAll(VERBATIM)) {
-    escaped += escapeInline(text.slice(last, match.index)) + match[0]
-    last = match.index! + match[0].length
+  const escapeRuns = (dollars: boolean) => {
+    let out = ''
+    let last = 0
+    for (const match of text.matchAll(VERBATIM)) {
+      out += escapeInline(text.slice(last, match.index), dollars) + match[0]
+      last = match.index! + match[0].length
+    }
+    return out + escapeInline(text.slice(last), dollars)
   }
-  escaped += escapeInline(text.slice(last))
   // A `$` pair the load path would read as math is escaped as a whole; lone
   // dollars (prices) reload as themselves and stay readable.
-  if (mathDollarToMathML(escaped) !== escaped) escaped = escaped.replace(/\$/g, '\\$')
+  let escaped = escapeRuns(false)
+  if (mathDollarToMathML(escaped) !== escaped) escaped = escapeRuns(true)
   return escaped
     .split('\n')
     .map((line, i) => (i > 0 || lineStart ? escapeLineStart(line) : line))
