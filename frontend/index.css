@@ -631,6 +631,57 @@ body .code-block-language-option[data-combobox-selected] {
 body .code-block-language-empty {
     color: var(--color-muted);
 }
+/* Settings → Web search provider: Mantine's Select, restyled from the app's
+   tokens (it portals to <body>, so the dropdown is styled by class, scoped
+   through body to out-rank Mantine's unlayered re-import like the picker above). */
+body .web-search-picker-input {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+    border-radius: 4px;
+    color: var(--color-foreground);
+    font-size: 12px;
+    font-family: var(--font-mono, ui-monospace, monospace);
+}
+body .web-search-picker-input:focus {
+    border-color: var(--color-accent);
+}
+body .web-search-picker-input:disabled {
+    opacity: 0.6;
+}
+body .web-search-picker-dropdown {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-popover);
+    color: var(--color-foreground-secondary);
+}
+body .web-search-picker-option {
+    font-size: 12px;
+}
+@media (hover: hover) {
+    body .web-search-picker-option:hover:not([data-combobox-selected]):not([data-combobox-disabled]) {
+        background: var(--color-surface-active);
+    }
+}
+body .web-search-picker-option[data-combobox-selected] {
+    background: var(--color-accent);
+    color: var(--color-on-accent);
+}
+/* Same settings pane: the fetch checkbox takes the app's accent and text size. */
+body .web-fetch-checkbox-input {
+    background: var(--color-background);
+    border: 1px solid var(--color-border);
+}
+body .web-fetch-checkbox-input:checked {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+}
+body .web-fetch-checkbox-label {
+    color: var(--color-foreground);
+    font-size: 12px;
+    line-height: 1.5;
+    padding-inline-start: 8px;
+}
 .ProseMirror .bn-block-content[data-content-type=codeBlock] .code-block-title {
     flex: 1;
     min-width: 0;
