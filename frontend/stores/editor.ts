@@ -22,6 +22,10 @@ export interface Tab {
   dirty: boolean
   /** File was deleted from vault (strikethrough indicator) */
   deleted: boolean
+  /** The file uses CRLF line endings. The editors only ever see LF (a CRLF
+   *  frontmatter fence is not recognised, and BlockNote reads every `\r\n` as a
+   *  hard break), so `setContent` normalizes and the save restores them. */
+  crlf?: boolean
   /** Content hash of the disk bytes this tab's edit branched from. `null` when
    *  the file did not exist at load time (a new note). The backend rejects a
    *  write whose baseline no longer matches disk, which is what makes an edit
@@ -120,8 +124,28 @@ const TAB_RELOAD_CONCURRENCY = 6
 export const useEditorStore = create<EditorState>()(
   persist(
     (set, get) => {
-  /** Disk content for a tab carrying WYSIWYG/code edits (frontmatter kept raw). */
-  const tabDiskContent = (tab: Tab) => tab.frontmatter + tab.editedContent!.replace(/^\n+/, '').replace(/\n+$/, '')
+  /** Disk content for a tab carrying WYSIWYG/code edits (frontmatter kept raw),
+   *  in the file's own line endings. */
+  const tabDiskContent = (tab: Tab) => {
+    const content = tab.frontmatter + tab.editedContent!.replace(/^\n+/, '').replace(/\n+$/, '')
+    return tab.crlf ? content.replace(/\n/g, '\r\n') : content
+  }
+
+  /** After a write of `content` lands (or is queued), the tab is clean only if
+   *  nothing was typed meanwhile: code mode edits the store directly, so a
+   *  keystroke during the round trip is already in `editedContent` and must stay
+   *  dirty — and be saved — rather than be marked written. */
+  const settleWrite = (path: string, content: string, patch: Partial<Tab> = {}) => {
+    let stillDirty = false
+    set({
+      tabs: get().tabs.map(t => {
+        if (t.path !== path) return t
+        stillDirty = t.editedContent !== null && tabDiskContent(t) !== content
+        return { ...t, ...patch, content, dirty: stillDirty }
+      }),
+    })
+    if (stillDirty) scheduleAutoSave(path)
+  }
 
   /**
    * Write a tab through the versioned guard.
@@ -148,7 +172,7 @@ export const useEditorStore = create<EditorState>()(
     } catch (error) {
       if (isRetryableError(error)) {
         useSyncStore.getState().enqueue({ path: tab.path, content, baseVersion })
-        set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, content, dirty: false } : t) })
+        settleWrite(tab.path, content)
         logger.warn('write_queued_offline', { path: tab.path })
         return
       }
@@ -173,11 +197,7 @@ export const useEditorStore = create<EditorState>()(
       return
     }
 
-    set({
-      tabs: get().tabs.map(t => t.path === tab.path
-        ? { ...t, content, dirty: false, baseVersion: outcome.version }
-        : t),
-    })
+    settleWrite(tab.path, content, { baseVersion: outcome.version })
   }
 
   const scheduleAutoSave = (path: string) => {
@@ -305,13 +325,16 @@ export const useEditorStore = create<EditorState>()(
         toast.error('Could not close the tab because editor changes could not be serialized.')
         return
       }
-      const tab = get().tabs.find(t => t.path === path)
-      if (tab?.editedContent !== null && tab?.dirty && !tab.deleted) {
-        try { await saveTabToDisk(tab) } catch (error) {
-          logger.error('tab_save_failed', { error, fileName: tab.name })
-          toast.error(`Could not save "${tab.name}". The tab was kept open; check disk access and try again.`)
-          return
-        }
+    }
+    /** An inactive tab can be dirty too: it was flushed when it lost focus, but
+     *  its autosave may still be pending (or a background AI wrote into it).
+     *  Closing cancels that autosave below, so it is saved here first. */
+    const tab = get().tabs.find(t => t.path === path)
+    if (tab?.editedContent !== null && tab?.dirty && !tab.deleted) {
+      try { await saveTabToDisk(tab) } catch (error) {
+        logger.error('tab_save_failed', { error, fileName: tab.name })
+        toast.error(`Could not save "${tab.name}". The tab was kept open; check disk access and try again.`)
+        return
       }
     }
     const currentTabs = get().tabs
@@ -339,9 +362,13 @@ export const useEditorStore = create<EditorState>()(
   },
 
   setContent: (path, fileContent) => {
-    const fm = fileContent.match(/^---[\s\S]*?\n---(?:\n|$)/)
-    const body = fm ? fileContent.slice(fm[0].length) : fileContent
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, content: fileContent, frontmatter: fm ? fm[0] : '', editedContent: body, dirty: false } : t) })
+    /* `content` keeps the disk bytes (the save compares against them); the
+       editable parts are LF-only, and the save converts back (tabDiskContent). */
+    const crlf = fileContent.includes('\r\n')
+    const text = crlf ? fileContent.replace(/\r\n/g, '\n') : fileContent
+    const fm = text.match(/^---[\s\S]*?\n---(?:\n|$)/)
+    const body = fm ? text.slice(fm[0].length) : text
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, content: fileContent, frontmatter: fm ? fm[0] : '', editedContent: body, dirty: false, crlf } : t) })
   },
   rebaseQueuedWrite: (path, write) => {
     set({ tabs: get().tabs.map(t => {
