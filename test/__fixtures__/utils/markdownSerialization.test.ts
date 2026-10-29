@@ -13,4 +13,17 @@ describe('serializeMarkdown', () => {
 
     expect(serializeMarkdown(editor)).toBeNull()
   })
+
+  it('normalizes prose bullets to dashes', () => {
+    const editor = { document: [], blocksToMarkdownLossy: () => '* a\n  * b\n' }
+
+    expect(serializeMarkdown(editor)).toBe('- a\n  - b')
+  })
+
+  it('leaves `* ` lines inside fenced code alone (JSDoc)', () => {
+    const md = '* a\n\n```ts\n/**\n * Adds\n * @param a\n */\n```\n\n* b'
+    const editor = { document: [], blocksToMarkdownLossy: () => md }
+
+    expect(serializeMarkdown(editor)).toBe('- a\n\n```ts\n/**\n * Adds\n * @param a\n */\n```\n\n- b')
+  })
 })

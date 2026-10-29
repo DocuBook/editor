@@ -192,7 +192,10 @@ describe('editor store tab persistence', () => {
     expect(abort).not.toHaveBeenCalled()
   })
 
-  it('does not save a dirty inactive tab when it is closed', async () => {
+  /** Switching away flushes a tab and leaves its autosave pending; closing it
+   *  from the strip before that fires cancels the autosave, so the close must
+   *  save it — otherwise the edit is silently dropped. */
+  it('saves a dirty inactive tab before closing it', async () => {
     useEditorStore.setState({
       tabs: [
         { path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'changed', dirty: true, deleted: false },
@@ -203,7 +206,81 @@ describe('editor store tab persistence', () => {
 
     await useEditorStore.getState().closeTab('a.md')
 
-    expect(invoke).not.toHaveBeenCalledWith('write_file', expect.anything())
+    expect(invoke).toHaveBeenCalledWith('write_file_checked', { path: 'a.md', content: 'changed', baseVersion: null })
+    expect(useEditorStore.getState().tabs.map(t => t.path)).toEqual(['b.md'])
+    expect(useEditorStore.getState().activeTab).toBe('b.md')
+  })
+
+  it('keeps a dirty inactive tab open when its save fails', async () => {
+    vi.mocked(invoke).mockRejectedValueOnce(new Error('disk full'))
+    useEditorStore.setState({
+      tabs: [
+        { path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'changed', dirty: true, deleted: false },
+        { path: 'b.md', name: 'b.md', content: 'b', frontmatter: '', editedContent: null, dirty: false, deleted: false },
+      ],
+      activeTab: 'b.md',
+    })
+
+    await useEditorStore.getState().closeTab('a.md')
+
+    expect(useEditorStore.getState().tabs.map(t => t.path)).toEqual(['a.md', 'b.md'])
+  })
+
+  /** Code mode edits the store directly, so a keystroke while a save is in
+   *  flight is already in `editedContent` when the write returns. */
+  it('keeps a tab dirty, and saves again, when it was edited while a save was in flight', async () => {
+    vi.useFakeTimers()
+    try {
+      let finishWrite!: (raw: string) => void
+      vi.mocked(invoke).mockImplementationOnce(() => new Promise(resolve => { finishWrite = resolve as (raw: string) => void }))
+      useEditorStore.setState({
+        tabs: [{ path: 'a.md', name: 'a.md', content: 'old', frontmatter: '', editedContent: 'first', dirty: true, deleted: false }],
+        activeTab: 'a.md',
+      })
+
+      const saving = useEditorStore.getState().persistAllDirty()
+      await vi.advanceTimersByTimeAsync(0)
+      useEditorStore.getState().setEditedContent('a.md', 'first and more')
+      useEditorStore.getState().setTabDirty('a.md', true)
+      finishWrite(written('v1'))
+      await saving
+
+      const tab = useEditorStore.getState().tabs[0]
+      expect(tab.content).toBe('first')
+      expect(tab.dirty).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(2000)
+      expect(invoke).toHaveBeenLastCalledWith('write_file_checked', { path: 'a.md', content: 'first and more', baseVersion: 'v1' })
+      expect(useEditorStore.getState().tabs[0].dirty).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+
+  it('reads CRLF frontmatter as frontmatter and saves edits back with CRLF', async () => {
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+      activeTab: 'a.md',
+    })
+    const disk = '---\r\ntitle: x\r\n---\r\nline one\r\nline two'
+
+    useEditorStore.getState().setContent('a.md', disk)
+    const loaded = useEditorStore.getState().tabs[0]
+    expect(loaded.frontmatter).toBe('---\ntitle: x\n---\n')
+    expect(loaded.editedContent).toBe('line one\nline two')
+    expect(loaded.content).toBe(disk)
+
+    // Unchanged: nothing to write, even though the editors only saw LF.
+    useEditorStore.getState().setTabDirty('a.md', true)
+    await useEditorStore.getState().persistAllDirty()
+    expect(invoke).not.toHaveBeenCalledWith('write_file_checked', expect.anything())
+
+    useEditorStore.getState().setEditedContent('a.md', 'line one\nline 2')
+    useEditorStore.getState().setTabDirty('a.md', true)
+    await useEditorStore.getState().persistAllDirty()
+    expect(invoke).toHaveBeenCalledWith('write_file_checked', {
+      path: 'a.md',
+      content: '---\r\ntitle: x\r\n---\r\nline one\r\nline 2',
+      baseVersion: null,
+    })
   })
 
   /** Closing the active tab should feel like the strip collapsing in place:

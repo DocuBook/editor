@@ -11,8 +11,13 @@
  * Rules (mirroring BlockNote's math parser/exporter):
  * - `$$...$$` and `\\[...\\]` on their own line(s) → block math
  * - `$...$` and `\\(...\\)` within a line → inline math
- * - escaped `\\$` is left alone
+ * - escaped `\\$` is a literal `$` (the backslash is dropped), and a delimiter
+ *   after an escaped backslash `\\\\` is no delimiter
+ * - code is left alone: fenced blocks, inline code spans, and `<pre>`/`<code>`
+ *   in HTML input
  */
+
+import { mapProse, protectInlineCode } from "./markdownCode";
 
 function escapeMathLatex(latex: string): string {
   return latex.trim().replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -21,10 +26,32 @@ function escapeMathLatex(latex: string): string {
 /** Convert common LaTeX delimiters into BlockNote MathML HTML. Used for both
  * Markdown fallback output and HTML tool blocks before BlockNote parses them. */
 export function mathDollarToMathML(markdown: string): string {
+  /** Code is literal: `$(pwd)`, a regex's `\(…\)` or a LaTeX listing's `\[…\]`
+   *  inside a fence or a code span must not become math. */
+  return mapProse(markdown, (prose) => {
+    const { text, spans } = protectInlineCode(prose, (i) => `${CODE}${i}${CODE}`);
+    return convertMath(text).replace(
+      new RegExp(`${CODE}(\\d+)${CODE}`, "g"),
+      (_m, index) => spans[Number(index)] ?? _m,
+    );
+  });
+}
+
+const CODE = "\u0000CODE\u0000";
+
+function convertMath(markdown: string): string {
   const ESC = "\u0000ESC\u0000";
   const MATH = "\u0000MATH\u0000";
-  let out = markdown.replace(/\\\$/g, ESC);
+  const BACKSLASH = "\u0000BS\u0000";
   const protectedMath: string[] = [];
+  /** HTML input (AI tool blocks) marks code with tags instead of backticks.
+   *  Protected before the escape passes below, which would rewrite its `\$`. */
+  let out = markdown.replace(/<(pre|code)\b[\s\S]*?<\/\1>/gi, (match) => {
+    protectedMath.push(match);
+    return `${MATH}${protectedMath.length - 1}${MATH}`;
+  });
+  /** `\\` is a literal backslash, so the `(`, `[` or `$` after it is no delimiter. */
+  out = out.replace(/\\\\/g, BACKSLASH).replace(/\\\$/g, ESC);
 
   // Keep already-canonical tool HTML untouched while normalizing delimiters in
   // surrounding paragraph content.
@@ -58,5 +85,8 @@ export function mathDollarToMathML(markdown: string): string {
     new RegExp(`${MATH}(\\d+)${MATH}`, 'g'),
     (_m, index) => protectedMath[Number(index)] ?? _m,
   );
-  return out.replaceAll(ESC, "\\$");
+  /** An escaped `\$` comes back as a plain `$`: it only had to dodge the math
+   *  regexes above, and BlockNote's parser has no `$` syntax (nor a `\$`
+   *  escape — it would show the backslash). */
+  return out.replaceAll(ESC, "$").replaceAll(BACKSLASH, "\\\\");
 }

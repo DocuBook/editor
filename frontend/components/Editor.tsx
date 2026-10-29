@@ -160,7 +160,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
           vaultPath={vaultPath}
           filePath={file.path}
           isDesktop={isDesktop}
-          markdown={(file.editedContent ?? file.content).replace(file.frontmatter, '')}
+          markdown={file.editedContent ?? file.content.replace(file.frontmatter, '')}
           cursorOffset={cursorOffset === undefined ? undefined : Math.max(0, cursorOffset - file.frontmatter.length)}
           onCursorOffset={offset => cursorOffsets.current.set(file.path, file.frontmatter.length + offset)}
           onSync={md => useEditorStore.getState().setEditedContent(file.path, md)}
