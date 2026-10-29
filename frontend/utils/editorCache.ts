@@ -36,11 +36,14 @@ export function clearEditorCache() {
   cacheVaultPath = null
 }
 
-/** Stop and release one page's cached editor when its owning tab is closed. */
-export function closeCachedEditor(path: string) {
+/** Stop and release one page's cached editor when its owning tab is closed, or
+ *  when its file moves (`reason`): the instance's AI stream and snapshot writes
+ *  are bound to the path it was created for, so after a rename it would keep
+ *  writing to a path that no longer exists. */
+export function closeCachedEditor(path: string, reason = 'tab closed') {
   const editor = cache?.peek(path)
   if (!editor) return
-  abortAi(editor, 'tab closed')
+  abortAi(editor, reason)
   cache?.delete(path)
 }
 

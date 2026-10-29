@@ -13,6 +13,7 @@ import { TabBar } from './editor/TabBar'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
 import { DiffViewer } from './editor/DiffViewer'
 import { clearEditorCache } from '../utils/editorCache'
+import { splitFrontmatter } from '../utils/frontmatter'
 import { clearDiagramSVG } from '../utils/mermaidRenderCache'
 import { useAiChat } from '../stores/aiChat'
 
@@ -144,9 +145,7 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
       cursorOffset={cursorOffset}
       onCursorOffset={offset => cursorOffsets.current.set(file.path, offset)}
       onChange={v => {
-        const fmMatch = v.match(/^---[\s\S]*?\n---(?:\n|$)/)
-        const newFrontmatter = fmMatch ? fmMatch[0] : ''
-        const body = fmMatch ? v.slice(fmMatch[0].length) : v
+        const { frontmatter: newFrontmatter, body } = splitFrontmatter(v)
         useEditorStore.getState().setFrontmatter(file.path, newFrontmatter)
         useEditorStore.getState().setEditedContent(file.path, body)
         useEditorStore.getState().setTabDirty(file.path, true)

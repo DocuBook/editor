@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useEditorStore } from "../../../frontend/stores/editor";
+import { clearEditorCache, getEditorCache, peekEditorCache } from "../../../frontend/utils/editorCache";
 
 vi.mock("../../../frontend/lib/ipc", () => ({
   invoke: vi.fn().mockResolvedValue(""),
@@ -203,5 +204,54 @@ describe("editor store renameTab", () => {
     expect(tabs.some((t) => t.path === "plan/bug.md")).toBe(false);
     expect(tabs.filter((t) => t.path === "task/bug.md").length).toBe(1); // no duplicate tab
     expect(activeTab).toBe("task/bug.md");
+  });
+
+  /** A cached editor is bound to the path it was created for (its AI stream and
+   *  snapshot writes target it), so after a rename it is stopped and dropped: the
+   *  tab remounts under its new path with a fresh instance. */
+  describe("cached editors", () => {
+    const tab = (path: string) => ({ path, name: path.split("/").pop()!, content: "x", frontmatter: "", editedContent: null, dirty: false, deleted: false });
+    const abort = vi.fn();
+    const seed = (...paths: string[]) => {
+      const cache = getEditorCache("vault", () => ({ editor: { getExtension: () => ({ abort }) } }));
+      for (const path of paths) cache.get(path);
+    };
+
+    beforeEach(() => { clearEditorCache(); abort.mockClear(); });
+
+    it("stops and drops the editor of the renamed file only", async () => {
+      seed("notes/old.md", "notes/other.md");
+      useEditorStore.setState({ tabs: [tab("notes/old.md"), tab("notes/other.md")], activeTab: "notes/other.md" });
+
+      await useEditorStore.getState().renameTab("notes/old.md", "notes/new.md");
+
+      expect(abort).toHaveBeenCalledTimes(1);
+      expect(abort).toHaveBeenCalledWith("file renamed");
+      expect(peekEditorCache("vault", "notes/old.md")).toBeNull();
+      expect(peekEditorCache("vault", "notes/other.md")).not.toBeNull();
+    });
+
+    it("stops and drops every open editor under a renamed folder", async () => {
+      seed("dir/a.md", "dir/sub/b.md", "dirty/c.md");
+      useEditorStore.setState({ tabs: [tab("dir/a.md"), tab("dir/sub/b.md"), tab("dirty/c.md")], activeTab: "dirty/c.md" });
+
+      await useEditorStore.getState().renameTab("dir", "moved");
+
+      expect(abort).toHaveBeenCalledTimes(2);
+      expect(peekEditorCache("vault", "dir/a.md")).toBeNull();
+      expect(peekEditorCache("vault", "dir/sub/b.md")).toBeNull();
+      // `dirty/` shares a prefix with `dir` but is not inside it.
+      expect(peekEditorCache("vault", "dirty/c.md")).not.toBeNull();
+    });
+
+    it("does nothing for a file with no open tab", async () => {
+      seed("notes/closed.md");
+      useEditorStore.setState({ tabs: [tab("notes/other.md")], activeTab: "notes/other.md" });
+
+      await useEditorStore.getState().renameTab("notes/closed.md", "notes/renamed.md");
+
+      expect(abort).not.toHaveBeenCalled();
+      expect(peekEditorCache("vault", "notes/closed.md")).not.toBeNull();
+    });
   });
 });
