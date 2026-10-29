@@ -10,10 +10,9 @@
  * tests fail loudly if an upgrade changes that.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
-import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
-import { BlockNoteView } from '@blocknote/mantine'
+import { act } from 'react'
 import { allowRemoteMediaForSession, blockedRemoteMediaUrl, resetSessionRemoteMediaAllowlist } from '../../../frontend/utils/mediaPolicy'
+import { mountAppEditor, type AppEditor } from '../appEditor'
 
 vi.mock('../../../frontend/lib/ipc', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../frontend/lib/ipc')>()),
@@ -21,31 +20,13 @@ vi.mock('../../../frontend/lib/ipc', async (importOriginal) => ({
   fileUrl: async (url: string) => `/api/file?path=${encodeURIComponent(url)}`,
 }))
 
-Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
-
+let app: AppEditor
 let editor: any
-let root: Root
-
-const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+const settle = () => app.settle()
 
 beforeAll(async () => {
-  // jsdom lacks these; Mantine and ProseMirror's paste path need them.
-  ;(window as any).matchMedia ??= (query: string) => ({ matches: false, media: query, onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false })
-  ;(globalThis as any).ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} }
-  ;(globalThis as any).ClipboardEvent ??= class extends Event { clipboardData = null }
-  ;(Range.prototype as any).getClientRects ??= () => []
-  ;(Range.prototype as any).getBoundingClientRect ??= () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 })
-  ;(Element.prototype as any).scrollIntoView ??= () => {}
-
-  const { createBlockEditor } = await import('../../../frontend/utils/editorFactory')
-  editor = createBlockEditor('/vault', 'notes/a.md', '').editor
-  const host = document.createElement('div')
-  document.body.appendChild(host)
-  root = createRoot(host)
-  await act(async () => {
-    root.render(createElement(BlockNoteView, { editor, slashMenu: false, formattingToolbar: false, linkToolbar: false, sideMenu: false }))
-  })
-  await settle()
+  app = await mountAppEditor()
+  editor = app.editor
 })
 
 afterEach(() => { resetSessionRemoteMediaAllowlist() })
