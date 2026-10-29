@@ -8,7 +8,14 @@ import GitCredentials from './GitCredentials'
 
 interface GitRemote { name: string; url: string }
 interface GitSettingsData {
-  isRepo: boolean; noVault: boolean; name: string; email: string
+  isRepo: boolean; noVault: boolean
+  /** Effective identity a commit uses: the vault override, else the inherited one. */
+  name: string; email: string
+  /** `local` = this vault overrides it; `global` = inherited from the user's Git
+   *  config; `none` = no identity anywhere yet. */
+  identitySource?: 'local' | 'global' | 'none'
+  /** Inherited (global/XDG/system) identity — what "Use global" returns to. */
+  globalName?: string; globalEmail?: string
   /** `init.defaultBranch` from git config, else `master` — prefills the branch field. */
   defaultBranch: string
   remotes: GitRemote[]
@@ -25,6 +32,9 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
   const [remoteUrl, setRemoteUrl] = useState('')
   const [initialBranch, setInitialBranch] = useState('master')
   const [busy, setBusy] = useState(false)
+  /** The identity form is only open while editing an override (or when no
+   *  identity exists at all) — otherwise the inherited identity is just shown. */
+  const [editingIdentity, setEditingIdentity] = useState(false)
   const [err, setErr] = useState('')
   const [confirmRemove, setConfirmRemove] = useState<GitRemote | null>(null)
   const cancelRemoveRef = useRef<HTMLButtonElement>(null)
@@ -47,8 +57,26 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
 
   const saveIdentity = async () => {
     setBusy(true); setErr('')
-    try { await invoke('git_set_identity', { name, email }); toast.success('Identity saved'); await load() }
-    catch (e) { setErr(String(e)) } finally { setBusy(false) }
+    try {
+      await invoke('git_set_identity', { name, email })
+      toast.success('Identity saved for this vault')
+      setEditingIdentity(false)
+      await load()
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+  /** Drop the vault override: commits follow the global Git identity again. */
+  const followGlobalIdentity = async () => {
+    setBusy(true); setErr('')
+    try {
+      await invoke('git_clear_identity')
+      toast.success('Using your global Git identity')
+      setEditingIdentity(false)
+      await load()
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+  const cancelIdentityEdit = () => {
+    setEditingIdentity(false)
+    if (data) { setName(data.name); setEmail(data.email) }
   }
   const addRemote = async () => {
     setBusy(true); setErr('')
@@ -158,18 +186,50 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
   )
 
   const inputCls = 'w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono focus:border-accent'
+  const identitySource = data.identitySource ?? (data.name || data.email ? 'local' : 'none')
+  /** A commit needs both values; a half-set identity (from any config level)
+   *  must keep the form open, never look finished. */
+  const identityComplete = !!(data.name && data.email)
+  const hasGlobal = !!(data.globalName && data.globalEmail)
   const rowBtnCls = 'px-2 py-0.5 rounded-md bg-surface-active text-foreground-secondary border border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-[11px] whitespace-nowrap hover:text-foreground transition-colors'
   return (
     <div className="text-xs">
       {/* Identity */}
       {identitySection(
         <>
-        <div className="flex gap-2">
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" className={inputCls} />
-          <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" className={inputCls} />
-          <button onClick={saveIdentity} disabled={busy} className={'shrink-0 ' + btnPrimary}>{busy ? '…' : 'Save'}</button>
-        </div>
-        <div className="text-[10px] text-muted mt-1">Stored per-vault (local git config) — your global git config is untouched. Required before committing.</div>
+        {identityComplete && !editingIdentity ? (
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-foreground" data-testid="git-identity">{data.name} <span className="text-muted">&lt;{data.email}&gt;</span></div>
+              <div className="text-[10px] text-muted mt-0.5">
+                {identitySource === 'local'
+                  ? <>Overridden for this vault{hasGlobal ? <> — global identity is <span className="font-mono">{data.globalName} &lt;{data.globalEmail}&gt;</span></> : ''}.</>
+                  : 'From your global Git config.'}
+              </div>
+            </div>
+            {identitySource === 'local' && hasGlobal && (
+              <button onClick={() => void followGlobalIdentity()} disabled={busy} className={'shrink-0 ' + btnSecondary}>Use global</button>
+            )}
+            <button onClick={() => setEditingIdentity(true)} disabled={busy} className={'shrink-0 ' + btnSecondary}>Edit</button>
+          </div>
+        ) : (
+          <>
+          <div className="flex gap-2">
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" aria-label="Name" className={inputCls} />
+            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" aria-label="Email" className={inputCls} />
+            <button onClick={saveIdentity} disabled={busy} className={'shrink-0 ' + btnPrimary}>{busy ? '…' : 'Save'}</button>
+            {identitySource === 'local' && hasGlobal && !identityComplete && (
+              <button onClick={() => void followGlobalIdentity()} disabled={busy} className={'shrink-0 ' + btnSecondary}>Use global</button>
+            )}
+            {identityComplete && <button onClick={cancelIdentityEdit} disabled={busy} className={'shrink-0 ' + btnSecondary}>Cancel</button>}
+          </div>
+          <div className="text-[10px] text-muted mt-1">
+            {!identityComplete
+              ? <>No complete Git identity (name and email) found. Set <span className="font-mono">user.name</span> and <span className="font-mono">user.email</span> in your global Git config, or save one for this vault here. Required before committing.</>
+              : 'Saved to this vault only (.git/config) as an override — your global Git config is untouched.'}
+          </div>
+          </>
+        )}
         </>
       )}
 

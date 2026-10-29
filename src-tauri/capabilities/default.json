@@ -43,6 +43,7 @@
     "allow-git-remote-probe",
     "allow-git-remove-remote",
     "allow-git-set-identity",
+    "allow-git-clear-identity",
     "allow-git-settings",
     "allow-git-stage",
     "allow-git-status",

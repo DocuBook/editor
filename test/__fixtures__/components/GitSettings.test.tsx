@@ -182,3 +182,94 @@ describe('GitSettings — init', () => {
     expect(pollGitStatus).toHaveBeenCalled()
   })
 })
+
+describe('GitSettings — identity', () => {
+  const settings = (identity: Record<string, unknown>) => JSON.stringify({ ...REPO_SETTINGS, ...identity })
+  const identityText = () => document.querySelector('[data-testid="git-identity"]')?.textContent ?? ''
+  const typeInto = (label: string, value: string) => act(() => {
+    const input = document.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+
+  it('shows the inherited global identity read-only, with Edit instead of a form', async () => {
+    invoke.mockResolvedValue(settings({ name: 'Global Me', email: 'me@example.com', identitySource: 'global', globalName: 'Global Me', globalEmail: 'me@example.com' }))
+    render()
+    await flush()
+
+    expect(identityText()).toContain('Global Me')
+    expect(document.body.textContent).toContain('From your global Git config.')
+    expect(document.querySelector('input[aria-label="Name"]')).toBeNull()
+    expect(buttonByText(document.body, 'Use global')).toBeUndefined()
+    expect(buttonByText(document.body, 'Edit')).toBeDefined()
+  })
+
+  it('opens the existing form on Edit and saves the override for this vault', async () => {
+    invoke.mockImplementation(async (cmd: string) => cmd === 'git_settings'
+      ? settings({ name: 'Global Me', email: 'me@example.com', identitySource: 'global', globalName: 'Global Me', globalEmail: 'me@example.com' })
+      : undefined)
+    render()
+    await flush()
+
+    act(() => buttonByText(document.body, 'Edit')!.click())
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe('Global Me')
+    expect(document.body.textContent).toContain('Saved to this vault only')
+
+    typeInto('Name', 'Vault Me')
+    typeInto('Email', 'vault@example.com')
+    act(() => buttonByText(document.body, 'Save')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_set_identity', { name: 'Vault Me', email: 'vault@example.com' })
+    expect(document.querySelector('input[aria-label="Name"]')).toBeNull()
+  })
+
+  it('cancels an edit without writing an override', async () => {
+    invoke.mockResolvedValue(settings({ name: 'Global Me', email: 'me@example.com', identitySource: 'global', globalName: 'Global Me', globalEmail: 'me@example.com' }))
+    render()
+    await flush()
+
+    act(() => buttonByText(document.body, 'Edit')!.click())
+    typeInto('Name', 'Changed')
+    act(() => buttonByText(document.body, 'Cancel')!.click())
+
+    expect(invoke).not.toHaveBeenCalledWith('git_set_identity', expect.anything())
+    expect(identityText()).toContain('Global Me')
+  })
+
+  it('marks a vault override and returns to the global identity on request', async () => {
+    invoke.mockImplementation(async (cmd: string) => cmd === 'git_settings'
+      ? settings({ name: 'Vault Me', email: 'vault@example.com', identitySource: 'local', globalName: 'Global Me', globalEmail: 'me@example.com' })
+      : undefined)
+    render()
+    await flush()
+
+    expect(document.body.textContent).toContain('Overridden for this vault')
+    expect(document.body.textContent).toContain('Global Me <me@example.com>')
+    act(() => buttonByText(document.body, 'Use global')!.click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('git_clear_identity')
+  })
+
+  it('opens the form directly when no identity exists anywhere', async () => {
+    invoke.mockResolvedValue(settings({ name: '', email: '', identitySource: 'none', globalName: '', globalEmail: '' }))
+    render()
+    await flush()
+
+    expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull()
+    expect(document.body.textContent).toContain('No complete Git identity')
+    expect(buttonByText(document.body, 'Cancel')).toBeUndefined()
+  })
+
+  it('keeps the form open for a half-set vault override and offers the global identity', async () => {
+    invoke.mockResolvedValue(settings({ name: 'Only Name', email: '', identitySource: 'local', globalName: 'Global Me', globalEmail: 'me@example.com' }))
+    render()
+    await flush()
+
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe('Only Name')
+    expect(document.body.textContent).toContain('No complete Git identity')
+    expect(buttonByText(document.body, 'Cancel')).toBeUndefined()
+    expect(buttonByText(document.body, 'Use global')).toBeDefined()
+  })
+})

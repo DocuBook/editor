@@ -41,6 +41,7 @@ permissions = [
   "allow-git-remote-probe",
   "allow-git-remove-remote",
   "allow-git-set-identity",
+  "allow-git-clear-identity",
   "allow-git-settings",
   "allow-git-stage",
   "allow-git-status",
@@ -463,6 +464,16 @@ commands.allow = ["git_set_identity"]
 identifier = "deny-git-set-identity"
 description = "Denies the git_set_identity command."
 commands.deny = ["git_set_identity"]
+
+[[permission]]
+identifier = "allow-git-clear-identity"
+description = "Enables the git_clear_identity command."
+commands.allow = ["git_clear_identity"]
+
+[[permission]]
+identifier = "deny-git-clear-identity"
+description = "Denies the git_clear_identity command."
+commands.deny = ["git_clear_identity"]
 
 [[permission]]
 identifier = "allow-git-settings"

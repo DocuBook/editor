@@ -43,10 +43,12 @@ pub fn git_settings(state: State<AppState>) -> Result<String, String> {
     let default_branch = crate::git::repo::configured_initial_branch();
     match state.git.lock().expect("lock").as_ref() {
         Some(g) if g.is_repo() => {
-            let (name, email) = g.identity()?;
+            let identity = g.identity_info()?;
             let remotes = g.remotes()?;
             Ok(serde_json::json!({
-                "isRepo": true, "name": name, "email": email,
+                "isRepo": true, "name": identity.name, "email": identity.email,
+                "identitySource": identity.source,
+                "globalName": identity.global_name, "globalEmail": identity.global_email,
                 "defaultBranch": default_branch,
                 "remotes": remotes.iter().map(|(n, u)| serde_json::json!({ "name": n, "url": u })).collect::<Vec<_>>(),
             }).to_string())
@@ -211,6 +213,15 @@ pub async fn git_merge_abort(state: State<'_, AppState>) -> Result<(), String> {
 pub fn git_set_identity(name: String, email: String, state: State<AppState>) -> Result<(), String> {
     match state.git.lock().expect("lock").as_ref() {
         Some(g) => g.set_identity(&name, &email),
+        None => Err("No vault".into()),
+    }
+}
+
+/// Remove the vault's identity override so commits follow the global config.
+#[tauri::command]
+pub fn git_clear_identity(state: State<AppState>) -> Result<(), String> {
+    match state.git.lock().expect("lock").as_ref() {
+        Some(g) => g.clear_identity(),
         None => Err("No vault".into()),
     }
 }
