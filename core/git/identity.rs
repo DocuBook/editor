@@ -17,7 +17,7 @@ pub enum IdentitySource {
     Local,
     /// Inherited from the global, XDG or system Git config.
     Global,
-    /// No identity anywhere: committing fails until one is set.
+    /// No complete identity (name and email) anywhere: committing fails until one is set.
     None,
 }
 
@@ -58,7 +58,7 @@ impl Git {
         };
         let source = if overridden {
             IdentitySource::Local
-        } else if !name.is_empty() || !email.is_empty() {
+        } else if !name.is_empty() && !email.is_empty() {
             IdentitySource::Global
         } else {
             IdentitySource::None
