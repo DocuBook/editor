@@ -133,11 +133,16 @@ export const useEditorStore = create<EditorState>()(
    *  not — so a save changes the lines that were edited and never the last-line
    *  marker git reports as "No newline at end of file". Leading blank lines are
    *  kept: the frontmatter owns the ones after it (see splitFrontmatter), and a
-   *  file with none is the author's own layout. */
+   *  file with none is the author's own layout.
+   *
+   *  A file that is only frontmatter can end at the closing fence with no newline;
+   *  the body then needs one to start on its own line, or its first line would be
+   *  glued to the fence and the frontmatter would stop closing. */
   const tabDiskContent = (tab: Tab) => {
     const body = tab.editedContent!.replace(/\n+$/, '')
     const hadFinalNewline = !tab.content || /\n$/.test(tab.content)
-    const content = tab.frontmatter + body + (body && hadFinalNewline ? '\n' : '')
+    const joint = tab.frontmatter && body && !tab.frontmatter.endsWith('\n') ? '\n' : ''
+    const content = tab.frontmatter + joint + body + (body && hadFinalNewline ? '\n' : '')
     return tab.crlf ? content.replace(/\n/g, '\r\n') : content
   }
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useEditorStore } from '../../../frontend/stores/editor'
 import { useSyncStore } from '../../../frontend/stores/sync'
 import { invoke } from '../../../frontend/lib/ipc'
+import { splitFrontmatter } from '../../../frontend/utils/frontmatter'
 import { clearEditorCache, getEditorCache, peekEditorCache } from '../../../frontend/utils/editorCache'
 
 vi.mock('../../../frontend/lib/ipc', () => ({
@@ -291,6 +292,23 @@ describe('editor store tab persistence', () => {
     it('does not rewrite a file whose text is unchanged', async () => {
       expect(await saved('---\ntitle: x\n---\n\n# Heading\n', '# Heading\n')).toBeNull()
       expect(await saved('no final newline', 'no final newline')).toBeNull()
+    })
+
+    /** A file that is only frontmatter can end at the closing fence with no
+     *  newline, so the frontmatter has none to give the body a line of its own. */
+    it('keeps the closing fence when text is typed into a file that is only frontmatter', async () => {
+      const content = await saved('---\ntitle: x\n---', 'Hello')
+
+      expect(content).toBe('---\ntitle: x\n---\nHello')
+      expect(splitFrontmatter(content!)).toEqual({ frontmatter: '---\ntitle: x\n---\n', body: 'Hello' })
+    })
+
+    it('does the same in a CRLF file', async () => {
+      expect(await saved('---\r\ntitle: x\r\n---', 'Hello')).toBe('---\r\ntitle: x\r\n---\r\nHello')
+    })
+
+    it('adds no line break when the frontmatter already ends with one', async () => {
+      expect(await saved('---\ntitle: x\n---\n', 'Hello')).toBe('---\ntitle: x\n---\nHello\n')
     })
 
     it('keeps leading blank lines of a file with no frontmatter', async () => {
