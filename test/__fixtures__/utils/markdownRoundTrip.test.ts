@@ -153,3 +153,29 @@ describe('markdown round trip keeps block structure', () => {
     expect(shape(editor.document)).toEqual(shape([{ type: 'bulletListItem', content: [t('item')], children: [{ type: 'bulletListItem', content: [t('t')], children: [{ type: 'paragraph', content: [t('in')] }] }] }]))
   })
 })
+
+/** What reaches a note, through the real exporter: the executing URL of a file or
+ *  media block is dropped from the written copy wherever the block sits, and an
+ *  ordinary URL is not touched. (An inline link needs no such handling: BlockNote's
+ *  exporter already blanks a link target it rejects.) */
+describe('markdown written for blocks that carry URLs', () => {
+  const written = (blocks: any[]) => {
+    editor.replaceBlocks(editor.document, blocks)
+    return serializeMarkdown(editor)!
+  }
+
+  it.each([
+    ['a file block', [{ type: 'file', props: { url: 'javascript:alert(1)', name: 'doc' } }]],
+    ['a captioned image (raw HTML in the note)', [{ type: 'image', props: { url: 'javascript:alert(1)', caption: 'cap' } }]],
+    ['a video', [{ type: 'video', props: { url: 'vbscript:msgbox(1)' } }]],
+    ['a block under a list item', [{ type: 'bulletListItem', content: 'item', children: [{ type: 'file', props: { url: 'javascript:alert(1)', name: 'doc' } }] }]],
+  ])('%s carries no executing URL', (_name, blocks) => {
+    expect(written(blocks)).not.toMatch(/javascript:|vbscript:/i)
+  })
+
+  it('writes ordinary URLs as before', () => {
+    expect(written([{ type: 'file', props: { url: 'https://example.com/f.pdf', name: 'doc' } }])).toBe('[doc](https://example.com/f.pdf)')
+    expect(written([{ type: 'file', props: { url: 'obsidian://open?vault=x', name: 'doc' } }])).toBe('[doc](obsidian://open?vault=x)')
+  })
+})
+

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { escapeBlocksForMarkdown, escapeMarkdownText } from '../../../frontend/utils/markdownEscape'
+import { escapeBlocksForMarkdown, escapeMarkdownText, isActiveContentUrl } from '../../../frontend/utils/markdownEscape'
 
 describe('escapeMarkdownText', () => {
   it.each([
@@ -81,6 +81,94 @@ describe('escapeBlocksForMarkdown', () => {
 
   it('does not modify the document it is given', () => {
     const blocks = [{ type: 'paragraph', content: [{ type: 'text', text: '# x', styles: {} }], children: [] }]
+    const before = JSON.stringify(blocks)
+
+    escapeBlocksForMarkdown(blocks)
+
+    expect(JSON.stringify(blocks)).toBe(before)
+  })
+})
+
+describe('isActiveContentUrl', () => {
+  it.each([
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    '  javascript:alert(1)',
+    'java\tscript:alert(1)',
+    'java\nscript:alert(1)',
+    'vbscript:msgbox(1)',
+    'data:text/html,<script>1</script>',
+    'DATA:TEXT/HTML;base64,PHNjcmlwdD4=',
+    'data:application/xhtml+xml,<html/>',
+  ])('flags %j', (url) => {
+    expect(isActiveContentUrl(url)).toBe(true)
+  })
+
+  it.each([
+    'https://example.com/a?b=1',
+    'http://example.com/',
+    'mailto:someone@example.com',
+    'tel:+15551234',
+    'pics/a.png',
+    '../notes/b.md',
+    '#section',
+    '//cdn.example.com/a.png',
+    'data:image/png;base64,AAAA',
+    'data:text/plain;base64,AAAA',
+    'obsidian://open?vault=x',
+    'file:///Users/me/doc.pdf',
+    'ftp://host/f',
+    '',
+    'see javascript: in the middle',
+  ])('leaves %j alone', (url) => {
+    expect(isActiveContentUrl(url)).toBe(false)
+  })
+
+  it('treats a non-string as safe', () => {
+    expect(isActiveContentUrl(undefined)).toBe(false)
+    expect(isActiveContentUrl(null)).toBe(false)
+    expect(isActiveContentUrl(42)).toBe(false)
+  })
+})
+
+describe('escapeBlocksForMarkdown: URLs that would execute', () => {
+  const media = (type: string, url: string, extra: object = {}) => ({ type, props: { url, name: 'n' }, content: undefined, children: [], ...extra })
+
+  it.each(['image', 'video', 'audio', 'file'])('empties the URL of a %s block', (type) => {
+    const [block] = escapeBlocksForMarkdown([media(type, 'javascript:alert(1)')]) as any[]
+
+    expect(block.props.url).toBe('')
+    expect(block.props.name).toBe('n')
+  })
+
+  it('empties it for a nested block as well', () => {
+    const blocks = [{ type: 'bulletListItem', content: [], children: [media('file', 'vbscript:msgbox(1)')] }]
+
+    const [item] = escapeBlocksForMarkdown(blocks) as any[]
+
+    expect(item.children[0].props.url).toBe('')
+  })
+
+  it('leaves safe URLs, other blocks and other props alone', () => {
+    const blocks = [
+      media('file', 'https://example.com/f.pdf'),
+      media('image', 'data:image/png;base64,AAAA'),
+      media('video', 'pics/v.mp4'),
+      { type: 'paragraph', content: [{ type: 'text', text: 'javascript:alert(1)', styles: {} }], props: { url: 'javascript:1' }, children: [] },
+    ]
+
+    const out = escapeBlocksForMarkdown(blocks) as any[]
+
+    expect(out[0].props.url).toBe('https://example.com/f.pdf')
+    expect(out[1].props.url).toBe('data:image/png;base64,AAAA')
+    expect(out[2].props.url).toBe('pics/v.mp4')
+    // Only media/file blocks carry a URL the export writes; a paragraph's text is just text.
+    expect(out[3].props.url).toBe('javascript:1')
+    expect(out[3].content[0].text).toBe('javascript:alert(1)')
+  })
+
+  it('does not modify the document it is given', () => {
+    const blocks = [media('file', 'javascript:alert(1)')]
     const before = JSON.stringify(blocks)
 
     escapeBlocksForMarkdown(blocks)

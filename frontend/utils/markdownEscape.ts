@@ -97,6 +97,25 @@ export function escapeMarkdownText(text: string, lineStart: boolean): string {
     .join('\n')
 }
 
+/** Blocks whose `props.url` the Markdown export writes as a link or image target
+ *  (or into raw HTML, for a captioned image). */
+const URL_BLOCKS = new Set(['image', 'video', 'audio', 'file'])
+
+/** Whether navigating to `url` runs script or opens an active document:
+ *  `javascript:`, `vbscript:` and `data:` HTML. Whitespace and control characters
+ *  inside a scheme are ignored by browsers, so they are ignored here too.
+ *
+ *  Deliberately a denylist of what EXECUTES, not an allowlist of what the editor
+ *  opens (`safeExternalUrl`): a note legitimately holds `obsidian://…`, `file:///…`
+ *  and `ftp:` targets, and dropping those on save would destroy the author's own
+ *  data. Nothing here concerns whether a link may be OPENED from the editor — that
+ *  is `linkClickPolicy`. */
+export function isActiveContentUrl(url: unknown): boolean {
+  if (typeof url !== 'string') return false
+  const scheme = Array.from(url).filter(char => char.charCodeAt(0) > 0x20).join('').toLowerCase()
+  return /^(?:javascript|vbscript):/.test(scheme) || /^data:(?:text\/html|application\/xhtml\+xml)/.test(scheme)
+}
+
 type Inline = { type: string; text?: string; styles?: Record<string, unknown>; content?: unknown }
 
 function escapeInlineContent(items: unknown, lineStarts: boolean, htmlBreaks = false): unknown {
@@ -137,10 +156,20 @@ function escapeTableContent(content: any): unknown {
   }
 }
 
-/** A copy of `blocks` whose prose text is escaped for Markdown export. The
- *  editor's document is never modified. */
+/** A copy of `blocks` made safe to write to a note: prose text is escaped, and a
+ *  file or media block whose URL is active content (see `isActiveContentUrl`) gets
+ *  an empty URL — which BlockNote's exporter writes as nothing at all, instead of
+ *  a `[name](javascript:…)` link, an `![](javascript:…)` image or a raw `<img
+ *  src>`. The editor's own document is never modified: the block stays in the open
+ *  note (it renders with an empty source) and is gone when the note is reopened.
+ *
+ *  Inline links need nothing here: BlockNote's exporter already writes a link whose
+ *  target it rejects with an empty one. */
 export function escapeBlocksForMarkdown<Block>(blocks: Block[]): Block[] {
-  return blocks.map((block: any) => {
+  return blocks.map((original: any) => {
+    const block = URL_BLOCKS.has(original?.type) && isActiveContentUrl(original.props?.url)
+      ? { ...original, props: { ...original.props, url: '' } }
+      : original
     const children = Array.isArray(block?.children) && block.children.length ? escapeBlocksForMarkdown(block.children) : block?.children
     if (!PROSE_BLOCKS.has(block?.type)) return children === block?.children ? block : { ...block, children }
     const content = block.type === 'table'
