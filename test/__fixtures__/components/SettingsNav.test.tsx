@@ -68,12 +68,13 @@ describe('SettingsNav — structure', () => {
       'general-account',
       'git-identity',
       'git-remotes',
+      'git-credentials',
       'ai-provider',
       'ai-web-tools',
     ]
     const owners: Record<string, string> = {
       'general-themes': 'general', 'general-account': 'general',
-      'git-identity': 'git', 'git-remotes': 'git',
+      'git-identity': 'git', 'git-remotes': 'git', 'git-credentials': 'git',
       'ai-provider': 'ai', 'ai-web-tools': 'ai',
     }
     let open = 'general'

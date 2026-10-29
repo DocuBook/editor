@@ -35,7 +35,7 @@ docker logs docubook | grep "one-time setup token"
 > - Put the container behind an HTTPS reverse proxy and pin an image tag.
 > - Set `DB_TRUSTED_PROXY` to the proxy's address or subnet, so the login rate limit applies per visitor. See **Behind a reverse proxy** below.
 > - Set `DB_SECURE_COOKIE=1` when the domain is HTTPS-only.
-> - Set `DB_KEYS_PASSPHRASE` from the first boot to encrypt stored API keys.
+> - Set `DB_KEYS_PASSPHRASE` from the first boot to encrypt stored API keys. It is required to save Git access tokens.
 > - Back up `/data`.
 
 <details>
@@ -46,7 +46,7 @@ docker logs docubook | grep "one-time setup token"
 | `DB_SETUP_TOKEN` | one-time token printed at first boot | Fixed setup token instead; `openssl rand -hex 32` |
 | `DB_TRUSTED_PROXY` | unset | Comma-separated addresses or CIDR ranges of your reverse proxies. Their `X-Forwarded-For` names the real client for the login rate limit; unset, every request is limited by the proxy's own address |
 | `DB_SECURE_COOKIE` | auto | `Secure` on session cookies follows `X-Forwarded-Proto`; `1`/`0` forces it |
-| `DB_KEYS_PASSPHRASE` | empty | Encrypts `keys.json` at rest; losing it makes encrypted keys unreadable |
+| `DB_KEYS_PASSPHRASE` | empty | Encrypts `keys.json` at rest and is required for Git access tokens (`git-credentials.json`, always encrypted); losing it makes encrypted keys and tokens unreadable |
 | `DB_SESSION_TTL_HOURS` | `168` | Session lifetime in hours |
 | `DB_ADMIN_EMAIL` + `DB_ADMIN_PASSWORD` | unset | Skips the setup wizard when both are set |
 | `DB_OPENAI_COMPAT_BASE_URL`, `DB_OPENAI_COMPAT_API_KEY`, `DB_OPENAI_COMPAT_MODEL` | unset | Provisions a custom OpenAI-compatible provider |
@@ -123,7 +123,7 @@ The image supports `linux/amd64` and `linux/arm64` and includes a health check a
 <details>
 <summary><strong>Storage and volumes</strong></summary>
 
-All state lives under `/data` (`vaults/`, `config.json`, `keys.json`, `sessions.json`), so the mount destination is always `/data` — the same path as `DATA_DIR`. Change one and you must change the other.
+All state lives under `/data` (`vaults/`, `config.json`, `keys.json`, `git-credentials.json`, `sessions.json`), so the mount destination is always `/data` — the same path as `DATA_DIR`. Change one and you must change the other.
 
 | Setup            | Name       | Source         | Destination |
 | ---------------- | ---------- | -------------- | ----------- |
@@ -170,6 +170,22 @@ open /Applications/DocuBook\ Editor.app
 3. Type `/` to insert blocks or use **Code** to edit raw Markdown.
 4. Configure an AI provider in **Settings → AI** if needed, and optionally **Web Tools** so the AI can search the web.
 5. Configure identity and a remote in **Settings → Git**, then **Save** and **Publish**.
+
+### Git credentials
+
+Cloning or pulling a public repository needs no credentials. Pushing, and any private repository, do.
+
+- **Desktop** uses this machine's Git setup:
+  - **HTTPS:** a credential helper set in your *global* config, for example `git config --global credential.helper osxkeychain`. A helper that only Xcode's or Homebrew's own Git config sets is not picked up.
+  - **SSH:** a key loaded in `ssh-agent`, or an unencrypted `~/.ssh/id_ed25519`. The host must be in `~/.ssh/known_hosts`.
+- **Docker** has no credential helper, SSH agent, or `~/.ssh`, and the container's home directory does not survive a redeploy. Instead:
+  1. Set `DB_KEYS_PASSPHRASE`.
+  2. Use an `https://` remote.
+  3. Save an access token for its host in **Settings → Git → Credentials**.
+
+  Tokens are stored AES-256-GCM encrypted in `/data/git-credentials.json` and are never sent back to the browser.
+
+  Use a token scoped to the vault's repository only: a GitHub fine-grained token with *Contents: read and write*, or a GitLab project access token with `write_repository`. Anyone who can sign in can push with it. Do not put a token in the remote URL, where it would be stored in plaintext. SSH remotes are not supported in Docker.
 
 Other text formats can be viewed but only `.md` and `.mdx` use the WYSIWYG editor.
 

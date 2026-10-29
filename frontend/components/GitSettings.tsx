@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Plus, X, GitBranch, RefreshCw } from 'lucide-react'
 import { pollGitStatus } from '../stores/gitStatus'
 import SettingsSection from './settings/SettingsSection'
+import GitCredentials from './GitCredentials'
 
 interface GitRemote { name: string; url: string }
 interface GitSettingsData {
@@ -15,7 +16,7 @@ interface GitSettingsData {
 interface InitResult { created: boolean; branch: string }
 interface RemoteProbe { reachable: boolean; empty: boolean; defaultBranch: string; branches: number; error: string }
 
-/** Git settings page content: identity + remotes + auth guidance. */
+/** Git settings page content: identity + remotes + credentials. */
 export default function GitSettings({ titleIsFirstSection = true }: { titleIsFirstSection?: boolean }) {
   const [data, setData] = useState<GitSettingsData | null>(null)
   const [name, setName] = useState('')
@@ -114,6 +115,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
     <div className="text-xs">
       {identitySection(<div className="text-muted py-2">Loading git settings…</div>)}
       {remotesAnchor()}
+      <GitCredentials />
     </div>
   )
   /** Buttons need to read as buttons: `surface-hover` sits too close to the panel
@@ -128,6 +130,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
         No vault is open — open or create a vault first, then return here to set up git (identity, remotes, publishing).
       </div>)}
       {remotesAnchor()}
+      <GitCredentials />
     </div>
   )
   if (!data.isRepo) return (
@@ -150,6 +153,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
       {err && <div className="text-[11px] text-danger">{err}</div>}
       </div>)}
       {remotesAnchor()}
+      <GitCredentials />
     </div>
   )
 
@@ -209,11 +213,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
         </div>
       </SettingsSection>
 
-      {/* Auth guidance */}
-      <div className="text-[10px] text-muted leading-relaxed mt-8 border-t border-border-subtle pt-4">
-        <GitBranch size={11} className="inline mr-1 align-[-1px]" />
-        Private repositories need credentials configured on this machine — the app uses them automatically: HTTPS → git credential helper (macOS Keychain), SSH → keys in ~/.ssh. Public repos need no setup.
-      </div>
+      <GitCredentials />
       {err && <div className="text-[11px] text-danger mt-2">{err}</div>}
 
       {confirmRemove && (

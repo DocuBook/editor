@@ -234,6 +234,9 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "web_tools_settings" => web_tools::settings_json(state),
         "set_web_tools_settings" => web_tools::set_settings(state, &args),
         "set_web_search_key" => web_tools::set_key(state, &args),
+        "git_credentials" => git_credentials::list_json(state),
+        "git_set_credential" => git_credentials::set_from_args(state, &args),
+        "git_delete_credential" => git_credentials::delete_from_args(state, &args),
         "delete_web_search_key" => web_tools::delete_key(state),
         "test_connection" => {
             probe::test_connection(
