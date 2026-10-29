@@ -148,8 +148,8 @@ function listItemContent(node: MarkdownNode): MarkdownNode | undefined {
  *  continuation line indented less than the item's content (`- a\nb`), a sublist
  *  at the same indent (`- a\n  b\n  - c`), and a task continuation
  *  (`- [ ] a\n  b`). BlockNote hoists those to top-level blocks; mirroring that
- *  would mean re-implementing its line grouping, and its serializer flattens a
- *  nested paragraph to an unindented top-level one on the way back out. */
+ *  would mean re-implementing its line grouping. The app's serializer never
+ *  writes these shapes (see markdownSerialization). */
 function listItemParts(markdown: string, own: MarkdownNode): { first: SourceCharacter[]; continuation?: SourceBlock } {
   const characters = textCharacters(markdown, own)
   const newline = markdown.indexOf('\n', nodeStart(own))
@@ -187,16 +187,84 @@ function sourceBlock(markdown: string, node: MarkdownNode): SourceBlock {
   }
 }
 
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' }
+
+/** Visible characters of a toggle's `<summary>…</summary>`, with their source
+ *  offsets: tags carry none, and an entity is one character at its `&`. */
+function summaryCharacters(markdown: string, node: MarkdownNode): SourceCharacter[] {
+  const start = nodeStart(node)
+  const source = markdown.slice(start, nodeEnd(node))
+  const open = /<summary\b[^>]*>/i.exec(source)
+  if (!open) return []
+  const close = source.indexOf('</summary>', open.index)
+  const characters: SourceCharacter[] = []
+  for (let index = open.index + open[0].length; index < (close < 0 ? source.length : close); index++) {
+    if (source[index] === '<') {
+      const tagEnd = source.indexOf('>', index)
+      if (tagEnd >= 0) { index = tagEnd; continue }
+    }
+    const entity = source[index] === '&' ? /^&(#x[0-9a-f]+|#\d+|\w+);/i.exec(source.slice(index)) : null
+    if (entity) {
+      const name = entity[1]
+      const value = name[0] !== '#' ? ENTITIES[name.toLowerCase()]
+        : String.fromCodePoint(name[1].toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : Number(name.slice(1)))
+      if (value) {
+        characters.push({ value, offset: start + index })
+        index += entity[0].length - 1
+        continue
+      }
+    }
+    characters.push({ value: source[index], offset: start + index })
+  }
+  return characters
+}
+
+const htmlValue = (markdown: string, node: MarkdownNode) => (node.type === 'html' ? markdown.slice(nodeStart(node), nodeEnd(node)).trim() : '')
+const opensDetails = (markdown: string, node: MarkdownNode) => /^<details\b/i.test(htmlValue(markdown, node))
+const closesDetails = (markdown: string, node: MarkdownNode) => /<\/details>$/i.test(htmlValue(markdown, node))
+
+/** Index of the node closing the `<details>` opened at `open`, or -1. */
+function detailsClose(markdown: string, nodes: MarkdownNode[], open: number): number {
+  let depth = 1
+  for (let index = open + 1; index < nodes.length; index++) {
+    if (opensDetails(markdown, nodes[index])) depth++
+    if (closesDetails(markdown, nodes[index]) && --depth === 0) return index
+  }
+  return -1
+}
+
 /** Lists are AST containers; BlockNote blocks correspond to their list items.
  *  A GFM table is the reverse: one BlockNote block holds every cell while the
  *  tokenizer emits cell text in document order, which is exactly what the
  *  generic walk below concatenates — so `mdast-util-gfm-table` turns a table
  *  into a single source block with no span special case, and the parse stays on
- *  one pass. */
+ *  one pass.
+ *
+ *  A toggle is written as `<details><summary>…</summary>` + body + `</details>`
+ *  (see markdownSerialization), which the tokenizer sees as an HTML block, the
+ *  body's blocks and a closing HTML block. Together they are ONE BlockNote
+ *  block: the summary is its text and the body its children. */
 function sourceBlocks(markdown: string, nodes: MarkdownNode[]): SourceBlock[] {
-  return nodes.flatMap(node => node.type === 'list'
-    ? sourceBlocks(markdown, node.children ?? [])
-    : [sourceBlock(markdown, node)])
+  const blocks: SourceBlock[] = []
+  for (let index = 0; index < nodes.length; index++) {
+    const node = nodes[index]
+    if (node.type === 'list') {
+      blocks.push(...sourceBlocks(markdown, node.children ?? []))
+    } else if (opensDetails(markdown, node)) {
+      const close = closesDetails(markdown, node) ? index : detailsClose(markdown, nodes, index)
+      const last = close < 0 ? nodes.length - 1 : close
+      blocks.push({
+        start: nodeStart(node),
+        end: nodeEnd(nodes[last]),
+        characters: summaryCharacters(markdown, node),
+        children: sourceBlocks(markdown, nodes.slice(index + 1, close < 0 ? nodes.length : close)),
+      })
+      index = last
+    } else {
+      blocks.push(sourceBlock(markdown, node))
+    }
+  }
+  return blocks
 }
 
 function emptySource(offset: number): SourceBlock {

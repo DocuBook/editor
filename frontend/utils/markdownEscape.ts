@@ -20,6 +20,12 @@ import { mathDollarToMathML } from './mathMarkdown'
  *  hold literal source and are exported as-is. */
 const PROSE_BLOCKS = new Set(['paragraph', 'heading', 'bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem', 'quote', 'table'])
 
+/** Blocks whose Markdown form is one line: an ATX heading cannot continue, and
+ *  BlockNote neither indents a list item's continuation line nor parses one.
+ *  A hard break inside them is written as `<br>`, which its parser reads back
+ *  as the same break. Paragraphs and quotes keep Markdown's `\` + newline. */
+const SINGLE_LINE_BLOCKS = new Set(['heading', 'bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem'])
+
 /** Spans copied through verbatim: wikilinks, footnote refs, bare URLs. */
 const VERBATIM = /\[\[[^\]\n]+\]\]|\[\^[^\]\s]+\]|(?:https?:\/\/|www\.)[^\s<]+/g
 
@@ -93,17 +99,27 @@ export function escapeMarkdownText(text: string, lineStart: boolean): string {
 
 type Inline = { type: string; text?: string; styles?: Record<string, unknown>; content?: unknown }
 
-function escapeInlineContent(items: unknown, lineStarts: boolean): unknown {
+function escapeInlineContent(items: unknown, lineStarts: boolean, htmlBreaks = false): unknown {
   if (!Array.isArray(items)) return items
   let atLineStart = lineStarts
-  return items.map((item: Inline) => {
+  return items.flatMap((item: Inline) => {
     if (item?.type === 'text' && typeof item.text === 'string') {
-      const text = item.styles?.code ? item.text : escapeMarkdownText(item.text, atLineStart)
-      atLineStart = lineStarts && item.text.endsWith('\n')
+      // `<br>` inside a code span is literal text, so the span is split at each
+      // break and the `<br>` written between the pieces.
+      if (htmlBreaks && item.styles?.code && item.text.includes('\n')) {
+        atLineStart = false
+        return item.text.split('\n').flatMap((part, i) => [
+          ...(i ? [{ type: 'text', text: '<br>', styles: {} }] : []),
+          ...(part ? [{ ...item, text: part }] : []),
+        ])
+      }
+      let text = item.styles?.code ? item.text : escapeMarkdownText(item.text, atLineStart)
+      if (htmlBreaks) text = text.split('\n').join('<br>')
+      atLineStart = lineStarts && !htmlBreaks && item.text.endsWith('\n')
       return text === item.text ? item : { ...item, text }
     }
     atLineStart = false
-    if (item?.type === 'link') return { ...item, content: escapeInlineContent(item.content, false) }
+    if (item?.type === 'link') return { ...item, content: escapeInlineContent(item.content, false, htmlBreaks) }
     return item
   })
 }
@@ -127,7 +143,9 @@ export function escapeBlocksForMarkdown<Block>(blocks: Block[]): Block[] {
   return blocks.map((block: any) => {
     const children = Array.isArray(block?.children) && block.children.length ? escapeBlocksForMarkdown(block.children) : block?.children
     if (!PROSE_BLOCKS.has(block?.type)) return children === block?.children ? block : { ...block, children }
-    const content = block.type === 'table' ? escapeTableContent(block.content) : escapeInlineContent(block.content, true)
+    const content = block.type === 'table'
+      ? escapeTableContent(block.content)
+      : escapeInlineContent(block.content, true, SINGLE_LINE_BLOCKS.has(block.type))
     return { ...block, content, children }
   })
 }

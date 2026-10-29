@@ -71,6 +71,18 @@ const CASES: [string, string][] = [
   ['image', '![alttext](pic.png)\n'],
   ['block math', '$$x^2 + 1$$\n'],
   ['inline math', 'Formula $x^2$ here\n'],
+  /* Shapes the app's serializer writes for structure BlockNote's own exporter
+     flattens (see markdownSerialization): a toggle as `<details>`, a list item's
+     child blocks at its content column, and a hard break in a one-line block as
+     `<br>`. */
+  ['toggle', 'beforeword\n\n<details>\n<summary>togglesummary</summary>\n\ninsideword\n\n</details>\n\nafterword\n'],
+  ['nested toggle', '<details>\n<summary>outerword</summary>\n\n<details>\n<summary>innerword</summary>\n\ndeepword\n\n</details>\n\ntailword\n\n</details>\n'],
+  ['toggle summary markup', '<details>\n<summary><strong>boldsum</strong> &lt;kbd&gt; &amp; tail</summary>\n\nbodyword\n\n</details>\n'],
+  ['empty toggle', '<details>\n<summary>emptytoggle</summary>\n\n</details>\n\nafterword\n'],
+  ['list item child blocks', '- itemword\n\n  childpara\n\n  ```js\n  childcode\n  ```\n\n- nextitem\n'],
+  ['task child block', '- [ ] taskword\n\n      tasknote\n'],
+  ['heading <br>', '## headone<br>headtwo\n'],
+  ['list item <br>', '- itemone<br>itemtwo\n- nextitem\n'],
 ]
 
 function walk(blocks: AnyBlock[], visit: (block: AnyBlock) => void) {
