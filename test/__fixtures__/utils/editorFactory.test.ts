@@ -40,7 +40,7 @@ import { KeepAliveCache, createBlockEditor, getCachedEditor } from '../../../fro
 import { clearEditorCache } from '../../../frontend/utils/editorCache'
 import { BlockNoteEditor } from '@blocknote/core'
 import { handleEditorLinkClick } from '../../../frontend/utils/linkClickPolicy'
-import { blockedRemoteMediaUrl } from '../../../frontend/utils/mediaPolicy'
+import { blockedRemoteMediaUrl, runForImageBlock } from '../../../frontend/utils/mediaPolicy'
 
 /** The keep-alive cache is the pure, testable core of tab switching: one
  *  entry per path, created lazily, reused on every later lookup. The BlockNote
@@ -88,6 +88,29 @@ describe('createBlockEditor AI transport wiring', () => {
 
     expect(await resolve('https://cdn.example.com/a.mp4')).toBe('https://cdn.example.com/a.mp4')
     expect(await resolve('https://cdn.example.com/a.mp3')).toBe('https://cdn.example.com/a.mp3')
+  })
+
+  /** The extension says nothing about what a server sends back, so an image block
+   *  (marked by `runForImageBlock`) gates every remote URL; the same URL asked for
+   *  by a video/audio block keeps the URL-shape rule. */
+  it('gates every remote URL asked for by an image block', async () => {
+    createBlockEditor('/vault', 'notes/a.md')
+    const resolve = (BlockNoteEditor.create as any).mock.calls.at(-1)[0].resolveFileUrl
+
+    for (const url of ['https://evil.example/p.php?id=1', 'https://evil.example/t.html', 'https://evil.example/p.pdf', 'https://evil.example/p.mp4']) {
+      const forImage = await runForImageBlock(() => resolve(url))
+      expect(blockedRemoteMediaUrl(forImage), url).toBe(url)
+      expect(await resolve(url), `${url} outside an image block`).toBe(url)
+    }
+    expect(blockedRemoteMediaUrl(await runForImageBlock(() => resolve('//evil.example/p.php')))).toBe('https://evil.example/p.php')
+  })
+
+  it('leaves local and data: images alone inside an image block', async () => {
+    createBlockEditor('/vault', 'notes/a.md')
+    const resolve = (BlockNoteEditor.create as any).mock.calls.at(-1)[0].resolveFileUrl
+
+    expect(await runForImageBlock(() => resolve('data:image/png;base64,AAAA'))).toBe('data:image/png;base64,AAAA')
+    expect(blockedRemoteMediaUrl(await runForImageBlock(() => resolve('pics/a.png')))).toBeNull()
   })
 })
 

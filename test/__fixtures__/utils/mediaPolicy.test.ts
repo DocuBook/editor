@@ -11,8 +11,10 @@ import {
   forgetRemoteMediaForSession,
   isRemoteMediaAllowedForSession,
   isRemoteMediaUrl,
+  isResolvingForImageBlock,
   normalizeRemoteMediaUrl,
   resetSessionRemoteMediaAllowlist,
+  runForImageBlock,
 } from '../../../frontend/utils/mediaPolicy'
 
 describe('isRemoteMediaUrl', () => {
@@ -142,3 +144,48 @@ describe('session allowlist', () => {
     expect(isRemoteMediaAllowedForSession('https://cdn.example.com/a.png')).toBe(false)
   })
 })
+
+describe('runForImageBlock', () => {
+  it('is on only while an image block renders', () => {
+    expect(isResolvingForImageBlock()).toBe(false)
+
+    const during = runForImageBlock(() => isResolvingForImageBlock())
+
+    expect(during).toBe(true)
+    expect(isResolvingForImageBlock()).toBe(false)
+  })
+
+  it('returns what the render returns', () => {
+    expect(runForImageBlock(() => 'dom')).toBe('dom')
+  })
+
+  it('is read synchronously: a call made after the first await no longer sees it', async () => {
+    let afterAwait: boolean | undefined
+    const resolving = runForImageBlock(async () => {
+      const synchronous = isResolvingForImageBlock()
+      await Promise.resolve()
+      afterAwait = isResolvingForImageBlock()
+      return synchronous
+    })
+
+    expect(await resolving).toBe(true)
+    expect(afterAwait).toBe(false)
+  })
+
+  it('restores the previous state when nested', () => {
+    runForImageBlock(() => {
+      runForImageBlock(() => undefined)
+
+      expect(isResolvingForImageBlock()).toBe(true)
+    })
+
+    expect(isResolvingForImageBlock()).toBe(false)
+  })
+
+  it('is cleared when the render throws', () => {
+    expect(() => runForImageBlock(() => { throw new Error('render failed') })).toThrow('render failed')
+
+    expect(isResolvingForImageBlock()).toBe(false)
+  })
+})
+

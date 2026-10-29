@@ -21,16 +21,47 @@ export function normalizeRemoteMediaUrl(url: string): string {
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|avif|svg|bmp|ico|tiff?)(?:[?#]|$)/i
 const ANY_EXT = /\.[a-z0-9]{2,5}(?:[?#]|$)/i
 
-/** Whether the blocked-image placeholder can stand in for this URL.
+/** Whether the blocked-image placeholder can stand in for this URL, for a block
+ *  that is NOT an image (video, audio, file).
  *
- *  Every file block (image, video, audio, file) shares one `resolveFileUrl`, but
+ *  Every file block shares one `resolveFileUrl` that receives only the URL, but
  *  the placeholder is an SVG *image*: handing it to `<video>`, `<audio>`, or a
  *  file block yields a broken player/link instead of a click target. So only
  *  image-looking URLs — an image extension, or no extension at all (the CDN
  *  case, where the type is unknowable) — get the placeholder; a URL that names
- *  itself as another kind of file resolves as it did before. */
+ *  itself as another kind of file resolves as it did before.
+ *
+ *  An image block never asks: the extension says nothing about what a server
+ *  sends back (`pixel.php`, `pixel.pdf` and `pixel.mp4` all render as images), so
+ *  every remote image is gated — see `runForImageBlock`. */
 export function canUseImagePlaceholder(url: string): boolean {
   return IMAGE_EXT.test(url) || !ANY_EXT.test(url)
+}
+
+let resolvingForImageBlock = false
+
+/** Run `render` — an image block's render — so that `isResolvingForImageBlock`
+ *  is true for any `resolveFileUrl` call it makes synchronously.
+ *
+ *  `resolveFileUrl` is shared by the image, video and audio blocks and gets only
+ *  a URL, so it cannot tell them apart. BlockNote's image block calls it from
+ *  inside its own `render` (before the first await), which is the one place the
+ *  block type is knowable; this marks that window. Nested calls restore the
+ *  previous state, and a throwing render cannot leave it set. */
+export function runForImageBlock<T>(render: () => T): T {
+  const previous = resolvingForImageBlock
+  resolvingForImageBlock = true
+  try {
+    return render()
+  } finally {
+    resolvingForImageBlock = previous
+  }
+}
+
+/** True only while an image block's render is running (see `runForImageBlock`).
+ *  Read it synchronously at the top of `resolveFileUrl`. */
+export function isResolvingForImageBlock(): boolean {
+  return resolvingForImageBlock
 }
 
 /** Marker left inside the placeholder SVG so the blocked state is identifiable

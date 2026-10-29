@@ -22,7 +22,7 @@ import { AIExtension } from './aiExtension'
 import { getAIDictionary } from './aiMenu'
 import { mathDollarToMathML } from './mathMarkdown'
 import { fileUrl, isAbsoluteUrl, isSafeImageUrl } from '../lib/ipc'
-import { blockedRemoteMediaPlaceholder, canUseImagePlaceholder, isRemoteMediaAllowedForSession, isRemoteMediaUrl, normalizeRemoteMediaUrl } from './mediaPolicy'
+import { blockedRemoteMediaPlaceholder, canUseImagePlaceholder, isRemoteMediaAllowedForSession, isRemoteMediaUrl, isResolvingForImageBlock, normalizeRemoteMediaUrl } from './mediaPolicy'
 import { getSchema, wikilinkStyler } from '../components/editor/setup'
 import { syntaxHighlighting } from './codeHighlighting'
 import { createAiTransport } from './aiTransport'
@@ -136,13 +136,17 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
     links: { onClick: handleEditorLinkClick },
 
     resolveFileUrl: async (url: string) => {
+      // Read before anything is awaited: only then is the image block's render
+      // still on the stack (see `runForImageBlock`).
+      const forImageBlock = isResolvingForImageBlock()
       if (!isSafeImageUrl(url)) return ''
       // Remote images never load until the reader asks for that ONE image:
       // opening a note must not contact a third-party host on their behalf. The
       // placeholder rendered in the note is the opt-in (see WysiwygEditor);
-      // local vault files and inline `data:` images are unaffected. Only
-      // image-shaped URLs get it — see `canUseImagePlaceholder`.
-      if (isRemoteMediaUrl(url) && canUseImagePlaceholder(url)) {
+      // local vault files and inline `data:` images are unaffected. An image
+      // block is always gated; video, audio and file blocks only for
+      // image-shaped URLs — see `canUseImagePlaceholder`.
+      if (isRemoteMediaUrl(url) && (forImageBlock || canUseImagePlaceholder(url))) {
         const remote = normalizeRemoteMediaUrl(url)
         return isRemoteMediaAllowedForSession(remote) ? remote : blockedRemoteMediaPlaceholder(remote)
       }
