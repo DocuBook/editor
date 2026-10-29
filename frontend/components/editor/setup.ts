@@ -24,6 +24,7 @@ import { Decoration, DecorationSet } from 'prosemirror-view'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
 import { parseCodeBlockInfo, withCodeBlockLanguage, withCodeBlockTitle } from '../../utils/codeBlockInfo'
 import { loadCodeLanguages } from '../../utils/codeLanguages'
+import { runForImageBlock } from '../../utils/mediaPolicy'
 
 let _previewRenderingPaused = false
 const _previewRenderingListeners = new Set<() => void>()
@@ -398,12 +399,29 @@ const codeBlockSpec = createReactBlockSpec(createCodeBlockConfig, {
   },
 }, [codeBlockShortcuts])
 
+/** BlockNote's image block, with its render marked as an image's so that the
+ *  editor's shared `resolveFileUrl` can gate every remote image (see
+ *  `runForImageBlock` in mediaPolicy). `this` is passed through: BlockNote hands
+ *  `render` its block DOM attributes there. */
+const imageBlockSpec = () => {
+  const spec: any = defaultBlockSpecs.image
+  const render = spec.implementation.render
+  return {
+    ...spec,
+    implementation: {
+      ...spec.implementation,
+      render(this: unknown, ...args: unknown[]) { return runForImageBlock(() => render.apply(this, args)) },
+    },
+  } as typeof defaultBlockSpecs.image
+}
+
 /** Base BlockNote schema with heading levels 1-5. */
 let _schema: any = null
 export const getSchema = () => {
   if (!_schema) _schema = BlockNoteSchema.create({
     blockSpecs: {
       ...defaultBlockSpecs,
+      image: imageBlockSpec(),
       heading: createHeadingBlockSpec({ levels: [1, 2, 3, 4, 5], allowToggleHeadings: false }),
       codeBlock: codeBlockSpec(),
       mathBlock: mathBlockSpec(),
