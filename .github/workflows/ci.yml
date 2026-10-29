@@ -29,11 +29,11 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The release config guard resolves bootstrap-sha against history.
           fetch-depth: 0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -110,10 +110,10 @@ jobs:
     timeout-minutes: 30
     needs: [lint]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - name: Cache cargo (registry + targets)
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -148,8 +148,8 @@ jobs:
       matrix:
         browser: [chromium, webkit]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -157,7 +157,7 @@ jobs:
       # Cache the Playwright browser builds (webkit/chromium ~1GB) — restored
       # on future runs so `playwright install` only fills gaps.
       - name: Cache Playwright browsers
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/Library/Caches/ms-playwright
           key: playwright-${{ hashFiles('package-lock.json') }}
@@ -169,9 +169,9 @@ jobs:
       # then rejects the driver's PushAPIEnabled context setting at newPage.
       - name: Install Playwright browsers
         run: npx --no-install playwright install chromium webkit
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - name: Cache cargo (server target)
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -195,7 +195,7 @@ jobs:
           BROWSER: ${{ matrix.browser }}
       - name: Upload e2e logs (server + browser console)
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-logs-${{ matrix.browser }}
           path: test/artifacts/
@@ -208,10 +208,10 @@ jobs:
     timeout-minutes: 20
     needs: [lint]
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
       - name: Cache cargo (server target, Linux)
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -231,20 +231,22 @@ jobs:
   security:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
-    needs: [lint]
+    # No `needs: [lint]`: an advisory should surface even when lint is red.
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-      - run: npm ci
+      # npm audit reads package-lock.json; no install needed.
       - name: npm audit (fail on high)
         run: npm audit --audit-level=high
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      # Prebuilt, checksum-verified binary instead of compiling cargo-audit each run.
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-audit@0.22.2
       - name: cargo audit
         run: |
-          cargo install cargo-audit --locked
           cd src-tauri && cargo audit
           cd ../server && cargo audit
           cd ../core && cargo audit
@@ -288,7 +290,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
       # `target` (singular) is the input name: the old `targets` was ignored
@@ -296,11 +298,11 @@ jobs:
       # the action runs `rustup target add` for the pinned toolchain — arm64
       # runners install only the native target, so this is what adds
       # x86_64-apple-darwin for the cross-compiled job.
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           target: ${{ matrix.target }}
       - name: Cache cargo (release targets, ${{ matrix.target }})
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -313,7 +315,7 @@ jobs:
           key: cargo-macos15-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             cargo-macos15-${{ matrix.target }}-
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -402,7 +404,7 @@ jobs:
           fi
           echo "OK: minos $MINOS, LSMinimumSystemVersion $PLIST (floor $MACOSX_DEPLOYMENT_TARGET)"
       - name: Upload DMG
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: DocuBook-${{ matrix.arch }}
           path: |
@@ -427,7 +429,7 @@ jobs:
     outputs:
       tag: ${{ steps.releasetag.outputs.tag }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Resolve the release tag
         id: releasetag
         shell: bash
@@ -462,7 +464,7 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # The tag comes from release-gate's output, so this job cannot disagree
       # with the gate about whether the run is a release.
       - name: Resolve the release tag
@@ -473,7 +475,7 @@ jobs:
         run: |
           echo "tag=${{ needs.release-gate.outputs.tag }}" >> "$GITHUB_OUTPUT"
           echo "Publishing ${{ needs.release-gate.outputs.tag }}"
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: DocuBook-*
           # Keep per-artifact folders (DocuBook-arm64/, DocuBook-amd64/) so the

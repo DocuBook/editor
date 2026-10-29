@@ -20,17 +20,19 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       # npm audit reads package-lock.json; no install needed.
       - name: npm audit (fail on high)
         run: npm audit --audit-level=high
-      - uses: actions-rust-lang/setup-rust-toolchain@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+        with:
+          tool: cargo-audit@0.22.2
       - name: cargo audit
         run: |
-          cargo install cargo-audit --locked
           cd src-tauri && cargo audit
           cd ../server && cargo audit
           cd ../core && cargo audit
