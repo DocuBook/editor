@@ -67,6 +67,10 @@ const WEB_ONLY = new Set([
   "change_password",
   "config_get",
   "config_set",
+  // Desktop authenticates through the system Git setup (credential helper, ssh-agent).
+  "git_credentials",
+  "git_set_credential",
+  "git_delete_credential",
 ]);
 
 /** Answered by a dedicated route instead of the catch-all POST /api/{cmd}. */
