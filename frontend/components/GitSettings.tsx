@@ -187,14 +187,17 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
 
   const inputCls = 'w-full bg-background border border-border rounded-md px-3 py-1.5 text-xs text-foreground outline-none font-mono focus:border-accent'
   const identitySource = data.identitySource ?? (data.name || data.email ? 'local' : 'none')
-  const hasGlobal = !!(data.globalName || data.globalEmail)
+  /** A commit needs both values; a half-set identity (from any config level)
+   *  must keep the form open, never look finished. */
+  const identityComplete = !!(data.name && data.email)
+  const hasGlobal = !!(data.globalName && data.globalEmail)
   const rowBtnCls = 'px-2 py-0.5 rounded-md bg-surface-active text-foreground-secondary border border-border cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed text-[11px] whitespace-nowrap hover:text-foreground transition-colors'
   return (
     <div className="text-xs">
       {/* Identity */}
       {identitySection(
         <>
-        {identitySource !== 'none' && !editingIdentity ? (
+        {identityComplete && !editingIdentity ? (
           <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1">
               <div className="truncate text-foreground" data-testid="git-identity">{data.name} <span className="text-muted">&lt;{data.email}&gt;</span></div>
@@ -215,11 +218,14 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Name" aria-label="Name" className={inputCls} />
             <input value={email} onChange={e => setEmail(e.target.value)} placeholder="Email" aria-label="Email" className={inputCls} />
             <button onClick={saveIdentity} disabled={busy} className={'shrink-0 ' + btnPrimary}>{busy ? '…' : 'Save'}</button>
-            {identitySource !== 'none' && <button onClick={cancelIdentityEdit} disabled={busy} className={'shrink-0 ' + btnSecondary}>Cancel</button>}
+            {identitySource === 'local' && hasGlobal && !identityComplete && (
+              <button onClick={() => void followGlobalIdentity()} disabled={busy} className={'shrink-0 ' + btnSecondary}>Use global</button>
+            )}
+            {identityComplete && <button onClick={cancelIdentityEdit} disabled={busy} className={'shrink-0 ' + btnSecondary}>Cancel</button>}
           </div>
           <div className="text-[10px] text-muted mt-1">
-            {identitySource === 'none'
-              ? <>No Git identity found. Set <span className="font-mono">user.name</span> and <span className="font-mono">user.email</span> in your global Git config, or save one for this vault here. Required before committing.</>
+            {!identityComplete
+              ? <>No complete Git identity (name and email) found. Set <span className="font-mono">user.name</span> and <span className="font-mono">user.email</span> in your global Git config, or save one for this vault here. Required before committing.</>
               : 'Saved to this vault only (.git/config) as an override — your global Git config is untouched.'}
           </div>
           </>

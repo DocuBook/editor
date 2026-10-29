@@ -258,7 +258,18 @@ describe('GitSettings — identity', () => {
     await flush()
 
     expect(document.querySelector('input[aria-label="Name"]')).not.toBeNull()
-    expect(document.body.textContent).toContain('No Git identity found')
+    expect(document.body.textContent).toContain('No complete Git identity')
     expect(buttonByText(document.body, 'Cancel')).toBeUndefined()
+  })
+
+  it('keeps the form open for a half-set vault override and offers the global identity', async () => {
+    invoke.mockResolvedValue(settings({ name: 'Only Name', email: '', identitySource: 'local', globalName: 'Global Me', globalEmail: 'me@example.com' }))
+    render()
+    await flush()
+
+    expect(document.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe('Only Name')
+    expect(document.body.textContent).toContain('No complete Git identity')
+    expect(buttonByText(document.body, 'Cancel')).toBeUndefined()
+    expect(buttonByText(document.body, 'Use global')).toBeDefined()
   })
 })
