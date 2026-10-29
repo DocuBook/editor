@@ -21,6 +21,8 @@ import { useEditorStore } from '../../stores/editor'
 import { useTheme } from '../../stores/theme'
 import { toast } from 'sonner'
 import { findWikilinkAt, openWikilink } from '../../utils/wikilink'
+import { modifierClickLabel } from '../../utils/modifierKey'
+import { caretFromPoint } from '../../utils/caretFromPoint'
 import { isTauri } from '../../lib/ipc'
 import { findActiveSuggestionItem, isEnterBeforeInput } from '../../utils/slashMenuFallback'
 import { indentationAt, indentSelection } from '../../utils/mermaidIndent'
@@ -151,7 +153,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     if (!el) return
     const tip = document.createElement('div')
     tip.setAttribute('data-wikilink-tip', '1')
-    tip.textContent = 'Cmd+Click to open'
+    tip.textContent = `${modifierClickLabel()} to open`
     tip.style.cssText = 'position:fixed;z-index:9999;display:none;pointer-events:none;padding:3px 8px;border-radius:6px;font-size:11px;white-space:nowrap;background:var(--color-surface);color:var(--color-foreground);border:1px solid var(--color-border);box-shadow:var(--shadow-popover);'
     document.body.appendChild(tip)
     const show = (x: number, y: number) => { tip.style.left = `${x + 10}px`; tip.style.top = `${y + 16}px`; tip.style.display = 'block' }
@@ -175,11 +177,12 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
       // Cmd/Ctrl+Click navigation is handled by the wikilinkStyler ProseMirror
       // handleClick prop — skip here so the toast doesn't fire alongside it.
       if (e.metaKey || e.ctrlKey) return
-      // Resolve the click position directly (caretRangeFromPoint) — Meta+click
-      // does not move the ProseMirror selection, so getSelection() is unreliable.
-      const range = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null
-      const node = range?.startContainer ?? null
-      const off = range?.startOffset ?? 0
+      // Resolve the click position directly — Meta+click does not move the
+      // ProseMirror selection, so getSelection() is unreliable. Firefox has no
+      // caretRangeFromPoint, hence the helper.
+      const caret = caretFromPoint(document, e.clientX, e.clientY)
+      const node = caret?.node ?? null
+      const off = caret?.offset ?? 0
       if (!node || node.nodeType !== Node.TEXT_NODE) return
       const title = findWikilinkAt(node.textContent || '', off)
       if (title) {
@@ -187,7 +190,7 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
         // Meta/Ctrl+Click navigation is handled by the wikilinkStyler
         // ProseMirror handleClick prop; this listener only serves
         // the plain-click hint.
-        toast('Wikilink — Cmd+Click or Open to navigate', {
+        toast(`Wikilink — ${modifierClickLabel()} or Open to navigate`, {
           action: { label: 'Open', onClick: open },
           duration: 4000,
         })

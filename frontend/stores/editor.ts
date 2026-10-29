@@ -8,6 +8,7 @@ import { logger } from '../utils/logger'
 import { mapWithConcurrency } from '../utils/concurrency'
 import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope } from './sync'
 import { clearEditorCache, closeCachedEditor } from '../utils/editorCache'
+import { splitFrontmatter } from '../utils/frontmatter'
 
 export interface Tab {
   path: string
@@ -125,9 +126,18 @@ export const useEditorStore = create<EditorState>()(
   persist(
     (set, get) => {
   /** Disk content for a tab carrying WYSIWYG/code edits (frontmatter kept raw),
-   *  in the file's own line endings. */
+   *  in the file's own line endings.
+   *
+   *  The body's trailing blank lines are dropped and the file's own ending is put
+   *  back: one final newline when the file had one (or is new), none when it did
+   *  not — so a save changes the lines that were edited and never the last-line
+   *  marker git reports as "No newline at end of file". Leading blank lines are
+   *  kept: the frontmatter owns the ones after it (see splitFrontmatter), and a
+   *  file with none is the author's own layout. */
   const tabDiskContent = (tab: Tab) => {
-    const content = tab.frontmatter + tab.editedContent!.replace(/^\n+/, '').replace(/\n+$/, '')
+    const body = tab.editedContent!.replace(/\n+$/, '')
+    const hadFinalNewline = !tab.content || /\n$/.test(tab.content)
+    const content = tab.frontmatter + body + (body && hadFinalNewline ? '\n' : '')
     return tab.crlf ? content.replace(/\n/g, '\r\n') : content
   }
 
@@ -302,6 +312,11 @@ export const useEditorStore = create<EditorState>()(
     if (affected.some(t => t.path === get().activeTab)) await get().flushEditor()
     const remap = (path: string) => (path === fromPath ? toPath : toPath + '/' + path.slice(prefix.length))
     const stale = new Set(affected.map(t => t.path))
+    /** The tab remounts under its new path and builds a fresh editor from the
+     *  flushed content. The old instance is bound to the old path (its AI stream,
+     *  its snapshot writes), so it is stopped and dropped rather than left in the
+     *  cache holding the file's previous identity. */
+    for (const path of stale) closeCachedEditor(path, 'file renamed')
     const taken = new Set(get().tabs.filter(t => !stale.has(t.path)).map(t => t.path))
     const tabs = get().tabs.flatMap(t => {
       if (!stale.has(t.path)) return [t]
@@ -366,9 +381,8 @@ export const useEditorStore = create<EditorState>()(
        editable parts are LF-only, and the save converts back (tabDiskContent). */
     const crlf = fileContent.includes('\r\n')
     const text = crlf ? fileContent.replace(/\r\n/g, '\n') : fileContent
-    const fm = text.match(/^---[\s\S]*?\n---(?:\n|$)/)
-    const body = fm ? text.slice(fm[0].length) : text
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, content: fileContent, frontmatter: fm ? fm[0] : '', editedContent: body, dirty: false, crlf } : t) })
+    const { frontmatter, body } = splitFrontmatter(text)
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, content: fileContent, frontmatter, editedContent: body, dirty: false, crlf } : t) })
   },
   rebaseQueuedWrite: (path, write) => {
     set({ tabs: get().tabs.map(t => {

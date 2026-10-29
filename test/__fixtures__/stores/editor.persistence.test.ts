@@ -255,6 +255,62 @@ describe('editor store tab persistence', () => {
     } finally { vi.useRealTimers() }
   })
 
+  /** Saving drops the body's trailing blank lines and puts the file's own ending
+   *  back, so an edit changes the edited lines and not git's "No newline at end of
+   *  file" marker. */
+  describe('what a save keeps of the file layout', () => {
+    const saved = async (disk: string, edited: string) => {
+      useEditorStore.setState({
+        tabs: [{ path: 'a.md', name: 'a.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+        activeTab: 'a.md',
+      })
+      useEditorStore.getState().setContent('a.md', disk)
+      useEditorStore.getState().setEditedContent('a.md', edited)
+      useEditorStore.getState().setTabDirty('a.md', true)
+      await useEditorStore.getState().persistAllDirty()
+      const call = vi.mocked(invoke).mock.calls.find(([cmd]) => cmd === 'write_file_checked')
+      return call ? (call[1] as { content: string }).content : null
+    }
+
+    it.each([
+      ['a file with a final newline keeps it', '# T\n\nold\n', '# T\n\nnew', '# T\n\nnew\n'],
+      ['extra trailing blank lines collapse to one newline', '# T\nold\n', '# T\nnew\n\n\n', '# T\nnew\n'],
+      ['a file without a final newline stays without', 'old', 'new', 'new'],
+      ['an empty file gets a final newline once it has text', '', '# Hello', '# Hello\n'],
+      ['a body edited to nothing is written empty', 'old\n', '', ''],
+    ])('%s', async (_name, disk, edited, expected) => {
+      expect(await saved(disk, edited)).toBe(expected)
+    })
+
+    it('keeps the blank line after the frontmatter', async () => {
+      // The editors hand back the body only; the frontmatter owns the blank line.
+      expect(await saved('---\ntitle: x\n---\n\n# Heading\nold\n', '# Heading\nnew'))
+        .toBe('---\ntitle: x\n---\n\n# Heading\nnew\n')
+    })
+
+    it('does not rewrite a file whose text is unchanged', async () => {
+      expect(await saved('---\ntitle: x\n---\n\n# Heading\n', '# Heading\n')).toBeNull()
+      expect(await saved('no final newline', 'no final newline')).toBeNull()
+    })
+
+    it('keeps leading blank lines of a file with no frontmatter', async () => {
+      expect(await saved('\n\n# T\nold\n', '\n\n# T\nnew')).toBe('\n\n# T\nnew\n')
+    })
+  })
+
+  it('does not take a leading divider and the next one for frontmatter', () => {
+    useEditorStore.setState({
+      tabs: [{ path: 'a.md', name: 'a.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],
+      activeTab: 'a.md',
+    })
+
+    useEditorStore.getState().setContent('a.md', '---\n\nIntro section\n\n---\n\nBody')
+
+    const tab = useEditorStore.getState().tabs[0]
+    expect(tab.frontmatter).toBe('')
+    expect(tab.editedContent).toBe('---\n\nIntro section\n\n---\n\nBody')
+  })
+
   it('reads CRLF frontmatter as frontmatter and saves edits back with CRLF', async () => {
     useEditorStore.setState({
       tabs: [{ path: 'a.md', name: 'a.md', content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false }],

@@ -418,7 +418,7 @@ export const getSchema = () => {
 }
 
 /** Visual indicator for `[[wikilink]]` text: accent + underline + pointer so
- *  Cmd+Click navigation is discoverable. ProseMirror decorations only — the
+ *  Cmd/Ctrl+Click navigation is discoverable. ProseMirror decorations only — the
  *  stored content stays literal `[[Title]]` (markdown round-trip untouched).
  *
  *  The full-doc regex scan runs on EVERY transaction — during AI typing that
