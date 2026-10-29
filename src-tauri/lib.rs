@@ -121,6 +121,7 @@ pub fn run() {
             commands::git::git_add_remote,
             commands::git::git_remove_remote,
             commands::git::git_set_identity,
+            commands::git::git_clear_identity,
             commands::git::git_init,
             commands::git::git_remote_probe,
             commands::git::git_fetch,

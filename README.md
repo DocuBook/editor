@@ -169,7 +169,7 @@ open /Applications/DocuBook\ Editor.app
 2. Select a `.md` or `.mdx` file.
 3. Type `/` to insert blocks or use **Code** to edit raw Markdown.
 4. Configure an AI provider in **Settings → AI** if needed, and optionally **Web Tools** so the AI can search the web.
-5. Configure identity and a remote in **Settings → Git**, then **Save** and **Publish**.
+5. Add a remote in **Settings → Git**, then **Save** and **Publish**. The commit identity comes from your global Git config (`user.name`, `user.email`); **Edit** sets an override for this vault only, and **Use global** removes it.
 
 ### Git credentials
 

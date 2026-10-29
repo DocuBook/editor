@@ -227,10 +227,12 @@ pub(crate) fn git_settings(state: &AppState) -> Result<String, String> {
     let default_branch = git::repo::configured_initial_branch();
     match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
         Some(g) if g.is_repo() => {
-            let (name, email) = g.identity()?;
+            let identity = g.identity_info()?;
             let remotes = g.remotes()?;
             Ok(json!({
-                "isRepo": true, "name": name, "email": email,
+                "isRepo": true, "name": identity.name, "email": identity.email,
+                "identitySource": identity.source,
+                "globalName": identity.global_name, "globalEmail": identity.global_email,
                 "defaultBranch": default_branch,
                 "remotes": remotes.iter().map(|(n, u)| json!({ "name": n, "url": u })).collect::<Vec<_>>(),
             }).to_string())

@@ -167,6 +167,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "git_add_remote" => sb(state, cmd, args).await,
         "git_remove_remote" => sb(state, cmd, args).await,
         "git_set_identity" => sb(state, cmd, args).await,
+        "git_clear_identity" => sb(state, cmd, args).await,
         "git_init" => {
             let branch = s("branch");
             tokio::task::spawn_blocking(move || cmds::git_init(&st, &branch))
@@ -429,6 +430,10 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
             Some(g) => g
                 .set_identity(&s("name"), &s("email"))
                 .map(|_| "null".into()),
+            None => Err("No vault".into()),
+        },
+        "git_clear_identity" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            Some(g) => g.clear_identity().map(|_| "null".into()),
             None => Err("No vault".into()),
         },
         "git_init" => match state.git.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
