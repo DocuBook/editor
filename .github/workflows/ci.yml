@@ -237,8 +237,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - name: npm audit (fail on critical)
-        run: npm audit --audit-level=critical
+      - name: npm audit (fail on high)
+        run: npm audit --audit-level=high
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: cargo audit
         run: |
