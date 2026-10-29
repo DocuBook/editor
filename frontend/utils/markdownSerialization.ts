@@ -96,7 +96,9 @@ function serializeBlocks<Block>(editor: MarkdownEditor<Block>, blocks: AnyBlock[
  *  what the editor showed is what reloads; nesting BlockNote would flatten and
  *  toggles are laid out by `serializeBlocks`. BlockNote writes bullets as `* `
  *  and dividers as `***`; they are normalized to `- ` and `---` in prose only —
- *  inside a fence the same characters are code (a JSDoc ` * ` line). */
+ *  inside a fence the same characters are code (a JSDoc ` * ` line). A divider
+ *  on the first line stays `***`: a file starting with `---` has its text up to
+ *  the next `---` read as frontmatter on load (`setContent`). */
 export function serializeMarkdown<Block>(editor: MarkdownEditor<Block>): string | null {
   try {
     const markdown = serializeBlocks(editor, editor.document as AnyBlock[], false)
@@ -104,6 +106,7 @@ export function serializeMarkdown<Block>(editor: MarkdownEditor<Block>): string 
       .replace(/^\n+/, '')
       .replace(/\n+$/, '')
     return mapProse(markdown, prose => prose.replace(/^(\s*)\* /gm, '$1- ').replace(/^(\s*)\*\*\*$/gm, '$1---'))
+      .replace(/^---(?=\n|$)/, '***')
   } catch {
     return null
   }

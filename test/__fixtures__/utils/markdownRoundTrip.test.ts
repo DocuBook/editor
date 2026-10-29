@@ -105,6 +105,7 @@ describe('markdown round trip keeps block structure', () => {
     ['hard break in a nested numbered item', [{ type: 'bulletListItem', content: 'a', children: [{ type: 'numberedListItem', content: 'line\nsecond' }] }]],
     ['hard break in a checklist item', [{ type: 'checkListItem', props: { checked: false }, content: 'line\nsecond' }]],
     ['hard break in a heading', [{ type: 'heading', props: { level: 2 }, content: 'line\nsecond' }]],
+    ['hard break in inline code in a bullet', [{ type: 'bulletListItem', content: [t('run '), t('a\nb', { code: true }), t(' now')] }]],
   ])('%s', (_name, blocks) => {
     editor.replaceBlocks(editor.document, blocks)
     const want = shape(editor.document)
@@ -127,6 +128,19 @@ describe('markdown round trip keeps block structure', () => {
       .toBe('- a\n\n  under a')
     expect(markdownOf([{ type: 'heading', props: { level: 2 }, content: 'line\nsecond' }])).toBe('## line<br>second')
     expect(markdownOf([{ type: 'paragraph', content: 'a' }, { type: 'divider' }, { type: 'paragraph', content: 'b' }])).toBe('a\n\n---\n\nb')
+  })
+
+  it('does not start a file with a divider the load path reads as frontmatter', () => {
+    const blocks = [{ type: 'divider' }, { type: 'paragraph', content: 'hidden' }, { type: 'divider' }, { type: 'paragraph', content: 'tail' }]
+    editor.replaceBlocks(editor.document, blocks)
+    const want = shape(editor.document)
+    const markdown = serializeMarkdown(editor)!
+
+    // The frontmatter split `setContent` (stores/editor.ts) applies on load.
+    expect(markdown).not.toMatch(/^---[\s\S]*?\n---(?:\n|$)/)
+    editor.replaceBlocks(editor.document, editor.tryParseMarkdownToBlocks(mathDollarToMathML(markdown)))
+    expect(shape(editor.document)).toEqual(want)
+    expect(markdown).toBe('***\n\nhidden\n\n---\n\ntail')
   })
 
   /** Limits of BlockNote's parser, pinned so a change is noticed. */

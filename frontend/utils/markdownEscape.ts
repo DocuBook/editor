@@ -102,8 +102,17 @@ type Inline = { type: string; text?: string; styles?: Record<string, unknown>; c
 function escapeInlineContent(items: unknown, lineStarts: boolean, htmlBreaks = false): unknown {
   if (!Array.isArray(items)) return items
   let atLineStart = lineStarts
-  return items.map((item: Inline) => {
+  return items.flatMap((item: Inline) => {
     if (item?.type === 'text' && typeof item.text === 'string') {
+      // `<br>` inside a code span is literal text, so the span is split at each
+      // break and the `<br>` written between the pieces.
+      if (htmlBreaks && item.styles?.code && item.text.includes('\n')) {
+        atLineStart = false
+        return item.text.split('\n').flatMap((part, i) => [
+          ...(i ? [{ type: 'text', text: '<br>', styles: {} }] : []),
+          ...(part ? [{ ...item, text: part }] : []),
+        ])
+      }
       let text = item.styles?.code ? item.text : escapeMarkdownText(item.text, atLineStart)
       if (htmlBreaks) text = text.split('\n').join('<br>')
       atLineStart = lineStarts && !htmlBreaks && item.text.endsWith('\n')
