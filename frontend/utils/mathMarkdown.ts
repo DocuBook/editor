@@ -43,14 +43,15 @@ function convertMath(markdown: string): string {
   const ESC = "\u0000ESC\u0000";
   const MATH = "\u0000MATH\u0000";
   const BACKSLASH = "\u0000BS\u0000";
-  /** `\\` is a literal backslash, so the `(`, `[` or `$` after it is no delimiter. */
-  let out = markdown.replace(/\\\\/g, BACKSLASH).replace(/\\\$/g, ESC);
   const protectedMath: string[] = [];
-  /** HTML input (AI tool blocks) marks code with tags instead of backticks. */
-  out = out.replace(/<(pre|code)\b[\s\S]*?<\/\1>/gi, (match) => {
+  /** HTML input (AI tool blocks) marks code with tags instead of backticks.
+   *  Protected before the escape passes below, which would rewrite its `\$`. */
+  let out = markdown.replace(/<(pre|code)\b[\s\S]*?<\/\1>/gi, (match) => {
     protectedMath.push(match);
     return `${MATH}${protectedMath.length - 1}${MATH}`;
   });
+  /** `\\` is a literal backslash, so the `(`, `[` or `$` after it is no delimiter. */
+  out = out.replace(/\\\\/g, BACKSLASH).replace(/\\\$/g, ESC);
 
   // Keep already-canonical tool HTML untouched while normalizing delimiters in
   // surrounding paragraph content.

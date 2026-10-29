@@ -80,6 +80,7 @@ describe("mathDollarToMathML", () => {
       ["double-backtick span", "Use ``a $b$ ` c`` here"],
       ["HTML code", "<p>Run <code>$(a) $(b)</code></p>"],
       ["HTML pre", "<pre><code>\\[ x \\]</code></pre>"],
+      ["HTML code with escaped dollar", "<p>Run <code>echo \\$HOME</code></p>"],
     ])("%s", (_name, md) => {
       expect(mathDollarToMathML(md)).toBe(md);
     });

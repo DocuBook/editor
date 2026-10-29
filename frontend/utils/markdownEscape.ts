@@ -77,7 +77,7 @@ export function escapeMarkdownText(text: string, lineStart: boolean): string {
   escaped += escapeInline(text.slice(last))
   // A `$` pair the load path would read as math is escaped as a whole; lone
   // dollars (prices) reload as themselves and stay readable.
-  if (mathDollarToMathML(escaped) !== escaped) escaped = escaped.replace(/\$/g, (dollar, at: number, all: string) => (all[at - 1] === '\\' ? dollar : '\\$'))
+  if (mathDollarToMathML(escaped) !== escaped) escaped = escaped.replace(/\$/g, '\\$')
   return escaped
     .split('\n')
     .map((line, i) => (i > 0 || lineStart ? escapeLineStart(line) : line))
