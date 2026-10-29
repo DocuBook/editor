@@ -101,6 +101,7 @@ export default function WebToolsSettings() {
       <NumberInput
         id="web-max-results"
         classNames={{ input: 'web-search-picker-input' }}
+        hideControls
         disabled={disabled}
         min={1}
         max={limit}
