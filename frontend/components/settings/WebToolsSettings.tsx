@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Checkbox, NumberInput, Select } from '@mantine/core'
 import { toast } from 'sonner'
 import { invoke, isTauri } from '../../lib/ipc'
 import { DEFAULT_WEB_TOOLS, describeWebTools, parseWebToolsState, type WebSearchProvider, type WebToolsState } from '../../utils/webTools'
 
 const INPUT_CLASS = 'w-full bg-background border border-border rounded px-3 py-2 text-xs font-mono disabled:opacity-60'
+const SEARCH_PROVIDERS: { value: WebSearchProvider; label: string }[] = [
+  { value: 'off', label: 'Off' },
+  { value: 'tavily', label: 'Tavily (API key)' },
+  { value: 'searxng', label: 'SearXNG (self-hosted)' },
+]
 const BUTTON_CLASS = 'px-3 py-2 rounded bg-accent text-on-accent border-0 text-xs cursor-pointer hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 
 /** Settings for rust-ai's built-in `web_search` / `web_fetch` tools. Both are
@@ -63,11 +69,15 @@ export default function WebToolsSettings() {
     {state.envManaged && <p className="text-xs text-warning">The search provider is controlled by DOCUBOOK_SEARXNG_URL / DOCUBOOK_TAVILY_API_KEY.</p>}
 
     <label className="block text-xs font-medium" htmlFor="web-search-provider">Web search</label>
-    <select id="web-search-provider" disabled={disabled || state.envManaged} value={draft.searchProvider} onChange={e => setDraft({ ...draft, searchProvider: e.target.value as WebSearchProvider })} className={INPUT_CLASS}>
-      <option value="off">Off</option>
-      <option value="tavily">Tavily (API key)</option>
-      <option value="searxng">SearXNG (self-hosted)</option>
-    </select>
+    <Select
+      id="web-search-provider"
+      classNames={{ input: 'web-search-picker-input', dropdown: 'web-search-picker-dropdown', option: 'web-search-picker-option' }}
+      data={SEARCH_PROVIDERS}
+      value={draft.searchProvider}
+      onChange={value => { if (value) setDraft({ ...draft, searchProvider: value as WebSearchProvider }) }}
+      allowDeselect={false}
+      disabled={disabled || state.envManaged}
+    />
 
     {draft.searchProvider === 'tavily' && <div className="rounded border border-border-subtle p-3 space-y-2">
       <p className="text-[10px] text-muted">Tavily's terms allow it to use queries to improve its service, and queries can contain text from your notes. The free plan includes 1,000 searches a month.</p>
@@ -88,13 +98,29 @@ export default function WebToolsSettings() {
 
     {draft.searchProvider !== 'off' && <>
       <label className="block text-xs font-medium" htmlFor="web-max-results">Results per search (1–{limit})</label>
-      <input id="web-max-results" disabled={disabled} type="number" min="1" max={limit} step="1" value={draft.maxResults} onChange={e => setDraft({ ...draft, maxResults: Number(e.target.value) })} className={INPUT_CLASS} />
+      <NumberInput
+        id="web-max-results"
+        classNames={{ input: 'web-search-picker-input' }}
+        disabled={disabled}
+        min={1}
+        max={limit}
+        step={1}
+        allowDecimal={false}
+        allowNegative={false}
+        value={draft.maxResults}
+        /* An emptied field arrives as '' — NaN keeps Save disabled until a number is back. */
+        onChange={value => setDraft({ ...draft, maxResults: typeof value === 'number' ? value : NaN })}
+      />
     </>}
 
-    <label className="flex items-start gap-2 text-xs">
-      <input type="checkbox" disabled={disabled} checked={draft.fetchEnabled} onChange={e => setDraft({ ...draft, fetchEnabled: e.target.checked })} className="mt-0.5" />
-      <span>Allow the AI to read web pages (<code>web_fetch</code>). Pages are fetched from this {isTauri ? 'computer' : 'server'}; internal and private addresses are always blocked.</span>
-    </label>
+    <Checkbox
+      classNames={{ input: 'web-fetch-checkbox-input', label: 'web-fetch-checkbox-label' }}
+      size="xs"
+      disabled={disabled}
+      checked={draft.fetchEnabled}
+      onChange={e => setDraft({ ...draft, fetchEnabled: e.currentTarget.checked })}
+      label={<>Allow the AI to read web pages (<code>web_fetch</code>). Pages are fetched from this {isTauri ? 'computer' : 'server'}; internal and private addresses are always blocked.</>}
+    />
 
     <button type="button" disabled={disabled || !dirty || !resultsValid} onClick={() => void run('set_web_tools_settings', { settings: draft }, 'Web tool settings saved')} className={BUTTON_CLASS}>{saving ? 'Saving…' : 'Save'}</button>
   </div>
