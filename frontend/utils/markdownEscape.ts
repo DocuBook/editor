@@ -101,9 +101,26 @@ export function escapeMarkdownText(text: string, lineStart: boolean): string {
  *  (or into raw HTML, for a captioned image). */
 const URL_BLOCKS = new Set(['image', 'video', 'audio', 'file'])
 
+/** Markdown and HTML readers decode character references in a link destination,
+ *  so `jav&#x61;script:` and `javascript&colon;` ARE `javascript:` to the reader
+ *  even though neither is one as written — and the export writes the string as it
+ *  is. Only the references that can rebuild a scheme matter: numeric ones, and the
+ *  named `&colon;`, `&Tab;` and `&NewLine;` (no named reference stands for an ASCII
+ *  letter, so no entity table is needed). One pass, like the reader's: the
+ *  `&amp;#x61;` form decodes to a literal `&#x61;`, which stays inert. A missing
+ *  semicolon is tolerated, which only ever flags more. */
+function decodeSchemeReferences(url: string): string {
+  return url.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|(colon|tab|newline));?/gi, (match, hex, decimal, name) => {
+    if (name) return { colon: ':', tab: '\t', newline: '\n' }[name.toLowerCase() as 'colon' | 'tab' | 'newline']
+    const code = hex ? parseInt(hex, 16) : parseInt(decimal, 10)
+    return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match
+  })
+}
+
 /** Whether navigating to `url` runs script or opens an active document:
  *  `javascript:`, `vbscript:` and `data:` HTML. Whitespace and control characters
- *  inside a scheme are ignored by browsers, so they are ignored here too.
+ *  inside a scheme are ignored by browsers, and character references are decoded
+ *  by readers (see `decodeSchemeReferences`), so both are undone here first.
  *
  *  Deliberately a denylist of what EXECUTES, not an allowlist of what the editor
  *  opens (`safeExternalUrl`): a note legitimately holds `obsidian://…`, `file:///…`
@@ -112,11 +129,11 @@ const URL_BLOCKS = new Set(['image', 'video', 'audio', 'file'])
  *  is `linkClickPolicy`. */
 export function isActiveContentUrl(url: unknown): boolean {
   if (typeof url !== 'string') return false
-  const scheme = Array.from(url).filter(char => char.charCodeAt(0) > 0x20).join('').toLowerCase()
+  const scheme = Array.from(decodeSchemeReferences(url)).filter(char => char.charCodeAt(0) > 0x20).join('').toLowerCase()
   return /^(?:javascript|vbscript):/.test(scheme) || /^data:(?:text\/html|application\/xhtml\+xml)/.test(scheme)
 }
 
-type Inline = { type: string; text?: string; styles?: Record<string, unknown>; content?: unknown }
+type Inline = { type: string; text?: string; href?: string; styles?: Record<string, unknown>; content?: unknown }
 
 function escapeInlineContent(items: unknown, lineStarts: boolean, htmlBreaks = false): unknown {
   if (!Array.isArray(items)) return items
@@ -138,7 +155,10 @@ function escapeInlineContent(items: unknown, lineStarts: boolean, htmlBreaks = f
       return text === item.text ? item : { ...item, text }
     }
     atLineStart = false
-    if (item?.type === 'link') return { ...item, content: escapeInlineContent(item.content, false, htmlBreaks) }
+    if (item?.type === 'link') {
+      const content = escapeInlineContent(item.content, false, htmlBreaks)
+      return isActiveContentUrl(item.href) ? (content as Inline[]) : { ...item, content }
+    }
     return item
   })
 }
@@ -163,8 +183,10 @@ function escapeTableContent(content: any): unknown {
  *  src>`. The editor's own document is never modified: the block stays in the open
  *  note (it renders with an empty source) and is gone when the note is reopened.
  *
- *  Inline links need nothing here: BlockNote's exporter already writes a link whose
- *  target it rejects with an empty one. */
+ *  An inline link to such a URL is replaced by its text. BlockNote's exporter
+ *  already blanks a target it rejects as written (`javascript:`), but not one that
+ *  only becomes a scheme once a reader decodes a character reference. A toggle's
+ *  summary needs nothing: it is HTML, where `&` is written as `&amp;`. */
 export function escapeBlocksForMarkdown<Block>(blocks: Block[]): Block[] {
   return blocks.map((original: any) => {
     const block = URL_BLOCKS.has(original?.type) && isActiveContentUrl(original.props?.url)

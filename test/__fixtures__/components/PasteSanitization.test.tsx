@@ -18,6 +18,7 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { serializeMarkdown } from '../../../frontend/utils/markdownSerialization'
 import { mathDollarToMathML } from '../../../frontend/utils/mathMarkdown'
+import { fromMarkdown } from 'mdast-util-from-markdown'
 import { mountAppEditor, type AppEditor, type ClipboardPayload } from '../appEditor'
 
 vi.mock('../../../frontend/lib/ipc', async (importOriginal) => ({
@@ -355,6 +356,37 @@ async function reloadFromMarkdown(markdown: string) {
   await app.settle()
 }
 
+/** What a CommonMark reader finds in `markdown`, which is how the next reader of
+ *  the vault sees the note — NOT how it is spelled. A character reference such as
+ *  `jav&#x61;script:` is plain text to a regex over the file, and `javascript:` to
+ *  the reader, so this parses it. Empty means clean: no link, image or definition
+ *  target that executes, and no raw HTML that would run or load. */
+function readerFindings(markdown: string): string[] {
+  const findings: string[] = []
+  const visit = (node: any) => {
+    if (typeof node.url === 'string') {
+      const target = compact(node.url)
+      if (/^(?:javascript|vbscript):/.test(target) || target.startsWith('data:text/html')) findings.push(`${node.type} -> ${JSON.stringify(node.url)}`)
+    }
+    if (node.type === 'html') findings.push(...auditDom(parsed(node.value)).map(finding => `html ${finding}`))
+    for (const child of node.children ?? []) visit(child)
+  }
+  visit(fromMarkdown(markdown))
+  return findings
+}
+
+describe('the reader check can be trusted', () => {
+  it('flags an executing target however it is spelled, and passes ordinary ones', () => {
+    expect(readerFindings('[a](javascript:alert(1)) ![b](vbscript:x) [c](jav&#x61;script:alert(1)) [d](javascript&colon;alert(1)) [e](data:text/html,x)')).toHaveLength(5)
+    expect(readerFindings('[a](https://example.com/) ![b](pics/a.png) [c](obsidian://open?vault=x) [d](jav&amp;#x61;script:alert(1))')).toEqual([])
+  })
+
+  it('reads raw HTML the way a browser does', () => {
+    expect(readerFindings('<img src="x" onerror="1">')).toContain('html img[onerror]')
+    expect(readerFindings('<p>plain <b>html</b></p>')).toEqual([])
+  })
+})
+
 describe('the Markdown saved after a hostile paste', () => {
   it.each(HOSTILE)('carries nothing from "$name", and reloads clean', async ({ html }) => {
     await app.paste({ data: { 'text/html': html } })
@@ -362,6 +394,7 @@ describe('the Markdown saved after a hostile paste', () => {
     const markdown = serializeMarkdown(editor)
     expect(markdown).not.toBeNull()
     expect(markdown!).not.toMatch(DANGEROUS_MARKDOWN)
+    expect(readerFindings(markdown!)).toEqual([])
 
     await reloadFromMarkdown(markdown!)
     expect(auditDom(editorDom())).toEqual([])
@@ -381,19 +414,47 @@ describe('the Markdown saved after a hostile paste', () => {
       ['an image', 'text/html', '<img src="javascript:alert(1)" alt="doc">', 'image'],
       ['a captioned image, which is exported as HTML', 'text/html', '<figure><img src="javascript:alert(1)"><figcaption>cap</figcaption></figure>', 'image'],
       ['a file block with an active data: URL', 'blocknote/html', '<div data-node-type="blockContainer"><div data-content-type="file" data-url="data:text/html,<script>1</script>" data-name="doc"></div></div>', 'file'],
+      // Character references the export would otherwise write as they are, for a
+      // reader to decode back to `javascript:`. `&amp;` makes the HTML parser hand
+      // the block the literal text `&#x61;`.
+      ['a video, scheme as a hex reference', 'text/html', '<video src="jav&amp;#x61;script:alert(1)"></video>', 'video'],
+      ['a video, scheme as a decimal reference', 'text/html', '<video src="jav&amp;#97;script:alert(1)"></video>', 'video'],
+      ['an image, colon as &colon;', 'text/html', '<img src="javascript&amp;colon;alert(1)">', 'image'],
+      ['an audio block, a tab inside the scheme', 'text/html', '<audio src="java&amp;Tab;script:alert(1)"></audio>', 'audio'],
+      ['a file block, colon as &colon;', 'blocknote/html', '<div data-node-type="blockContainer"><div data-content-type="file" data-url="javascript&amp;colon;alert(1)" data-name="doc"></div></div>', 'file'],
     ])('%s', async (_name, mime, html, blockType) => {
       await app.paste({ data: { [mime]: html } })
       const block = editor.document[0]
       expect(block.type, 'the unsafe block is created in the open note').toBe(blockType)
-      expect(block.props.url, 'with its URL, which the open note renders as empty').toMatch(/^(?:javascript|vbscript|data):/i)
+      expect(block.props.url, 'with its URL, which the open note renders as empty').toMatch(/^(?:javascript|vbscript|data):|&#|&colon;|&Tab;/i)
 
       const markdown = serializeMarkdown(editor)!
       expect(markdown).not.toMatch(DANGEROUS_MARKDOWN)
+      expect(readerFindings(markdown)).toEqual([])
       expect(editor.document[0].props.url, 'the open note is not modified by saving').toBe(block.props.url)
 
       await reloadFromMarkdown(markdown)
       expect(auditDom(editorDom())).toEqual([])
       expect(anchors().filter(target => !SAFE_LINK.test(target))).toEqual([])
+    })
+
+    /** The editor keeps such a link as written (its target is not a scheme until a
+     *  reader decodes it), so it is replaced by its text in what is written. The
+     *  plain `javascript:` spelling never becomes a link in the first place. */
+    it.each([
+      ['a hex reference', 'jav&amp;#x61;script:alert(1)'],
+      ['&colon;', 'javascript&amp;colon;alert(1)'],
+      ['a tab inside the scheme', 'java&amp;Tab;script:alert(1)'],
+    ])('an inline link with the scheme written as %s', async (_name, href) => {
+      await app.paste({ data: { 'text/html': `<p><a href="${href}">keep-link</a> and <a href="https://example.com/">docs</a></p>` } })
+      expect(anchors().some(target => /&(?:#|colon;|Tab;)/.test(target)), 'the open note holds the link as written').toBe(true)
+
+      const markdown = serializeMarkdown(editor)!
+      expect(markdown).toBe('keep-link and [docs](https://example.com/)')
+      expect(readerFindings(markdown)).toEqual([])
+
+      await reloadFromMarkdown(markdown)
+      expect(anchors()).toEqual(['https://example.com/'])
     })
 
     it('keeps the URLs a note legitimately holds', async () => {

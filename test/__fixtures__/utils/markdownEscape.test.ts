@@ -100,6 +100,22 @@ describe('isActiveContentUrl', () => {
     'data:text/html,<script>1</script>',
     'DATA:TEXT/HTML;base64,PHNjcmlwdD4=',
     'data:application/xhtml+xml,<html/>',
+    // A reader decodes character references in a link destination, so these ARE
+    // `javascript:` to it although none is one as written.
+    'jav&#x61;script:alert(1)',
+    'jav&#X61;script:alert(1)',
+    'jav&#97;script:alert(1)',
+    '&#106;&#97;&#118;&#97;script:alert(1)',
+    '&#x6A;&#x61;&#x76;&#x61;script:alert(1)',
+    'javascript&colon;alert(1)',
+    'javascript&#58;alert(1)',
+    'JAVASCRIPT&COLON;alert(1)',
+    'java&Tab;script:alert(1)',
+    'java&NewLine;script:alert(1)',
+    'java&#9;script:alert(1)',
+    'vb&#x73;cript:msgbox(1)',
+    'data&colon;text/html,<script>1</script>',
+    'jav&#x61script:alert(1)',
   ])('flags %j', (url) => {
     expect(isActiveContentUrl(url)).toBe(true)
   })
@@ -120,6 +136,16 @@ describe('isActiveContentUrl', () => {
     'ftp://host/f',
     '',
     'see javascript: in the middle',
+    // One decoding pass, like the reader's: `&amp;` decodes to a literal `&`, so the
+    // result is the text `&#x61;`, not the letter, and no scheme is rebuilt.
+    'jav&amp;#x61;script:alert(1)',
+    'javascript&amp;colon;alert(1)',
+    // Not a reference, or one that cannot be a character.
+    'jav&#x110000;script:alert(1)',
+    'jav&#0;script:alert(1)',
+    'jav&notaref;script:alert(1)',
+    'https://example.com/?q=&#x61;&colon;',
+    'pics/a&#x2e;png',
   ])('leaves %j alone', (url) => {
     expect(isActiveContentUrl(url)).toBe(false)
   })
@@ -167,6 +193,12 @@ describe('escapeBlocksForMarkdown: URLs that would execute', () => {
     expect(out[3].content[0].text).toBe('javascript:alert(1)')
   })
 
+  it.each(['jav&#x61;script:alert(1)', 'javascript&colon;alert(1)'])('empties the URL %j of a file block too', (url) => {
+    const [block] = escapeBlocksForMarkdown([media('file', url)]) as any[]
+
+    expect(block.props.url).toBe('')
+  })
+
   it('does not modify the document it is given', () => {
     const blocks = [media('file', 'javascript:alert(1)')]
     const before = JSON.stringify(blocks)
@@ -175,4 +207,33 @@ describe('escapeBlocksForMarkdown: URLs that would execute', () => {
 
     expect(JSON.stringify(blocks)).toBe(before)
   })
+
+  describe('inline links', () => {
+    const text = (value: string) => ({ type: 'text', text: value, styles: {} })
+    const link = (href: string) => ({ type: 'link', href, content: [text('click')] })
+
+    it.each(['javascript:alert(1)', 'vbscript:msgbox(1)', 'data:text/html,x', 'jav&#x61;script:alert(1)', 'javascript&colon;alert(1)', 'java&Tab;script:alert(1)'])(
+      'replaces a link to %j with its text, in prose and in table cells',
+      (href) => {
+        const blocks = [
+          { type: 'paragraph', content: [link(href), text(' and '), link('https://example.com/')], children: [] },
+          { type: 'table', content: { type: 'tableContent', rows: [{ cells: [[link(href)]] }] }, children: [] },
+        ]
+
+        const [paragraph, table] = escapeBlocksForMarkdown(blocks) as any[]
+
+        expect(paragraph.content.map((item: any) => item.type)).toEqual(['text', 'text', 'link'])
+        expect(paragraph.content[0].text).toBe('click')
+        expect(paragraph.content[2].href).toBe('https://example.com/')
+        expect(table.content.rows[0].cells[0].map((item: any) => item.type)).toEqual(['text'])
+      },
+    )
+
+    it.each(['https://example.com/a', 'mailto:someone@example.com', 'pics/a.md', 'obsidian://open?vault=x', 'jav&amp;#x61;script:alert(1)'])('keeps a link to %j', (href) => {
+      const [paragraph] = escapeBlocksForMarkdown([{ type: 'paragraph', content: [link(href)], children: [] }]) as any[]
+
+      expect(paragraph.content[0]).toMatchObject({ type: 'link', href })
+    })
+  })
 })
+
