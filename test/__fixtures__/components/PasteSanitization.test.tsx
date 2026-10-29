@@ -402,7 +402,7 @@ describe('the Markdown saved after a hostile paste', () => {
 
       const markdown = serializeMarkdown(editor)!
 
-      for (const url of urls) expect(markdown, url).toContain(`](${url.replace(/[()]/g, '\\$&')})`)
+      for (const url of urls) expect(markdown, url).toContain(`](${url})`)
     })
   })
 })
