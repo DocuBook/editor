@@ -34,4 +34,4 @@ eventsource-stream = "0.2.3"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false }
 dom_smoothie = "0.18"
-dom_query = "0.28"
+dom_query = "0.29"
