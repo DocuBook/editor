@@ -6,6 +6,7 @@
 
 pub mod branches;
 pub mod commit;
+pub mod credentials;
 pub mod diff;
 pub mod fetch;
 pub mod identity;
@@ -166,14 +167,27 @@ pub(crate) fn auto_proxy() -> git2::ProxyOptions<'static> {
 }
 
 /// Credentials follow normal Git configuration without weakening certificate
-/// or SSH host verification: credential helper, SSH agent, then common keys.
+/// or SSH host verification: an app-stored HTTPS token (web server only), the
+/// credential helper, the SSH agent, then common keys.
 pub(crate) fn remote_callbacks(config: Config) -> RemoteCallbacks<'static> {
     let mut callbacks = RemoteCallbacks::new();
+    let mut stored_attempted = false;
+    let mut stored_host: Option<String> = None;
     let mut helper_attempted = false;
     let mut ssh_attempt = 0usize;
     callbacks.credentials(move |url, username, allowed| {
         if allowed.is_username() && !allowed.is_ssh_key() && !allowed.is_user_pass_plaintext() {
             return Cred::username(username.unwrap_or("git"));
+        }
+
+        // Tried once: a rejected token falls through to the other sources
+        // instead of being replayed until libgit2 gives up.
+        if allowed.is_user_pass_plaintext() && !stored_attempted {
+            stored_attempted = true;
+            if let Some((host, user, secret)) = credentials::stored_credential(url) {
+                stored_host = Some(host);
+                return Cred::userpass_plaintext(&user, &secret);
+            }
         }
 
         if allowed.is_user_pass_plaintext() && !helper_attempted {
@@ -213,9 +227,10 @@ pub(crate) fn remote_callbacks(config: Config) -> RemoteCallbacks<'static> {
             return Cred::default();
         }
 
-        Err(Error::from_str(
-            "No supported Git credentials found; configure a credential helper or SSH agent",
-        ))
+        Err(Error::from_str(&credentials::missing_credentials_message(
+            url,
+            stored_host.as_deref(),
+        )))
     });
     callbacks
 }

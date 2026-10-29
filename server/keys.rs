@@ -39,7 +39,7 @@ fn keys_file(data_dir: &Path) -> std::path::PathBuf {
     stable_data_dir.join("keys.json")
 }
 
-fn passphrase() -> Option<String> {
+pub(crate) fn passphrase() -> Option<String> {
     std::env::var("DB_KEYS_PASSPHRASE")
         .ok()
         .filter(|s| !s.is_empty())
@@ -57,7 +57,7 @@ fn derive_key(pass: &str, salt: &[u8]) -> Result<[u8; 32], String> {
     Ok(key)
 }
 
-fn encrypt_map(map: &HashMap<String, String>, pass: &str) -> Result<String, String> {
+pub(crate) fn encrypt_map(map: &HashMap<String, String>, pass: &str) -> Result<String, String> {
     let plain = serde_json::to_vec(map).map_err(|e| e.to_string())?;
     let salt: [u8; 16] = std::array::from_fn(|_| rand::random());
     let nonce: [u8; 12] = std::array::from_fn(|_| rand::random());
@@ -75,7 +75,7 @@ fn encrypt_map(map: &HashMap<String, String>, pass: &str) -> Result<String, Stri
     .map_err(|e| e.to_string())
 }
 
-fn decrypt_map(raw: &str, pass: &str) -> Result<HashMap<String, String>, String> {
+pub(crate) fn decrypt_map(raw: &str, pass: &str) -> Result<HashMap<String, String>, String> {
     let v: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
     let salt: Vec<u8> = v["salt"]
         .as_array()
@@ -109,7 +109,7 @@ const BASE_URL_SUFFIX: &str = ":base_url";
 
 /** Envelope detection: `{"v":..,"kdf":..,"salt":..,...}` (encrypted) vs the
  *  plain provider map. Provider ids never collide with `"kdf"`. */
-fn looks_like_envelope(raw: &str) -> bool {
+pub(crate) fn looks_like_envelope(raw: &str) -> bool {
     raw.trim_start().starts_with('{') && raw.contains("\"kdf\"")
 }
 

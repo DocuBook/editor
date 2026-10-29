@@ -48,6 +48,7 @@ export const SETTINGS_GROUPS: NavGroup[] = [
     items: [
       { id: 'git-identity', label: 'Identity' },
       { id: 'git-remotes', label: 'Remotes' },
+      { id: 'git-credentials', label: 'Credentials' },
     ],
   },
   {

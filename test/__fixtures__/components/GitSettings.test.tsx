@@ -12,6 +12,8 @@ const pollGitStatus = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('../../../frontend/lib/ipc', () => ({ invoke }))
 vi.mock('../../../frontend/stores/gitStatus', () => ({ pollGitStatus }))
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), info: vi.fn() } }))
+// Credentials have their own suite (GitCredentials.test.tsx).
+vi.mock('../../../frontend/components/GitCredentials', () => ({ default: () => null }))
 
 import GitSettings from '../../../frontend/components/GitSettings'
 

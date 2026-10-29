@@ -18,6 +18,7 @@ mod auth;
 mod auth_routes;
 mod cmds;
 mod config;
+mod git_credentials;
 mod handlers;
 mod httpm;
 mod keys;
@@ -145,6 +146,13 @@ fn main() {
         auth,
         data_dir: data_dir.clone().into(),
     };
+
+    // Containers have no credential helper or SSH agent: HTTPS remotes use the
+    // encrypted token store instead (see git_credentials.rs).
+    let credentials_dir = PathBuf::from(&data_dir);
+    git::credentials::set_credential_lookup(Box::new(move |host| {
+        git_credentials::lookup(&credentials_dir, host)
+    }));
 
     // Move legacy keys.json `<provider>:base_url` entries into config.json (single
     // source of truth for AI endpoints). Idempotent: no-op once migrated.

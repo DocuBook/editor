@@ -33,9 +33,18 @@ The Rust backend (`src-tauri`) is the trust boundary; the webview is treated as 
 - The passphrase protects the file **at rest only** — the real API key still flows to the provider `Authorization` header per request.
 - Migration & guards: a plaintext file auto-migrates to encrypted on first access when the passphrase is set; an encrypted file is **never overwritten** when the passphrase is missing; a wrong passphrase yields an error, never garbage.
 
+**Git credentials**
+- Desktop: the app stores none. It uses the machine's own Git setup: the credential helper from the global or `/etc` Git config, `ssh-agent`, and `~/.ssh` keys. Certificate and SSH host-key verification are never weakened.
+- Web (Docker): `git-credentials.json` in `/data` holds HTTPS access tokens per host.
+  - The file is **always** AES-256-GCM encrypted with the `DB_KEYS_PASSPHRASE`-derived key. There is no plaintext mode, and saving is refused while the passphrase is unset.
+  - Writes go to a `0600` temp file that is then renamed into place.
+  - The listing returns hosts and usernames only. A token is never sent back to the browser.
+  - A stored token is offered only to `https://` remotes on the matching host. It is never offered over plain HTTP or to SSH, and it is tried once per operation, so a rejected token is reported instead of replayed.
+- Prefer a token scoped to the vault's repository. Every account that can sign in can push with it.
+
 **Deployment hardening — decide at first boot**
 - `DB_SETUP_TOKEN` — optional fixed setup token. If unset, the server prints a one-time token to its log at first boot and the wizard requires it, so no one can claim the admin account before you do. The token changes on restart until the admin exists.
-- `DB_KEYS_PASSPHRASE` — set from first boot and keep it in your secret manager; losing it makes stored keys unrecoverable. Without it the server logs a `keys_plaintext` warning at startup.
+- `DB_KEYS_PASSPHRASE` — set from first boot and keep it in your secret manager; losing it makes stored keys and Git tokens unrecoverable. Without it the server logs a `keys_plaintext` warning at startup, and Git access tokens cannot be saved.
 - `DB_TRUSTED_PROXY` — comma-separated addresses or CIDR ranges of your reverse proxies, for example `127.0.0.1` for a proxy on the same host or `172.18.0.0/16` for a Docker network (a range keeps working when the proxy container gets a new address). Only a listed proxy's `X-Forwarded-For` names the real client for the login rate limit, and the proxy must append to that header rather than pass the client's value through: nginx `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (Traefik appends by default). Without a listed proxy the forwarded headers are ignored, and any request that passed through a proxy is treated as remote for the setup gate.
   - **Caddy:** list Caddy's address. Nothing else to set; Caddy writes `X-Forwarded-For` and `X-Forwarded-Proto` itself.
   - **Traefik:** list Traefik's address or its Docker network range. Keep the default; do not set `notAppendXForwardedFor`.

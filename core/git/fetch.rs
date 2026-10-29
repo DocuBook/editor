@@ -124,7 +124,10 @@ fn fetch_refspecs(remote: &git2::Remote<'_>, name: &str) -> Result<Vec<String>, 
  *  into the sync UI, where it reads as noise. Keep the local setup errors that
  *  tell the user what to fix and replace the rest with one actionable line. */
 fn probe_error(error: &str) -> String {
-    if error.contains("No git remote") || error.starts_with("Unknown remote \"") {
+    if error.contains("No git remote")
+        || error.starts_with("Unknown remote \"")
+        || super::credentials::is_credentials_message(error)
+    {
         return error.to_string();
     }
     "Remote is unreachable — check the URL, your network, and your Git credentials".to_string()
