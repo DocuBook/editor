@@ -56,7 +56,7 @@ jobs:
       # skipped build-and-push/merge on every master push and tag push — the
       # image was never built. It went unnoticed while only PRs ran this workflow
       # routinely; the check below is cheap and the tag lookup is gated on it.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Resolve the release tag
         id: resolve
         if: github.event_name != 'pull_request'
@@ -84,8 +84,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -93,7 +93,7 @@ jobs:
       - name: Build frontend once
         run: npm run build
       - name: Upload frontend
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docker-web-${{ github.sha }}
           path: dist/
@@ -115,21 +115,21 @@ jobs:
     environment:
       name: ${{ github.event_name == 'pull_request' && 'build-approval' || 'release-auto' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # On a release, build the exact tagged tree rather than the branch.
           ref: ${{ needs.resolve-tag.outputs.tag || github.sha }}
       - name: Download frontend
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           # The frontend artifact is keyed by the run's SHA; keep it that way so
           # this lookup still works when the checkout ref is a tag.
           name: docker-web-${{ github.sha }}
           path: .docker-web
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to GHCR
         if: needs.resolve-tag.outputs.tag != ''
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -137,7 +137,7 @@ jobs:
       - name: Image metadata
         id: meta
         if: needs.resolve-tag.outputs.tag != ''
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           # metadata-action derives ref-based tags from github.ref, which on the
@@ -149,7 +149,7 @@ jobs:
             type=raw,value=latest,enable=${{ !contains(needs.resolve-tag.outputs.tag, '-') }}
       - name: Build PR check
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           build-contexts: web-content=.docker-web
@@ -160,7 +160,7 @@ jobs:
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache-${{ matrix.slug }}
       - name: Build manual check
         if: github.event_name == 'workflow_dispatch'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           build-contexts: web-content=.docker-web
@@ -183,7 +183,7 @@ jobs:
       - name: Build and push platform image
         id: build
         if: needs.resolve-tag.outputs.tag != ''
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           build-contexts: web-content=.docker-web
@@ -203,7 +203,7 @@ jobs:
           touch "/tmp/digests/${digest#sha256:}"
       - name: Upload digest
         if: needs.resolve-tag.outputs.tag != ''
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: docker-digest-${{ matrix.slug }}
           path: /tmp/digests/*
@@ -221,21 +221,21 @@ jobs:
     environment: release-auto
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: docker-digest-*
           path: /tmp/digests
           merge-multiple: true
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Image metadata
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.IMAGE }}
           # Same as the platform job: derive tags from the resolved tag, not
