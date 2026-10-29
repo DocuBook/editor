@@ -226,6 +226,8 @@ jobs:
       - name: Cargo test (shared engine, Linux)
         run: cargo test --manifest-path core/Cargo.toml
 
+  # Mirrored by audit.yml (weekly schedule, same NODE_VERSION pin); keep the
+  # audit steps and levels in step.
   security:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
