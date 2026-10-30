@@ -224,6 +224,7 @@ export const useEditorStore = create<EditorState>()(
     }, AUTOSAVE_DELAY_MS))
   }
   let flushPromise: Promise<void> | null = null
+  let persistChain: Promise<void> = Promise.resolve()
   return {
   tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null,
   setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
@@ -452,17 +453,25 @@ export const useEditorStore = create<EditorState>()(
     })
   },
 
-  /** Flush WYSIWYG then write every dirty tab to disk — used on app close. */
-  persistAllDirty: async () => {
-    await get().flushEditor()
-    for (const tab of get().tabs) {
-      if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
-        try { await saveTabToDisk(tab) } catch (error) {
-          logger.error('dirty_file_save_failed', { error, fileName: tab.name })
-          throw new Error(`Could not save ${tab.name}`, { cause: error })
+  /** Flush WYSIWYG then write every dirty tab to disk — used on app close.
+   *  Runs are serialized: a tab stays dirty until its write settles, so an
+   *  overlapping run (autosave, page hide, unload) would resend the same edit
+   *  against the old `baseVersion` and come back as a false conflict. A run
+   *  that waits sees the settled tabs and writes only what is still dirty. */
+  persistAllDirty: () => {
+    const run = persistChain.then(async () => {
+      await get().flushEditor()
+      for (const tab of get().tabs) {
+        if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
+          try { await saveTabToDisk(tab) } catch (error) {
+            logger.error('dirty_file_save_failed', { error, fileName: tab.name })
+            throw new Error(`Could not save ${tab.name}`, { cause: error })
+          }
         }
       }
-    }
+    })
+    persistChain = run.catch(() => {})
+    return run
   },
 
   /** Take the disk version as the truth: reload the tab from what won on disk. */

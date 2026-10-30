@@ -57,6 +57,32 @@ describe('saving when the browser tab goes away', () => {
     await vi.waitFor(() => expect(writes()).toHaveLength(1))
   })
 
+  it('writes once when one page exit fires every unload event', async () => {
+    dirtyTab()
+    window.dispatchEvent(new Event('beforeunload', { cancelable: true }))
+    window.dispatchEvent(new Event('pagehide'))
+    setVisibility('hidden')
+    await vi.waitFor(() => expect(useEditorStore.getState().tabs[0].dirty).toBe(false))
+    await useEditorStore.getState().persistAllDirty()
+    expect(writes()).toHaveLength(1)
+  })
+
+  it('does not resend a write still in flight when the page is hidden', async () => {
+    let land!: (raw: string) => void
+    vi.mocked(invoke).mockImplementationOnce(() => new Promise(resolve => { land = resolve }))
+    dirtyTab()
+    const autosave = useEditorStore.getState().persistAllDirty()
+    await vi.waitFor(() => expect(writes()).toHaveLength(1))
+    setVisibility('hidden')
+    // Give the hide's save every chance to start before the first write lands.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    land(JSON.stringify({ status: 'written', version: 'v1' }))
+    await autosave
+    await useEditorStore.getState().persistAllDirty()
+    expect(writes()).toHaveLength(1)
+    expect(useSyncStore.getState().conflicts).toHaveLength(0)
+  })
+
   it('lets the page go without a prompt or a write when nothing is pending', () => {
     useEditorStore.setState({
       tabs: [{ path: 'a.md', name: 'a.md', content: 'old\n', frontmatter: '', editedContent: 'old', dirty: false, deleted: false }],
