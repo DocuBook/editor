@@ -59,7 +59,10 @@ describe('AI extension page lifecycle', () => {
     ai.attach()
 
     expect(editor.updateBlock).toHaveBeenCalledOnce()
-    expect(onDocumentChange).toHaveBeenCalledOnce()
     await vi.waitFor(() => expect(ai.store.state.aiMenuState.status).toBe('user-reviewing'))
+    // The result reaches the tab only once the user keeps it.
+    expect(onDocumentChange).not.toHaveBeenCalled()
+    ai.acceptChanges()
+    expect(onDocumentChange).toHaveBeenCalledOnce()
   })
 })

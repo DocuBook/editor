@@ -356,6 +356,14 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
       if (document === documentRef.current) return
       documentRef.current = document
       if (initialLoadRef.current) return
+      /** An AI request's writes (and their revert) are not page edits: the
+       *  extension publishes them to the tab once the user keeps them. Marking
+       *  the page dirty here would make the review baseline rewrite a file the
+       *  user never touched. */
+      if ((editor as any).getExtension?.('ai')?.reviewBaseline?.()) {
+        if (!aiWritingRef.current && !exitingRef.current) useEditorStore.getState().setUndoRedoState()
+        return
+      }
       dirtyRef.current = true
       if (aiWritingRef.current || exitingRef.current) return // exit hook publishes store state after serialization
       useEditorStore.getState().setTabDirty(filePath, true)
@@ -379,7 +387,27 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
       /** Only flush content when there are real WYSIWYG edits — serialization is
        *  not idempotent. Cursor capture still runs on every mode/tab switch. */
       let md = markdownRef.current
-      if (dirtyRef.current) {
+      /** An AI result under review is not saved: the document it started from
+       *  is, until the user keeps it (the extension then publishes it). The
+       *  page stays dirty so the kept result is still serialized afterwards. */
+      const baseline: any[] | null = (editor as any).getExtension?.('ai')?.reviewBaseline?.() ?? null
+      if (baseline && dirtyRef.current) {
+        const serialized = serializeMarkdown({
+          document: baseline,
+          blocksToMarkdownLossy: (blocks?: any[]) => editor.blocksToMarkdownLossy(blocks),
+          blocksToHTMLLossy: (blocks?: any[]) => editor.blocksToHTMLLossy(blocks),
+        })
+        if (serialized === null) throw new Error(`Could not serialize ${filePath}`)
+        md = serialized
+        if (serialized !== markdownRef.current) {
+          Object.assign(cached, { loadedMarkdown: serialized })
+          loadedMarkdownRef.current = serialized
+          markdownRef.current = serialized
+          onSyncRef.current(serialized)
+          useEditorStore.getState().setTabDirty(filePath, true)
+          writeWysiwygSnapshot(filePath, serialized, baseline)
+        }
+      } else if (dirtyRef.current) {
         const serialized = serializeMarkdown(editor)
         if (serialized === null) throw new Error(`Could not serialize ${filePath}`)
         md = serialized
