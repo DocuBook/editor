@@ -702,10 +702,14 @@ mod tests {
         tokio::spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             let (mut reader, mut writer) = socket.into_split();
+            // Wait for the request head before replying: hyper fails the request with
+            // `UnexpectedMessage` if response bytes reach a connection it has not
+            // written to yet.
+            let mut discard = [0_u8; 4096];
+            let _ = tokio::io::AsyncReadExt::read(&mut reader, &mut discard).await;
             // Drain the request in the background so the reply never stalls on a full
             // receive window while we stream padding at the client.
             tokio::spawn(async move {
-                let mut discard = [0_u8; 4096];
                 loop {
                     // Reading until EOF is the point: the request bytes must leave the
                     // socket or our writes below would stall behind them.
