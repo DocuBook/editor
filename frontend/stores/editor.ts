@@ -126,6 +126,27 @@ const normalizeVersion = (value: string | null): string | null => {
  *  baseline read goes through here so both runtimes agree on its shape. */
 const readFileVersion = (path: string) =>
   invoke<string | null>('file_version', { path }).then(normalizeVersion, () => null)
+/** Read a note together with the version of exactly those bytes.
+ *
+ *  Text and version are two calls. A write landing between them paired the old
+ *  text with the new version, so the next save matched the baseline and
+ *  silently overwrote that write. The common case costs nothing extra: the hash
+ *  of the text read equals the version. Otherwise — a write in between, or bytes
+ *  that are not valid UTF-8, whose lossy text hashes differently — the note is
+ *  read again, and the version is trusted only when the text did not change
+ *  around it. A note that keeps changing gets no version: the caller then hashes
+ *  the text it shows, so a save against newer bytes conflicts. */
+const readWithVersion = async (path: string): Promise<{ raw: string; version: string | null }> => {
+  let raw = await invoke<string>('read_file', { path })
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const version = await readFileVersion(path)
+    if (version === null || version === contentVersion(raw)) return { raw, version }
+    const again = await invoke<string>('read_file', { path })
+    if (again === raw) return { raw, version }
+    raw = again
+  }
+  return { raw, version: null }
+}
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /** Concurrent tab reloads after a branch switch (see `reloadAllTabs`). */
@@ -263,10 +284,9 @@ export const useEditorStore = create<EditorState>()(
     // Binary/image files are previewed via asset URL, never read as UTF-8 text.
     if (isBinaryPath(path)) return
     try {
-      const raw = await invoke<string>('read_file', { path })
       // Capture the baseline before the tab can be typed into: the version read
       // here is what a subsequent save is validated against.
-      const version = await readFileVersion(path)
+      const { raw, version } = await readWithVersion(path)
       get().setContent(path, raw)
       set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
     } catch (e) {
@@ -422,8 +442,7 @@ export const useEditorStore = create<EditorState>()(
     for (const tab of [...get().tabs]) {
       if (isBinaryPath(tab.path)) continue
       try {
-        const raw = await invoke<string>('read_file', { path: tab.path })
-        const version = await readFileVersion(tab.path)
+        const { raw, version } = await readWithVersion(tab.path)
         get().setContent(tab.path, raw)
         set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
       } catch (error) {
@@ -450,8 +469,7 @@ export const useEditorStore = create<EditorState>()(
     const candidates = get().tabs.filter(t => !t.dirty && !isBinaryPath(t.path))
     await mapWithConcurrency(candidates, TAB_RELOAD_CONCURRENCY, async (t) => {
       try {
-        const raw = await invoke<string>('read_file', { path: t.path })
-        const version = await readFileVersion(t.path)
+        const { raw, version } = await readWithVersion(t.path)
         get().setContent(t.path, raw)
         set({ tabs: get().tabs.map(x => x.path === t.path ? { ...x, baseVersion: version ?? contentVersion(raw) } : x) })
         get().setTabDeleted(t.path, false)
