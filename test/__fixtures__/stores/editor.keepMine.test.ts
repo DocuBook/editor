@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useEditorStore } from '../../../frontend/stores/editor'
 import { useSyncStore, contentVersion } from '../../../frontend/stores/sync'
-import { invoke } from '../../../frontend/lib/ipc'
+import { invoke, IpcError } from '../../../frontend/lib/ipc'
 
 vi.mock('../../../frontend/lib/ipc', () => ({
   invoke: vi.fn(),
@@ -11,10 +11,14 @@ vi.mock('../../../frontend/lib/ipc', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 function backend(initial: string) {
-  const state = { disk: initial }
+  const state = { disk: initial, failNext: false }
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === 'file_version') return contentVersion(state.disk)
     if (cmd === 'write_file_checked') {
+      if (state.failNext) {
+        state.failNext = false
+        throw new IpcError('timed out', 503)
+      }
       if (args?.baseVersion !== contentVersion(state.disk)) {
         return JSON.stringify({ status: 'conflict', disk: state.disk, version: contentVersion(state.disk), reason: 'version_mismatch' })
       }
@@ -47,7 +51,13 @@ describe('Keep mine after typing on', () => {
     // The user keeps typing while the dialog is up; the last keystrokes are
     // still only in the editor until its flush.
     useEditorStore.setState({ _flushEditor: () => useEditorStore.getState().setEditedContent('a.md', 'mine, and more') })
-    expect(useSyncStore.getState().conflicts[0].id).toBe(id)
+
+    // A retryable failure defers the write: the conflict stays open, now
+    // holding the newer edit, under the same id (a dismissed dialog stays dismissed).
+    server.failNext = true
+    await useEditorStore.getState().applyConflictMine('a.md')
+    expect(server.disk).toBe('theirs\n')
+    expect(useSyncStore.getState().conflicts[0]).toMatchObject({ id, mine: 'mine, and more\n' })
 
     await useEditorStore.getState().applyConflictMine('a.md')
     expect(server.disk).toBe('mine, and more\n')
