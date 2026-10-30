@@ -51,7 +51,7 @@
     "@tiptap/starter-kit": "^3.32.0",
     "katex": "^0.19.0",
     "lucide-react": "^1.61.0",
-    "mdast-util-from-markdown": "2.0.2",
+    "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm-table": "2.0.0",
     "micromark": "4.0.3",
     "micromark-extension-frontmatter": "2.0.0",
