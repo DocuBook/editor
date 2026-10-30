@@ -10,12 +10,12 @@ import ShortcutsModal from './components/ShortcutsModal'
 import { Toaster, toast } from 'sonner'
 
 import { useGitStatusRefresh } from './stores/gitStatus'
-import { useEditorStore } from './stores/editor'
+import { useEditorStore, installUnloadSave } from './stores/editor'
 import { useVaultStore } from './stores/vault'
 import { useSyncStore, installSyncListeners, isSyncRecordInScope } from './stores/sync'
 import ConflictDialog from './components/ConflictDialog'
 import SyncStatusBadge from './components/editor/SyncStatusBadge'
-import { listen, invoke, closeWindow } from './lib/ipc'
+import { listen, invoke, closeWindow, isTauri } from './lib/ipc'
 import { useAuth, useAuthGuard } from './stores/auth'
 import SetupWizard from './components/SetupWizard'
 import Login from './components/Login'
@@ -175,6 +175,9 @@ export default function App() {
   useEffect(() => {
     if (status === 'ready' && isVaultOpen) void useSyncStore.getState().drain()
   }, [status, isVaultOpen])
+
+  /** The browser tab has no close handshake: save on hide and before unload. */
+  useEffect(() => (isTauri ? undefined : installUnloadSave()), [])
 
   /** Graceful shutdown: on window close, flush + save all dirty tabs, then confirm. */
   useEffect(() => {

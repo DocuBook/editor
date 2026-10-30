@@ -317,3 +317,23 @@ describe('web IPC bridge', () => {
     expect(abortCount).toBe(2)
   })
 })
+
+describe('keepalive note writes', () => {
+  const okResponse = (_url: string, _init?: RequestInit) => Promise.resolve(new Response(JSON.stringify({ result: 'null' }), { status: 200 }))
+
+  it('sends a note write as keepalive so it can outlive a closing tab', async () => {
+    const fetch = vi.fn(okResponse)
+    vi.stubGlobal('fetch', fetch)
+    await invoke('write_file_checked', { path: 'a.md', content: 'hello', baseVersion: null })
+    expect(fetch.mock.calls[0][1]).toMatchObject({ keepalive: true })
+  })
+
+  it('sends other commands and oversized notes as normal requests', async () => {
+    const fetch = vi.fn(okResponse)
+    vi.stubGlobal('fetch', fetch)
+    await invoke('read_file', { path: 'a.md' })
+    // Over the browsers' 64 KiB keepalive budget in bytes, though not in characters.
+    await invoke('write_file_checked', { path: 'a.md', content: 'é'.repeat(31_000), baseVersion: null })
+    expect(fetch.mock.calls.map(([, init]) => init?.keepalive)).toEqual([false, false])
+  })
+})

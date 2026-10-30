@@ -24,6 +24,7 @@ export const PORTS = {
   webSmoke: 4273,
   aiDebug: 4275,
   aiMention: 4290,
+  unloadSave: 4292,
 }
 
 const ARTIFACTS = 'test/artifacts'

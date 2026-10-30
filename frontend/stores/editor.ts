@@ -524,3 +524,36 @@ export const useEditorStore = create<EditorState>()(
     },
   ),
 )
+
+/** Web only: a browser tab gets no `app:before-close` handshake, so edits still
+ *  waiting for the autosave debounce (WYSIWYG edits live only in the editor
+ *  until a flush) were lost when the tab was closed or reloaded.
+ *
+ *  The save starts when the page is hidden — the last moment a phone browser
+ *  reliably runs script before it may discard the page — and again on unload,
+ *  whose writes go out as keepalive requests (see `KEEPALIVE_COMMANDS` in
+ *  lib/ipc). While a dirty tab remains, unload also asks the browser to
+ *  confirm leaving, which gives that save time to land. */
+export function installUnloadSave(): () => void {
+  const hasUnsaved = () => useEditorStore.getState().tabs.some(t => t.dirty && t.editedContent !== null && !t.deleted)
+  const save = () => {
+    if (!hasUnsaved()) return
+    useEditorStore.getState().persistAllDirty().catch(error => logger.error('unload_save_failed', { error }))
+  }
+  const onVisibility = () => { if (document.visibilityState === 'hidden') save() }
+  const onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (!hasUnsaved()) return
+    save()
+    event.preventDefault()
+    // Older Safari and Chrome show the prompt only when returnValue is set.
+    event.returnValue = ''
+  }
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('pagehide', save)
+  window.addEventListener('beforeunload', onBeforeUnload)
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('pagehide', save)
+    window.removeEventListener('beforeunload', onBeforeUnload)
+  }
+}
