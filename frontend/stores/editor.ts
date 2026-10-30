@@ -211,6 +211,20 @@ export const useEditorStore = create<EditorState>()(
     if (content === tab.content) { get().setTabDirty(tab.path, false); return }
 
     const baseVersion = tab.baseVersion ?? null
+    /** The tab shows a write that is still queued: this edit continues it. A
+     *  direct write would land first (disk still holds the old version), and the
+     *  queued predecessor would then conflict with it, offering the OLDER text
+     *  as "mine". Queue it behind that write instead, so the path keeps one
+     *  writer and this edit rebases once its predecessor lands. When the queued
+     *  write is itself still waiting on a predecessor, that is the one to wait
+     *  for: the queued write is superseded here and will never be sent. */
+    const queued = useSyncStore.getState().queuedWrite(tab.path)
+    if (queued && queued.content === tab.content) {
+      useSyncStore.getState().enqueue({ path: tab.path, content, baseVersion, parentVersion: queued.parentVersion ?? queued.contentVersion })
+      settleWrite(tab.path, content)
+      void useSyncStore.getState().drain()
+      return
+    }
     let raw: string
     try {
       raw = await invoke<string>('write_file_checked', { path: tab.path, content, baseVersion })
@@ -484,18 +498,25 @@ export const useEditorStore = create<EditorState>()(
    *  Runs are serialized: a tab stays dirty until its write settles, so an
    *  overlapping run (autosave, page hide, unload) would resend the same edit
    *  against the old `baseVersion` and come back as a false conflict. A run
-   *  that waits sees the settled tabs and writes only what is still dirty. */
+   *  that waits sees the settled tabs and writes only what is still dirty.
+   *  Every tab gets its attempt: one file that cannot be written (permissions,
+   *  a bad path) must not leave the others unsaved on every autosave and at
+   *  close. The failures are reported together once all tabs were tried. */
   persistAllDirty: () => {
     const run = persistChain.then(async () => {
       await get().flushEditor()
+      const failed: string[] = []
+      let firstError: unknown
       for (const tab of get().tabs) {
         if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
           try { await saveTabToDisk(tab) } catch (error) {
             logger.error('dirty_file_save_failed', { error, fileName: tab.name })
-            throw new Error(`Could not save ${tab.name}`, { cause: error })
+            failed.push(tab.name)
+            firstError ??= error
           }
         }
       }
+      if (failed.length) throw new Error(`Could not save ${failed.join(', ')}`, { cause: firstError })
     })
     persistChain = run.catch(() => {})
     return run
@@ -514,6 +535,17 @@ export const useEditorStore = create<EditorState>()(
 
   /** Push the local edit over the disk version, then rebase the tab baseline. */
   applyConflictMine: async (path) => {
+    /** The conflict holds the edit as it was when the save was rejected, but
+     *  the tab stays editable while the dialog waits: anything typed since is
+     *  newer, and builds on it. "Mine" is the tab's latest edit, so keeping it
+     *  must not throw away the last few seconds of typing. */
+    if (get().activeTab === path) {
+      try { await get().flushEditor() } catch (error) { logger.error('editor_exit_failed', { error }) }
+    }
+    const tab = get().tabs.find(t => t.path === path)
+    if (tab?.dirty && tab.editedContent !== null && !tab.deleted) {
+      useSyncStore.getState().updateConflictMine(path, tabDiskContent(tab))
+    }
     const conflict = useSyncStore.getState().conflicts.find(c => c.path === path && isSyncRecordInScope(c))
     if (!conflict) return
     const resolved = await useSyncStore.getState().resolveKeepMine(path)
