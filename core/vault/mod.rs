@@ -58,8 +58,9 @@ fn write_atomic(target: &Path, content: &[u8]) -> Result<(), String> {
         std::fs::OpenOptions::new().write(true).open(&target).map_err(|error| error.to_string())?;
     }
     let dir = target.parent().ok_or_else(|| "Write: no parent directory".to_string())?;
-    let name = target.file_name().ok_or_else(|| "Write: no file name".to_string())?.to_string_lossy();
-    let temp = dir.join(format!(".{name}.docubook-tmp-{}-{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed)));
+    // The note's name stays out of the temp name: a note near the 255-byte name
+    // limit would leave no room for the suffix. The pid and counter keep it unique.
+    let temp = dir.join(format!(".docubook-tmp-{}-{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed)));
 
     let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&temp) {
         Ok(file) => file,
@@ -73,8 +74,10 @@ fn write_atomic(target: &Path, content: &[u8]) -> Result<(), String> {
         Err(error) => return Err(error.to_string()),
     };
     let written = (|| -> std::io::Result<()> {
-        file.write_all(content)?;
+        // Mode first, so a `0600` note's content is never readable through the
+        // temp file's default mode.
         if let Some(meta) = &existing { file.set_permissions(meta.permissions())?; }
+        file.write_all(content)?;
         file.sync_all()
     })();
     drop(file);
@@ -1809,6 +1812,18 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dir.0.join("notes/new.md")).unwrap(), "created");
         assert_eq!(dir.names(""), vec!["a.md", "notes"]);
         assert_eq!(dir.names("notes"), vec!["new.md"]);
+    }
+
+    /// A note whose name is near the 255-byte limit still saves: the temp
+    /// name must not grow with it.
+    #[test]
+    fn write_file_saves_a_note_with_a_long_name() {
+        let dir = TempVault::new("longname");
+        let name = format!("{}.md", "a".repeat(250));
+        std::fs::write(dir.0.join(&name), "old").unwrap();
+        dir.vault().write_file(&name, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.0.join(&name)).unwrap(), "new");
+        assert_eq!(dir.names(""), vec![name]);
     }
 
     /// The new bytes arrive by rename, never by truncating the note in place:
