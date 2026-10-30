@@ -211,6 +211,20 @@ export const useEditorStore = create<EditorState>()(
     if (content === tab.content) { get().setTabDirty(tab.path, false); return }
 
     const baseVersion = tab.baseVersion ?? null
+    /** The tab shows a write that is still queued: this edit continues it. A
+     *  direct write would land first (disk still holds the old version), and the
+     *  queued predecessor would then conflict with it, offering the OLDER text
+     *  as "mine". Queue it behind that write instead, so the path keeps one
+     *  writer and this edit rebases once its predecessor lands. When the queued
+     *  write is itself still waiting on a predecessor, that is the one to wait
+     *  for: the queued write is superseded here and will never be sent. */
+    const queued = useSyncStore.getState().queuedWrite(tab.path)
+    if (queued && queued.content === tab.content) {
+      useSyncStore.getState().enqueue({ path: tab.path, content, baseVersion, parentVersion: queued.parentVersion ?? queued.contentVersion })
+      settleWrite(tab.path, content)
+      void useSyncStore.getState().drain()
+      return
+    }
     let raw: string
     try {
       raw = await invoke<string>('write_file_checked', { path: tab.path, content, baseVersion })

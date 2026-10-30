@@ -50,6 +50,13 @@ export interface PendingWrite {
   queuedAt: number
   /** Hash of `content`, so a queued write can be skipped once disk already matches. */
   contentVersion: string
+  /** `contentVersion` of the earliest queued write this one continues that may
+   *  still land: the tab was showing a queued write's content when it was
+   *  edited again, and that write may itself continue an earlier one. When it
+   *  lands (it may already be in flight), this one is rebased onto the version
+   *  it produced instead of conflicting with its own history. Cleared once this
+   *  write is sent: by then its predecessor has landed or never will. */
+  parentVersion?: string
 }
 
 /** An edit that could not be applied because disk changed underneath it. */
@@ -111,6 +118,8 @@ interface SyncState {
    *  the same path — only the newest content matters, and replaying stale writes
    *  in order would just thrash the disk. */
   enqueue: (write: Omit<PendingWrite, 'seq' | 'queuedAt' | 'contentVersion' | 'vaultPath'>) => void
+  /** The write still queued for `path` in this vault, if any. */
+  queuedWrite: (path: string) => PendingWrite | undefined
   /** Drop a queued write without applying it (user discarded the change). */
   discard: (path: string) => void
   retryFailure: (path: string) => void
@@ -250,6 +259,11 @@ export const useSyncStore = create<SyncState>()(
          *  the drain: either the vault changed or the store was reset. Results
          *  are dropped instead of published into the new scope. */
         const abandoned = () => gen !== generation || !isSyncRecordInScope(item)
+        // Only one drain sends at a time, so nothing this write continues is
+        // still in flight: an edit made on top of it now waits on THIS write.
+        if (item.parentVersion !== undefined) {
+          set({ queue: get().queue.map(q => q.seq === item.seq ? { ...q, parentVersion: undefined } : q) })
+        }
         let outcome: WriteOutcome
         try {
           const raw = await invokeTrackedWrite({
@@ -283,7 +297,16 @@ export const useSyncStore = create<SyncState>()(
         if (abandoned()) return true
 
         if (outcome.status === 'written') {
-          set({ queue: get().queue.filter(q => q.seq !== item.seq) })
+          // A later edit of the same tab, queued while this write was pending,
+          // was based on this content: it now continues from the version just
+          // written instead of the one this write replaced.
+          set({
+            queue: get().queue
+              .filter(q => q.seq !== item.seq)
+              .map(q => q.path === item.path && q.parentVersion === item.contentVersion && isSyncRecordInScope(q)
+                ? { ...q, baseVersion: outcome.version, parentVersion: undefined }
+                : q),
+          })
           // Dynamic on purpose: editor.ts imports this module statically
           // (useSyncStore/contentVersion/isRetryableError), so a static import
           // back would form an ESM cycle. The cycle is harmless at call time
@@ -338,7 +361,12 @@ export const useSyncStore = create<SyncState>()(
           // state only risks a spurious conflict against our own history.
           const rest = get().queue.filter(q => !(q.path === write.path && isSyncRecordInScope(q)))
           set({ queue: [...rest, item] })
+          // Nothing else drains a queue filled while the browser stayed online
+          // (a restarting server, a backend error): retry on the backoff timer.
+          scheduleRetry()
         },
+
+        queuedWrite: (path) => get().queue.find(q => q.path === path && isSyncRecordInScope(q)),
 
         discard: (path) => {
           set({
