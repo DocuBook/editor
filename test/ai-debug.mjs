@@ -127,12 +127,31 @@ await runSuite('ai-debug', {
   await page.waitForTimeout(2600)
   ok('rejected AI result is never saved', readFileSync(`${vaultPath}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
 
+  // An edit typed just before a request is still unflushed when the result
+  // lands. The autosave flush during review must write that edit (the request's
+  // baseline), not the unaccepted result; Accept then saves the result.
+  await page.getByText('hello world', { exact: true }).click()
+  await page.keyboard.press('End')
+  await page.keyboard.type(' edited')
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.press('Control+Alt+L')
+  await promptBox.fill('summarize the note')
+  await page.keyboard.press('Enter')
+  await page.getByText('Accept', { exact: true }).waitFor()
+  ok('the edit is still unflushed when the review lands', readFileSync(`${vaultPath}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
+  await page.waitForTimeout(2600)
+  const flushedDuringReview = readFileSync(`${vaultPath}/notes.md`, 'utf8')
+  ok('flush during review saves the edit, not the AI result', flushedDuringReview.includes('hello world edited') && !flushedDuringReview.includes('point one'), flushedDuringReview)
+  await page.getByText('Accept', { exact: true }).click()
+  await page.waitForTimeout(2600)
+  ok('accepted AI result is saved', readFileSync(`${vaultPath}/notes.md`, 'utf8').includes('point one'))
+
   // Switch the probe to true and reload: the same mock now reports a measured
   // model, so the request goes out WITH tools (Path A). The backend owns this
   // state now — flipping it here is what a completed probe would have stored.
   aiState.probes['mock-model'] = true
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await openNote(page)
+  await openNote(page, 'point one')
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.press('Control+Alt+L')
   await page.waitForTimeout(900)
@@ -140,7 +159,7 @@ await runSuite('ai-debug', {
   await page.keyboard.press('Enter')
   await page.getByText('Accept', { exact: true }).waitFor()
   await page.getByText('Revert', { exact: true }).waitFor()
-  ok('Path A: tool request renders review', askAiHits() === 2)
+  ok('Path A: tool request renders review', askAiHits() === 3)
   ok('Path A: hostile HTML stays inert', await page.locator('.bn-editor script, .bn-editor [onerror]').count() === 0)
 
   // Revert closes the review and restores the editor; the composer stays mounted,
@@ -158,7 +177,7 @@ await runSuite('ai-debug', {
   // Reset the editor after Path A so its save/conflict UI and no-op toast do not
   // intercept pointer actions in the independent SSE lifecycle scenarios.
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await openNote(page)
+  await openNote(page, 'point one')
 
   // Keep the frontend fetch pending so this suite can verify page-owned stream
   // lifetime: switching preserves it, while each explicit close/Stop cancels it.
