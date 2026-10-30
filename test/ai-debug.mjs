@@ -112,6 +112,10 @@ await runSuite('ai-debug', {
   // type the next instruction while deciding accept/revert.
   await page.locator('textarea[aria-label="AI prompt"]').waitFor()
   ok('Path B: text-only request renders review', askAiHits() === 1)
+  // A result under review is not the user's yet: autosave (2s) leaves the file
+  // byte for byte as it was.
+  await page.waitForTimeout(2600)
+  ok('unaccepted AI result is not saved', readFileSync(`${vaultPath}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
 
   // Escape dismisses the AI review back to the idle composer (the FAB is gone;
   // the composer stays mounted). The panel listens on window capture so the
@@ -119,6 +123,9 @@ await runSuite('ai-debug', {
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'Accept' }).waitFor({ state: 'detached' })
   ok('Escape collapses AI review to the idle composer', await page.getByRole('button', { name: 'Accept' }).count() === 0)
+  // Escape during review reverts: the rejected result never reaches the file.
+  await page.waitForTimeout(2600)
+  ok('rejected AI result is never saved', readFileSync(`${vaultPath}/notes.md`, 'utf8') === ORIGINAL_MARKDOWN)
 
   // Switch the probe to true and reload: the same mock now reports a measured
   // model, so the request goes out WITH tools (Path A). The backend owns this

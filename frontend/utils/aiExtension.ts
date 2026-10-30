@@ -183,7 +183,10 @@ function readPart(value: any) {
   return partOfType(value, 'tool-input-available')?.input
 }
 
-type AiSession = { options: InvokeOptions; controller: AbortController; before: any[]; retries: number; pendingInputs: any[]; streamComplete: boolean }
+/** `before` is the document the request started from; `changed` turns true once
+ *  an operation landed. Until the user accepts, that document is the one that
+ *  gets saved (see `reviewBaseline`). */
+type AiSession = { options: InvokeOptions; controller: AbortController; before: any[]; changed: boolean; retries: number; pendingInputs: any[]; streamComplete: boolean }
 
 const extensionFactory = ({ editor, options }: any) => {
   const store = createStore<{ aiMenuState: AiMenuState }>({ aiMenuState: 'closed' })
@@ -288,7 +291,11 @@ const extensionFactory = ({ editor, options }: any) => {
     store.setState({ aiMenuState: next })
   }
 
-  const close = (collapseSelection = false) => {
+  /** `keep`: the request's changes stay in the document (accept, or a dismiss
+   *  that leaves them). Only then are they published to the tab, so autosave
+   *  never writes a result the user has not kept. */
+  const close = (collapseSelection = false, keep = true) => {
+    const kept = keep && !!session?.changed
     session = undefined
     cancelReveal()
     clearWritingCursor()
@@ -311,11 +318,14 @@ const extensionFactory = ({ editor, options }: any) => {
      *  composer, which is lifted above it mid-collapse instead of staying put.
      *  Desktop keeps the caret restore. */
     if (!softKeyboardOnFocus()) editor.focus()
+    if (kept) options?.onDocumentChange?.()
   }
 
+  /** Never publishes: a page without a view cannot revert, but its tab still
+   *  holds the baseline, which is what a rejected result must leave behind. */
   const reject = () => {
     if (session?.before && hasAttachedView()) editor.replaceBlocks(editor.document.map((block: any) => block.id), session.before)
-    close(true)
+    close(true, false)
   }
 
   const completeReview = async (current: AiSession) => {
@@ -324,6 +334,9 @@ const extensionFactory = ({ editor, options }: any) => {
   }
 
   const applyInput = (input: any) => {
+    /** Set before applying: an operation that throws midway may already have
+     *  written, and the saved baseline must cover that partial result too. */
+    if (session) session.changed = true
     const { written, changed } = applyOperations(editor, input)
     /** The selected range has been rewritten, so the selection is spent: both
      *  the snapshot and the live range are released, so a follow-up prompt
@@ -334,10 +347,7 @@ const extensionFactory = ({ editor, options }: any) => {
      *  non-empty, which `hasAISelection` and the text-only path still read as
      *  "the selection"). A failed apply throws above and keeps the selection
      *  for Retry. */
-    if (changed) {
-      releaseAISelection(editor)
-      options?.onDocumentChange?.()
-    }
+    if (changed) releaseAISelection(editor)
     moveWritingCursor(written[written.length - 1] ?? null)
     startReveal(written)
   }
@@ -376,6 +386,12 @@ const extensionFactory = ({ editor, options }: any) => {
     closeAIMenu: () => close(),
     acceptChanges: () => close(true),
     rejectChanges: reject,
+    /** The document to save while a request's result awaits review: the one it
+     *  started from. Null when nothing is pending, so the live document is
+     *  saved. Without this, autosave wrote the unaccepted result — partial when
+     *  the stream was still running — and a crash, a close or a commit during
+     *  review kept it, since only this page could still revert it. */
+    reviewBaseline: (): any[] | null => (session?.changed ? session.before : null),
     attach() {
       const current = session
       if (!current || !hasAttachedView()) return
@@ -413,8 +429,19 @@ const extensionFactory = ({ editor, options }: any) => {
       const state = store.state.aiMenuState
       if (state === 'closed') return
       const controller = new AbortController()
-      const before = editor.document.map((block: any) => ({ ...block, children: block.children?.map((child: any) => ({ ...child })) || [] }))
-      const current: AiSession = { options: invokeOptions, controller, before, retries, pendingInputs: [], streamComplete: false }
+      const previous = session
+      /** A retry re-runs the same request over whatever its failed attempt
+       *  already wrote: it keeps that attempt's starting document, so Reject
+       *  (and the saved baseline) still go back to before the request. */
+      const retrying = retries > 0 && !!previous
+      const before = retrying
+        ? previous.before
+        : editor.document.map((block: any) => ({ ...block, children: block.children?.map((child: any) => ({ ...child })) || [] }))
+      /** A follow-up prompt builds on the result under review: the user kept
+       *  it by asking for more, so it is published now and the new request
+       *  starts from it. */
+      if (!retrying && previous?.changed) options?.onDocumentChange?.()
+      const current: AiSession = { options: invokeOptions, controller, before, changed: retrying && previous.changed, retries, pendingInputs: [], streamComplete: false }
       /** One request owns the menu at a time. A previous stream that is still
        *  running is cancelled here, and `superseded()` below stops it from
        *  writing into the document or the menu status once a newer request has
