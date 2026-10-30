@@ -50,10 +50,12 @@ export interface PendingWrite {
   queuedAt: number
   /** Hash of `content`, so a queued write can be skipped once disk already matches. */
   contentVersion: string
-  /** `contentVersion` of the queued write this one continues: the tab was
-   *  showing that write's content when it was edited again. When that write
+  /** `contentVersion` of the earliest queued write this one continues that may
+   *  still land: the tab was showing a queued write's content when it was
+   *  edited again, and that write may itself continue an earlier one. When it
    *  lands (it may already be in flight), this one is rebased onto the version
-   *  it produced instead of conflicting with its own predecessor. */
+   *  it produced instead of conflicting with its own history. Cleared once this
+   *  write is sent: by then its predecessor has landed or never will. */
   parentVersion?: string
 }
 
@@ -257,6 +259,11 @@ export const useSyncStore = create<SyncState>()(
          *  the drain: either the vault changed or the store was reset. Results
          *  are dropped instead of published into the new scope. */
         const abandoned = () => gen !== generation || !isSyncRecordInScope(item)
+        // Only one drain sends at a time, so nothing this write continues is
+        // still in flight: an edit made on top of it now waits on THIS write.
+        if (item.parentVersion !== undefined) {
+          set({ queue: get().queue.map(q => q.seq === item.seq ? { ...q, parentVersion: undefined } : q) })
+        }
         let outcome: WriteOutcome
         try {
           const raw = await invokeTrackedWrite({

@@ -113,6 +113,50 @@ describe('offline queue hand-off to live saves', () => {
     expect(useSyncStore.getState().queue).toHaveLength(0)
   })
 
+  it('rebases a chain of follow-up edits made while the predecessor was in flight', async () => {
+    const server = backend('v0\n')
+    openTab('v0\n', 'A')
+    await useEditorStore.getState().persistAllDirty()
+    server.down = false
+    server.hold = () => {}
+
+    const draining = useSyncStore.getState().drain()
+    await vi.advanceTimersByTimeAsync(0)
+    // Two autosaves pile up behind the parked write; the second supersedes the first.
+    await type('A B')
+    await type('A B C')
+    server.hold?.()
+    server.hold = null
+    await draining
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(server.writes).toEqual(['A\n', 'A B C\n'])
+    expect(useSyncStore.getState().conflicts).toHaveLength(0)
+    expect(useSyncStore.getState().queue).toHaveLength(0)
+  })
+
+  it('waits on the sent follow-up, not on the predecessor it superseded', async () => {
+    const server = backend('v0\n')
+    openTab('v0\n', 'A')
+    await useEditorStore.getState().persistAllDirty()
+    // Still offline: the follow-up supersedes `A`, which is never sent.
+    await type('A B')
+    server.down = false
+    server.hold = () => {}
+
+    const draining = useSyncStore.getState().drain()
+    await vi.advanceTimersByTimeAsync(0)
+    await type('A B C')
+    server.hold?.()
+    server.hold = null
+    await draining
+    await vi.advanceTimersByTimeAsync(60_000)
+
+    expect(server.writes).toEqual(['A B\n', 'A B C\n'])
+    expect(useSyncStore.getState().conflicts).toHaveLength(0)
+    expect(useSyncStore.getState().queue).toHaveLength(0)
+  })
+
   it('an edit that does not continue the queued write still keeps both sides', async () => {
     const server = backend('v0\n')
     openTab('v0\n', 'A')
