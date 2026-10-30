@@ -29,6 +29,72 @@ pub struct FileInfo {
     pub file_type: String, // "0"=file, "1"=dir
 }
 
+/// Replace `target` with `content` atomically.
+///
+/// `std::fs::write` truncates the file before writing it, so a crash, a power
+/// loss or a full disk in between left an empty or cut-off note. This writes a
+/// hidden sibling temp file, flushes it to disk, and renames it over the target:
+/// the rename is atomic on the same filesystem, so the note is always either the
+/// old bytes or the new ones.
+///
+/// - A symlinked note is written through to its target, so the link survives.
+/// - The target's permissions are carried over, and a note this process may not
+///   write is refused as before instead of being replaced.
+/// - Where no temp file can be created (a directory this process may not add
+///   entries to) or the rename is refused (on Windows, another process can hold
+///   the file open without delete sharing), it falls back to the plain write
+///   rather than fail a save that used to work.
+fn write_atomic(target: &Path, content: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+
+    let target = std::fs::canonicalize(target).unwrap_or_else(|_| target.to_path_buf());
+    let existing = std::fs::metadata(&target).ok();
+    // The rename only needs a writable directory. Opening the note for writing
+    // (without truncating it) keeps the file's own permission as the gate, so a
+    // note this process could not write before is still refused.
+    if existing.is_some() {
+        std::fs::OpenOptions::new().write(true).open(&target).map_err(|error| error.to_string())?;
+    }
+    let dir = target.parent().ok_or_else(|| "Write: no parent directory".to_string())?;
+    // The note's name stays out of the temp name: a note near the 255-byte name
+    // limit would leave no room for the suffix. The pid and counter keep it unique.
+    let temp = dir.join(format!(".docubook-tmp-{}-{}", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed)));
+
+    let mut file = match std::fs::OpenOptions::new().write(true).create_new(true).open(&temp) {
+        Ok(file) => file,
+        // A directory this process may not add entries to, holding a note it
+        // may write: there is no room for the temp file, so write in place as
+        // before. Only for this error — on a full disk the in-place write would
+        // truncate the note and then fail.
+        Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            return std::fs::write(&target, content).map_err(|error| error.to_string());
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let written = (|| -> std::io::Result<()> {
+        // Mode first, so a `0600` note's content is never readable through the
+        // temp file's default mode.
+        if let Some(meta) = &existing { file.set_permissions(meta.permissions())?; }
+        file.write_all(content)?;
+        file.sync_all()
+    })();
+    drop(file);
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&temp);
+        return Err(error.to_string());
+    }
+    if let Err(rename_error) = std::fs::rename(&temp, &target) {
+        let _ = std::fs::remove_file(&temp);
+        return std::fs::write(&target, content).map_err(|error| format!("{error} (after rename failed: {rename_error})"));
+    }
+    // Make the rename itself durable. Windows cannot open a directory as a file.
+    #[cfg(unix)]
+    if let Ok(dir) = std::fs::File::open(dir) { let _ = dir.sync_all(); }
+    Ok(())
+}
+
 pub(crate) fn is_ignored_entry(name: &str) -> bool {
     matches!(name, ".git" | ".DS_Store" | "node_modules" | ".trash" | SNAPSHOT_ROOT)
 }
@@ -365,11 +431,13 @@ impl Vault {
         let data = Self::read_limited(&f, MAX_FILE_BYTES)?;
         Ok(base64::engine::general_purpose::STANDARD.encode(data))
     }
-/** Write content to a file, creating parent directories if needed. */
+/** Write content to a file, creating parent directories if needed. The
+     *  write is atomic (see [`write_atomic`]): a crash mid-save leaves the old
+     *  note or the new one, never a truncated one. */
     pub fn write_file(&self, path: &str, content: &str) -> Result<(), String> {
         let f = self.safe_path(path)?;
         if let Some(p) = f.parent() { std::fs::create_dir_all(p).map_err(|e| e.to_string())?; }
-        std::fs::write(&f, content).map_err(|e| e.to_string())?;
+        write_atomic(&f, content.as_bytes())?;
         self.invalidate_caches();
         Ok(())
     }
@@ -1703,5 +1771,127 @@ mod tests {
         assert_eq!(EntryKind::parse("file"), Some(EntryKind::File));
         assert_eq!(EntryKind::parse("folder"), Some(EntryKind::Folder));
         assert_eq!(EntryKind::parse("note"), None);
+    }
+
+    /// A fresh vault in a temp dir, removed when the guard drops.
+    struct TempVault(PathBuf);
+    impl TempVault {
+        fn new(tag: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!("docubook-atomic-{tag}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+        fn vault(&self) -> Vault { Vault::new(self.0.to_str().unwrap()).unwrap() }
+        /// Entry names in `sub`, to prove no temp file was left behind.
+        fn names(&self, sub: &str) -> Vec<String> {
+            let mut names: Vec<_> = std::fs::read_dir(self.0.join(sub)).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+            names.sort();
+            names
+        }
+    }
+    impl Drop for TempVault {
+        fn drop(&mut self) {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+            }
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn write_file_replaces_content_and_leaves_no_temp_file() {
+        let dir = TempVault::new("replace");
+        std::fs::write(dir.0.join("a.md"), "a much longer original body").unwrap();
+        let v = dir.vault();
+        v.write_file("a.md", "short").unwrap();
+        v.write_file("notes/new.md", "created").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.0.join("a.md")).unwrap(), "short");
+        assert_eq!(std::fs::read_to_string(dir.0.join("notes/new.md")).unwrap(), "created");
+        assert_eq!(dir.names(""), vec!["a.md", "notes"]);
+        assert_eq!(dir.names("notes"), vec!["new.md"]);
+    }
+
+    /// A note whose name is near the 255-byte limit still saves: the temp
+    /// name must not grow with it.
+    #[test]
+    fn write_file_saves_a_note_with_a_long_name() {
+        let dir = TempVault::new("longname");
+        let name = format!("{}.md", "a".repeat(250));
+        std::fs::write(dir.0.join(&name), "old").unwrap();
+        dir.vault().write_file(&name, "new").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.0.join(&name)).unwrap(), "new");
+        assert_eq!(dir.names(""), vec![name]);
+    }
+
+    /// The new bytes arrive by rename, never by truncating the note in place:
+    /// the file is a new inode, so a crash mid-write could only have lost the
+    /// temp file, not the note.
+    #[cfg(unix)]
+    #[test]
+    fn write_file_swaps_in_a_new_file_instead_of_truncating() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = TempVault::new("rename");
+        std::fs::write(dir.0.join("a.md"), "old").unwrap();
+        let before = std::fs::metadata(dir.0.join("a.md")).unwrap().ino();
+        dir.vault().write_file("a.md", "new").unwrap();
+        assert_ne!(std::fs::metadata(dir.0.join("a.md")).unwrap().ino(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_file_keeps_permissions_and_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempVault::new("meta");
+        std::fs::write(dir.0.join("a.md"), "old").unwrap();
+        std::fs::set_permissions(dir.0.join("a.md"), std::fs::Permissions::from_mode(0o640)).unwrap();
+        std::fs::write(dir.0.join("real.md"), "old").unwrap();
+        std::os::unix::fs::symlink("real.md", dir.0.join("link.md")).unwrap();
+        let v = dir.vault();
+
+        v.write_file("a.md", "new").unwrap();
+        let mode = std::fs::metadata(dir.0.join("a.md")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
+
+        // Writing through the link updates its target and keeps the link.
+        v.write_file("link.md", "through the link").unwrap();
+        assert!(std::fs::symlink_metadata(dir.0.join("link.md")).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read_to_string(dir.0.join("real.md")).unwrap(), "through the link");
+    }
+
+    /// Root ignores file modes, so the permission cases cannot be observed there.
+    #[cfg(unix)]
+    fn mode_bits_enforced(probe: &Path) -> bool {
+        std::fs::OpenOptions::new().write(true).open(probe).is_err()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_file_refuses_a_note_it_may_not_write() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempVault::new("readonly");
+        let note = dir.0.join("a.md");
+        std::fs::write(&note, "keep me").unwrap();
+        std::fs::set_permissions(&note, std::fs::Permissions::from_mode(0o444)).unwrap();
+        if !mode_bits_enforced(&note) { return; }
+        // The directory is writable, so a rename alone would have replaced it.
+        assert!(dir.vault().write_file("a.md", "clobbered").is_err());
+        assert_eq!(std::fs::read_to_string(&note).unwrap(), "keep me");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_file_still_saves_a_writable_note_in_a_locked_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempVault::new("lockeddir");
+        std::fs::write(dir.0.join("a.md"), "old").unwrap();
+        let v = dir.vault();
+        std::fs::set_permissions(&dir.0, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Root may add entries anyway; then there is nothing to fall back from.
+        if std::fs::write(dir.0.join("probe"), "").is_ok() { return; }
+        v.write_file("a.md", "new").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.0.join("a.md")).unwrap(), "new");
     }
 }
