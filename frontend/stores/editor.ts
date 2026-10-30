@@ -105,18 +105,27 @@ interface EditorState {
 const AUTOSAVE_DELAY_MS = 2000
 
 
+/** `file_version` answers a bare string on desktop but a JSON-encoded one on the
+ *  web server (`"\"<hash>\""`, or `"null"` for a missing file), whose command
+ *  results are JSON text. A baseline kept with its quotes never matches the
+ *  backend's hash, so the first save after reading it was always a conflict. */
 const normalizeVersion = (value: string | null): string | null => {
   if (value === null) return null
   let current = value
   for (let i = 0; i < 2; i++) {
     try {
       const parsed = JSON.parse(current)
+      if (parsed === null) return null
       if (typeof parsed !== 'string') break
       current = parsed
     } catch { break }
   }
   return current
 }
+/** The on-disk version of `path` as a bare hash, or null when unknown. Every
+ *  baseline read goes through here so both runtimes agree on its shape. */
+const readFileVersion = (path: string) =>
+  invoke<string | null>('file_version', { path }).then(normalizeVersion, () => null)
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /** Concurrent tab reloads after a branch switch (see `reloadAllTabs`). */
@@ -257,7 +266,7 @@ export const useEditorStore = create<EditorState>()(
       const raw = await invoke<string>('read_file', { path })
       // Capture the baseline before the tab can be typed into: the version read
       // here is what a subsequent save is validated against.
-      const version = normalizeVersion(await invoke<string | null>('file_version', { path }).catch(() => null))
+      const version = await readFileVersion(path)
       get().setContent(path, raw)
       set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
     } catch (e) {
@@ -414,7 +423,7 @@ export const useEditorStore = create<EditorState>()(
       if (isBinaryPath(tab.path)) continue
       try {
         const raw = await invoke<string>('read_file', { path: tab.path })
-        const version = await invoke<string | null>('file_version', { path: tab.path }).catch(() => null)
+        const version = await readFileVersion(tab.path)
         get().setContent(tab.path, raw)
         set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
       } catch (error) {
@@ -442,7 +451,7 @@ export const useEditorStore = create<EditorState>()(
     await mapWithConcurrency(candidates, TAB_RELOAD_CONCURRENCY, async (t) => {
       try {
         const raw = await invoke<string>('read_file', { path: t.path })
-        const version = await invoke<string | null>('file_version', { path: t.path }).catch(() => null)
+        const version = await readFileVersion(t.path)
         get().setContent(t.path, raw)
         set({ tabs: get().tabs.map(x => x.path === t.path ? { ...x, baseVersion: version ?? contentVersion(raw) } : x) })
         get().setTabDeleted(t.path, false)
@@ -482,7 +491,7 @@ export const useEditorStore = create<EditorState>()(
     if (!conflict) return
     const resolved = await useSyncStore.getState().resolveKeepMine(path)
     if (!resolved) return
-    const raw = normalizeVersion(await invoke<string | null>('file_version', { path }).catch(() => null))
+    const raw = await readFileVersion(path)
     get().setContent(path, conflict.mine)
     set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine) } : t) })
   },

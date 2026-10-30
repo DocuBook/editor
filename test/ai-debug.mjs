@@ -250,8 +250,9 @@ await runSuite('ai-debug', {
   await sendHeldRequest(closingTab, 'close only this page request')
   await page.getByText('other', { exact: true }).first().click()
   await page.locator('[data-tab-path="other.md"]').waitFor()
-  await page.getByRole('button', { name: 'Keep my version' }).click()
-  await page.getByRole('alertdialog', { name: 'Resolve file conflict' }).waitFor({ state: 'detached' })
+  // Saving the page on the way out is not a conflict: nothing else wrote it.
+  await page.waitForTimeout(500)
+  ok('leaving a page mid-request raises no conflict', await page.getByRole('alertdialog', { name: 'Resolve file conflict' }).count() === 0)
   const neighbour = holdNextAsk()
   await sendHeldRequest(neighbour, 'keep the neighbouring page request')
   await page.locator('[data-tab-path="notes.md"]').click()
