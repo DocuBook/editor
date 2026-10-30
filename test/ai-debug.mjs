@@ -19,6 +19,10 @@ import { readFileSync } from 'node:fs'
 import { runSuite, mockAiSettings, mockAskAi, openNote, PORTS, sseFrames } from './lib.mjs'
 
 const ORIGINAL_MARKDOWN = '# _Notes_\n\nhello world'
+/* Caret to the end of the line. On macOS `End` scrolls instead of moving the
+   caret (CI runs there), so the edit landed mid-line; Cmd+Right is the macOS
+   line end. */
+const LINE_END = process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End'
 /* Both are produced by the transport mocks in `setup` and read by the body. */
 let askAiHits
 let aiState
@@ -131,7 +135,7 @@ await runSuite('ai-debug', {
   // lands. The autosave flush during review must write that edit (the request's
   // baseline), not the unaccepted result; Accept then saves the result.
   await page.getByText('hello world', { exact: true }).click()
-  await page.keyboard.press('End')
+  await page.keyboard.press(LINE_END)
   await page.keyboard.type(' edited')
   await page.keyboard.press('ControlOrMeta+a')
   await page.keyboard.press('Control+Alt+L')
