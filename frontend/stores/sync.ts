@@ -124,6 +124,9 @@ interface SyncState {
   discard: (path: string) => void
   retryFailure: (path: string) => void
   discardFailure: (path: string) => void
+  /** Replace the local side of the path's conflict with a newer edit of it,
+   *  keeping the record's identity (a dismissed dialog stays dismissed). */
+  updateConflictMine: (path: string, mine: string) => void
   /** True when the path has an unresolved conflict. */
   hasConflict: (path: string) => boolean
   /** Resolve a conflict by keeping the local edit and overwriting disk. */
@@ -386,6 +389,10 @@ export const useSyncStore = create<SyncState>()(
 
         discardFailure: (path) => set({
           failures: get().failures.filter(f => !(f.path === path && isSyncRecordInScope(f))),
+        }),
+
+        updateConflictMine: (path, mine) => set({
+          conflicts: get().conflicts.map(c => (c.path === path && isSyncRecordInScope(c) ? { ...c, mine } : c)),
         }),
 
         hasConflict: (path) => conflictPaths().has(path),

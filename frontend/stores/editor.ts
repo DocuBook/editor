@@ -526,6 +526,17 @@ export const useEditorStore = create<EditorState>()(
 
   /** Push the local edit over the disk version, then rebase the tab baseline. */
   applyConflictMine: async (path) => {
+    /** The conflict holds the edit as it was when the save was rejected, but
+     *  the tab stays editable while the dialog waits: anything typed since is
+     *  newer, and builds on it. "Mine" is the tab's latest edit, so keeping it
+     *  must not throw away the last few seconds of typing. */
+    if (get().activeTab === path) {
+      try { await get().flushEditor() } catch (error) { logger.error('editor_exit_failed', { error }) }
+    }
+    const tab = get().tabs.find(t => t.path === path)
+    if (tab?.dirty && tab.editedContent !== null && !tab.deleted) {
+      useSyncStore.getState().updateConflictMine(path, tabDiskContent(tab))
+    }
     const conflict = useSyncStore.getState().conflicts.find(c => c.path === path && isSyncRecordInScope(c))
     if (!conflict) return
     const resolved = await useSyncStore.getState().resolveKeepMine(path)
