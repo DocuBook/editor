@@ -28,7 +28,7 @@ git2 = { version = "0.21", features = ["https", "ssh", "vendored-libgit2", "vend
 # No TLS backend here: the consuming binary picks one (native-tls on desktop,
 # rustls on the musl server) and Cargo unifies the features within its graph.
 reqwest = { version = "0.13", default-features = false, features = ["stream", "json"] }
-getrandom = "0.2"
+getrandom = "0.4"
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", "time", "net", "io-util"] }
 eventsource-stream = "0.2.3"
 bytes = "1"
