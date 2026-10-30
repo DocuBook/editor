@@ -479,17 +479,24 @@ export const useEditorStore = create<EditorState>()(
     })
   },
 
-  /** Flush WYSIWYG then write every dirty tab to disk — used on app close. */
+  /** Flush WYSIWYG then write every dirty tab to disk — used on app close.
+   *  Every tab gets its attempt: one file that cannot be written (permissions,
+   *  a bad path) must not leave the others unsaved on every autosave and at
+   *  close. The failures are reported together once all tabs were tried. */
   persistAllDirty: async () => {
     await get().flushEditor()
+    const failed: string[] = []
+    let firstError: unknown
     for (const tab of get().tabs) {
       if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
         try { await saveTabToDisk(tab) } catch (error) {
           logger.error('dirty_file_save_failed', { error, fileName: tab.name })
-          throw new Error(`Could not save ${tab.name}`, { cause: error })
+          failed.push(tab.name)
+          firstError ??= error
         }
       }
     }
+    if (failed.length) throw new Error(`Could not save ${failed.join(', ')}`, { cause: firstError })
   },
 
   /** Take the disk version as the truth: reload the tab from what won on disk. */
