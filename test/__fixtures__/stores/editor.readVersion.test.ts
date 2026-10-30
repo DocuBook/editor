@@ -13,17 +13,25 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 /** A backend whose file can change between calls. `afterRead` runs once,
  *  right after the first `read_file` answered: another writer landing in the
- *  gap before `file_version`. `lossy` makes reads return text whose hash is not
- *  the bytes' version, as a note with invalid UTF-8 does. */
-function backend(initial: string, opts: { afterRead?: () => string; lossy?: boolean } = {}) {
-  const state = { disk: initial, reads: 0 }
+ *  gap before `file_version`. `keepsChanging` lands another write after every
+ *  `read_file` and `file_version`, so no read ever sees the bytes a version
+ *  belongs to. `lossy` makes reads return text whose hash is not the bytes'
+ *  version, as a note with invalid UTF-8 does. */
+function backend(initial: string, opts: { afterRead?: () => string; keepsChanging?: boolean; lossy?: boolean } = {}) {
+  const state = { disk: initial, reads: 0, writes: 0 }
+  const otherWrite = () => { if (opts.keepsChanging) state.disk = `v${++state.writes}\n` }
   vi.mocked(invoke).mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
     if (cmd === 'read_file') {
       const text = opts.lossy ? state.disk.replace('é', '�') : state.disk
       if (state.reads++ === 0 && opts.afterRead) state.disk = opts.afterRead()
+      otherWrite()
       return text
     }
-    if (cmd === 'file_version') return contentVersion(state.disk)
+    if (cmd === 'file_version') {
+      const version = contentVersion(state.disk)
+      otherWrite()
+      return version
+    }
     if (cmd === 'write_file_checked') {
       if (args?.baseVersion !== contentVersion(state.disk)) {
         return JSON.stringify({ status: 'conflict', disk: state.disk, version: contentVersion(state.disk), reason: 'version_mismatch' })
@@ -70,6 +78,29 @@ describe('a note read while another writer saves it', () => {
     await editAndSave(`${tab().editedContent} edited`)
     const kept = server.disk.includes('theirs') || useSyncStore.getState().conflicts.some(c => c.theirs.includes('theirs'))
     expect(kept).toBe(true)
+  })
+
+  it('reloads a tab after a branch switch with the version of the text it shows', async () => {
+    const server = backend('old\n', { afterRead: () => 'theirs\n' })
+    useEditorStore.setState({ tabs: [{ path: 'a.md', name: 'a.md', content: 'stale\n', frontmatter: '', editedContent: 'stale', dirty: false, deleted: false, baseVersion: contentVersion('stale\n') }], activeTab: 'a.md' })
+    await useEditorStore.getState().reloadAllTabs()
+    expect(tab().content).toBe('theirs\n')
+    expect(tab().baseVersion).toBe(contentVersion('theirs\n'))
+
+    await editAndSave('theirs and mine')
+    expect(server.disk).toBe('theirs and mine\n')
+  })
+
+  it('gives a note that keeps changing the version of the text it shows', async () => {
+    // Every re-read differs, so no backend version can be trusted for the text.
+    const server = backend('v0\n', { keepsChanging: true })
+    await useEditorStore.getState().openFile('a.md', 'a.md')
+    expect(tab().baseVersion).toBe(contentVersion(tab().content ?? ''))
+
+    // The disk moved on after the last read: saving must conflict, not overwrite.
+    await editAndSave('mine')
+    expect(server.disk).not.toContain('mine')
+    expect(useSyncStore.getState().conflicts.some(c => c.path === 'a.md')).toBe(true)
   })
 
   it('keeps the backend version for a note whose text cannot hash to it', async () => {
