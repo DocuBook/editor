@@ -131,9 +131,13 @@ jobs:
       # core/Cargo.toml. Any of these that the hook does and this workflow did
       # not is a drift only the developer's machine can catch — which is how
       # PR 276 needed a manual fixup.
+      # Node 22 ships npm 10, which drops the lockfile's `libc` fields that
+      # npm 11 (dependabot, local dev) writes.
       - name: Sync package-lock.json
         if: steps.pr.outputs.branch != ''
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+        run: |
+          npm install -g npm@11.21.1
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
       - name: Sync Cargo.lock root versions
         if: steps.pr.outputs.branch != ''
