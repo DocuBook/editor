@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="DocuBook Editor" src="./opengraph.png" />
+  <img alt="DocuBook Editor demo: Markdown shortcuts, keyboard shortcuts, slash menu, formatting toolbar and AI writing" src="./demo.gif" />
 </p>
 
 <p align="center">
@@ -9,7 +9,7 @@
   <a href="#"><img alt="badge" src="https://shieldcn.dev/badge/Battery Include.svg?variant=branded&amp;theme=green&amp;logo=lu%3ABatteryCharging" /></a>
 </p>
 
-> Pocket notes sync across all devices. Built-in real-time collaboration. WYSIWYG rich editing `/` slash command for quick block insertion.
+> Write like a document, keep plain Markdown. `/` block editing, Git sync and an AI writing agent, on macOS or your own server.
 
 ## Install
 
