@@ -5,8 +5,8 @@ Thanks for your interest! This guide covers setting up a dev environment, the pr
 ## Prerequisites
 
 - **macOS** — desktop development only. CI uses macos-15 for lint/test/build/E2E (macos-14 runners retire on 2026-11-02; the pinned Playwright WebKit build also needs macOS 15+). The app itself targets macOS 12.3+ (WKWebView Safari 15.4) — the build job pins and verifies that deployment target, and the compat lints hold the frontend to `.browserslistrc`
-- **Node.js** 22.22.1 or newer — CI pins `22.23.4` (the newest dependency floor is `lint-staged` 17 at `>=22.22.1`; ESLint 10, pulled in by `eslint-plugin-compat`, needs `^22.13.0`); `package.json` declares no `engines` range, so this is a CI contract, not an enforced constraint. The Dockerfile's `node:22-alpine` floats on the same major
-- **npm**
+- **Node.js** `22.23.4` — pinned in `.nvmrc` / `.node-version` / `.tool-versions` and in CI; `package.json` `engines` allows `>=22.23.4 <23` (the newest dependency floor is `lint-staged` 17 at `>=22.22.1`; ESLint 10, pulled in by `eslint-plugin-compat`, needs `^22.13.0`). `.npmrc` sets no `engine-strict`, so a mismatch only warns. The Dockerfile's `node:22-alpine` floats on the same major
+- **npm** 11 or newer — Node 22 bundles npm 10, so run `npm install -g npm@11` after installing Node. npm 10 strips the `libc` fields npm 11 records in `package-lock.json`, and the pre-push hook refuses to sync the lockfile with npm older than 11
 - **Rust** toolchain — pinned via `rust-toolchain.toml` (rustup installs it automatically; includes `clippy` and `rustfmt`)
 - **Tauri v2 system dependencies** — see https://v2.tauri.app/start/prerequisites/
 - **Docker** — only needed to build/test the web image (`docker build`); local server development needs no Docker
