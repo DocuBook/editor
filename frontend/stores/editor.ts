@@ -6,7 +6,7 @@ import { undoDepth, redoDepth } from '@tiptap/pm/history'
 import { isBinaryPath } from '../utils/fileKind'
 import { logger } from '../utils/logger'
 import { mapWithConcurrency } from '../utils/concurrency'
-import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope } from './sync'
+import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope, parseWriteOutcome } from './sync'
 import { clearEditorCache, closeCachedEditor } from '../utils/editorCache'
 import { splitFrontmatter } from '../utils/frontmatter'
 
@@ -238,9 +238,7 @@ export const useEditorStore = create<EditorState>()(
       throw error
     }
 
-    const outcome = JSON.parse(raw) as
-      | { status: 'written'; version: string }
-      | { status: 'conflict'; disk: string; version: string }
+    const outcome = parseWriteOutcome(raw, content)
 
     if (outcome.status === 'conflict') {
       // Preserve BOTH sides: the user's edit lives in the conflict record and the

@@ -89,7 +89,7 @@ export interface SyncFailure {
 }
 
 /** Result shape of the `write_file_checked` backend command. */
-type WriteOutcome =
+export type WriteOutcome =
   | { status: 'written'; version: string }
   | { status: 'conflict'; disk: string; version: string; reason?: 'version_mismatch' | 'target_exists' }
 
@@ -164,6 +164,22 @@ export function contentVersion(content: string): string {
   return hash.toString(16).padStart(16, '0')
 }
 
+
+/** Parse a `write_file_checked` reply for a write of `content`.
+ *
+ *  A rejection whose disk side already holds exactly `content` is not a
+ *  conflict: the same bytes landed earlier. That happens when a response is
+ *  lost but the request was not — a keepalive save that outlived its closing
+ *  page while the page also queued it as unreachable, or a retry after a
+ *  timeout — and the replay then carries the old baseline. Surfacing it asked
+ *  the user to choose between two identical texts; it is read as written. */
+export function parseWriteOutcome(raw: string, content: string): WriteOutcome {
+  const outcome = JSON.parse(raw) as WriteOutcome
+  if (outcome.status === 'conflict' && outcome.version === contentVersion(content)) {
+    return { status: 'written', version: outcome.version }
+  }
+  return outcome
+}
 
 const RETRYABLE = /cannot reach server|not responding|no vault|timed out|network|failed to fetch|load failed/i
 
@@ -274,7 +290,7 @@ export const useSyncStore = create<SyncState>()(
             content: item.content,
             baseVersion: item.baseVersion,
           })
-          outcome = JSON.parse(raw) as WriteOutcome
+          outcome = parseWriteOutcome(raw, item.content)
         } catch (error) {
           if (abandoned()) return true
           if (isRetryableError(error)) {
@@ -416,7 +432,7 @@ export const useSyncStore = create<SyncState>()(
             }
             throw error
           }
-          const outcome = JSON.parse(raw) as WriteOutcome
+          const outcome = parseWriteOutcome(raw, conflict.mine)
           if (outcome.status === 'written') {
             set({ conflicts: get().conflicts.filter(c => c.id !== conflict.id) })
             return true
