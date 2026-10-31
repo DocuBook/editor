@@ -9,7 +9,7 @@
   <a href="#"><img alt="badge" src="https://shieldcn.dev/badge/Battery Include.svg?variant=branded&amp;theme=green&amp;logo=lu%3ABatteryCharging" /></a>
 </p>
 
-> Pocket notes sync across all devices. Built-in real-time collaboration. WYSIWYG rich editing `/` slash command for quick block insertion.
+> Write like a document, keep plain Markdown. `/` block editing, Git sync and an AI writing agent, on macOS or your own server.
 
 ## Install
 
