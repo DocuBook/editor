@@ -178,6 +178,8 @@ html[data-toolbar-popup-open] .bn-editor {
 .bn-mantine .bn-toolbar.formatting-toolbar-scroll {
     max-width: calc(100vw - 32px);
     scrollbar-width: none;
+    /* Keeps a focused button from scrolling in under the pinned control. */
+    scroll-padding-inline-end: 40px;
 }
 .bn-mantine .bn-toolbar.formatting-toolbar-scroll::-webkit-scrollbar {
     display: none;
