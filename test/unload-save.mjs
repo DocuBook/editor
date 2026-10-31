@@ -8,12 +8,9 @@
  */
 import { readFileSync } from 'node:fs'
 
-import { runSuite, openNote, PORTS } from './lib.mjs'
+import { runSuite, openNote, caretToEnd, PORTS } from './lib.mjs'
 
 const ORIGINAL_MARKDOWN = '# Notes\n\nhello world\n'
-/* Caret to the end of the line. On macOS `End` scrolls instead of moving the
-   caret (CI runs there); Cmd+Right is the macOS line end. */
-const LINE_END = process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End'
 
 await runSuite('unload-save', {
   port: PORTS.unloadSave,
@@ -38,8 +35,7 @@ await runSuite('unload-save', {
   await openNote(page)
 
   // Type and reload at once: well inside the autosave debounce.
-  await page.getByText('hello world', { exact: true }).click()
-  await page.keyboard.press(LINE_END)
+  await caretToEnd(page, 'hello world')
   await page.keyboard.type(' typed before reload')
   await page.reload({ waitUntil: 'domcontentloaded' })
   for (let i = 0; i < 40 && !disk().includes('typed before reload'); i++) await page.waitForTimeout(100)
