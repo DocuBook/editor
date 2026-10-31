@@ -1,5 +1,5 @@
 <p align="center">
-  <img alt="DocuBook Editor" src="./opengraph.png" />
+  <img alt="DocuBook Editor demo: Markdown shortcuts, keyboard shortcuts, slash menu, formatting toolbar and AI writing" src="./demo.gif" />
 </p>
 
 <p align="center">
