@@ -70,7 +70,7 @@
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.0.3",
+    "@vitejs/plugin-react": "^6.1.2",
     "doiuse": "6.0.6",
     "esbuild": "^0.28.2",
     "eslint-plugin-compat": "7.0.2",
