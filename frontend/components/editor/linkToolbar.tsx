@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, ComponentsContext, useUIMode, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, TextAlignButton, NestBlockButton, UnnestBlockButton, ScreenReaderOnlySubmit, usePortalElement, type Components, type LinkToolbarProps } from '@blocknote/react'
+import { useBlockNoteEditor, useComponentsContext, useExtension, useEditorState, ComponentsContext, useUIMode, DeleteLinkButton, FormattingToolbar, getFormattingToolbarItems, blockTypeSelectItems, ScreenReaderOnlySubmit, usePortalElement, type Components, type LinkToolbarProps } from '@blocknote/react'
 import { LinkToolbarExtension, FormattingToolbarExtension, ShowSelectionExtension } from '@blocknote/core/extensions'
 import { getDefaultAIMenuItems, getAIDictionary } from '../../utils/aiMenu'
 import { Link2, Type, ExternalLink, Sparkles } from 'lucide-react'
@@ -11,7 +11,8 @@ import { openExternalLink } from '../../utils/externalLink'
 import { isVaultLinkUrl, resolveVaultLinkTarget } from '../../utils/wikilink'
 import { invoke } from '../../lib/ipc'
 import { toast } from 'sonner'
-import { FormattingToolbarPopover } from './FormattingToolbarPopover'
+import { ToolbarScrollButton } from './ToolbarScrollButton'
+import { DeleteBlockButton } from './DeleteBlockButton'
 import { InsertBlockButton } from './InsertBlockButton'
 import { MoveBlockDownButton, MoveBlockUpButton } from './MoveBlockButtons'
 
@@ -243,13 +244,11 @@ function AIToolbarButtonSafe() {
   )
 }
 
-/* Keys of the built-in formatting-toolbar items grouped into the compact panel.
-   `getFormattingToolbarItems()` returns rendered ELEMENTS (e.g.
-   `<BasicTextStyleButton basicTextStyle="underline" key="underlineStyleButton" />`),
-   so `key` is the only handle on them — their props are already resolved, there is
-   no onClick to re-dispatch. The panel therefore re-instantiates the public
-   controls instead of reusing these elements. */
-const GROUPED_KEYS = [
+/* Keys of the built-in formatting-toolbar items that the compact row moves to
+   its scrolled-off tail. `getFormattingToolbarItems()` returns rendered ELEMENTS
+   (e.g. `<TextAlignButton textAlignment="left" key="textAlignLeftButton" />`), so
+   `key` is the only handle on them. */
+const TAIL_KEYS = [
   'textAlignLeftButton',
   'textAlignCenterButton',
   'textAlignRightButton',
@@ -336,9 +335,16 @@ function ToolbarComponents({ children }: { children: ReactNode }) {
  *  `blockActions` carries the side menu's block actions for shells that have no
  *  side menu: the cursor-anchored `+`, and move up/down. WysiwygEditor sets it
  *  wherever `sideMenu` is off — both keyed to the same 640px `isDesktop` query,
- *  so no shell is left without an insert or reorder affordance. */
+ *  so no shell is left without an insert or reorder affordance.
+ *
+ *  The same component renders twice over: as the bubble menu, and — while a
+ *  touch keyboard is up — as BlockNote's IME strip pinned above it (`uiMode`
+ *  "mobile"). Both scroll horizontally when they do not fit; the bubble adds a
+ *  chevron that pages it, the strip a trash button that deletes the block. */
 export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: boolean; blockActions?: boolean } = {}) => {
   const editor = useBlockNoteEditor<any, any, any>()
+  const Components = useComponentsContext()!
+  const ime = useUIMode() === 'mobile'
   const blockTypes = blockTypeSelectItems(editor)
     .filter(item => item.type !== 'heading' || (Number(item.props?.level) <= 5 && item.props?.isToggleable !== true))
     .map(item => item.type === 'heading'
@@ -357,12 +363,14 @@ export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: b
      from re-appearing over the document mid-run, before the AI menu closes. */
   if (!editor.isEditable) return null
 
-  // Both branches keep the upstream array order — only the split point moves.
-  if (!compact) {
+  const blockButtons = blockActions && (<><InsertBlockButton /><MoveBlockUpButton /><MoveBlockDownButton /></>)
+
+  // Both orders keep the upstream array order — only the split point moves.
+  if (!compact && !ime) {
     return (
       <FormattingToolbar>
         <ToolbarComponents>
-          {blockActions && (<><InsertBlockButton /><MoveBlockUpButton /><MoveBlockDownButton /></>)}
+          {blockButtons}
           {items}
           <CreateLinkButtonPreserveUrl />
           <AIToolbarButtonSafe />
@@ -371,33 +379,33 @@ export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: b
     )
   }
 
-  /* Compact layout: keep block type, the full inline-mark set (bold, italic,
-     code, highlight, colour) and the app's own Link/AI actions on the row; move
-     what otherwise gets clipped — underline, strikethrough, alignment, indent —
-     into the overflow panel. Splitting on element KEYS (not on index) keeps the
-     row correct if upstream reorders or adds items. The row takes no extra
-     buttons at all — the side menu's block actions (insert, move up/down) stay
-     in that panel, because a phone-width row cannot hold them without pushing
-     its tail past the viewport edge. */
-  const onRow = items.filter(el => !GROUPED_KEYS.includes((el as any).key))
-
-  return (
-    <FormattingToolbar>
-      <ToolbarComponents>
-        {onRow}
+  /* Compact order: block type, the full inline-mark set (bold, italic, code,
+     highlight, colour) and the app's own Link/AI actions lead the row, where
+     they are in view without scrolling; the block actions follow, then what a
+     phone reaches for least — alignment and indent — at the scrolled-off tail.
+     Splitting on element KEYS (not on index) keeps the row correct if upstream
+     reorders or adds items. A wider IME strip (a tablet) keeps the desktop
+     order: the whole row is in view there. */
+  const isTail = (el: unknown) => TAIL_KEYS.includes((el as any).key)
+  const row = compact
+    ? (<>
+        {items.filter(el => !isTail(el))}
         <CreateLinkButtonPreserveUrl />
         <AIToolbarButtonSafe />
-        <FormattingToolbarPopover label="More formatting">
-          <TextAlignButton textAlignment="left" />
-          <TextAlignButton textAlignment="center" />
-          <TextAlignButton textAlignment="right" />
-          {blockActions && <InsertBlockButton />}
-          {blockActions && (<><MoveBlockUpButton /><MoveBlockDownButton /></>)}
-          <NestBlockButton />
-          <UnnestBlockButton />
-        </FormattingToolbarPopover>
+        {blockButtons}
+        {items.filter(isTail)}
+      </>)
+    : (<>{blockButtons}{items}<CreateLinkButtonPreserveUrl /><AIToolbarButtonSafe /></>)
+
+  /* Root directly rather than <FormattingToolbar>, which fixes its className:
+     `formatting-toolbar-scroll` caps the row at the viewport (index.css). */
+  return (
+    <Components.FormattingToolbar.Root className="bn-toolbar bn-formatting-toolbar formatting-toolbar-scroll">
+      <ToolbarComponents>
+        {row}
+        {ime ? <DeleteBlockButton /> : <ToolbarScrollButton />}
       </ToolbarComponents>
-    </FormattingToolbar>
+    </Components.FormattingToolbar.Root>
   )
 }
 

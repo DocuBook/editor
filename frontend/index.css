@@ -170,42 +170,32 @@ html[data-toolbar-popup-open] .bn-editor {
     caret-color: transparent;
 }
 
-/* The overflow panel's buttons are portalled through its popover
-   (FormattingToolbarPopover → Generic.Popover.Content), so they land OUTSIDE
-   `.bn-toolbar` — and BlockNote scopes every toolbar-button rule to it
-   (blocknoteStyles.css). Without this re-scope they fall back to Mantine's
-   filled default: every button reads as pressed, `data-selected` paints
-   nothing (the current alignment is indistinguishable) and `data-disabled`
-   keeps Mantine's palette instead of the editor's. Same tokens as the toolbar
-   rules, scoped to this panel so the other portalled popovers are untouched. */
-.formatting-toolbar-more-panel .mantine-Button-root,
-.formatting-toolbar-more-panel .mantine-ActionIcon-root {
-    background-color: var(--bn-colors-menu-background);
-    border: none;
-    color: var(--bn-colors-menu-text);
+/* The compact bubble menu and the IME strip scroll horizontally instead of
+   overflowing (linkToolbar.tsx). Upstream's `.bn-toolbar` already scrolls on x,
+   but `width: fit-content` with no cap lets the bubble grow past the viewport,
+   where its tail is out of reach: the cap keeps it inside the 16px gutters. No
+   scrollbar — a swipe scrolls it, and the pinned chevron is the visible cue. */
+.bn-mantine .bn-toolbar.formatting-toolbar-scroll {
+    max-width: calc(100vw - 32px);
+    scrollbar-width: none;
+    /* Keeps a focused button from scrolling in under the pinned control. */
+    scroll-padding-inline-end: 40px;
+}
+.bn-mantine .bn-toolbar.formatting-toolbar-scroll::-webkit-scrollbar {
+    display: none;
 }
 
-@media (hover: hover) {
-    .formatting-toolbar-more-panel .mantine-Button-root:hover,
-    .formatting-toolbar-more-panel .mantine-ActionIcon-root:hover {
-        background-color: var(--bn-colors-hovered-background);
-        border: none;
-        color: var(--bn-colors-hovered-text);
-    }
+/* The row's trailing control — the chevron on the bubble, the trash on the IME
+   strip — stays put while the row scrolls under it. The shadow is the menu's
+   own colour, so the buttons fade into the control instead of being cut. */
+.bn-mantine .bn-toolbar .formatting-toolbar-pinned {
+    position: sticky;
+    right: 0;
+    z-index: 1;
+    box-shadow: -8px 0 8px -2px var(--bn-colors-menu-background);
 }
-
-.formatting-toolbar-more-panel .mantine-Button-root[data-selected],
-.formatting-toolbar-more-panel .mantine-ActionIcon-root[data-selected] {
-    background-color: var(--bn-colors-selected-background);
-    border: none;
-    color: var(--bn-colors-selected-text);
-}
-
-.formatting-toolbar-more-panel .mantine-Button-root[data-disabled],
-.formatting-toolbar-more-panel .mantine-ActionIcon-root[data-disabled] {
-    background-color: var(--bn-colors-disabled-background);
-    border: none;
-    color: var(--bn-colors-disabled-text);
+.bn-mantine .bn-toolbar .formatting-toolbar-pinned.is-hidden {
+    display: none;
 }
 
 #root .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {
