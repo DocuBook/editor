@@ -33,5 +33,5 @@ tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "sync", 
 eventsource-stream = "0.2.3"
 bytes = "1"
 futures-util = { version = "0.3", default-features = false }
-dom_smoothie = "0.18"
+dom_smoothie = "0.19"
 dom_query = "0.28"
