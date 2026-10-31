@@ -47,6 +47,7 @@ vi.mock('../../../frontend/components/Login', () => ({ default: () => null }))
 vi.mock('../../../frontend/stores/gitStatus', () => ({ useGitStatusRefresh: () => {} }))
 vi.mock('../../../frontend/stores/editor', () => ({
   useEditorStore: { getState: () => ({ persistAllDirty: vi.fn(async () => {}) }) },
+  installUnloadSave: () => () => {},
 }))
 vi.mock('../../../frontend/stores/vault', () => ({
   useVaultStore: Object.assign(

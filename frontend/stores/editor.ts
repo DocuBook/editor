@@ -6,7 +6,7 @@ import { undoDepth, redoDepth } from '@tiptap/pm/history'
 import { isBinaryPath } from '../utils/fileKind'
 import { logger } from '../utils/logger'
 import { mapWithConcurrency } from '../utils/concurrency'
-import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope } from './sync'
+import { useSyncStore, contentVersion, isRetryableError, isSyncRecordInScope, parseWriteOutcome } from './sync'
 import { clearEditorCache, closeCachedEditor } from '../utils/editorCache'
 import { splitFrontmatter } from '../utils/frontmatter'
 
@@ -238,9 +238,7 @@ export const useEditorStore = create<EditorState>()(
       throw error
     }
 
-    const outcome = JSON.parse(raw) as
-      | { status: 'written'; version: string }
-      | { status: 'conflict'; disk: string; version: string }
+    const outcome = parseWriteOutcome(raw, content)
 
     if (outcome.status === 'conflict') {
       // Preserve BOTH sides: the user's edit lives in the conflict record and the
@@ -268,6 +266,7 @@ export const useEditorStore = create<EditorState>()(
     }, AUTOSAVE_DELAY_MS))
   }
   let flushPromise: Promise<void> | null = null
+  let persistChain: Promise<void> = Promise.resolve()
   return {
   tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null,
   setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
@@ -494,23 +493,31 @@ export const useEditorStore = create<EditorState>()(
   },
 
   /** Flush WYSIWYG then write every dirty tab to disk — used on app close.
+   *  Runs are serialized: a tab stays dirty until its write settles, so an
+   *  overlapping run (autosave, page hide, unload) would resend the same edit
+   *  against the old `baseVersion` and come back as a false conflict. A run
+   *  that waits sees the settled tabs and writes only what is still dirty.
    *  Every tab gets its attempt: one file that cannot be written (permissions,
    *  a bad path) must not leave the others unsaved on every autosave and at
    *  close. The failures are reported together once all tabs were tried. */
-  persistAllDirty: async () => {
-    await get().flushEditor()
-    const failed: string[] = []
-    let firstError: unknown
-    for (const tab of get().tabs) {
-      if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
-        try { await saveTabToDisk(tab) } catch (error) {
-          logger.error('dirty_file_save_failed', { error, fileName: tab.name })
-          failed.push(tab.name)
-          firstError ??= error
+  persistAllDirty: () => {
+    const run = persistChain.then(async () => {
+      await get().flushEditor()
+      const failed: string[] = []
+      let firstError: unknown
+      for (const tab of get().tabs) {
+        if (tab.dirty && tab.editedContent !== null && !tab.deleted) {
+          try { await saveTabToDisk(tab) } catch (error) {
+            logger.error('dirty_file_save_failed', { error, fileName: tab.name })
+            failed.push(tab.name)
+            firstError ??= error
+          }
         }
       }
-    }
-    if (failed.length) throw new Error(`Could not save ${failed.join(', ')}`, { cause: firstError })
+      if (failed.length) throw new Error(`Could not save ${failed.join(', ')}`, { cause: firstError })
+    })
+    persistChain = run.catch(() => {})
+    return run
   },
 
   /** Take the disk version as the truth: reload the tab from what won on disk. */
@@ -583,3 +590,36 @@ export const useEditorStore = create<EditorState>()(
     },
   ),
 )
+
+/** Web only: a browser tab gets no `app:before-close` handshake, so edits still
+ *  waiting for the autosave debounce (WYSIWYG edits live only in the editor
+ *  until a flush) were lost when the tab was closed or reloaded.
+ *
+ *  The save starts when the page is hidden — the last moment a phone browser
+ *  reliably runs script before it may discard the page — and again on unload,
+ *  whose writes go out as keepalive requests (see `KEEPALIVE_COMMANDS` in
+ *  lib/ipc). While a dirty tab remains, unload also asks the browser to
+ *  confirm leaving, which gives that save time to land. */
+export function installUnloadSave(): () => void {
+  const hasUnsaved = () => useEditorStore.getState().tabs.some(t => t.dirty && t.editedContent !== null && !t.deleted)
+  const save = () => {
+    if (!hasUnsaved()) return
+    useEditorStore.getState().persistAllDirty().catch(error => logger.error('unload_save_failed', { error }))
+  }
+  const onVisibility = () => { if (document.visibilityState === 'hidden') save() }
+  const onBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (!hasUnsaved()) return
+    save()
+    event.preventDefault()
+    // Older Safari and Chrome show the prompt only when returnValue is set.
+    event.returnValue = ''
+  }
+  document.addEventListener('visibilitychange', onVisibility)
+  window.addEventListener('pagehide', save)
+  window.addEventListener('beforeunload', onBeforeUnload)
+  return () => {
+    document.removeEventListener('visibilitychange', onVisibility)
+    window.removeEventListener('pagehide', save)
+    window.removeEventListener('beforeunload', onBeforeUnload)
+  }
+}

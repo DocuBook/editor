@@ -24,6 +24,7 @@ export const PORTS = {
   webSmoke: 4273,
   aiDebug: 4275,
   aiMention: 4290,
+  unloadSave: 4292,
 }
 
 const ARTIFACTS = 'test/artifacts'
@@ -87,6 +88,27 @@ export async function openNote(page, text = 'hello world') {
   await entry.waitFor({ timeout: 15000 })
   await entry.click()
   await page.getByText(text, { exact: true }).waitFor({ timeout: 15000 })
+}
+
+/** Click into the block showing exactly `text` and put the caret at its end.
+ *
+ *  No key does this on every CI platform: on macOS `End` scrolls instead of
+ *  moving the caret in WebKit, and `Meta+ArrowRight` leaves it in place in
+ *  Chromium. The caret is set through the DOM selection instead, which
+ *  ProseMirror adopts on `selectionchange`; one frame lets it do so before the
+ *  next key arrives. */
+export async function caretToEnd(page, text) {
+  const block = page.getByText(text, { exact: true })
+  await block.click()
+  await block.evaluate(element => {
+    const range = document.createRange()
+    range.selectNodeContents(element)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection.removeAllRanges()
+    selection.addRange(range)
+  })
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 }
 
 /** Free the port a previous (aborted) run may still hold. */

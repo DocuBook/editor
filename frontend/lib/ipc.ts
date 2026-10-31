@@ -173,16 +173,28 @@ function askAiKey(requestId: string): string {
   return requestId || `anon-${++anonymousAskAi}`
 }
 
+/** Commands whose request must outlive the page: a note saved while the tab is
+ *  closing or hidden (see `installUnloadSave`). */
+const KEEPALIVE_COMMANDS = new Set(['write_file_checked'])
+/** Browsers cap the bodies of all in-flight keepalive requests at 64 KiB (in
+ *  bytes, together) and reject a request over the cap outright. A larger note
+ *  goes out as a normal request, which is not guaranteed to finish once the
+ *  page is gone. */
+const KEEPALIVE_MAX_BODY = 60_000
+
 async function post(cmd: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const payload = JSON.stringify(args)
+  const keepalive = KEEPALIVE_COMMANDS.has(cmd) && new TextEncoder().encode(payload).length <= KEEPALIVE_MAX_BODY
   let res: Response
   try {
     res = await fetch(`/api/${cmd}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
-      body: JSON.stringify(args),
+      body: payload,
+      keepalive,
       signal: signal ?? controller.signal,
     })
   } catch {
