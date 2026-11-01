@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore, type MouseEvent a
 import { SuggestionMenuController, SideMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
+import '@blocknote/math-block/style.css'
 
 import { combineByGroup, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
 import { SourceBlockWithPreviewExtension } from '@blocknote/core/extensions'
@@ -574,7 +575,8 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     <LinkToolbarController linkToolbar={WikiLinkToolbar} />
     <SuggestionMenuController triggerCharacter="/"
       getItems={async (query) => {
-        const defaultItems = getDefaultReactSlashMenuItems(editor)
+        // Emoji stays on the `:` picker only; the slash menu's Others entry is dropped.
+        const defaultItems = getDefaultReactSlashMenuItems(editor).filter(item => item.title !== editor.dictionary.slash_menu.emoji.title)
         const mathItems = getMathSlashMenuItems(editor)
         const diagramItems = getDiagramSlashMenuItems(editor).map(item => ({
           ...item,

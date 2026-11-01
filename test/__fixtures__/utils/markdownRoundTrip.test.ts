@@ -27,6 +27,7 @@ describe('markdown round trip keeps code intact', () => {
     ['LaTeX listing', '```latex\n\\[ x^2 \\]\n```'],
     ['shell in inline code', 'Run `docker run -v $(pwd):/app $(IMAGE)` now'],
     ['regex in inline code', 'Match `/\\(foo\\)/` literally'],
+    ['private-use glyph in a fence', '```sh\nprompt \uE000 $\n```'],
   ])('%s', (_name, markdown) => {
     expect(roundTrip(markdown)).toBe(markdown)
   })
@@ -53,6 +54,7 @@ describe('markdown round trip keeps typed text literal', () => {
     '$x$ math', 'cost $5 and $x$ here', 'esc \\* star', 'esc \\( x \\)',
     '[[Wiki Note]]', 'Text[^1]', 'Paid $5 and $10', '\\$a\\$', 'a \\$b\\$ c', 'snake_case_name', '2 * 3 * 4',
     'line\n# second', 'line\n- second', 'line\n---', 'line\n> q',
+    'press <kbd>Ctrl</kbd>', 'typed <br> tag', 'icon \uE000 here',
   ])('%j', (text) => {
     const [block, ...rest] = reload(text)
     expect(rest).toEqual([])
