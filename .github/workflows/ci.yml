@@ -52,7 +52,7 @@ jobs:
         run: node test/check-changelog-heading.mjs
       - name: Release tag guard (release detection does not depend on github.ref)
         run: node test/check-release-tag.mjs
-      - name: Release notes guard (body is the tag's changelog, no icons, contributors)
+      - name: Release notes guard (body is the tag's changelog, no icons, bullets credit authors)
         run: node test/check-release-notes.mjs
       - name: Frontend tests
         run: npm test
@@ -502,20 +502,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.releasetag.outputs.tag }}"
-          # Contributors: the authors of the commits since the previous release
-          # (a squash merge is authored by the PR's author). Best effort: no
-          # previous release or a failed lookup leaves the section out rather
-          # than blocking the publish.
+          # Authors of the commits since the previous release, "<sha> <login>"
+          # (a squash merge is authored by the PR's author). Each changelog
+          # bullet gets "by @login", which GitHub renders as the release's
+          # contributor avatars. Best effort: no previous release or a failed
+          # lookup leaves the bullets unattributed rather than blocking.
           PREV=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=30" \
             --jq "[.[] | select(.draft | not) | .tag_name | select(. != \"$TAG\")][0] // empty" 2>/dev/null || true)
           : > /tmp/contributors.txt
           if [ -n "$PREV" ]; then
             gh api "repos/$GITHUB_REPOSITORY/compare/$PREV...$TAG" --paginate \
-              --jq '.commits[] | select(.author.type? != "Bot") | .author.login // empty' \
+              --jq '.commits[] | select(.author.login? and .author.type != "Bot") | "\(.sha) \(.author.login)"' \
               > /tmp/contributors.txt 2>/dev/null || : > /tmp/contributors.txt
           fi
-          echo "contributors since ${PREV:-none}: $(tr '\n' ' ' < /tmp/contributors.txt)"
-          # The tag's changelog section, heading icons removed, plus Contributors.
+          echo "authored commits since ${PREV:-none}: $(wc -l < /tmp/contributors.txt)"
+          # The tag's changelog section, heading icons removed, bullets attributed.
           node .github/scripts/release-notes.mjs "$TAG" CHANGELOG.md /tmp/contributors.txt > /tmp/release-notes.md
           # Artifacts preserve their full relative path (upload-artifact v4), so
           # locate the DMGs recursively instead of assuming a flat layout. The
