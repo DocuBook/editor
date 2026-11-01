@@ -27,8 +27,9 @@ const PROSE_BLOCKS = new Set(['paragraph', 'heading', 'bulletListItem', 'numbere
 const SINGLE_LINE_BLOCKS = new Set(['heading', 'bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem'])
 
 /** Stands in for that `<br>` in the escaped text: BlockNote's exporter escapes
- *  a `<br>` text node to `\<br>`, so the caller swaps this for `<br>` after export. */
-export const HARD_BREAK = '\uE000'
+ *  a `<br>` text node to `\<br>`, so the caller swaps this for `<br>` after export.
+ *  A noncharacter, so no pasted text holds it (icon fonts use the private-use area). */
+export const HARD_BREAK = '\uFDD0'
 
 /** Spans copied through verbatim: wikilinks, footnote refs, bare URLs. */
 const VERBATIM = /\[\[[^\]\n]+\]\]|\[\^[^\]\s]+\]|(?:https?:\/\/|www\.)[^\s<]+/g
