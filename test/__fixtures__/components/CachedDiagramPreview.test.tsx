@@ -23,6 +23,13 @@ vi.mock('@blocknote/core', () => ({
 }))
 
 vi.mock('react-icons/si', () => ({ SiMermaid: () => null }))
+vi.mock('@mantine/core', () => ({
+  // Forwards the rest of its props to the `div` like the real one, so the
+  // accessible role and label are observable.
+  Skeleton: ({ height, radius: _radius, ...rest }: { height: number; radius?: string }) => (
+    <div data-testid="skeleton" style={{ height }} {...rest} />
+  ),
+}))
 
 vi.mock('@blocknote/react', () => ({
   // Renders its label like the real placeholder, so the error path is observable
@@ -183,6 +190,43 @@ describe('CachedDiagramPreviewWithPopup', () => {
     expect(container.innerHTML).not.toContain(`id="${renderId}"`)
     expect(peekDiagramSVG('graph TD; A-->B')?.renderId).toBe(renderId)
     expect(peekDiagramSVG('graph TD; A-->B')?.svg).toContain(`id="${renderId}"`)
+  })
+
+  it('holds a skeleton while the first render is pending, then swaps in the diagram', async () => {
+    let resolveRender!: (value: { svg: string }) => void
+    mermaid.render.mockReturnValueOnce(new Promise((resolve) => { resolveRender = resolve }))
+
+    renderDiagramNow('graph TD; A-->B')
+    const skeleton = container.querySelector('[data-testid="skeleton"]')
+    expect(skeleton?.getAttribute('role')).toBe('img')
+    expect(skeleton?.getAttribute('aria-label')).toBe('Mermaid diagram')
+
+    await act(async () => {
+      resolveRender({ svg: '<svg id="diagram"></svg>' })
+      await Promise.resolve()
+    })
+
+    expect(container.querySelector('[data-testid="skeleton"]')).toBeNull()
+    expect(container.querySelector('svg')).not.toBeNull()
+  })
+
+  it('paints a cached diagram straight away, with no skeleton frame', () => {
+    cacheDiagramSVG('graph TD; A-->B', '<svg id="cached"></svg>', documentFont())
+
+    renderDiagramNow('graph TD; A-->B')
+
+    expect(container.querySelector('[data-testid="skeleton"]')).toBeNull()
+    expect(container.innerHTML).toContain('id="cached"')
+  })
+
+  it('replaces the skeleton with the error state when the first render fails', async () => {
+    mermaid.render.mockRejectedValue(new Error('invalid'))
+
+    await renderDiagram('broken')
+
+    expect(container.querySelector('[data-testid="skeleton"]')).toBeNull()
+    expect(container.innerHTML).toContain('data-has-preview=""')
+    expect(container.innerHTML).toContain('Invalid diagram')
   })
 
   it('does not cache a diagram that failed to render, and keeps the last good one up', async () => {
