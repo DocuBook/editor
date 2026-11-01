@@ -97,15 +97,18 @@ await runSuite('side-menu', {
       const box = range.getBoundingClientRect()
       return { label, x: box.left + box.width / 2, y: box.top + box.height / 2 }
     })
-    await page.mouse.move(row.x, row.hoverY ?? row.y)
-    const menu = page.locator('.bn-side-menu')
     let menuY = null
     for (let i = 0; i < 20; i++) {
+      /* A fresh pointer move every try, 1px apart: one synthetic move after the
+         scroll (which hides the menu) is sometimes not taken as a hover, and
+         the menu then never shows. Read without a locator, whose auto-wait
+         would block for its full timeout on every try while no menu exists. */
+      await page.mouse.move(row.x + (i % 2), row.hoverY ?? row.y)
       await page.waitForTimeout(50)
-      menuY = await menu.evaluate((element, edge) => {
-        const box = element.getBoundingClientRect()
-        return edge ? box.top : box.top + box.height / 2
-      }, row.edge).catch(() => null)
+      menuY = await page.evaluate(edge => {
+        const box = document.querySelector('.bn-side-menu')?.getBoundingClientRect()
+        return box ? (edge ? box.top : box.top + box.height / 2) : null
+      }, row.edge ?? false)
       if (menuY !== null && Math.abs(menuY - row.y) <= TOLERANCE_PX) break
     }
     const delta = menuY === null ? null : menuY - row.y
