@@ -160,6 +160,7 @@ export const CachedDiagramPreviewWithPopup = (
             className="diagram-preview-skeleton"
             height={DIAGRAM_SKELETON_HEIGHT}
             radius="sm"
+            role="img"
             aria-busy="true"
             aria-label={dict.preview_label}
           />

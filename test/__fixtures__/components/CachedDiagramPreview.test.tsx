@@ -24,7 +24,11 @@ vi.mock('@blocknote/core', () => ({
 
 vi.mock('react-icons/si', () => ({ SiMermaid: () => null }))
 vi.mock('@mantine/core', () => ({
-  Skeleton: ({ height }: { height: number }) => <div data-testid="skeleton" style={{ height }} />,
+  // Forwards the rest of its props to the `div` like the real one, so the
+  // accessible role and label are observable.
+  Skeleton: ({ height, radius: _radius, ...rest }: { height: number; radius?: string }) => (
+    <div data-testid="skeleton" style={{ height }} {...rest} />
+  ),
 }))
 
 vi.mock('@blocknote/react', () => ({
@@ -193,7 +197,9 @@ describe('CachedDiagramPreviewWithPopup', () => {
     mermaid.render.mockReturnValueOnce(new Promise((resolve) => { resolveRender = resolve }))
 
     renderDiagramNow('graph TD; A-->B')
-    expect(container.querySelector('[data-testid="skeleton"]')).not.toBeNull()
+    const skeleton = container.querySelector('[data-testid="skeleton"]')
+    expect(skeleton?.getAttribute('role')).toBe('img')
+    expect(skeleton?.getAttribute('aria-label')).toBe('Mermaid diagram')
 
     await act(async () => {
       resolveRender({ svg: '<svg id="diagram"></svg>' })
