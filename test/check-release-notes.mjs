@@ -7,9 +7,9 @@
  *      `## v0.5.10`), so a release never ships an empty or foreign body.
  *   2. No heading carries an icon, including release-please's hardcoded
  *      "### ⚠ BREAKING CHANGES" and the emoji sections of older releases.
- *   3. A Contributors section lists each human author once, as an @mention
- *      (what GitHub renders as the contributor avatars), and is left out when
- *      there is nobody to list.
+ *   3. Each bullet whose commit has a human author ends "by @login" (what
+ *      GitHub renders as the contributor avatars), with no Contributors
+ *      section; bots and unknown commits stay unattributed.
  *   4. release-please-config.json's section names carry no icon either, so the
  *      changelog and the release PR match the release body.
  *
@@ -38,15 +38,15 @@ const changelog = `# Changelog
 
 ### ⚠ BREAKING CHANGES
 
-* **ai:** something breaks
+* **ai:** something breaks ([aaaaaaa](https://x/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa))
 
 ### 🐛 Bug Fixes
 
-* **ai:** Return starts a new line ([#351](https://x/351))
+* **ai:** Return starts a new line ([#351](https://x/351)) ([bbbbbbb](https://x/commit/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb))
 
 ### 🛡️ Security
 
-* tighten a check
+* tighten a check ([ccccccc](https://x/commit/cccccccccccccccccccccccccccccccccccccccc))
 
 ### CI
 
@@ -66,34 +66,35 @@ if (/wrong release|older/.test(section)) fail('extractSection leaked a neighbour
 if (extractSection(changelog, 'v9.9.9') !== '') fail('extractSection returned text for a tag with no section')
 
 // --- 2. Headings without icons, bullets untouched
-const notes = buildNotes(changelog, 'v0.5.1', 'gitfromwildan\nsomeone\n@GitFromWildan\ngithub-actions[bot]\n\n')
+const notes = buildNotes(changelog, 'v0.5.1', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa gitfromwildan\nBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB someone\ncccccccccccccccccccccccccccccccccccccccc dependabot[bot]\n\n')
 for (const line of notes.split('\n').filter((l) => /^#{1,6} /.test(l))) {
   if (ICON.test(line)) fail(`heading still carries an icon: ${JSON.stringify(line)}`)
 }
 for (const heading of ['### BREAKING CHANGES', '### Bug Fixes', '### Security', '### CI']) {
   if (!notes.split('\n').includes(heading)) fail(`expected heading ${JSON.stringify(heading)} in the notes`)
 }
-if (!notes.includes('* **ai:** Return starts a new line ([#351](https://x/351))')) fail('a changelog bullet was altered')
+if (!notes.includes('* **ai:** Return starts a new line ([#351](https://x/351)) ([bbbbbbb]')) fail('a changelog bullet was altered')
 if (cleanHeadings('### [0.5.1](https://x) (2026-10-26)') !== '### [0.5.1](https://x) (2026-10-26)') {
   fail('cleanHeadings altered a heading that has no icon')
 }
 
 // --- 3. Contributors
-if (!/\n### Contributors\n\n\* @gitfromwildan\n\* @someone\n$/.test(notes)) {
-  fail(`Contributors section wrong (deduplicated, no bots, @mentions, last): ${JSON.stringify(notes.slice(notes.indexOf('### Contributors')))}`)
+for (const [needle, want] of [['something breaks', 'by @gitfromwildan'], ['new line', 'by @someone']]) {
+  const line = notes.split('\n').find((l) => l.includes(needle))
+  if (!line?.endsWith(`/commit/${needle === 'new line' ? 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' : 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'})) ${want}`)) fail(`bullet not attributed ${want}: ${JSON.stringify(line)}`)
 }
-if (buildNotes(changelog, 'v0.5.1', 'renovate[bot]\n').includes('Contributors')) {
-  fail('an empty Contributors section was added when only bots contributed')
-}
+if (/tighten a check.*@/.test(notes)) fail('a bot-authored bullet was attributed')
+if (/\* publish the image .*@/.test(notes)) fail('a bullet with no commit link was attributed')
+if (notes.includes('Contributors')) fail('a Contributors section was added; the avatars come from the per-bullet mentions')
 
 // The real changelog's latest release builds cleanly too.
 const real = readFileSync(join(root, 'CHANGELOG.md'), 'utf8')
 const latest = real.match(/^## (v\d+\.\d+\.\d+\S*)/m)?.[1]
 if (!latest) fail('CHANGELOG.md has no release heading')
 else {
-  const built = buildNotes(real, latest, 'someone\n')
+  const built = buildNotes(real, latest)
   if (built.split('\n').some((l) => /^#{1,6} /.test(l) && ICON.test(l))) fail(`${latest}: a heading kept its icon`)
-  if (built.trim() === '### Contributors\n\n* @someone') fail(`${latest}: the changelog section came out empty`)
+  if (!built.trim()) fail(`${latest}: the changelog section came out empty`)
 }
 
 // --- 4. The config the changelog is generated from
@@ -113,4 +114,4 @@ if (failures.length) {
   for (const f of failures) console.error(`  ✗ ${f}`)
   process.exit(1)
 }
-console.log('Release-notes guard OK — the release body is its own changelog section, headings carry no icon, and Contributors lists each human author once')
+console.log('Release-notes guard OK — the release body is its own changelog section, headings carry no icon, and each bullet credits its human author')

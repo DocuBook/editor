@@ -2,13 +2,13 @@
 /**
  * Builds the GitHub release body for one tag from CHANGELOG.md.
  *
- *   node .github/scripts/release-notes.mjs <tag> <changelog> [contributors-file]
+ *   node .github/scripts/release-notes.mjs <tag> <changelog> [authors-file]
  *
  * Prints the tag's changelog section with the icons taken out of its headings,
- * followed by a Contributors section when the contributors file lists anyone
- * (one GitHub login per line; ci.yml `publish` fills it from the commits since
- * the previous release). `@login` mentions are what GitHub turns into the
- * release page's contributor avatars.
+ * and "by @login" after each bullet whose commit the authors file names
+ * ("<sha> <login>" per line; ci.yml `publish` fills it from the commits since
+ * the previous release). GitHub turns those mentions into the release page's
+ * contributor avatars; a mention hidden in an HTML comment does not count.
  *
  * Icons: the section names in release-please-config.json carry none, but
  * release-please hardcodes "### ⚠ BREAKING CHANGES" and older sections were
@@ -34,32 +34,32 @@ export function cleanHeadings(markdown) {
   return markdown.replace(/^(#{1,6})[ \t]+(?:[\p{Extended_Pictographic}\p{So}️‍]+[ \t]*)+/gmu, '$1 ')
 }
 
-/** Unique logins, in first-seen order, without bots. */
-export function parseContributors(text) {
-  const seen = new Map()
+/** "<sha> <login>" lines → Map(sha → login), bots left out. */
+export function parseAuthors(text) {
+  const authors = new Map()
   for (const raw of text.split('\n')) {
-    const login = raw.trim().replace(/^@/, '')
-    if (!login || /\[bot\]$/i.test(login) || seen.has(login.toLowerCase())) continue
-    seen.set(login.toLowerCase(), login)
+    const [sha, login] = raw.trim().split(/\s+/)
+    if (sha && login && !/\[bot\]$/i.test(login)) authors.set(sha.toLowerCase(), login.replace(/^@/, ''))
   }
-  return [...seen.values()]
+  return authors
 }
 
-export function contributorsSection(logins) {
-  if (!logins.length) return ''
-  return `### Contributors\n\n${logins.map((login) => `* @${login}`).join('\n')}`
+/** Appends " by @login" to each bullet linking a commit the map knows. */
+export function attributeBullets(markdown, authors) {
+  return markdown.replace(/^(\*.*\/commit\/([0-9a-f]{40})\).*?)[ \t]*$/gim, (line, body, sha) => {
+    const login = authors.get(sha.toLowerCase())
+    return login ? `${body} by @${login}` : line
+  })
 }
 
-export function buildNotes(changelog, tag, contributorsText = '') {
-  const body = cleanHeadings(extractSection(changelog, tag))
-  const contributors = contributorsSection(parseContributors(contributorsText))
-  return [body, contributors].filter(Boolean).join('\n\n\n') + '\n'
+export function buildNotes(changelog, tag, authorsText = '') {
+  return attributeBullets(cleanHeadings(extractSection(changelog, tag)), parseAuthors(authorsText)) + '\n'
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const [tag, changelogPath, contributorsPath] = process.argv.slice(2)
+  const [tag, changelogPath, authorsPath] = process.argv.slice(2)
   if (!tag || !changelogPath) {
-    console.error('usage: release-notes.mjs <tag> <changelog> [contributors-file]')
+    console.error('usage: release-notes.mjs <tag> <changelog> [authors-file]')
     process.exit(2)
   }
   const changelog = readFileSync(changelogPath, 'utf8')
@@ -67,7 +67,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
     console.error(`::error::${changelogPath} has no "## ${tag}" section`)
     process.exit(1)
   }
-  let contributors = ''
-  try { if (contributorsPath) contributors = readFileSync(contributorsPath, 'utf8') } catch { /* none listed */ }
-  process.stdout.write(buildNotes(changelog, tag, contributors))
+  let authors = ''
+  try { if (authorsPath) authors = readFileSync(authorsPath, 'utf8') } catch { /* none listed */ }
+  process.stdout.write(buildNotes(changelog, tag, authors))
 }
