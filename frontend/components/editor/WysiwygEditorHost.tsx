@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { WysiwygEditor } from './WysiwygEditor'
 import { getCachedEditor, peekCachedEditor, type CachedEditor } from '../../utils/editorFactory'
 import { readWysiwygSnapshot } from '../../utils/wysiwygSnapshot'
@@ -29,6 +29,33 @@ export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, mark
   })
   const ready = entry?.vaultPath === vaultPath && entry.filePath === filePath ? entry.cached : null
 
+  /* The editor view is mounted only by a SYNC-lane commit — one scheduled from
+   * this layout effect, which React commits before the browser paints.
+   *
+   * BlockNote mounts ProseMirror in a ref callback (layout phase). Every
+   * math / diagram / code block node view then attaches its editable source
+   * (the contentDOM, i.e. the raw LaTeX / Mermaid / code text) straight into
+   * the page, and queues its React render on a microtask. That render reaches
+   * the screen through BlockNote's `Portals`, whose store subscription is a
+   * PASSIVE effect. React flushes passive effects synchronously only after a
+   * sync-lane commit; after any other commit it defers them past the next
+   * paint. The cold open is such a commit — `setEntry` runs after an await —
+   * so the queued renders found no subscriber, and the browser painted every
+   * source block as its bare source text until the deferred effect subscribed
+   * and rendered the previews (one frame; on a long note, hundreds of ms).
+   *
+   * Gating the mount behind a layout-effect update makes the commit that runs
+   * `editor.mount` a sync one whatever scheduled the host — a cold open after
+   * the snapshot read, or a cached tab activated from async code. Nothing is
+   * painted in between: the empty commit and the sync re-render both complete
+   * before the frame. */
+  const [mounted, setMounted] = useState<CachedEditor | null>(null)
+  /* oxlint-disable react/set-state-in-effect -- the sync-lane mount gate described above */
+  useLayoutEffect(() => {
+    if (ready) setMounted(ready)
+  }, [ready])
+  /* oxlint-enable react/set-state-in-effect */
+
   /* oxlint-disable react/set-state-in-effect -- creates the editor for a cache miss after mount */
   useEffect(() => {
     if (ready) return
@@ -46,5 +73,6 @@ export default function WysiwygEditorHost({ vaultPath, filePath, isDesktop, mark
   /* oxlint-enable react/set-state-in-effect */
 
   if (!ready) return <div className="h-full flex items-center justify-center text-foreground-subtle text-sm italic">Loading editor...</div>
+  if (mounted !== ready) return null
   return <WysiwygEditor cached={ready} filePath={filePath} isDesktop={isDesktop} markdown={markdown} cursorOffset={cursorOffset} onCursorOffset={onCursorOffset} onSync={onSync} />
 }
