@@ -575,7 +575,8 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     <LinkToolbarController linkToolbar={WikiLinkToolbar} />
     <SuggestionMenuController triggerCharacter="/"
       getItems={async (query) => {
-        const defaultItems = getDefaultReactSlashMenuItems(editor)
+        // Emoji stays on the `:` picker only; the slash menu's Others entry is dropped.
+        const defaultItems = getDefaultReactSlashMenuItems(editor).filter(item => item.title !== editor.dictionary.slash_menu.emoji.title)
         const mathItems = getMathSlashMenuItems(editor)
         const diagramItems = getDiagramSlashMenuItems(editor).map(item => ({
           ...item,
