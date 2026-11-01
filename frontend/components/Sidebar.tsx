@@ -68,7 +68,8 @@ interface SidebarProps {
 
 export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortcuts, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
   const [showPlusMenu, setShowPlusMenu] = useState(false)
-  const sidebarActionsRef = useRef<HTMLDivElement>(null)
+  const plusMenuRef = useRef<HTMLDivElement>(null)
+  const vaultMenuRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
   const [activePanel, setActivePanel] = useState<SidebarPanelId>('vault')
   /** Settings is NOT a sidebar panel and has no tab: the profile menu (and ⌘,)
@@ -89,7 +90,8 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
 
   // Close popups on click outside; the context menu and the inline inputs each
   // own theirs.
-  useClickOutside(sidebarActionsRef, () => { setShowPlusMenu(false); setVaultMenuOpen(false) })
+  useClickOutside(plusMenuRef, () => setShowPlusMenu(false))
+  useClickOutside(vaultMenuRef, () => setVaultMenuOpen(false))
 
   const { name, isOpen, vaultPath, recent, visibleItems, loading, openVault, openRecent, toggleFolder, loadTree } = useVaultStore()
   const { openFile } = useEditorStore()
@@ -229,9 +231,6 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   }, [activePanel, isOpen, loadTree, loadTrash])
   /* oxlint-enable react/set-state-in-effect */
 
-  /** Shared header icon style - theme tokens only, so +/search/X match in both themes. */
-  const iconBtn = 'cursor-pointer p-1 rounded hover:bg-surface-active text-foreground-subtle hover:text-foreground transition-colors'
-
   return (
     <aside id={id} data-testid={id} className={'ui-shell bg-surface border-r border-border-subtle flex flex-col shrink-0 h-full ' + (isTauri ? 'w-68' : 'w-56')}>
       {permission && <PermissionDialog pane={permission.pane} message={permission.message} onClose={() => setPermission(null)} />}
@@ -251,12 +250,30 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           over the whole sidebar area. ⌘F/⌘P still open the modal anywhere: the
           modal lives in App precisely so no panel has to host it. */}
       {!settingsOpen && activePanel === 'vault' && (
-        <div className="px-2 py-2">
-          <button onClick={onOpenSearch} aria-label="Search project files" className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground-secondary cursor-pointer transition-colors text-left">
+        <div ref={plusMenuRef} className="relative flex items-center gap-1 px-2 py-2">
+          <button onClick={onOpenSearch} aria-label="Search project files" className="flex items-center gap-2 flex-1 min-w-0 px-2 py-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground-secondary cursor-pointer transition-colors text-left">
             <Search size={14} className="text-muted shrink-0" />
             <span className="flex-1 truncate text-[13px]">Search</span>
             <kbd className="inline-flex items-center gap-0.5 bg-surface px-1 py-0.5 rounded-[3px] text-[10px] font-mono text-muted border border-border-subtle"><Command size={9} />F</kbd>
           </button>
+          <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" title="Create a file/folder" aria-expanded={showPlusMenu} data-plus-btn disabled={loading}
+            className="shrink-0 cursor-pointer p-1.5 rounded-md border border-border bg-background text-foreground-subtle hover:text-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+            <Plus size={14} />
+          </button>
+          {showPlusMenu && (
+            <SidebarPopover side="bottom" className="max-w-[calc(100vw-1rem)]">
+              <div data-plus-popup>
+                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); startCreate('file') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                  <FileText size={14} /> New File
+                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
+                </button>
+                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); startCreate('folder') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
+                  <Folder size={14} /> New Folder
+                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
+                </button>
+              </div>
+            </SidebarPopover>
+          )}
         </div>
       )}
 
@@ -320,25 +337,18 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           <BacklinksPanel onNavigate={onNavigate} />
         </div>
       )}
-      {activePanel === 'vault' && (
-      <div ref={sidebarActionsRef} className="relative flex items-center gap-0.5 px-2 py-1.5 shrink-0">
-        <span className="flex-1 min-w-0">
+      {/* One compact footer row on every panel: the vault switcher takes the
+          width, the profile avatar sits at the end. Both popovers anchor to
+          this row (the only positioned ancestor), so they span the sidebar. */}
+      <div className="relative flex items-center gap-1 border-t border-border-subtle px-2 py-1.5 shrink-0">
+        <div ref={vaultMenuRef} className="flex-1 min-w-0">
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading || trashBusy} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
             className={'flex items-center gap-1 w-full min-w-0 cursor-pointer rounded px-2 py-1.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-foreground-secondary')}>
             <span className="text-xs font-semibold uppercase tracking-wider truncate">{name}</span>
             <ChevronsUpDown size={14} className="ml-auto shrink-0" />
           </button>
-
-        </span>
-        <span className="relative shrink-0">
-          <button onClick={(e) => { setShowPlusMenu(o => !o); e.currentTarget.blur() }} aria-label="Create file or folder" title="Create a file/folder" data-plus-btn disabled={loading} className={iconBtn + ' disabled:opacity-30 disabled:cursor-not-allowed'}>
-            <Plus size={15} />
-          </button>
-
-        </span>
-        {(vaultMenuOpen || showPlusMenu) && (
-          <SidebarPopover side="top" className="max-w-[calc(100vw-1rem)]">
-            {vaultMenuOpen && (
+          {vaultMenuOpen && (
+            <SidebarPopover side="top" className="max-w-[calc(100vw-1rem)]">
               <div data-vault-menu>
                 {recent.length === 0 && <div className="px-2.5 py-1.5 text-[11px] text-foreground-subtle italic">No recent vaults</div>}
                 {recent.length > 0 && (
@@ -359,26 +369,11 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
                 <button onClick={() => { if (trashBusy) return; setVaultMenuOpen(false); onNavigate(); void openVault() }} disabled={trashBusy} className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded text-left hover:bg-surface-active disabled:cursor-not-allowed disabled:opacity-40"><FolderOpen size={14} /> Open Vault</button>
                 <button onClick={() => { if (trashBusy) return; setVaultMenuOpen(false); onRequestCloseVault() }} disabled={trashBusy} className="flex items-center gap-2 w-full px-2.5 py-1.5 cursor-pointer text-[13px] text-danger bg-transparent border-none rounded text-left hover:bg-surface-active disabled:cursor-not-allowed disabled:opacity-40"><X size={14} /> Close Vault</button>
               </div>
-            )}
-            {showPlusMenu && (
-              <div data-plus-popup>
-                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); startCreate('file') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
-                  <FileText size={14} /> New File
-                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
-                </button>
-                <button onClick={() => { if (loading) return; setShowPlusMenu(false); setActivePanel('vault'); startCreate('folder') }} className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] text-foreground-secondary bg-transparent border-none rounded w-full text-left hover:bg-surface-active">
-                  <Folder size={14} /> New Folder
-                  <span className="ml-auto text-[10px] text-muted font-mono flex items-center gap-0.5 whitespace-nowrap"><kbd className="inline-flex items-center gap-0.5 bg-background px-1 py-0.5 rounded-[3px] text-[10px]"><Option size={9} /><Command size={9} />{isTauri ? 'N' : <><ArrowBigUp size={9} />F</>}</kbd></span>
-                </button>
-              </div>
-            )}
-          </SidebarPopover>
-        )}
-
+            </SidebarPopover>
+          )}
+        </div>
+        <ProfileMenu isNative={isTauri} settingsOpen={settingsOpen} onOpenSettings={() => { onOpenSettings(); openSettings() }} onCloseSettings={() => { onNavigate(); closeSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
       </div>
-      )}
-
-      <ProfileMenu isNative={isTauri} settingsOpen={settingsOpen} onOpenSettings={() => { onOpenSettings(); openSettings() }} onCloseSettings={() => { onNavigate(); closeSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
 
       {ctxItem && (
         <SidebarContextMenu

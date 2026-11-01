@@ -41,9 +41,9 @@ afterEach(() => {
 })
 
 describe('ProfileMenu', () => {
-  it('shows account email in profile trigger and menu', () => {
+  it('shows account email in profile trigger tooltip and menu', () => {
     renderMenu()
-    expect(document.querySelector('[aria-label="Open profile menu"]')?.textContent).toContain('member@example.com')
+    expect(document.querySelector('[aria-label="Open profile menu"]')?.getAttribute('title')).toBe('member@example.com')
 
     openMenu()
     expect(document.body.textContent).toContain('member@example.com')

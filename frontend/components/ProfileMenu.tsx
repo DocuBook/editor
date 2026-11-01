@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../stores/auth'
-import { ArrowLeft, BriefcaseBusiness, ChevronDown, Keyboard, LogOut, Settings, UserRound, Users } from 'lucide-react'
+import { ArrowLeft, BriefcaseBusiness, Keyboard, LogOut, Settings, UserRound, Users } from 'lucide-react'
 import SidebarPopover from './SidebarPopover'
 
 interface ProfileMenuProps {
@@ -62,11 +62,12 @@ export default function ProfileMenu({ isNative, settingsOpen, onOpenSettings, on
   }, [open])
 
   return (
-    <div ref={menuRef} className="relative shrink-0 border-t border-border-subtle px-2 py-2">
-      <button ref={triggerRef} type="button" onClick={() => setOpen(value => !value)} aria-label="Open profile menu" aria-expanded={open} className="flex w-full cursor-pointer items-center gap-2 rounded-md border-none bg-transparent px-2 py-2 text-left hover:bg-surface-active">
-        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-active text-foreground-secondary"><UserRound size={15} /></span>
-        <span className="min-w-0 flex-1 truncate text-[12px] text-foreground-secondary">{email || (isNative ? 'Local profile' : 'Profile')}</span>
-        <ChevronDown size={14} aria-hidden="true" className={`shrink-0 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+    /* Not `relative`: the popover anchors to the parent footer row so it spans
+       the sidebar instead of the avatar's width. */
+    <div ref={menuRef} className="shrink-0">
+      <button ref={triggerRef} type="button" onClick={() => setOpen(value => !value)} aria-label="Open profile menu" aria-expanded={open} title={email || (isNative ? 'Local profile' : 'Profile')}
+        className={`flex size-7 cursor-pointer items-center justify-center rounded-full border-none text-foreground-secondary hover:bg-surface-hover hover:text-foreground ${open ? 'bg-surface-hover text-foreground' : 'bg-surface-active'}`}>
+        <UserRound size={15} />
       </button>
       {open && (
         <SidebarPopover side="top">

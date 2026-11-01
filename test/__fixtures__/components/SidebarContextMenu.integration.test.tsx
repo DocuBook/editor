@@ -388,9 +388,9 @@ describe('SidebarContextMenu in the Sidebar', () => {
   })
 
 
-  /** The vault switcher and the create (+) control belong to the Folders panel;
-   *  the Changes and Trash panels show neither. */
-  it('shows the vault switcher and create control only on the Folders panel', async () => {
+  /** The create (+) control sits beside Search, so it belongs to the Folders
+   *  panel only; the vault switcher lives in the footer on every panel. */
+  it('shows the create control only on the Folders panel and the vault switcher everywhere', async () => {
     renderSidebar()
     await flush()
     const plus = () => document.querySelector('[data-plus-btn]')
@@ -401,7 +401,7 @@ describe('SidebarContextMenu in the Sidebar', () => {
     act(() => (document.querySelector('[data-testid="sidebar-panel-git"]') as HTMLElement).click())
     await flush()
     expect(plus()).toBeNull()
-    expect(switcher()).toBeNull()
+    expect(switcher()).not.toBeNull()
 
     act(() => (document.querySelector('[data-testid="sidebar-panel-vault"]') as HTMLElement).click())
     await flush()
