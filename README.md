@@ -259,14 +259,14 @@ On the web build, `DOCUBOOK_SEARXNG_URL` or `DOCUBOOK_TAVILY_API_KEY` switches `
 
 ## Stack
 
-| Layer    | Technology                          |
-| -------- | ----------------------------------- |
-| Desktop  | Tauri v2, Rust                      |
-| Web API  | Axum, Rust                          |
-| Frontend | React 19, TypeScript 7, Zustand     |
-| Editor   | BlockNote 0.54, TipTap, ProseMirror |
-| UI       | Tailwind CSS v4                     |
-| Build    | Vite 8, Rolldown                    |
+| Layer    | Technology                      |
+| -------- | ------------------------------- |
+| Desktop  | Tauri v2, Rust                  |
+| Web API  | Axum, Rust                      |
+| Frontend | React 19, TypeScript 7, Zustand |
+| Editor   | BlockNote, TipTap, ProseMirror  |
+| UI       | Tailwind CSS v4                 |
+| Build    | Vite 8, Rolldown                |
 
 ## Development
 
