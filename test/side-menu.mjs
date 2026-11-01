@@ -3,7 +3,8 @@
  * centred on the first row of the block they belong to: the first line of text,
  * or a code block's header. Upstream hard-codes an offset per block type tuned
  * to its own CSS (headings 1–3 only, nothing for code blocks), which left the
- * menu ~13px above h4–h6 text and ~10px above the code block header.
+ * menu ~13px above h4–h6 text and ~10px above the code block header. Math and
+ * diagram blocks keep it on the block's top edge, not on the source below.
  *
  * Run: npm run build && node test/side-menu.mjs
  */
@@ -31,6 +32,15 @@ hello world
 const codeLine = 1
 \`\`\`
 
+\`\`\`mermaid
+graph TD
+  A --> B
+\`\`\`
+
+$$
+\\frac{1}{2}
+$$
+
 | cell a | cell b |
 | - | - |
 | cell c | cell d |
@@ -57,13 +67,22 @@ await runSuite('side-menu', {
   const ids = await page.$$eval('.bn-editor .bn-block[data-id]', blocks => blocks.map(block => block.getAttribute('data-id')))
   for (const id of ids) {
     const block = page.locator(`.bn-block[data-id="${id}"]`)
-    await block.scrollIntoViewIfNeeded()
+    // Centred rather than merely visible: a block left at the bottom of the
+    // viewport sits under the floating AI chat, which then takes the hover.
+    await block.evaluate(element => element.scrollIntoView({ block: 'center' }))
     /** The centre of the block's first row, measured from the text itself (a
-     *  one-character range), not from the line-height arithmetic under test. */
+     *  one-character range), not from the line-height arithmetic under test.
+     *  Math and diagram blocks have no text row — their text is the source in
+     *  the popup below the preview — so the menu stays on the block's top edge
+     *  (`edge`), as upstream places it. */
     const row = await block.evaluate(element => {
       const content = element.querySelector('.bn-block-content')
       const header = content.querySelector('.code-block-header')
       const label = content.dataset.contentType + (content.dataset.level ? ` h${content.dataset.level}` : '')
+      if (content.querySelector('.bn-preview-with-source-popup')) {
+        const box = content.getBoundingClientRect()
+        return { label, x: box.left + box.width / 2, hoverY: box.top + box.height / 2, y: element.getBoundingClientRect().top, edge: true }
+      }
       if (header) {
         const box = header.getBoundingClientRect()
         return { label, x: box.left + box.width / 2, y: box.top + box.height / 2 }
@@ -78,19 +97,20 @@ await runSuite('side-menu', {
       const box = range.getBoundingClientRect()
       return { label, x: box.left + box.width / 2, y: box.top + box.height / 2 }
     })
-    await page.mouse.move(row.x, row.y)
+    await page.mouse.move(row.x, row.hoverY ?? row.y)
     const menu = page.locator('.bn-side-menu')
-    let menuCentre = null
+    let menuY = null
     for (let i = 0; i < 20; i++) {
       await page.waitForTimeout(50)
-      menuCentre = await menu.evaluate(element => {
+      menuY = await menu.evaluate((element, edge) => {
         const box = element.getBoundingClientRect()
-        return box.top + box.height / 2
-      }).catch(() => null)
-      if (menuCentre !== null && Math.abs(menuCentre - row.y) <= TOLERANCE_PX) break
+        return edge ? box.top : box.top + box.height / 2
+      }, row.edge).catch(() => null)
+      if (menuY !== null && Math.abs(menuY - row.y) <= TOLERANCE_PX) break
     }
-    const delta = menuCentre === null ? null : menuCentre - row.y
-    ok(`side menu is centred on the first row of ${row.label}`, delta !== null && Math.abs(delta) <= TOLERANCE_PX,
+    const delta = menuY === null ? null : menuY - row.y
+    ok(row.edge ? `side menu sits on the top edge of ${row.label}` : `side menu is centred on the first row of ${row.label}`,
+      delta !== null && Math.abs(delta) <= TOLERANCE_PX,
       delta === null ? 'menu not shown' : `menu − row = ${delta.toFixed(1)}px`)
   }
 })

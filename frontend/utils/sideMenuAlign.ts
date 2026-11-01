@@ -10,8 +10,10 @@ const ROW_BOXES = '.code-block-header, tr, .bn-add-file-button, .bn-file-name-wi
 
 /** Vertical centre, in viewport px, of the row the side menu belongs to: a
  *  `ROW_BOXES` box, else the first line of the block's own inline content.
- *  `null` for blocks with neither (an image, an embed preview) — those keep the
- *  menu on the block's top edge, as upstream does. The block's own content
+ *  `null` for blocks with neither (an image, an embed preview, a math or
+ *  diagram block, whose inline content is the source editor in the popup below
+ *  its preview) — those keep the menu on the block's top edge, as upstream
+ *  does. The block's own content
  *  comes before its children in the DOM, so the first match is never a child
  *  block's. */
 export function firstRowCentre(block: Element): number | null {
@@ -23,7 +25,7 @@ export function firstRowCentre(block: Element): number | null {
     return rect.top + rect.height / 2
   }
   const inline = content.querySelector('.bn-inline-content')
-  if (!inline) return null
+  if (!inline || inline.closest('.bn-source-block-popup')) return null
   const style = getComputedStyle(inline)
   const fontSize = parseFloat(style.fontSize)
   const lineHeight = style.lineHeight === 'normal' ? fontSize * 1.2 : parseFloat(style.lineHeight)
