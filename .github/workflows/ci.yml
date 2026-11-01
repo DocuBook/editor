@@ -241,6 +241,22 @@ jobs:
       - name: npm audit (fail on high)
         run: npm audit --audit-level=high
       - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      # `core` is a path dependency of both consumers, so a dependency bump in
+      # core/Cargo.toml must also move server/ and src-tauri/'s locks. Dependabot
+      # updates only core/Cargo.lock (PR 412), and only the Docker image and
+      # macOS release builds use `--locked`, so the drift reached master and
+      # failed every later PR's Docker build. Resolve each consumer with
+      # `--locked`: it needs only the registry index, not the crate sources
+      # (`cargo metadata` downloads them all), and it fails the same way.
+      # cargo audit below reads these locks, so a stale one is audited as well.
+      - name: Consumer lockfiles in sync with core
+        run: |
+          for crate in server src-tauri; do
+            (cd "$crate" && cargo update --workspace --locked) || {
+              echo "::error file=$crate/Cargo.lock::$crate/Cargo.lock is out of sync with its manifests (often a core/ dependency bump). Run: cd $crate && cargo update -p <crate> --precise <version in core/Cargo.lock>"
+              exit 1
+            }
+          done
       # Prebuilt, checksum-verified binary instead of compiling cargo-audit each run.
       - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
         with:
