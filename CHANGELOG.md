@@ -1,5 +1,54 @@
 # Changelog
 
+## v0.7.0 — 2026-11-01
+
+
+### Features
+
+* **editor:** scroll the compact formatting toolbar and add block delete to the IME strip ([#407](https://github.com/DocuBook/editor/issues/407)) ([1db4031](https://github.com/DocuBook/editor/commit/1db403128ef46991b77558d571a3750e265fd059))
+* **editor:** show a Mantine skeleton while a Mermaid diagram first renders ([#426](https://github.com/DocuBook/editor/issues/426)) ([a67b4f0](https://github.com/DocuBook/editor/commit/a67b4f02781ce9a02ce7b04a9f44af790f0126fd))
+* **git:** commit identity follows global config, vault override is explicit ([#378](https://github.com/DocuBook/editor/issues/378)) ([5ade1b7](https://github.com/DocuBook/editor/commit/5ade1b7f0ac2051d6db35257ac7beb6e1a31af5b))
+* **git:** encrypted HTTPS access tokens for the web server ([#377](https://github.com/DocuBook/editor/issues/377)) ([f9aa5ad](https://github.com/DocuBook/editor/commit/f9aa5ad183d41c564c720e32d9ae0f9dd1410004))
+* **settings:** use Mantine controls in the web tools pane ([#384](https://github.com/DocuBook/editor/issues/384)) ([a805b10](https://github.com/DocuBook/editor/commit/a805b10f6b55f270952c6d86ead40d7c9a57853a))
+
+
+### Bug Fixes
+
+* **ai:** save an AI result only once the user keeps it ([#401](https://github.com/DocuBook/editor/issues/401)) ([3e26d9a](https://github.com/DocuBook/editor/commit/3e26d9a855bcc8ccc8dcba25037345d00ac21e32))
+* **deps:** override minimatch to 11 to clear the npm audit advisory ([#420](https://github.com/DocuBook/editor/issues/420)) ([de3dd08](https://github.com/DocuBook/editor/commit/de3dd0872dbac7b6277e38e647d9bc8053634c30))
+* **deps:** sync dom_smoothie 0.19.0 into the server and desktop locks ([#419](https://github.com/DocuBook/editor/issues/419)) ([406924a](https://github.com/DocuBook/editor/commit/406924abe26bd0d0af32ac4649300a7ae5c0847c))
+* **deps:** upgrade BlockNote to 0.57.0 ([#423](https://github.com/DocuBook/editor/issues/423)) ([1df7c73](https://github.com/DocuBook/editor/commit/1df7c73e638ac07f81d7b94fafd31d6455c43c7f))
+* **editor:** centre the side menu on a block's first row ([#418](https://github.com/DocuBook/editor/issues/418)) ([b4cb4b6](https://github.com/DocuBook/editor/commit/b4cb4b62c6fcd9d297fbab3718669845fc10a29a))
+* **editor:** gate every remote image behind the opt-in, whatever its extension ([#382](https://github.com/DocuBook/editor/issues/382)) ([f7c726f](https://github.com/DocuBook/editor/commit/f7c726f6ec48303629c7a7edffe445027619835a))
+* **editor:** keep file layout on save, rename cleanly, label wikilink hints per OS ([#381](https://github.com/DocuBook/editor/issues/381)) ([65bf740](https://github.com/DocuBook/editor/commit/65bf740822a53c87efc1a8536a3d2e8ca7558402))
+* **editor:** keep list children, toggles and hard breaks intact on save ([#380](https://github.com/DocuBook/editor/issues/380)) ([67d86dc](https://github.com/DocuBook/editor/commit/67d86dc4b5f6969dbce38dc3dd42332e14603aa4))
+* **editor:** keep the tab's latest edit when resolving a conflict as mine ([#406](https://github.com/DocuBook/editor/issues/406)) ([10e4df6](https://github.com/DocuBook/editor/commit/10e4df6c46ffdf2cf652c0d7bf0851744ee75005))
+* **editor:** mount the editor in a sync commit so a cold open never paints raw source ([#425](https://github.com/DocuBook/editor/issues/425)) ([8c1abdc](https://github.com/DocuBook/editor/commit/8c1abdcea5e9bcbf05a29b5377aa6d4b2d8ed32e))
+* **editor:** never write an executing URL to a note; test paste payloads end to end ([#383](https://github.com/DocuBook/editor/issues/383)) ([18866a6](https://github.com/DocuBook/editor/commit/18866a640ffaca59b958759859df674c68ee9ce8))
+* **editor:** patch data-loss and markdown corruption bugs from WYSIWYG review ([#379](https://github.com/DocuBook/editor/issues/379)) ([ddee3a5](https://github.com/DocuBook/editor/commit/ddee3a5d24c9b41914b77c5c81b984f5a9fe5965))
+* **editor:** read a note's text and version as one consistent pair ([#405](https://github.com/DocuBook/editor/issues/405)) ([ffac9f2](https://github.com/DocuBook/editor/commit/ffac9f2271da2a8b9c84ac1b3f41d83a000511e1))
+* **editor:** read the web file version as a bare hash everywhere ([#400](https://github.com/DocuBook/editor/issues/400)) ([e2d4088](https://github.com/DocuBook/editor/commit/e2d408826ddf5ee81302ebc7bf22a88b640deebf))
+* **editor:** save pending edits when the browser tab goes away ([#402](https://github.com/DocuBook/editor/issues/402)) ([2c6934c](https://github.com/DocuBook/editor/commit/2c6934c5f885e1bd5679813152071a6151e321ef))
+* **editor:** try every dirty tab before reporting a failed save ([#403](https://github.com/DocuBook/editor/issues/403)) ([193f20a](https://github.com/DocuBook/editor/commit/193f20a5354ab0b31cdecf780183762712178f36))
+* **git:** patch data-loss and stuck-state bugs from git review ([#373](https://github.com/DocuBook/editor/issues/373)) ([e7a2f96](https://github.com/DocuBook/editor/commit/e7a2f96be11eb28312ecfc35f2d1af595de881ef))
+* **git:** serialize git operations, follow upstream, surface status errors ([#375](https://github.com/DocuBook/editor/issues/375)) ([1066748](https://github.com/DocuBook/editor/commit/1066748833a3066fd24ebe56352c3d14c75eacfc))
+* **git:** stale merge marker, quoted status paths, deleted-file diff, Windows paths ([#376](https://github.com/DocuBook/editor/issues/376)) ([0141c3c](https://github.com/DocuBook/editor/commit/0141c3c6e5ef1a440649e6a3aa44dee1e1d65774))
+* **sync:** drain the offline queue on its own and keep live saves behind it ([#399](https://github.com/DocuBook/editor/issues/399)) ([e424caf](https://github.com/DocuBook/editor/commit/e424cafc9c1b6a51d930c5782d96ee1e4b08495e))
+* **vault:** write notes atomically so a crash cannot truncate them ([#404](https://github.com/DocuBook/editor/issues/404)) ([20bbcff](https://github.com/DocuBook/editor/commit/20bbcff00f0bdc98ca4b5d8f7694891f9d45090b))
+
+
+### Refactor
+
+* **sidebar:** merge vault switcher and profile into one footer row ([#427](https://github.com/DocuBook/editor/issues/427)) ([f8913f1](https://github.com/DocuBook/editor/commit/f8913f164013d20df702fb370b20cc0946ef61d2))
+
+
+### CI
+
+* credit each release-note bullet's author instead of a Contributors list ([#422](https://github.com/DocuBook/editor/issues/422)) ([88d0d1e](https://github.com/DocuBook/editor/commit/88d0d1e8326b510120124f0e3b9e5a7955c08a30))
+* fail a PR whose server or desktop lock is out of sync with core ([#421](https://github.com/DocuBook/editor/issues/421)) ([86fcc93](https://github.com/DocuBook/editor/commit/86fcc9361171e16757759b982ac769de097a27f2))
+* pin actions to SHAs, speed up and decouple the security audit ([#397](https://github.com/DocuBook/editor/issues/397)) ([f968815](https://github.com/DocuBook/editor/commit/f968815506cf818f7d5b5706d9420946d8a05552))
+* **security:** audit core deps, run audits weekly, fail npm audit on high ([#385](https://github.com/DocuBook/editor/issues/385)) ([acbe33d](https://github.com/DocuBook/editor/commit/acbe33dceb0749450252f206e00b2ec70276e1b4))
+
 ## v0.6.0 — 2026-10-28
 
 
