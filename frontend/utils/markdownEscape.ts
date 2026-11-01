@@ -6,8 +6,8 @@
  * `*a*`, `` `a` ``, `<kbd>`, `[a](b)` or `$x$` reload as formatting, HTML, a
  * link or math. The editor showed literal characters, so the file must too.
  *
- * Raw HTML (`<kbd>`) cannot be escaped: BlockNote's parser honours no `\<`
- * and decodes no entities, so a typed tag still reloads as HTML.
+ * Raw HTML (`<kbd>`) needs nothing here: BlockNote's exporter writes it as
+ * `\<kbd>` and its parser reads that back as text.
  *
  * Escaping is minimal on purpose — the file is also read by people and git:
  * text that already reloads as itself (`2 * 3`, `snake_case`, `Paid $5`) is
@@ -25,6 +25,10 @@ const PROSE_BLOCKS = new Set(['paragraph', 'heading', 'bulletListItem', 'numbere
  *  A hard break inside them is written as `<br>`, which its parser reads back
  *  as the same break. Paragraphs and quotes keep Markdown's `\` + newline. */
 const SINGLE_LINE_BLOCKS = new Set(['heading', 'bulletListItem', 'numberedListItem', 'checkListItem', 'toggleListItem'])
+
+/** Stands in for that `<br>` in the escaped text: BlockNote's exporter escapes
+ *  a `<br>` text node to `\<br>`, so the caller swaps this for `<br>` after export. */
+export const HARD_BREAK = '\uE000'
 
 /** Spans copied through verbatim: wikilinks, footnote refs, bare URLs. */
 const VERBATIM = /\[\[[^\]\n]+\]\]|\[\^[^\]\s]+\]|(?:https?:\/\/|www\.)[^\s<]+/g
@@ -141,16 +145,16 @@ function escapeInlineContent(items: unknown, lineStarts: boolean, htmlBreaks = f
   return items.flatMap((item: Inline) => {
     if (item?.type === 'text' && typeof item.text === 'string') {
       // `<br>` inside a code span is literal text, so the span is split at each
-      // break and the `<br>` written between the pieces.
+      // break and the break written between the pieces.
       if (htmlBreaks && item.styles?.code && item.text.includes('\n')) {
         atLineStart = false
         return item.text.split('\n').flatMap((part, i) => [
-          ...(i ? [{ type: 'text', text: '<br>', styles: {} }] : []),
+          ...(i ? [{ type: 'text', text: HARD_BREAK, styles: {} }] : []),
           ...(part ? [{ ...item, text: part }] : []),
         ])
       }
       let text = item.styles?.code ? item.text : escapeMarkdownText(item.text, atLineStart)
-      if (htmlBreaks) text = text.split('\n').join('<br>')
+      if (htmlBreaks) text = text.split('\n').join(HARD_BREAK)
       atLineStart = lineStarts && !htmlBreaks && item.text.endsWith('\n')
       return text === item.text ? item : { ...item, text }
     }

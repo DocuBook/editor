@@ -1,5 +1,5 @@
 import { mapProse } from './markdownCode'
-import { escapeBlocksForMarkdown } from './markdownEscape'
+import { escapeBlocksForMarkdown, HARD_BREAK } from './markdownEscape'
 import { mathDollarToMathML } from './mathMarkdown'
 
 interface MarkdownEditor<Block> {
@@ -39,7 +39,7 @@ function escapeSummaryDollars(html: string): string {
 function serializeBlocks<Block>(editor: MarkdownEditor<Block>, blocks: AnyBlock[], underListItem: boolean): string {
   const parts: string[] = []
   let run: AnyBlock[] = []
-  const write = (group: AnyBlock[]) => editor.blocksToMarkdownLossy(escapeBlocksForMarkdown(group as Block[])).replace(/^\n+|\s+$/g, '')
+  const write = (group: AnyBlock[]) => editor.blocksToMarkdownLossy(escapeBlocksForMarkdown(group as Block[])).split(HARD_BREAK).join('<br>').replace(/^\n+|\s+$/g, '')
   const flush = () => {
     if (run.length) parts.push(write(run))
     run = []

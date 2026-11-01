@@ -10,6 +10,7 @@ import { useCallback, useEffect, useRef, useSyncExternalStore, type MouseEvent a
 import { SuggestionMenuController, SideMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
+import '@blocknote/math-block/style.css'
 
 import { combineByGroup, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
 import { SourceBlockWithPreviewExtension } from '@blocknote/core/extensions'
