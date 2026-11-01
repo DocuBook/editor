@@ -7,7 +7,7 @@
  *  In-flight AI stays with the cached page and defers tool application until its
  *  view is attached again. */
 import { useCallback, useEffect, useRef, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react'
-import { SuggestionMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
+import { SuggestionMenuController, SideMenuController, getDefaultReactSlashMenuItems, FormattingToolbarController, LinkToolbarController, type FormattingToolbarProps } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import '@blocknote/mantine/style.css'
 
@@ -32,6 +32,7 @@ import { cursorPositionAtMarkdownOffset, markdownOffsetForCursor } from '../../u
 import { serializeMarkdown } from '../../utils/markdownSerialization'
 import { writeWysiwygSnapshot } from '../../utils/wysiwygSnapshot'
 import { refreshCodeHighlighting } from '../../utils/codeHighlighting'
+import { SIDE_MENU_FLOATING_OPTIONS } from '../../utils/sideMenuAlign'
 import { isCodeBlockHeaderField, setPreviewRenderingPaused, setWikilinkStylerPaused } from './setup'
 import { softKeyboardOnFocus } from '../../utils/softKeyboard'
 import { FormattingToolbarWithAI, WikiLinkToolbar } from './linkToolbar'
@@ -526,8 +527,9 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
   /* FormattingToolbarController takes the toolbar as a component TYPE and
      renders it, so an inline arrow would be a new type on every editor update
      and remount the whole toolbar (losing open popovers). `blockActions` mirrors
-     `sideMenu` below: the side menu owns the block actions where it exists —
-     insert and reorder — so the toolbar carries them exactly where it is off. */
+     the SideMenuController below: the side menu owns the block actions where it
+     exists — insert and reorder — so the toolbar carries them exactly where it
+     is off. */
   const renderFormattingToolbar = useCallback(
     (props: FormattingToolbarProps) => <FormattingToolbarWithAI {...props} compact={compact} blockActions={!isDesktop} />,
     [compact, isDesktop],
@@ -562,7 +564,10 @@ export function WysiwygEditor({ cached, markdown, cursorOffset, onCursorOffset, 
     }
   }, [editor])
 
-  return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={isDesktop} onClick={onEditorClick}>
+  return <BlockNoteView editor={editor} theme={useTheme(s => s.colorScheme)} slashMenu={false} formattingToolbar={false} linkToolbar={false} sideMenu={false} onClick={onEditorClick}>
+    {/** Rendered here rather than through `sideMenu` so it can take our own
+     *  vertical alignment (sideMenuAlign) in place of upstream's per-type offsets. */}
+    {isDesktop && <SideMenuController floatingUIOptions={SIDE_MENU_FLOATING_OPTIONS} />}
     {/** AI interaction surfaces here in the floating chat (AiFloatingChat) — the
      *  built-in block-anchored AIMenuController is intentionally not rendered. */}
     <FormattingToolbarController formattingToolbar={renderFormattingToolbar} />
