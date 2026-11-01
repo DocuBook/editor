@@ -13,8 +13,13 @@ import {
   withSVGFontFamily,
   type DiagramBlockConfig,
 } from '@blocknote/diagram-block'
+import { Skeleton } from '@mantine/core'
 import { SiMermaid } from 'react-icons/si'
 import { cacheDiagramSVG, peekDiagramSVG } from '../../utils/mermaidRenderCache'
+
+/** Space held for a diagram whose first render is pending — about a small
+ *  flowchart's height, so most diagrams grow from it rather than jump. */
+const DIAGRAM_SKELETON_HEIGHT = 160
 
 /** Each render needs its own element ID: Mermaid removes any existing document
  *  element with the given ID when rendering, which would yank a displayed diagram
@@ -136,8 +141,11 @@ export const CachedDiagramPreviewWithPopup = (
       editor={props.editor}
       contentRef={props.contentRef}
       source={source}
-      // `undefined` while nothing has rendered successfully, so an error shows the
-      // error state instead of an empty preview.
+      // A skeleton while the first render of this source is still in flight
+      // (nothing cached, nothing rendered yet), so the block holds space instead
+      // of collapsing to an empty strip until Mermaid resolves. `undefined` once
+      // that render failed, so the error state shows instead of a skeleton that
+      // would never resolve.
       preview={
         svg ? (
           <div
@@ -146,6 +154,14 @@ export const CachedDiagramPreviewWithPopup = (
             role="img"
             aria-label={dict.preview_label}
             dangerouslySetInnerHTML={{ __html: svg }}
+          />
+        ) : error == null ? (
+          <Skeleton
+            className="diagram-preview-skeleton"
+            height={DIAGRAM_SKELETON_HEIGHT}
+            radius="sm"
+            aria-busy="true"
+            aria-label={dict.preview_label}
           />
         ) : undefined
       }
