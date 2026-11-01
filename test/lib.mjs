@@ -26,6 +26,7 @@ export const PORTS = {
   aiMention: 4290,
   unloadSave: 4292,
   sideMenu: 4294,
+  coldOpen: 4296,
 }
 
 const ARTIFACTS = 'test/artifacts'
