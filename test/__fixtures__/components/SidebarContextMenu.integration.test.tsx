@@ -408,4 +408,22 @@ describe('SidebarContextMenu in the Sidebar', () => {
     expect(plus()).not.toBeNull()
     expect(switcher()).not.toBeNull()
   })
+
+  /** ⌘, opens Settings straight through the store, unmounting the Search row
+   *  with the + popover still open; closing Settings must not bring it back. */
+  it('closes the create menu when Settings opens from outside the sidebar', async () => {
+    renderSidebar()
+    await flush()
+    act(() => (document.querySelector('[data-plus-btn]') as HTMLElement).click())
+    expect(document.querySelector('[data-plus-popup]')).not.toBeNull()
+
+    act(() => useSettings.getState().openSettings('git-identity'))
+    await flush()
+    expect(document.querySelector('[data-plus-popup]')).toBeNull()
+
+    act(() => useSettings.getState().closeSettings())
+    await flush()
+    expect(document.querySelector('[data-plus-btn]')).not.toBeNull()
+    expect(document.querySelector('[data-plus-popup]')).toBeNull()
+  })
 })
