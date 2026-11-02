@@ -12,12 +12,12 @@ beforeEach(() => {
 });
 
 describe("finished diagram SVG cache", () => {
-  it("serves a diagram back by its source, with the font it was rendered for", () => {
+  it("serves a diagram back by its source, with the style it was rendered for", () => {
     cacheDiagramSVG("graph TD; A-->B", '<svg id="a"></svg>', "Inter");
 
     expect(peekDiagramSVG("graph TD; A-->B")).toEqual({
       svg: '<svg id="a"></svg>',
-      fontFamily: "Inter",
+      styleKey: "Inter",
       renderId: '',
     });
   });

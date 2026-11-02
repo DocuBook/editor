@@ -133,6 +133,56 @@ describe("Mermaid rendering", () => {
     vi.unstubAllGlobals();
   });
 
+  /** Mermaid's theme is page-global and baked into the SVG: a render must run
+   *  under the config read when it was REQUESTED (a theme switch while it waits
+   *  in the queue must not leak in), and a source cached under one theme must not
+   *  be served under another. */
+  it("keys renders by site config and applies it right before each render", async () => {
+    vi.stubGlobal("requestIdleCallback", (run: () => void) => { run(); return 1; });
+    let theme = "dark";
+    let applied = "";
+    const render = vi.fn(async (id: string) => ({ svg: `<svg id="${id}" data-theme="${applied}" />` }));
+    const queued = createQueuedMermaidRender(render, {
+      siteConfig: () => {
+        const requested = theme;
+        return { key: requested, apply: () => { applied = requested; } };
+      },
+    });
+
+    const dark = queued("one", "A --> B");
+    theme = "light";
+    const light = queued("two", "A --> B");
+
+    expect((await dark).svg).toContain('data-theme="dark"');
+    expect((await light).svg).toContain('data-theme="light"');
+    expect(render).toHaveBeenCalledTimes(2);
+
+    // Switching back is a cache hit under the first theme's key.
+    theme = "dark";
+    expect((await queued("three", "A --> B")).svg).toContain('data-theme="dark"');
+    expect(render).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  /** A throwing `apply` must reject that render, not wedge the queue: every
+   *  later render waits on the one before it. */
+  it("keeps the queue moving when applying the site config throws", async () => {
+    vi.stubGlobal("requestIdleCallback", (run: () => void) => { run(); return 1; });
+    let fail = true;
+    const render = vi.fn(async (id: string) => ({ svg: `<svg id="${id}" />` }));
+    const queued = createQueuedMermaidRender(render, {
+      siteConfig: () => ({
+        key: String(fail),
+        apply: () => { if (fail) throw new Error("bad config"); },
+      }),
+    });
+
+    await expect(queued("one", "A")).rejects.toThrow("bad config");
+    fail = false;
+    await expect(queued("two", "A")).resolves.toMatchObject({ svg: '<svg id="two" />' });
+    vi.unstubAllGlobals();
+  });
+
   it("validates a source once, and re-validates only after a failure", async () => {
     const parse = vi.fn(async (source: string) => {
       if (source === "bad") throw new Error("invalid");
