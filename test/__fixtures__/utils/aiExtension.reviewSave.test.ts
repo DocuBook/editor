@@ -106,6 +106,32 @@ describe('AI result is saved only once kept', () => {
     expect(failed.editor.document).toBe(unchanged)
   })
 
+  it('abandons a request without reverting when the document is replaced under it', async () => {
+    // Mid-stream: nothing is reverted, published or focused.
+    const running = setup([new ReadableStream({ start() {} })])
+    running.ai.openAIMenuAtBlock('b1')
+    void running.ai.invokeAI({ userPrompt: 'rewrite' })
+    await vi.waitFor(() => expect(running.ai.store.state.aiMenuState.status).toBe('thinking'))
+    running.editor.focus.mockClear()
+    const untouched = running.editor.document
+    expect(running.ai.abandon('document reloaded')).toBe(true)
+    expect(running.ai.store.state.aiMenuState).toBe('closed')
+    expect(running.editor.document).toBe(untouched)
+    expect(running.editor.focus).not.toHaveBeenCalled()
+    expect(running.ai.reviewBaseline()).toBeNull()
+    expect(running.ai.abandon()).toBe(false)
+
+    // Under review: the written result stays for the load to replace; Revert's
+    // starting document is never put back.
+    const reviewing = setup([streamOf({ operations: [update('b1', 'ai text')] })])
+    reviewing.ai.openAIMenuAtBlock('b1')
+    await reviewing.ai.invokeAI({ userPrompt: 'rewrite' })
+    expect(reviewing.ai.store.state.aiMenuState.status).toBe('user-reviewing')
+    expect(reviewing.ai.abandon('document reloaded')).toBe(true)
+    expect(reviewing.contentOf(reviewing.editor.document)).toBe('ai text')
+    expect(reviewing.onDocumentChange).not.toHaveBeenCalled()
+  })
+
   it('keeps the starting document across a retry of a partly applied request', async () => {
     const { ai, onDocumentChange, contentOf, editor } = setup([
       // The first attempt writes b1, then references a block that is gone.

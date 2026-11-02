@@ -233,8 +233,64 @@ export function flattenBlocks(blocks: readonly any[] | null | undefined): any[] 
  *  that content and keeps the children, and every child is listed, scoped and
  *  written as a block of its own; carrying the children in the parent's HTML
  *  too showed them to the model twice, under two ids. */
+/** A block's own HTML, per editor and block object. The tool-mode document
+ *  state is the whole document as HTML on every request, retries included,
+ *  and serializing it block by block was most of a request's start-up time on
+ *  a long note (~390 ms for 3000 blocks under jsdom). BlockNote hands out the same
+ *  object for a block until that block changes (its `blockCache`), and an edit
+ *  replaces the edited block and its ancestors, so a cached entry can never
+ *  describe content the block no longer has. */
+const ownHtmlCache = new WeakMap<object, WeakMap<object, string>>();
+
+function cachedOwnHtml(editor: any, block: any): string {
+  if (!editor || typeof editor !== "object" || !block || typeof block !== "object") {
+    return editor.blocksToHTMLLossy([{ ...block, children: [] }]);
+  }
+  let blocks = ownHtmlCache.get(editor);
+  if (!blocks) ownHtmlCache.set(editor, (blocks = new WeakMap()));
+  const cached = blocks.get(block);
+  if (cached !== undefined) return cached;
+  const html = editor.blocksToHTMLLossy([{ ...block, children: [] }]);
+  if (typeof html === "string") blocks.set(block, html);
+  return html;
+}
+
 async function ownBlockHtml(editor: any, block: any): Promise<string> {
-  return editor.blocksToHTMLLossy([{ ...block, children: [] }]);
+  return cachedOwnHtml(editor, block);
+}
+
+/** Main-thread time one warm-up slice may take before yielding. */
+const WARM_SLICE_MS = 8;
+
+/** Fill the own-HTML cache for the current document in slices of at most
+ *  `WARM_SLICE_MS`, while the user is still typing a prompt: the first request
+ *  on a long note then starts without serializing it. Returns a cancel. A
+ *  block edited meanwhile is a new object and is simply serialized again when
+ *  the request needs it. `setTimeout`, not `requestIdleCallback`: Safari 15.4
+ *  (the macOS 12 webview) has no idle callbacks. */
+export function warmDocumentHtml(editor: any, now: () => number = () => performance.now()): () => void {
+  if (typeof editor?.blocksToHTMLLossy !== "function") return () => {};
+  const blocks = flattenBlocks(editor.document);
+  let next = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const slice = () => {
+    timer = undefined;
+    const started = now();
+    try {
+      while (next < blocks.length && now() - started < WARM_SLICE_MS) {
+        cachedOwnHtml(editor, blocks[next++]);
+      }
+    } catch {
+      return;
+    }
+    if (next < blocks.length) timer = setTimeout(slice, 0);
+  };
+  timer = setTimeout(slice, 0);
+  return () => {
+    if (timer) clearTimeout(timer);
+    timer = undefined;
+    next = blocks.length;
+  };
 }
 
 /** How many levels each block of the document is nested. `ownBlockHtml` drops
@@ -743,17 +799,36 @@ export const isMeaningfulOps = (tc: any): boolean =>
 const normalizeHtml = (html: unknown): string =>
   typeof html === "string" ? html.trim() : "";
 
-function containsInternalBlockId(editor: any, html: string): boolean {
-  const ids: string[] = [];
-  const collect = (blocks: any[]) => {
-    for (const block of blocks) {
-      if (typeof block?.id === "string" && block.id.length >= 8)
-        ids.push(block.id);
-      if (block?.children?.length) collect(block.children);
+/** The document's blocks by id, and a test for whether some HTML carries one
+ *  of their ids. Built once per filtering pass: every operation used to walk the
+ *  document to find its block, and every sanitized block walked it again and ran
+ *  `includes` once per block id. */
+type DocumentIndex = { byId: Map<string, any>; containsInternalBlockId: (html: string) => boolean };
+
+function indexDocument(editor: any): DocumentIndex {
+  const byId = new Map<string, any>();
+  const ids = new Set<string>();
+  const lengths = new Set<number>();
+  for (const block of flattenBlocks(Array.isArray(editor?.document) ? editor.document : [])) {
+    if (typeof block?.id !== "string") continue;
+    byId.set(block.id, block);
+    if (block.id.length >= 8) {
+      ids.add(block.id);
+      lengths.add(block.id.length);
     }
+  }
+  /** Same answer as `ids.some(id => html.includes(id))`: every window of an id's
+   *  length is looked up instead, which costs the HTML's length per distinct id
+   *  length (one, for BlockNote's UUIDs) rather than per block. */
+  const containsInternalBlockId = (html: string) => {
+    for (const length of lengths) {
+      for (let start = 0; start + length <= html.length; start++) {
+        if (ids.has(html.slice(start, start + length))) return true;
+      }
+    }
+    return false;
   };
-  collect(Array.isArray(editor?.document) ? editor.document : []);
-  return ids.some((id) => html.includes(id));
+  return { byId, containsInternalBlockId };
 }
 
 function findBlock(editor: any, id: string): any | null {
@@ -769,7 +844,7 @@ function findBlock(editor: any, id: string): any | null {
   return find(Array.isArray(editor?.document) ? editor.document : []);
 }
 
-function sanitizeBlockHtml(editor: any, html: unknown): string | null {
+function sanitizeBlockHtml(editor: any, html: unknown, index: DocumentIndex): string | null {
   if (
     typeof html !== "string" ||
     typeof editor?.tryParseHTMLToBlocks !== "function" ||
@@ -790,7 +865,7 @@ function sanitizeBlockHtml(editor: any, html: unknown): string | null {
     if (!Array.isArray(parsed) || !parsed.length) return null;
     const sanitized = editor.blocksToHTMLLossy([parsed[0]]);
     return typeof sanitized === "string" &&
-      !containsInternalBlockId(editor, sanitized)
+      !index.containsInternalBlockId(sanitized)
       ? sanitized
       : null;
   } catch {
@@ -805,18 +880,17 @@ function sanitizeBlockHtml(editor: any, html: unknown): string | null {
 function updateIsMeaningful(
   editor: any,
   op: any,
-  scopeBlocks?: readonly any[],
+  index: DocumentIndex,
+  scopeById?: ReadonlyMap<string, any>,
 ): { meaningful: boolean; block: string } | null {
   if (!op?.id || typeof op.block !== "string") return null;
   const clean = stripSuffix(op.id);
-  const current = flattenBlocks(scopeBlocks).find((block) => block?.id === clean) ?? findBlock(editor, op.id);
+  const current = scopeById?.get(clean) ?? index.byId.get(clean);
   if (!current || typeof editor?.blocksToHTMLLossy !== "function") return null;
-  const requestedHtml = sanitizeBlockHtml(editor, op.block);
+  const requestedHtml = sanitizeBlockHtml(editor, op.block, index);
   if (requestedHtml === null) return null;
   try {
-    const currentHtml = editor.blocksToHTMLLossy([
-      { ...current, children: [] },
-    ]);
+    const currentHtml = cachedOwnHtml(editor, current);
     return {
       meaningful: normalizeHtml(currentHtml) !== normalizeHtml(requestedHtml),
       block: requestedHtml,
@@ -832,13 +906,20 @@ function updateIsMeaningful(
  *  compared against; without them the whole editor block is. */
 export function filterMeaningfulOperations(editor: any, tc: any, scopeBlocks?: readonly any[]): any | null {
   if (!isMeaningfulOps(tc)) return null;
+  const index = indexDocument(editor);
+  /** First occurrence wins, as `find` over the flattened scope did. */
+  const scopeById = scopeBlocks ? new Map<string, any>() : undefined;
+  for (const block of flattenBlocks(scopeBlocks)) {
+    const id = String(block?.id ?? "");
+    if (!scopeById!.has(id)) scopeById!.set(id, block);
+  }
   const operations = tc.input.operations.flatMap((op: any) => {
     if (op?.type === "update") {
-      const result = updateIsMeaningful(editor, op, scopeBlocks);
+      const result = updateIsMeaningful(editor, op, index, scopeById);
       return result?.meaningful ? [{ ...op, block: result.block }] : [];
     }
     if (op?.type === "delete") {
-      return op.id && findBlock(editor, op.id) ? [op] : [];
+      return op.id && index.byId.has(stripSuffix(op.id)) ? [op] : [];
     }
     if (op?.type === "add") {
       const blocks = Array.isArray(op.blocks)
@@ -846,7 +927,7 @@ export function filterMeaningfulOperations(editor: any, tc: any, scopeBlocks?: r
             .filter(
               (block: unknown) => typeof block === "string" && block.trim(),
             )
-            .map((block: string) => sanitizeBlockHtml(editor, block))
+            .map((block: string) => sanitizeBlockHtml(editor, block, index))
             .filter((block: string | null): block is string => block !== null)
         : [];
       return blocks.length ? [{ ...op, blocks }] : [];

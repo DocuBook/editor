@@ -144,6 +144,29 @@ describe('web IPC bridge', () => {
     }
   })
 
+  it.each([1, 2, 3, 4, 5, 7])('splits no frame differently when every read is %i characters', async (size) => {
+    // Each terminator kind, back to back, so a read boundary falls inside every
+    // one of them at some size; a frame with a lone \n inside it must survive.
+    const body = [
+      'event: ai:token\ndata: {"token":"lf"}\n\n',
+      'event: ai:token\r\ndata: {"token":"crlf"}\r\n\r\n',
+      'event: ai:token\rdata: {"token":"cr"}\r\r',
+      'event: ai:token\ndata: {"token":"two\\nlines"}\n\n',
+      'event: ai:token\ndata: {"token":"last"}\n\n',
+    ].join('')
+    const reads: string[] = []
+    for (let at = 0; at < body.length; at += size) reads.push(body.slice(at, at + size))
+    const tokens: string[] = []
+    const unlisten = await listen<{ token: string }>('ai:token', e => tokens.push(e.payload.token))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(sseStream(reads), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })))
+    try {
+      await invoke('ask_ai', { messages: '[]' })
+      expect(tokens).toEqual(['lf', 'crlf', 'cr', 'two\nlines', 'last'])
+    } finally {
+      unlisten()
+    }
+  })
+
   it('emits the auth event for unauthorized JSON requests', async () => {
     let unauthorized = 0
     const unlisten = await listen('auth:unauthorized', () => { unauthorized++ })

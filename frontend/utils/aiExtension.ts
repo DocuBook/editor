@@ -306,7 +306,7 @@ const extensionFactory = ({ editor, options }: any) => {
   /** `keep`: the request's changes stay in the document (accept, or a dismiss
    *  that leaves them). Only then are they published to the tab, so autosave
    *  never writes a result the user has not kept. */
-  const close = (collapseSelection = false, keep = true) => {
+  const close = (collapseSelection = false, keep = true, refocus = true) => {
     const kept = keep && !!session?.changed
     session = undefined
     cancelReveal()
@@ -329,7 +329,7 @@ const extensionFactory = ({ editor, options }: any) => {
      *  (keyboard open + editor focused). The strip then appears under the
      *  composer, which is lifted above it mid-collapse instead of staying put.
      *  Desktop keeps the caret restore. */
-    if (!softKeyboardOnFocus()) editor.focus()
+    if (refocus && !softKeyboardOnFocus()) editor.focus()
     if (kept) options?.onDocumentChange?.()
   }
 
@@ -422,6 +422,19 @@ const extensionFactory = ({ editor, options }: any) => {
       if (!session) return
       session.controller.abort(reason)
       reject()
+    },
+    /** The document is about to be replaced wholesale (reloaded from disk after
+     *  a branch switch, a conflict resolved to the disk version, a code-mode
+     *  edit). Stop the request and close WITHOUT reverting: `before` describes
+     *  a document that is going away, so restoring it would overwrite what the
+     *  load brings in, and later operations would land on blocks that no longer
+     *  exist. Nothing is published, and focus stays where the reload came from.
+     *  True when a request was dropped. */
+    abandon(reason?: any): boolean {
+      if (!session) return false
+      session.controller.abort(reason)
+      close(false, false, false)
+      return true
     },
     async retry() {
       // The error UI can outlive the session when the editor is closed or the

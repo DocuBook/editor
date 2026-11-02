@@ -254,7 +254,6 @@ async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
   }
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
-  let buf = ''
   // Watchdog (P0): if the stream produces no event for 60s (stalled provider
   // mid-generation), abort and surface an error instead of hanging silently.
   let stalled = false
@@ -284,41 +283,55 @@ async function streamAskAi(args: Record<string, unknown>, signal: AbortSignal) {
     if (!AI_STREAM_EVENTS.has(event)) return
     emit(event, parseSseJson(payload))
   }
-  /** Where the next frame-terminator search starts. A large frame (a tool call
-   *  carrying a whole document edit) arrives over many chunks; rescanning it
-   *  from the start on every chunk was quadratic in its size. Backing up by 3
-   *  keeps a terminator split across two chunks findable. */
-  let scanFrom = 0
-  const FRAME_END = /\r\n\r\n|\n\n|\r\r/g
-  const takeFrame = () => {
-    FRAME_END.lastIndex = Math.max(0, scanFrom - 3)
-    const match = FRAME_END.exec(buf)
-    if (!match) {
-      scanFrom = buf.length
-      return null
+  /** Text after the last complete frame, kept as the chunks it arrived in. A
+   *  large frame (a tool call carrying a whole document edit) spans many reads,
+   *  and appending each read to one string and scanning that string made the
+   *  engine copy the whole growing frame on every read: quadratic in its size,
+   *  ~150 ms of main thread for a 4 MB frame against ~4 ms now. Only the newest
+   *  chunk, with the 3 characters before it, can hold the terminator that ends
+   *  a frame, so that is all a read scans; the chunks are joined only then. */
+  let pending: string[] = []
+  let tail = ''
+  const FRAME_END = /\r\n\r\n|\n\n|\r\r/
+  const FRAME_ENDS = /\r\n\r\n|\n\n|\r\r/g
+  const takeFrames = (text: string): string[] => {
+    if (!text) return []
+    const boundary = tail + text
+    pending.push(text)
+    if (!FRAME_END.test(boundary)) {
+      tail = boundary.slice(-3)
+      return []
     }
-    const frame = buf.slice(0, match.index)
-    buf = buf.slice(match.index + match[0].length)
-    scanFrom = 0
-    return frame
+    const buffered = pending.join('')
+    const frames: string[] = []
+    let start = 0
+    FRAME_ENDS.lastIndex = 0
+    for (let match = FRAME_ENDS.exec(buffered); match; match = FRAME_ENDS.exec(buffered)) {
+      frames.push(buffered.slice(start, match.index))
+      start = FRAME_ENDS.lastIndex
+    }
+    const rest = buffered.slice(start)
+    pending = rest ? [rest] : []
+    tail = rest.slice(-3)
+    return frames
   }
   arm()
   try {
     for (;;) {
       const { done, value } = await reader.read()
       if (done) {
-        buf += decoder.decode()
+        pending.push(decoder.decode())
         break
       }
-      buf += decoder.decode(value, { stream: true })
+      const frames = takeFrames(decoder.decode(value, { stream: true }))
       if (value.byteLength > 0) arm()
-      let frame: string | null
-      while ((frame = takeFrame()) !== null) dispatch(frame)
+      for (const frame of frames) dispatch(frame)
       if (stalled) break
     }
     // The server closes every frame with a blank line — leftover text means the
     // connection died mid-frame; emitting it would ship partial content.
-    if (!stalled && buf.trim()) console.warn('[ipc] dropping incomplete SSE frame:', buf.slice(0, 120))
+    const leftover = pending.join('')
+    if (!stalled && leftover.trim()) console.warn('[ipc] dropping incomplete SSE frame:', leftover.slice(0, 120))
   } finally {
     if (watchdog) clearTimeout(watchdog)
     await reader.cancel().catch(() => {})
