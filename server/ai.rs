@@ -131,7 +131,13 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
     // Take the slot after `begin`: a turn that reuses an id has just cancelled its
     // predecessor, and a turn sent right after Stop follows one that is releasing
     // its slot now. Both should wait for that slot, not be refused.
-    let slot = tokio::time::timeout(AI_SLOT_WAIT, state.ai_slots.clone().acquire_owned()).await;
+    let slot = tokio::select! {
+        biased;
+        // Stopped while queued: the browser has already aborted this fetch, so
+        // give up the place in line instead of taking a slot from a live turn.
+        _ = cancel.cancelled() => return StatusCode::NO_CONTENT.into_response(),
+        slot = tokio::time::timeout(AI_SLOT_WAIT, state.ai_slots.clone().acquire_owned()) => slot,
+    };
     let ai_slot = match slot {
         Ok(Ok(slot)) => slot,
         _ => {

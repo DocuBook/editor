@@ -1278,4 +1278,58 @@ mod api_tests {
         assert_eq!(crate::config::Config::load(&state.data_dir).web_tools.search_provider, "tavily");
         let _ = std::fs::remove_dir_all(&state.data_dir);
     }
+
+    fn ask_ai(
+        state: &AppState,
+        request_id: &str,
+    ) -> tokio::task::JoinHandle<axum::response::Response> {
+        // No provider: a turn that gets a slot fails validation with a 400.
+        let args = json!({ "provider": "", "requestId": request_id });
+        tokio::spawn(crate::ai::ask_ai(
+            axum::extract::State(state.clone()),
+            axum::Json(args),
+        ))
+    }
+
+    #[tokio::test]
+    async fn ask_ai_waits_for_a_busy_slot_instead_of_refusing() {
+        let state = test_state();
+        let busy = state
+            .ai_slots
+            .clone()
+            .acquire_many_owned(MAX_CONCURRENT_AI_REQUESTS as u32)
+            .await
+            .unwrap();
+        let turn = ask_ai(&state, "queued");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(
+            !turn.is_finished(),
+            "a turn must queue while every slot is busy"
+        );
+        drop(busy);
+        let response = turn.await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let _ = std::fs::remove_dir_all(&state.data_dir);
+    }
+
+    #[tokio::test]
+    async fn ask_ai_stopped_while_queued_gives_up_its_place() {
+        let state = test_state();
+        let busy = state
+            .ai_slots
+            .clone()
+            .acquire_many_owned(MAX_CONCURRENT_AI_REQUESTS as u32)
+            .await
+            .unwrap();
+        let turn = ask_ai(&state, "stopped");
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        state.ai_requests.cancel("stopped");
+        let response = tokio::time::timeout(std::time::Duration::from_secs(1), turn)
+            .await
+            .expect("Stop must end the wait at once")
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        drop(busy);
+        let _ = std::fs::remove_dir_all(&state.data_dir);
+    }
 }
