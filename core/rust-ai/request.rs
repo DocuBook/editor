@@ -1,5 +1,6 @@
 use super::tool_schema;
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::{json, value::RawValue, Value};
 
 /// One chat request to an OpenAI-compatible provider.
 ///
@@ -7,23 +8,42 @@ use serde_json::{json, Value};
 /// prompt (system policy, grounding rules, document state, reference data)
 /// in one place (`frontend/utils/aiPrompt.ts`, `aiGrounding.ts`), so the
 /// backend adds no policy of its own that could drift from it.
+///
+/// They stay the JSON text the frontend sent. A tool-mode prompt carries the
+/// whole document, and parsing it into a `Value` tree, cloning that tree for
+/// the body and serializing it again cost several times the document's size in
+/// memory per request, for bytes that go out unchanged.
 #[derive(Debug, Clone)]
 pub struct AiRequest {
     pub model: String,
     pub api_key: String,
     pub base_url: String,
-    pub messages: Value,
+    pub messages: Box<RawValue>,
     pub tools: Option<Value>,
 }
 
+/// The `/chat/completions` body. It borrows the request, so the messages are
+/// written out as they arrived.
+#[derive(Serialize)]
+pub struct ChatBody<'a> {
+    model: &'a str,
+    messages: &'a RawValue,
+    stream: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Vec<Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<Value>,
+}
+
 impl AiRequest {
-    pub fn body(&self) -> Value {
-        let messages = self.messages.as_array().cloned().unwrap_or_default();
-        let mut body = json!({
-            "model": self.model,
-            "messages": messages,
-            "stream": true,
-        });
+    pub fn body(&self) -> ChatBody<'_> {
+        let mut body = ChatBody {
+            model: &self.model,
+            messages: &self.messages,
+            stream: true,
+            tools: None,
+            tool_choice: None,
+        };
         if let Some(tools) = &self.tools {
             if let Some(items) = tools.as_array().filter(|items| !items.is_empty()) {
                 let mut definitions = vec![tool_schema::openai_document_operation_tool()];
@@ -39,14 +59,14 @@ impl AiRequest {
                         })
                         .cloned(),
                 );
-                body["tools"] = json!(definitions);
+                body.tools = Some(definitions);
                 debug_assert_eq!(
                     tool_schema::DOCUMENT_OPERATION_TOOL,
                     "applyDocumentOperations"
                 );
                 // Thinking-mode gateways reject tool_choice:"required". Auto
                 // preserves tool-capable and text-capable provider behavior.
-                body["tool_choice"] = json!("auto");
+                body.tool_choice = Some(json!("auto"));
             }
         }
         body
@@ -63,8 +83,15 @@ impl AiRequest {
         messages: &str,
         tools: Option<&str>,
     ) -> Result<Self, String> {
-        let messages: Value =
+        // Checked as JSON without building a tree. A valid non-array has always
+        // been sent as no messages.
+        let messages: Box<RawValue> =
             serde_json::from_str(messages).map_err(|_| "Invalid messages".to_string())?;
+        let messages = if messages.get().trim_start().starts_with('[') {
+            messages
+        } else {
+            RawValue::from_string("[]".into()).map_err(|_| "Invalid messages".to_string())?
+        };
         // Older desktop/web adapters ignored malformed or non-array tools and
         // continued with text-only streaming. Keep that compatibility here.
         let tools = tools.and_then(|value| serde_json::from_str(value).ok());
@@ -81,7 +108,12 @@ impl AiRequest {
 #[cfg(test)]
 mod tests {
     use super::AiRequest;
-    use serde_json::json;
+    use serde_json::{json, Value};
+
+    /// The body as the provider receives it.
+    fn body(request: &AiRequest) -> Value {
+        serde_json::to_value(request.body()).unwrap()
+    }
 
     #[test]
     fn builds_streaming_openai_compatible_body() {
@@ -94,8 +126,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(request.url(), "https://example.test/v1/chat/completions");
-        assert_eq!(request.body()["stream"], true);
-        assert_eq!(request.body()["tool_choice"], json!("auto"));
+        assert_eq!(body(&request)["stream"], true);
+        assert_eq!(body(&request)["tool_choice"], json!("auto"));
     }
 
     #[test]
@@ -108,7 +140,7 @@ mod tests {
             None,
         )
         .unwrap();
-        let messages = request.body()["messages"].as_array().unwrap().clone();
+        let messages = body(&request)["messages"].as_array().unwrap().clone();
         let assistant = messages
             .iter()
             .find(|message| message["role"] == "assistant")
@@ -132,7 +164,7 @@ mod tests {
             Some(r#"[{"type":"function","function":{"name":"lookup_context","description":"Look up context","parameters":{"type":"object","properties":{"query":{"type":"string"}},"required":["query"]}}}]"#),
         )
         .unwrap();
-        let tools = request.body()["tools"].as_array().unwrap().clone();
+        let tools = body(&request)["tools"].as_array().unwrap().clone();
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["function"]["name"], "applyDocumentOperations");
         assert_eq!(tools[1]["function"]["name"], "lookup_context");
@@ -148,8 +180,8 @@ mod tests {
             Some("not-json"),
         )
         .unwrap();
-        assert!(request.body().get("tools").is_none());
-        assert!(request.body().get("tool_choice").is_none());
+        assert!(body(&request).get("tools").is_none());
+        assert!(body(&request).get("tool_choice").is_none());
     }
 
     #[test]
@@ -157,8 +189,8 @@ mod tests {
         let request =
             AiRequest::from_json("model", "key", "https://example.test/v1", "[]", Some("[]"))
                 .unwrap();
-        assert!(request.body().get("tools").is_none());
-        assert!(request.body().get("tool_choice").is_none());
+        assert!(body(&request).get("tools").is_none());
+        assert!(body(&request).get("tool_choice").is_none());
     }
 
     #[test]
@@ -174,11 +206,40 @@ mod tests {
             None,
         )
         .unwrap();
-        let body = request.body();
+        let body = body(&request);
         let messages = body["messages"].as_array().unwrap();
         assert_eq!(messages.len(), 3);
         assert_eq!(messages[0]["content"], "policy");
         assert_eq!(messages[1]["content"], "state");
         assert_eq!(messages[2]["content"], "hi");
+    }
+
+    #[test]
+    fn writes_the_messages_out_byte_for_byte() {
+        // Escapes and spacing are the frontend's: nothing is parsed and re-encoded.
+        let messages = r#"[ {"role":"user","content":"caf\u00e9 \"quoted\""} ]"#;
+        let request =
+            AiRequest::from_json("model", "key", "https://example.test/v1", messages, None)
+                .unwrap();
+        let wire = serde_json::to_string(&request.body()).unwrap();
+        assert!(wire.contains(messages), "{wire}");
+        assert_eq!(body(&request)["messages"][0]["content"], "café \"quoted\"");
+    }
+
+    #[test]
+    fn a_non_array_is_sent_as_no_messages_and_invalid_json_is_refused() {
+        let request = AiRequest::from_json(
+            "model",
+            "key",
+            "https://example.test/v1",
+            r#"{"a":1}"#,
+            None,
+        )
+        .unwrap();
+        assert_eq!(body(&request)["messages"], json!([]));
+        assert_eq!(
+            AiRequest::from_json("model", "key", "https://example.test/v1", "[", None).unwrap_err(),
+            "Invalid messages"
+        );
     }
 }

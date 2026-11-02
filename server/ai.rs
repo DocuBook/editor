@@ -86,7 +86,7 @@ fn resolve_agent(
                     (url, key, requested_model)
                 }
             };
-            let resolution = agent::validated_custom_addrs(&bound_url, false)?;
+            let resolution = agent::validated_custom_addrs_for_chat(&bound_url, false)?;
             Ok((agent::Agent::new(p, &model, &key, &bound_url), Some(resolution)))
         }
         p if !p.is_empty() => {
@@ -180,7 +180,7 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
         let _ai_slot = ai_slot;
         let url = request.url();
         let body = request.body();
-        let api_key = request.api_key;
+        let api_key = &request.api_key;
         // OpenCode Go 400s without a session id; every other provider ignores it.
         let mut chat = client
             .post(url)

@@ -453,6 +453,29 @@ pub async fn process_sse_data(
     Ok(())
 }
 
+/// Merge the `Token`s already queued behind `first` into it, without waiting
+/// for more. Returns the event to deliver and the first queued item that is
+/// not a token, which the caller handles next in order.
+///
+/// On desktop every event is one IPC message, which the webview handles on its
+/// main thread. A fast model or a busy webview leaves several tokens queued at
+/// once; they go out as one. Nothing is held back: an empty queue returns at once.
+pub fn coalesce_tokens(
+    first: AiEvent,
+    rx: &mut mpsc::Receiver<Result<AiEvent, String>>,
+) -> (AiEvent, Option<Result<AiEvent, String>>) {
+    let AiEvent::Token(mut text) = first else {
+        return (first, None);
+    };
+    loop {
+        match rx.try_recv() {
+            Ok(Ok(AiEvent::Token(next))) => text.push_str(&next),
+            Ok(other) => return (AiEvent::Token(text), Some(other)),
+            Err(_) => return (AiEvent::Token(text), None),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -506,6 +529,47 @@ mod tests {
         process_sse_data(&data, &mut state, &tx).await.unwrap();
         assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Token(_)))));
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn queued_tokens_go_out_as_one_and_order_is_kept() {
+        let (tx, mut rx) = mpsc::channel(8);
+        for item in [
+            Ok(AiEvent::Token("b".into())),
+            Ok(AiEvent::Token("c".into())),
+            Ok(AiEvent::ToolsDone),
+            Ok(AiEvent::Token("d".into())),
+        ] {
+            tx.send(item).await.unwrap();
+        }
+        let (merged, next) = coalesce_tokens(AiEvent::Token("a".into()), &mut rx);
+        assert_eq!(merged, AiEvent::Token("abc".into()));
+        // The first non-token is handed back, not dropped or reordered.
+        assert_eq!(next, Some(Ok(AiEvent::ToolsDone)));
+        assert_eq!(rx.try_recv().unwrap(), Ok(AiEvent::Token("d".into())));
+    }
+
+    #[tokio::test]
+    async fn an_error_behind_tokens_is_handed_back_after_them() {
+        let (tx, mut rx) = mpsc::channel(8);
+        tx.send(Err("boom".into())).await.unwrap();
+        let (merged, next) = coalesce_tokens(AiEvent::Token("partial".into()), &mut rx);
+        assert_eq!(merged, AiEvent::Token("partial".into()));
+        assert_eq!(next, Some(Err("boom".into())));
+    }
+
+    #[tokio::test]
+    async fn coalescing_never_waits_and_leaves_other_events_alone() {
+        let (tx, mut rx) = mpsc::channel::<Result<AiEvent, String>>(8);
+        let (merged, next) = coalesce_tokens(AiEvent::Token("only".into()), &mut rx);
+        assert_eq!((merged, next), (AiEvent::Token("only".into()), None));
+        tx.send(Ok(AiEvent::Token("x".into()))).await.unwrap();
+        let (event, next) = coalesce_tokens(AiEvent::Generating, &mut rx);
+        assert_eq!((event, next), (AiEvent::Generating, None));
+        assert!(
+            rx.try_recv().is_ok(),
+            "a non-token first event drains nothing"
+        );
     }
 
     #[tokio::test]
