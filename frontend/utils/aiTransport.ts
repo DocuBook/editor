@@ -34,6 +34,7 @@ import type { ReferenceResult } from "./aiPromptState";
 import { parseMentions } from "./aiMentions";
 import { isTextOnly, pendingToolProbe } from "./aiProbe";
 import { mapWithConcurrency } from "./concurrency";
+import type { AiPhase } from "./aiExtension";
 import { uuid } from "./uuid";
 import { collectUrlSources, extractUrls } from "./webTools";
 
@@ -308,6 +309,21 @@ async function runSendMessages(
         if (abortSignal?.aborted || closed || !isCurrent(e.payload)) return;
         toolBuffer.push(e.payload);
       });
+      /** Where the turn is while nothing is written yet. The menu shows only
+       *  "thinking" or "generating" otherwise, and "generating" stayed up through
+       *  context lookups, page fetches and re-asks that come after the first
+       *  output. Each phase part moves the menu back to `thinking` with a label. */
+      const enterPhase = (phase: AiPhase) => {
+        if (closed || abortSignal?.aborted) return;
+        try {
+          controller.enqueue({ type: "phase", phase });
+        } catch {}
+      };
+      /** rust-ai: the provider streams its reasoning before any output. */
+      const unsubReasoning = await listen<{ requestId?: string }>("ai:reasoning", (e) => {
+        if (!isCurrent(e.payload)) return;
+        enterPhase("reasoning");
+      });
       /** rust-ai: the first tool-call delta means the provider has started writing
        *  the document operations. Surface it now so the AI menu leaves "thinking"
        *  while the write happens, not only when the completed call lands. */
@@ -421,6 +437,9 @@ async function runSendMessages(
         /** The same results as plain reference data, for a text-mode fallback:
          *  Path B edits through Markdown and never carries tool calls. */
         const references: ReferenceResult[] = [];
+        /** What the next provider request is: the first ask (or the one after a
+         *  context round) thinks; a grounding re-ask or the text fallback retries. */
+        let nextAsk: AiPhase = "thinking";
         let contextToolRounds = 0;
         let contextToolCalls = 0;
         let contextToolChars = 0;
@@ -441,6 +460,7 @@ async function runSendMessages(
           const linked = extractUrls(userText).filter((url) => !fetched.has(url));
           const urls = linked.slice(0, MAX_PREFETCH_URLS);
           if (!urls.length) return;
+          enterPhase("researching");
           /** Its own request id, so Stop cancels the fetches like a tool round. */
           currentRequestId = uuid();
           const requestId = currentRequestId;
@@ -516,6 +536,7 @@ async function runSendMessages(
               });
             }
             if (abortSignal?.aborted) return;
+            enterPhase(nextAsk);
             requestStartedAt = performance.now();
             firstTokenAt = 0;
             currentRequestId = uuid();
@@ -563,6 +584,7 @@ async function runSendMessages(
                 };
               });
               toolTranscript.push({ role: "assistant", content: null, tool_calls: providerToolCalls });
+              enterPhase("researching");
               const budgetFor = (pageRead: boolean) => ({
                 used: pageRead ? contextPageChars : contextToolChars,
                 total: pageRead ? MAX_CONTEXT_PAGE_TOTAL_CHARS : MAX_CONTEXT_TOOL_TOTAL_CHARS,
@@ -610,6 +632,8 @@ async function runSendMessages(
               });
               pendingDelta = "";
               if (abortSignal?.aborted) return;
+              /** The model now reads what the lookups returned. */
+              nextAsk = "thinking";
               continue;
             }
             /** Tool calls are Path A's output channel only. A text-mode request
@@ -636,6 +660,7 @@ async function runSendMessages(
             }
             lastReason = semanticError ?? "unknown";
             errorFeedback = groundingRetryFeedback(semanticError, scope);
+            nextAsk = "retrying";
             attempts++;
           }
           /** The retry loop settled (accepted, exhausted, or truncated). Output for
@@ -745,6 +770,7 @@ async function runSendMessages(
             pendingDelta = "";
             attempts = 0;
             errorFeedback = "";
+            nextAsk = "retrying";
             toast.info("AI could not call tools — retrying in text mode");
             continue turn;
           }
@@ -823,6 +849,7 @@ async function runSendMessages(
         if (flushTimer) clearTimeout(flushTimer);
         unsubToken();
         unsubTool();
+        unsubReasoning();
         unsubGenerating();
         unsubDone();
         abortSignal?.removeEventListener?.("abort", cancelCurrentRequest);

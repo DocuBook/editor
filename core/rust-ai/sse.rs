@@ -162,6 +162,7 @@ pub async fn stream_chat(
         tool_calls: Vec::new(),
         truncated: false,
         generating_sent: false,
+        reasoning_sent: false,
     };
     let mut saw_event = false;
     let mut cancelled = false;
@@ -416,6 +417,22 @@ pub async fn process_sse_data(
         }
     }
     let text_delta = content.is_some_and(|delta| !delta.is_empty());
+    // Reasoning models stream their thinking before any output: DeepSeek, Qwen,
+    // Kimi and vLLM as `reasoning_content`, OpenRouter and Ollama as `reasoning`.
+    // The text is not output and is not kept; one signal lets the UI tell a model
+    // that is thinking from one that has not answered yet. A frame after the
+    // output started is not announced: the UI does not go back to "thinking".
+    let reasoning_delta = ["reasoning_content", "reasoning"].iter().any(|field| {
+        value["choices"][0]["delta"][field]
+            .as_str()
+            .is_some_and(|delta| !delta.is_empty())
+    });
+    if reasoning_delta && !summary.reasoning_sent && !summary.generating_sent {
+        summary.reasoning_sent = true;
+        tx.send(Ok(AiEvent::Reasoning))
+            .await
+            .map_err(|_| "AI stream consumer closed".to_string())?;
+    }
     // First non-empty delta — prose or tool-call arguments — means the provider has
     // begun writing. One signal per stream, sent before the completed call — without
     // it the UI sits in "thinking" for the whole write and only flips at the end.
@@ -448,6 +465,7 @@ mod tests {
             tool_calls: Vec::new(),
             truncated: false,
             generating_sent: false,
+            reasoning_sent: false,
         }
     }
 
@@ -488,6 +506,48 @@ mod tests {
         process_sse_data(&data, &mut state, &tx).await.unwrap();
         assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Token(_)))));
         assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    }
+
+    #[tokio::test]
+    async fn first_reasoning_delta_signals_reasoning_once() {
+        use tokio::sync::mpsc::error::TryRecvError;
+
+        // Both spellings providers use, each beside the empty `content` they send.
+        for field in ["reasoning_content", "reasoning"] {
+            let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+            let mut state = summary();
+            let data = json!({ "choices": [{ "delta": { "content": "", field: "let me see" } }] })
+                .to_string();
+            process_sse_data(&data, &mut state, &tx).await.unwrap();
+            process_sse_data(&data, &mut state, &tx).await.unwrap();
+            assert!(
+                matches!(rx.try_recv(), Ok(Ok(AiEvent::Reasoning))),
+                "{field}"
+            );
+            // Once per stream, and the thinking text is neither forwarded nor kept.
+            assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)), "{field}");
+            assert!(state.text.is_empty());
+            assert!(!state.generating_sent);
+
+            let answer = json!({ "choices": [{ "delta": { "content": "hi" } }] }).to_string();
+            process_sse_data(&answer, &mut state, &tx).await.unwrap();
+            assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Generating))));
+            assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Token(token))) if token == "hi"));
+        }
+    }
+
+    #[tokio::test]
+    async fn reasoning_after_output_started_is_not_announced() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let mut state = summary();
+        let answer = json!({ "choices": [{ "delta": { "content": "hi" } }] }).to_string();
+        process_sse_data(&answer, &mut state, &tx).await.unwrap();
+        let reasoning =
+            json!({ "choices": [{ "delta": { "reasoning_content": "hmm" } }] }).to_string();
+        process_sse_data(&reasoning, &mut state, &tx).await.unwrap();
+        assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Generating))));
+        assert!(matches!(rx.try_recv(), Ok(Ok(AiEvent::Token(_)))));
+        assert!(rx.try_recv().is_err(), "no Reasoning once output started");
     }
 
     #[tokio::test]

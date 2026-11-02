@@ -6,6 +6,7 @@ pub const TOKEN_EVENT: &str = "ai:token";
  *  completed call is only emitted at end of stream. Lets the UI leave its
  *  "thinking" state when writing actually starts instead of waiting for the end. */
 pub const GENERATING_EVENT: &str = "ai:generating";
+pub const REASONING_EVENT: &str = "ai:reasoning";
 pub const TOOL_CALL_EVENT: &str = "ai:tool_call";
 pub const TOOLS_DONE_EVENT: &str = "ai:tools_done";
 pub const DONE_EVENT: &str = "ai:done";
@@ -28,6 +29,9 @@ pub struct ToolCall {
 #[derive(Debug, Clone, PartialEq)]
 pub enum AiEvent {
     Token(String),
+    /// The provider started streaming its reasoning: it is working, but nothing
+    /// it emits yet is output. Sent at most once, and never after `Generating`.
+    Reasoning,
     Generating,
     ToolCall {
         tool_call_id: String,
@@ -52,6 +56,10 @@ impl AiEvent {
             AiEvent::Token(token) => (
                 TOKEN_EVENT,
                 serde_json::json!({ "requestId": request_id, "token": token }),
+            ),
+            AiEvent::Reasoning => (
+                REASONING_EVENT,
+                serde_json::json!({ "requestId": request_id }),
             ),
             AiEvent::Generating => (
                 GENERATING_EVENT,
@@ -100,6 +108,8 @@ pub struct StreamSummary {
     /// True once the first non-empty delta was forwarded as `AiEvent::Generating`,
     /// so the signal fires at most once per stream.
     pub generating_sent: bool,
+    /// True once a reasoning delta was announced as `AiEvent::Reasoning`.
+    pub reasoning_sent: bool,
 }
 
 pub fn local_tool_call_id(index: usize) -> String {
@@ -116,6 +126,7 @@ mod wire_tests {
         // superseded stream; a payload without it silently reopens the bug.
         let events = [
             AiEvent::Token("hi".into()),
+            AiEvent::Reasoning,
             AiEvent::Generating,
             AiEvent::ToolCall {
                 tool_call_id: "tool-0".into(),
