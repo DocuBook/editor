@@ -165,7 +165,7 @@ export function createBlockEditor(vaultPath: string, filePath: string, markdown?
         documentStateBuilder: createSelectionAwareDocumentStateBuilder(async (request: any) =>
           (await import('./aiBlocks')).buildHtmlDocumentState(request.editor, !!request.selectedBlocks?.length),
         ),
-        agentCursor: { name: 'DocuBook AI', color: 'var(--color-ai-cursor)' },
+        agentCursor: { name: 'Agent', color: 'var(--color-ai-cursor)' },
         onDocumentChange: () => {
           const markdown = serializeMarkdown(editor)
           if (markdown === null) return

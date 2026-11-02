@@ -202,6 +202,22 @@ html[data-toolbar-popup-open] .bn-editor {
     color: var(--color-ai-cursor-text);
 }
 
+/* Writing finished: the agent caret stays where it stopped, then fades out
+   over the end of its linger (CURSOR_LINGER_MS in aiExtension.ts). */
+.bn-collaboration-cursor__base.ai-cursor-leaving {
+    animation: ai-cursor-leave var(--ai-cursor-linger, 1600ms) ease-in forwards;
+}
+/* Fully faded a little before the caret is removed, so it never cuts out. */
+@keyframes ai-cursor-leave {
+    0%, 65% { opacity: 1; }
+    95%, 100% { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .bn-collaboration-cursor__base.ai-cursor-leaving {
+        animation: none;
+    }
+}
+
 /* AI character-reveal: waiting text stays laid out and only its visibility
    grows, so a tall block is written top-to-bottom without any reflow. */
 .ai-reveal-hidden {
