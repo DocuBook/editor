@@ -1200,3 +1200,121 @@ describe('createAiTransport writing-started marker', () => {
     expect(types).not.toContain('writing-started')
   })
 })
+
+describe('createAiTransport phase parts', () => {
+  const usePathA = () => {
+    useAiSettings.setState({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      probeTools: { deepseek: { 'deepseek-v4-flash': true } },
+    })
+  }
+  const editor = () => ({
+    document: [{ id: 'b1', type: 'paragraph', content: 'before' }],
+    getBlock: (id: string) => (id === 'b1' ? { id: 'b1', content: [] } : undefined),
+    getSelection: () => undefined,
+    getTextCursorPosition: () => ({ block: { id: 'b1', content: [] } }),
+    blocksToMarkdownLossy: () => '',
+    blocksToHTMLLossy: (blocks: any[]) => `<p>${blocks?.[0]?.content ?? ''}</p>`,
+    tryParseHTMLToBlocks: (html: string) => [
+      { type: 'paragraph', content: html.replace(/^<p>|<\/p>$/g, '') },
+    ],
+    tryParseMarkdownToBlocks: async (markdown: string) => [
+      { type: 'paragraph', content: markdown },
+    ],
+  })
+  const frame = (event: string, payload: Record<string, unknown>) => [`event: ${event}\n`, `data: ${JSON.stringify(payload)}\n\n`]
+  const finish = (id: string) => [...frame('ai:tools_done', { requestId: id }), ...frame('ai:done', { requestId: id, provider: 'deepseek', truncated: false })]
+  const edit = (id: string, blockId: string) => frame('ai:tool_call', {
+    requestId: id,
+    toolCallId: 'tool-0',
+    providerToolCallId: 'provider-doc',
+    toolName: 'applyDocumentOperations',
+    input: { operations: [{ type: 'update', id: blockId, block: '<p>after</p>' }] },
+  })
+  /** The parts that drive the menu label, in order. */
+  const timeline = async (options: Record<string, unknown> = {}, tools: Record<string, unknown> = {}) => {
+    const stream = await createAiTransport({ getEditor: editor, ...options }).sendMessages({
+      messages: [{ role: 'user', content: 'edit the document' }],
+      body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit doc', inputSchema: {} }, ...tools } },
+    })
+    const reader = stream.getReader()
+    const labels: string[] = []
+    for (;;) {
+      try {
+        const r = await reader.read()
+        if (r.done) break
+        if (r.value?.type === 'phase') labels.push(`phase:${r.value.phase}`)
+        else if (r.value?.type === 'writing-started' || r.value?.type === 'tool-input-available') labels.push(r.value.type)
+      } catch {
+        break
+      }
+    }
+    return labels
+  }
+
+  it('reports the model reasoning before it starts writing', async () => {
+    usePathA()
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      ...frame('ai:reasoning', { requestId: id }),
+      ...frame('ai:generating', { requestId: id }),
+      ...edit(id, 'b1$'),
+      ...finish(id),
+    ]))
+
+    expect(await timeline()).toEqual(['phase:thinking', 'phase:reasoning', 'writing-started', 'tool-input-available'])
+  })
+
+  it('ignores a reasoning signal from another request', async () => {
+    usePathA()
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      ...frame('ai:reasoning', { requestId: 'stale' }),
+      ...frame('ai:generating', { requestId: id }),
+      ...edit(id, 'b1$'),
+      ...finish(id),
+    ]))
+
+    expect(await timeline()).toEqual(['phase:thinking', 'writing-started', 'tool-input-available'])
+  })
+
+  it('goes back from generating to researching and thinking around a context lookup', async () => {
+    usePathA()
+    let attempt = 0
+    vi.stubGlobal('fetch', sseResponder((id) => attempt++ === 0
+      ? [
+          ...frame('ai:generating', { requestId: id }),
+          ...frame('ai:tool_call', { requestId: id, toolCallId: 'tool-0', providerToolCallId: 'provider-context', toolName: 'lookup_context', input: { query: 'q' } }),
+          ...finish(id),
+        ]
+      : [...frame('ai:generating', { requestId: id }), ...edit(id, 'b1$'), ...finish(id)]))
+    const executeContextTool = vi.fn(async () => JSON.stringify({ reference: 'data' }))
+
+    const labels = await timeline(
+      { executeContextTool, trustedContextTools: ['lookup_context'] },
+      { lookup_context: { description: 'Look up reference data', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } } },
+    )
+
+    expect(executeContextTool).toHaveBeenCalledOnce()
+    expect(labels).toEqual([
+      'phase:thinking', 'writing-started',
+      'phase:researching',
+      'phase:thinking', 'writing-started', 'tool-input-available',
+    ])
+  })
+
+  it('reports a re-ask after the first answer failed grounding as retrying', async () => {
+    usePathA()
+    let attempt = 0
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      ...frame('ai:generating', { requestId: id }),
+      // The first answer edits a block that does not exist.
+      ...edit(id, attempt++ === 0 ? 'missing$' : 'b1$'),
+      ...finish(id),
+    ]))
+
+    expect(await timeline()).toEqual([
+      'phase:thinking', 'writing-started',
+      'phase:retrying', 'writing-started', 'tool-input-available',
+    ])
+  })
+})

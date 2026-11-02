@@ -5,8 +5,13 @@ import { buildHtmlDocumentState, captureAISelection, dropAISelectionSnapshot, ha
 import { softKeyboardOnFocus } from './softKeyboard'
 import { uuid } from './uuid'
 
+/** What a `thinking` request is doing before it writes: waiting on the
+ *  provider, streaming the model's reasoning, reading context (vault lookups,
+ *  linked pages), or re-asking after a rejected or tool-less answer. */
+export type AiPhase = 'thinking' | 'reasoning' | 'researching' | 'retrying'
+
 export type AiMenuState =
-  | { blockId: string; status: 'user-input' | 'thinking' | 'generating' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any; retriesLeft?: number }
+  | { blockId: string; status: 'user-input' | 'thinking' | 'generating' | 'ai-writing' | 'user-reviewing' | 'error'; error?: any; retriesLeft?: number; phase?: AiPhase }
   | 'closed'
 
 type InvokeOptions = { userPrompt: string; useSelection?: boolean }
@@ -177,6 +182,13 @@ function blockEndPos(doc: any, id: string): number | null {
 function partOfType(value: any, type: string) {
   const parts = Array.isArray(value) ? value : [value]
   return parts.find((part) => part?.type === type)
+}
+
+const AI_PHASES = new Set<AiPhase>(['thinking', 'reasoning', 'researching', 'retrying'])
+
+function readPhase(value: any): AiPhase | undefined {
+  const phase = partOfType(value, 'phase')?.phase
+  return AI_PHASES.has(phase) ? phase : undefined
 }
 
 function readPart(value: any) {
@@ -491,6 +503,10 @@ const extensionFactory = ({ editor, options }: any) => {
            *  the completed operations only arrive at end of stream (and Path A may
            *  still retry or fall back). 'generating' is honest about that; 'ai-writing'
            *  is reserved for when operations are actually applied below. */
+          /** A new round (context lookup, re-ask) goes back to `thinking`: the
+           *  output its predecessor started is not what will be written. */
+          const phase = readPhase(next.value)
+          if (phase) setStatus({ status: 'thinking', phase })
           if (partOfType(next.value, 'writing-started')) setStatus('generating')
           const input = readPart(next.value)
           if (!input) continue

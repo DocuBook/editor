@@ -35,7 +35,7 @@ const bus = new Map<string, Set<Listener>>()
  *  web re-emits its SSE frames, desktop its per-request channel. They are never
  *  global Tauri events, so a listener costs no IPC round trip and a stream only
  *  reaches the window that asked for it. */
-const AI_STREAM_EVENTS = new Set(['ai:token', 'ai:generating', 'ai:tool_call', 'ai:tools_done', 'ai:done'])
+const AI_STREAM_EVENTS = new Set(['ai:token', 'ai:reasoning', 'ai:generating', 'ai:tool_call', 'ai:tools_done', 'ai:done'])
 /** Last message of a desktop `ask_ai` channel (`AI_END_EVENT` in agent.rs). */
 const AI_END_EVENT = 'ai:end'
 /** How long a finished desktop `ask_ai` waits for its channel to drain. Channel
