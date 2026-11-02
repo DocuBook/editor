@@ -144,10 +144,19 @@ type RevealState = {
  *  element carrying a `.bn-collaboration-cursor__label`, wrapped in word joiners.
  *  `aiFollowScroll`, the `#root` label override in index.css and the pre-flicker
  *  e2e suite all key off that exact DOM contract. */
-function createAgentCursor({ name, color }: { name?: string; color?: string }) {
+/** How long the caret stays where writing ended once the result is up for
+ *  review. It fades over the last part of it (`.ai-cursor-leaving`, index.css)
+ *  instead of vanishing the instant the writing stops. */
+const CURSOR_LINGER_MS = 1600
+
+function createAgentCursor({ name, color }: { name?: string; color?: string }, leaving = false) {
   const accent = color || 'var(--color-ai-cursor)'
   const cursor = document.createElement('span')
   cursor.classList.add('bn-collaboration-cursor__base')
+  if (leaving) {
+    cursor.classList.add('ai-cursor-leaving')
+    cursor.style.setProperty('--ai-cursor-linger', `${CURSOR_LINGER_MS}ms`)
+  }
   cursor.setAttribute('data-active', 'true')
   const caret = document.createElement('span')
   caret.classList.add('bn-collaboration-cursor__caret')
@@ -156,7 +165,7 @@ function createAgentCursor({ name, color }: { name?: string; color?: string }) {
   const label = document.createElement('span')
   label.classList.add('bn-collaboration-cursor__label')
   label.setAttribute('style', `background-color: ${accent}`)
-  label.textContent = name || 'AI'
+  label.textContent = name || 'Agent'
   caret.appendChild(label)
   cursor.appendChild(document.createTextNode('\u2060'))
   cursor.appendChild(caret)
@@ -206,6 +215,9 @@ const extensionFactory = ({ editor, options }: any) => {
   let session: AiSession | undefined
   /** Live position of the streaming caret, or null when nothing is being written. */
   let writingPos: number | null = null
+  /** Set while the caret lingers after writing (see `CURSOR_LINGER_MS`). */
+  let cursorLeaving = false
+  let cursorLingerTimer: ReturnType<typeof setTimeout> | undefined
   const hasAttachedView = () => !(editor as any).headless && !!(editor as any).prosemirrorView
   /** Non-null while freshly written content is being revealed character by
    *  character; `budget` counts revealed characters across `spans`. */
@@ -283,23 +295,42 @@ const extensionFactory = ({ editor, options }: any) => {
     view.dispatch(view.state.tr)
   }
 
+  const stopCursorLinger = () => {
+    if (cursorLingerTimer) clearTimeout(cursorLingerTimer)
+    cursorLingerTimer = undefined
+    cursorLeaving = false
+  }
+
   const moveWritingCursor = (blockId: string | null | undefined) => {
+    stopCursorLinger()
     const doc = (editor as any).prosemirrorView?.state.doc
     writingPos = blockId && doc ? blockEndPos(doc, blockId) : null
     refreshDecorations()
   }
 
   const clearWritingCursor = () => {
+    stopCursorLinger()
     if (writingPos === null) return
     writingPos = null
     refreshDecorations()
+  }
+
+  /** Writing is done and the result is up for review: the caret stays at the
+   *  end of what was written and fades, then goes. Anything else that happens
+   *  meanwhile (accept, revert, a follow-up, closing) clears it at once. */
+  const retireWritingCursor = () => {
+    if (writingPos === null || cursorLeaving) return
+    cursorLeaving = true
+    refreshDecorations()
+    cursorLingerTimer = setTimeout(clearWritingCursor, CURSOR_LINGER_MS)
   }
 
   const setStatus = (status: any) => {
     const current = store.state.aiMenuState
     if (current === 'closed') return
     const next = typeof status === 'object' ? { ...status, blockId: current.blockId } : { status, blockId: current.blockId }
-    if (next.status !== 'ai-writing') clearWritingCursor()
+    if (next.status === 'user-reviewing') retireWritingCursor()
+    else if (next.status !== 'ai-writing') clearWritingCursor()
     store.setState({ aiMenuState: next })
   }
 
@@ -388,7 +419,8 @@ const extensionFactory = ({ editor, options }: any) => {
           }
           if (writingPos === null || writingPos > state.doc.content.size) return DecorationSet.empty
           return DecorationSet.create(state.doc, [
-            Decoration.widget(writingPos, () => createAgentCursor(agentCursor), { key: 'docubook-ai-cursor', side: 10, ignoreSelection: true }),
+            /** A new key once leaving: the widget is drawn again, so its fade starts. */
+            Decoration.widget(writingPos, () => createAgentCursor(agentCursor, cursorLeaving), { key: cursorLeaving ? 'docubook-ai-cursor-leaving' : 'docubook-ai-cursor', side: 10, ignoreSelection: true }),
           ])
         },
       },
