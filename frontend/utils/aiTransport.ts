@@ -398,6 +398,9 @@ async function runSendMessages(
         const mentionResult = parsedMentions.hasMentions
           ? await invoke<any>("resolve_mentions", { request: { mentions: parsedMentions.mentions.map(({ token, kind }) => ({ token, kind })), excludePath: deps.filePath } })
           : undefined;
+        /** Stopped or superseded while the vault was searched: the composer's
+         *  context line now belongs to whatever came next, so leave it alone. */
+        if (abortSignal?.aborted) return;
         /** The Tauri command may hand back the bundle as a serialized string; a
          *  malformed payload must not abort the turn. Mentions are optional
          *  context, so a decode failure degrades to "no context" and the notice
@@ -485,6 +488,7 @@ async function runSendMessages(
           /** Visible like the mention summary: "the AI ignored my link" and "the
            *  link was never read" must not look the same. The count is over every
            *  link, so one past the cap reads as never read, not as ignored. */
+          if (abortSignal?.aborted) return;
           const notice = [mentionNotice(mentionContext), `${read} of ${linked.length} linked page${linked.length === 1 ? "" : "s"} read`]
             .filter(Boolean)
             .join(" · ");

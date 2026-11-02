@@ -280,3 +280,33 @@ describe('KeepAliveCache', () => {
     expect(create).toHaveBeenCalledOnce()
   })
 })
+describe('loadMarkdownIntoEditor under a live AI request', () => {
+  it('drops the request without reverting before it replaces the document, and says so', async () => {
+    const { loadMarkdownIntoEditor } = await import('../../../frontend/utils/editorFactory')
+    const { toast } = await import('sonner')
+    const info = vi.spyOn(toast, 'info').mockImplementation(() => 0 as any)
+    const order: string[] = []
+    const abandon = vi.fn(() => { order.push('abandon'); return true })
+    const editor = {
+      document: ['old-block'],
+      getExtension: (name: string) => (name === 'ai' ? { abandon } : undefined),
+      tryParseMarkdownToBlocks: () => ['disk-block'],
+      transact: (run: any) => run({ setMeta: vi.fn() }),
+      replaceBlocks: vi.fn(() => { order.push('replace') }),
+    }
+    const cached: any = { editor, loaded: true, loadedMarkdown: 'before' }
+
+    expect(loadMarkdownIntoEditor(cached, 'from disk')).toBe(true)
+    // The request is gone before its document is: its later operations and its
+    // Revert can no longer reach the loaded content.
+    expect(order).toEqual(['abandon', 'replace'])
+    expect(info).toHaveBeenCalledOnce()
+
+    // No request running: nothing to drop, nothing to say.
+    abandon.mockImplementation(() => false)
+    info.mockClear()
+    loadMarkdownIntoEditor(cached, 'again')
+    expect(info).not.toHaveBeenCalled()
+    info.mockRestore()
+  })
+})

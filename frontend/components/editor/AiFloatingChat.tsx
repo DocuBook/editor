@@ -9,7 +9,7 @@ import { useVaultStore } from '../../stores/vault'
 import { useAiChat } from '../../stores/aiChat'
 import { useAiSettings } from '../../stores/aiSettings'
 import { toast } from 'sonner'
-import { hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../utils/aiBlocks'
+import { hasAISelection, openAIMenuAtAnchor, restoreAISelection, warmDocumentHtml } from '../../utils/aiBlocks'
 import { mentionText, parseMentions } from '../../utils/aiMentions'
 import { loadMentionIndex, type MentionEntry } from '../../utils/mentionIndex'
 import { observeMobileToolbar } from '../../utils/mobileToolbar'
@@ -211,6 +211,13 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const canPrompt = status === 'closed' || status === 'user-input' || status === 'user-reviewing'
   const canTogglePrompts = status === 'closed' || status === 'user-input'
   const promptEnabled = aiConfigured && canPrompt
+
+  /** Serialize the note while the prompt is being typed: every request sends
+   *  the whole document as HTML, and on a long note that was the first thing a
+   *  sent prompt had to wait for. Restarts when the editor changes, stops once
+   *  the input is cleared or sent. */
+  const warmPrompt = promptEnabled && hasInput
+  useEffect(() => (warmPrompt && editor ? warmDocumentHtml(editor) : undefined), [warmPrompt, editor])
 
   /** Latest interaction guards for the scroll listener below. Status comes
    *  from the rust-ai store, so it is not part of the component's own render. */

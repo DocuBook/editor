@@ -13,6 +13,12 @@ vi.mock('../../../frontend/utils/aiMenu', () => ({
   ],
 }))
 
+const warm = vi.hoisted(() => ({ start: vi.fn(), cancel: vi.fn() }))
+vi.mock('../../../frontend/utils/aiBlocks', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../frontend/utils/aiBlocks')>()),
+  warmDocumentHtml: (editor: unknown) => { warm.start(editor); return warm.cancel },
+}))
+
 const softKeyboard = vi.hoisted(() => ({ onFocus: false }))
 vi.mock('../../../frontend/utils/softKeyboard', () => ({ softKeyboardOnFocus: () => softKeyboard.onFocus }))
 
@@ -211,6 +217,35 @@ describe('AI floating composer', () => {
 
     expect(useAiChat.getState().expanded).toBe(false)
     expect(document.body.textContent).not.toContain('Continue Writing')
+  })
+
+  it('serializes the note while a prompt is typed, and stops when it is cleared', () => {
+    warm.start.mockClear(); warm.cancel.mockClear()
+    const ai = makeAi()
+    const blockEditor = {
+      getExtension: vi.fn(() => ai),
+      getTextCursorPosition: vi.fn(() => ({ block: { id: 'b1' } })),
+      getSelection: vi.fn(() => undefined),
+    }
+    useEditorStore.setState({ blockEditor })
+
+    act(() => root!.render(<AiFloatingChat />))
+    expect(warm.start).not.toHaveBeenCalled()
+
+    act(() => useAiChat.setState({ input: 'summarize this' }))
+    expect(warm.start).toHaveBeenCalledOnce()
+    expect(warm.start).toHaveBeenCalledWith(blockEditor)
+    // Typing on does not restart it.
+    act(() => useAiChat.setState({ input: 'summarize this note' }))
+    expect(warm.start).toHaveBeenCalledOnce()
+
+    act(() => useAiChat.setState({ input: '' }))
+    expect(warm.cancel).toHaveBeenCalledOnce()
+
+    // Nothing to warm while a request runs: the prompt cannot be sent then.
+    act(() => ai.setMenuState({ blockId: 'b1', status: 'generating' }))
+    act(() => useAiChat.setState({ input: 'next prompt' }))
+    expect(warm.start).toHaveBeenCalledOnce()
   })
 
   it.each([

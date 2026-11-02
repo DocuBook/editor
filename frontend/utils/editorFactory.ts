@@ -64,6 +64,13 @@ export function loadMarkdownIntoEditor(cached: CachedEditor, markdown: string): 
    *  over whatever the user had opened meanwhile. */
   cached.loaded = true
   cached.loadedMarkdown = markdown
+  /** A live AI request was built against the document this load replaces. Left
+   *  running, its Revert put that old document back over the one loaded here
+   *  without marking the tab dirty, and the next edit then saved the old content
+   *  over the version just loaded. */
+  if ((editor as any).getExtension?.('ai')?.abandon?.('document reloaded')) {
+    toast.info('AI request stopped: the note was reloaded')
+  }
   try {
     /** Math blocks export as $/$$ but blocknote's markdown parser has no
      *  $ handling — pre-convert to <math> HTML so saved math re-renders. */

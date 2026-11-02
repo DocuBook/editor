@@ -885,10 +885,15 @@ describe('createAiTransport tools-to-text fallback', () => {
 
     await mentionsStarted
     controller.abort()
-    finishMentions(Response.json({ result: [] }))
+    // The turn that replaced this one has already published its own notice.
+    useAiChat.getState().setMentionNotice('newer turn')
+    finishMentions(Response.json({ result: { files: [{ path: 'notes.md' }] } }))
     await stream.getReader().read().catch(() => undefined)
+    // The read can settle on the abort first; let the resolution land.
+    await new Promise(resolve => setTimeout(resolve, 20))
 
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/api/ask_ai'))).toBe(false)
+    expect(useAiChat.getState().mentionNotice).toBe('newer turn')
   })
 
   it('does not start a model request if stopped during context-tool discovery', async () => {
