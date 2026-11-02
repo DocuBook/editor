@@ -1233,9 +1233,9 @@ describe('createAiTransport phase parts', () => {
     input: { operations: [{ type: 'update', id: blockId, block: '<p>after</p>' }] },
   })
   /** The parts that drive the menu label, in order. */
-  const timeline = async (options: Record<string, unknown> = {}, tools: Record<string, unknown> = {}) => {
+  const timeline = async (options: Record<string, unknown> = {}, tools: Record<string, unknown> = {}, prompt = 'edit the document') => {
     const stream = await createAiTransport({ getEditor: editor, ...options }).sendMessages({
-      messages: [{ role: 'user', content: 'edit the document' }],
+      messages: [{ role: 'user', content: prompt }],
       body: { toolDefinitions: { applyDocumentOperations: { description: 'Edit doc', inputSchema: {} }, ...tools } },
     })
     const reader = stream.getReader()
@@ -1315,6 +1315,48 @@ describe('createAiTransport phase parts', () => {
     expect(await timeline()).toEqual([
       'phase:thinking', 'writing-started',
       'phase:retrying', 'writing-started', 'tool-input-available',
+    ])
+  })
+
+  it('reports the text-mode fallback after a prose answer as retrying', async () => {
+    usePathA()
+    let attempt = 0
+    vi.stubGlobal('fetch', sseResponder((id) => [
+      ...frame('ai:generating', { requestId: id }),
+      // Path A answers prose instead of a tool call; Path B answers Markdown.
+      ...frame('ai:token', { requestId: id, token: attempt++ === 0 ? 'I cannot edit this document.' : '<content>after</content>' }),
+      ...frame('ai:done', { requestId: id, provider: 'deepseek', truncated: false }),
+    ]))
+
+    expect(await timeline()).toEqual([
+      'phase:thinking', 'writing-started',
+      'phase:retrying', 'writing-started', 'tool-input-available',
+    ])
+  })
+
+  it('reports reading the linked pages before a text-only model thinks', async () => {
+    useAiSettings.setState({
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      probeTools: { deepseek: { 'deepseek-v4-flash': false } },
+    })
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: any) => {
+      const body = JSON.parse(String(init?.body ?? '{}'))
+      const command = String(url).replace(/^.*\/api\//, '')
+      if (command === 'context_tools') return Response.json({ result: [{ name: 'web_fetch', description: 'f', input_schema: { type: 'object' }, read_only: true }] })
+      if (command === 'call_context_tool') return Response.json({ result: JSON.stringify({ type: 'untrusted_reference_data', truncated: false, content: { url: body.input.url, title: 'T', text: 'Body' } }) })
+      if (command !== 'ask_ai') return Response.json({ result: null })
+      const id = String(body.requestId ?? '')
+      return new Response(sseStream([
+        ...frame('ai:generating', { requestId: id }),
+        ...frame('ai:token', { requestId: id, token: '<content>Summary.</content>' }),
+        ...frame('ai:done', { requestId: id, provider: 'deepseek', truncated: false }),
+      ]), { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    }))
+
+    expect(await timeline({ discoverContextTools: true }, {}, 'Summarise https://a.example/one')).toEqual([
+      'phase:researching',
+      'phase:thinking', 'writing-started', 'tool-input-available',
     ])
   })
 })
