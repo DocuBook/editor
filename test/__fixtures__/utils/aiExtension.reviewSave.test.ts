@@ -84,6 +84,28 @@ describe('AI result is saved only once kept', () => {
     expect(second.onDocumentChange).not.toHaveBeenCalled()
   })
 
+  it('leaves the document alone when nothing was written', async () => {
+    // Stop mid-stream: the request never got to write.
+    const pending = new ReadableStream({ start() {} })
+    const stopped = setup([pending])
+    const untouched = stopped.editor.document
+    stopped.ai.openAIMenuAtBlock('b1')
+    void stopped.ai.invokeAI({ userPrompt: 'rewrite' })
+    await vi.waitFor(() => expect(stopped.ai.store.state.aiMenuState.status).toBe('thinking'))
+    await stopped.ai.abort('stop')
+    // Reverting replaces every block, so the same array means no revert ran.
+    expect(stopped.editor.document).toBe(untouched)
+
+    // Cancel from an error that came before any operation was applied.
+    const failed = setup([streamOf()])
+    const unchanged = failed.editor.document
+    failed.ai.openAIMenuAtBlock('b1')
+    await failed.ai.invokeAI({ userPrompt: 'rewrite' })
+    expect(failed.ai.store.state.aiMenuState.status).toBe('error')
+    failed.ai.rejectChanges()
+    expect(failed.editor.document).toBe(unchanged)
+  })
+
   it('keeps the starting document across a retry of a partly applied request', async () => {
     const { ai, onDocumentChange, contentOf, editor } = setup([
       // The first attempt writes b1, then references a block that is gone.

@@ -227,6 +227,12 @@ pub async fn stream_chat(
                     break;
                 }
                 saw_event = true;
+                // The provider's end marker. Waiting for EOF instead would hold the
+                // tool calls and `Done` behind a gateway that keeps the connection
+                // open, until the read timeout.
+                if event.data == "[DONE]" {
+                    break;
+                }
                 if let Err(error) = process_sse_data(&event.data, &mut summary, &tx).await {
                     send_error(&tx, error).await;
                     return;
@@ -419,7 +425,9 @@ pub async fn process_sse_data(
             .await
             .map_err(|_| "AI stream consumer closed".to_string())?;
     }
-    if let Some(content) = content {
+    // Role-only and reasoning frames carry `content: ""`; forwarding them would be
+    // an IPC round trip (and a fake first token) per frame for nothing.
+    if let Some(content) = content.filter(|delta| !delta.is_empty()) {
         summary.text.push_str(content);
         tx.send(Ok(AiEvent::Token(content.to_string())))
             .await
@@ -492,7 +500,11 @@ mod tests {
             json!({ "choices": [{ "delta": { "role": "assistant", "content": "" } }] }).to_string();
         process_sse_data(&data, &mut state, &tx).await.unwrap();
         assert!(!state.generating_sent);
-        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(_)))));
+        // Nor is it forwarded as a token: it carries no text.
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]
@@ -651,6 +663,52 @@ mod tests {
         // The signal announced by the first delta precedes the text it carries.
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
         assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(value))) if value == "café"));
+    }
+
+    #[tokio::test]
+    async fn done_marker_ends_the_stream_while_the_connection_stays_open() {
+        use tokio::io::AsyncWriteExt;
+
+        // Some gateways keep the connection open after `[DONE]`. Waiting for EOF
+        // held the result back until the read timeout.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut head = [0_u8; 1024];
+            let _ = tokio::io::AsyncReadExt::read(&mut socket, &mut head).await;
+            let _ = socket
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+                      data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n\
+                      data: [DONE]\n\n",
+                )
+                .await;
+            let _ = socket.flush().await;
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            drop(socket);
+        });
+        let response = get_sse(format!("http://{addr}/chat")).await;
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            stream_chat(
+                response,
+                "test".into(),
+                "test".into(),
+                Arc::new(CancelToken::new()),
+                Instant::now(),
+                tx,
+            ),
+        )
+        .await
+        .expect("`[DONE]` must end the stream without waiting for EOF");
+
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Generating))));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Token(value))) if value == "hi"));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::ToolsDone))));
+        assert!(matches!(rx.recv().await, Some(Ok(AiEvent::Done { .. }))));
     }
 
     #[tokio::test]

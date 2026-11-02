@@ -102,7 +102,14 @@ struct AppState {
     data_dir: PathBuf,
 }
 
-const MAX_CONCURRENT_AI_REQUESTS: usize = 1;
+/** In-flight AI streams across the whole server. Each turn is addressed by its
+ *  own request id, so streams never share cancellation; the cap only bounds
+ *  provider connections and buffered responses. One would turn a commit-message
+ *  request beside the AI panel, or a prompt sent right after Stop, into a 429. */
+const MAX_CONCURRENT_AI_REQUESTS: usize = 4;
+/** How long a turn waits for a slot before it is refused. Covers a stopped turn
+ *  still releasing its slot when the next prompt arrives. */
+const AI_SLOT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -204,6 +211,13 @@ fn main() {
                 .await
                 .expect("bind"),
         };
+        // Token frames are a few dozen bytes; with Nagle on, each can sit behind
+        // the previous frame's delayed ACK (~40ms on Linux) before it is sent.
+        let listener = axum::serve::ListenerExt::tap_io(listener, |tcp| {
+            if let Err(error) = tcp.set_nodelay(true) {
+                tracing::debug!(event = "set_nodelay_failed", %error);
+            }
+        });
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),

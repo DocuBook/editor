@@ -322,9 +322,12 @@ const extensionFactory = ({ editor, options }: any) => {
   }
 
   /** Never publishes: a page without a view cannot revert, but its tab still
-   *  holds the baseline, which is what a rejected result must leave behind. */
+   *  holds the baseline, which is what a rejected result must leave behind.
+   *  Nothing written means nothing to revert: replacing every block anyway
+   *  produced a new document, which marked the tab dirty, autosaved a file the
+   *  user never touched, rebuilt every node view and left a no-op undo step. */
   const reject = () => {
-    if (session?.before && hasAttachedView()) editor.replaceBlocks(editor.document.map((block: any) => block.id), session.before)
+    if (session?.changed && session.before && hasAttachedView()) editor.replaceBlocks(editor.document.map((block: any) => block.id), session.before)
     close(true, false)
   }
 
