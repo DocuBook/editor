@@ -151,6 +151,58 @@ pub fn validated_custom_addrs(
     Ok((host, addrs))
 }
 
+/// How long a chat request reuses a custom endpoint's validated addresses. Each
+/// model round of a turn resolved the host again: a blocking lookup (musl in the
+/// Docker image keeps no resolver cache) and, whenever the answer came back in a
+/// different set, a newly pinned client paying TCP and TLS setup again.
+const CHAT_RESOLUTION_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+const MAX_CHAT_RESOLUTIONS: usize = 8;
+
+type Resolution = (String, Vec<std::net::SocketAddr>);
+type ResolutionKey = (String, bool);
+static CHAT_RESOLUTIONS: std::sync::Mutex<Vec<(ResolutionKey, std::time::Instant, Resolution)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// `resolve` behind the chat cache. Only an answer that passed validation is
+/// kept, so the cache can only replay addresses that were allowed; a refusal or
+/// a failed lookup is retried on the next round.
+fn cached_chat_resolution(
+    key: ResolutionKey,
+    now: std::time::Instant,
+    resolve: impl FnOnce() -> Result<Resolution, String>,
+) -> Result<Resolution, String> {
+    let fresh = |at: &std::time::Instant| now.saturating_duration_since(*at) < CHAT_RESOLUTION_TTL;
+    {
+        let mut cached = CHAT_RESOLUTIONS.lock().unwrap_or_else(|e| e.into_inner());
+        cached.retain(|(_, at, _)| fresh(at));
+        if let Some((_, _, resolution)) = cached.iter().find(|(k, _, _)| *k == key) {
+            return Ok(resolution.clone());
+        }
+    }
+    let resolution = resolve()?;
+    let mut cached = CHAT_RESOLUTIONS.lock().unwrap_or_else(|e| e.into_inner());
+    cached.retain(|(k, _, _)| *k != key);
+    if cached.len() >= MAX_CHAT_RESOLUTIONS {
+        cached.remove(0);
+    }
+    cached.push((key, now, resolution.clone()));
+    Ok(resolution)
+}
+
+/// `validated_custom_addrs` for a chat request, reused across the rounds of a
+/// turn (see `CHAT_RESOLUTION_TTL`). Saving or probing an endpoint in Settings
+/// resolves it afresh through `validated_custom_addrs`.
+pub fn validated_custom_addrs_for_chat(
+    base_url: &str,
+    allow_loopback: bool,
+) -> Result<Resolution, String> {
+    cached_chat_resolution(
+        (base_url.to_string(), allow_loopback),
+        std::time::Instant::now(),
+        || validated_custom_addrs(base_url, allow_loopback),
+    )
+}
+
 /// Validate a user-supplied OpenAI-compatible endpoint.
 pub fn validate_custom_base_url(base_url: &str, allow_loopback: bool) -> Result<(), String> {
     validated_custom_addrs(base_url, allow_loopback).map(|_| ())
@@ -250,6 +302,62 @@ pub async fn fetch_models(
 
 #[cfg(test)]
 mod tests {
+
+    fn resolution(port: u16) -> Resolution {
+        (
+            "llm.example.test".into(),
+            vec![std::net::SocketAddr::from(([203, 0, 113, 7], port))],
+        )
+    }
+
+    #[test]
+    fn chat_resolution_is_reused_within_its_window_and_refreshed_after() {
+        let key = ("https://reuse.example.test/v1".to_string(), false);
+        let start = std::time::Instant::now();
+        let mut lookups = 0;
+        let mut lookup = |port| {
+            lookups += 1;
+            Ok(resolution(port))
+        };
+        assert_eq!(
+            cached_chat_resolution(key.clone(), start, || lookup(1)).unwrap(),
+            resolution(1)
+        );
+        let inside = start + CHAT_RESOLUTION_TTL - std::time::Duration::from_secs(1);
+        assert_eq!(
+            cached_chat_resolution(key.clone(), inside, || lookup(2)).unwrap(),
+            resolution(1)
+        );
+        let after = start + CHAT_RESOLUTION_TTL;
+        assert_eq!(
+            cached_chat_resolution(key, after, || lookup(2)).unwrap(),
+            resolution(2)
+        );
+        assert_eq!(lookups, 2);
+    }
+
+    #[test]
+    fn a_refused_chat_resolution_is_not_cached() {
+        let key = ("https://refused.example.test/v1".to_string(), false);
+        let now = std::time::Instant::now();
+        assert!(
+            cached_chat_resolution(key.clone(), now, || Err("internal address".into())).is_err()
+        );
+        assert_eq!(
+            cached_chat_resolution(key, now, || Ok(resolution(3))).unwrap(),
+            resolution(3)
+        );
+    }
+
+    #[test]
+    fn loopback_permission_is_part_of_the_chat_resolution_key() {
+        // Desktop allows loopback, the server never does: an answer validated
+        // under one rule must not be replayed under the other.
+        let url = "https://rule.example.test/v1".to_string();
+        let now = std::time::Instant::now();
+        cached_chat_resolution((url.clone(), true), now, || Ok(resolution(4))).unwrap();
+        assert!(cached_chat_resolution((url, false), now, || Err("refused".into())).is_err());
+    }
     use super::*;
 
     #[test]

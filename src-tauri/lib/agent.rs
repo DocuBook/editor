@@ -726,14 +726,19 @@ pub async fn ask_ai(
             base_url.as_deref().unwrap_or(""),
         )?;
         let pinned = if provider == crate::agent::CUSTOM_PROVIDER_ID {
-            Some(crate::agent::validated_custom_addrs(&resolved, true)?)
+            Some(crate::agent::validated_custom_addrs_for_chat(
+                &resolved, true,
+            )?)
         } else {
             crate::agent::validate_base_url(&provider, &resolved)?;
             None
         };
-        let key =
-            crate::keychain::get_key(&provider).map_err(|_| "No API key found in keychain")?;
-        Ok::<_, String>((crate::agent::Agent::new(&provider, &model, &key, &resolved), pinned))
+        let key = crate::keychain::get_key_for_chat(&provider)
+            .map_err(|_| "No API key found in keychain")?;
+        Ok::<_, String>((
+            crate::agent::Agent::new(&provider, &model, &key, &resolved),
+            pinned,
+        ))
     });
     let (agent, pinned) = tokio::select! {
         result = lookup => result.map_err(|e| e.to_string())??,
@@ -776,8 +781,10 @@ pub async fn ask_ai(
         tx,
     ));
     let request_id = request_id.unwrap_or_default();
-    while let Some(event) = rx.recv().await {
-        let event = event?;
+    let mut next = rx.recv().await;
+    while let Some(event) = next.take() {
+        // Tokens already queued travel as one channel message.
+        let (event, after) = crate::rust_ai::sse::coalesce_tokens(event?, &mut rx);
         let (name, payload) = event.to_wire(&request_id);
         if on_event
             .send(serde_json::json!({ "event": name, "payload": payload }))
@@ -787,6 +794,10 @@ pub async fn ask_ai(
             cancel.cancel();
             return Ok(());
         }
+        next = match after {
+            Some(item) => Some(item),
+            None => rx.recv().await,
+        };
     }
     finish()
 }

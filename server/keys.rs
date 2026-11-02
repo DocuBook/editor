@@ -47,13 +47,46 @@ pub(crate) fn passphrase() -> Option<String> {
 
 const ENC_VERSION: u8 = 1;
 
-/** Derive a 32-byte AES key from the passphrase + salt (Argon2id). */
+/** Derivations remembered by `derive_key`: keys.json and the git credential
+ *  store each have one salt, and a save replaces it. Tests derive from many
+ *  files in parallel, so they get room enough that none evicts another's. */
+const MAX_DERIVED_KEYS: usize = if cfg!(test) { 256 } else { 4 };
+type DerivedKey = (String, Vec<u8>, [u8; 32]);
+static DERIVED_KEYS: std::sync::Mutex<Vec<DerivedKey>> = std::sync::Mutex::new(Vec::new());
+
+#[cfg(test)]
+thread_local! {
+    /// Argon2id runs on the calling thread, so a per-thread count stays exact
+    /// while other tests derive in parallel.
+    static DERIVATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/** Derive a 32-byte AES key from the passphrase + salt (Argon2id).
+ *
+ *  Argon2id is slow by design (about 13 ms and 19 MiB per derive), and every
+ *  key lookup decrypts keys.json: once per model round of every prompt turn.
+ *  The result depends only on the passphrase and the file's salt, and each save
+ *  writes a fresh salt, so a remembered derivation never decrypts a file it was
+ *  not made for. It adds nothing the process lacks: the passphrase is already in
+ *  its environment, and the API keys are still decrypted per read. */
 fn derive_key(pass: &str, salt: &[u8]) -> Result<[u8; 32], String> {
+    let remembered = DERIVED_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, _, key)) = remembered.iter().find(|(p, s, _)| p == pass && s == salt) {
+        return Ok(*key);
+    }
+    drop(remembered);
+    #[cfg(test)]
+    DERIVATIONS.with(|count| count.set(count.get() + 1));
     // Output buffer is fully overwritten by Argon2id before it is returned.
     let mut key: [u8; 32] = Default::default();
     Argon2::default()
         .hash_password_into(pass.as_bytes(), salt, &mut key)
         .map_err(|e| format!("argon2id kdf failed: {e}"))?;
+    let mut remembered = DERIVED_KEYS.lock().unwrap_or_else(|e| e.into_inner());
+    if remembered.len() >= MAX_DERIVED_KEYS {
+        remembered.remove(0);
+    }
+    remembered.push((pass.to_string(), salt.to_vec(), key));
     Ok(key)
 }
 
@@ -304,6 +337,31 @@ mod tests {
         assert!(raw.contains("sk-abc"), "no passphrase must stay plaintext");
         let loaded = load_with(&dir, None);
         assert_eq!(loaded.get("openai").map(|s| s.as_str()), Some("sk-abc"));
+        let _ = std::fs::remove_file(keys_file(&dir));
+    }
+
+    #[test]
+    fn repeated_reads_derive_the_key_once_per_salt() {
+        let derivations = || DERIVATIONS.with(|count| count.get());
+        let dir = tmp();
+        let mut map = HashMap::new();
+        map.insert("deepseek".to_string(), "sk-memo".to_string());
+        let start = derivations();
+        save_with(&dir, &map, Some("memo-pass")).unwrap();
+        for _ in 0..3 {
+            assert_eq!(load_with(&dir, Some("memo-pass")), map);
+        }
+        // One derivation for the salt the save wrote; every read reuses it.
+        assert_eq!(derivations() - start, 1);
+
+        // A save writes a fresh salt, which is derived once more.
+        map.insert("deepseek".to_string(), "sk-memo-2".to_string());
+        save_with(&dir, &map, Some("memo-pass")).unwrap();
+        assert_eq!(load_with(&dir, Some("memo-pass")), map);
+        assert_eq!(derivations() - start, 2);
+
+        // The memo is keyed by passphrase too: a wrong one still fails.
+        assert!(load_with(&dir, Some("not-the-pass")).is_empty());
         let _ = std::fs::remove_file(keys_file(&dir));
     }
 

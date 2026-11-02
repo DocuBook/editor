@@ -4,15 +4,68 @@
 /// keyring 3.6.3 writes to a process-scoped location on macOS 12 and its
 /// entries do not persist across processes (verified: cross-process reads
 /// return NoEntry while the `security` CLI persists correctly).
-use std::{collections::HashSet, process::Command, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    process::Command,
+    sync::Mutex,
+    time::{Duration, Instant},
+};
 
 const SERVICE: &str = "com.docubook.editor";
 const MAX_PROVIDER_COUNT: usize = 64;
 const MAX_PROVIDER_ID_BYTES: usize = 128;
 static KEY_SCAN_LOCK: Mutex<()> = Mutex::new(());
 
+/** How long a key read for chat is reused. Every model round of a prompt turn
+ *  (up to five, plus retries) needs the key, and each read is a `security`
+ *  process. A turn's rounds land well inside this window; an edit made outside
+ *  the app (Keychain Access) is picked up once it lapses. */
+const CHAT_KEY_TTL: Duration = Duration::from_secs(60);
+static CHAT_KEYS: Mutex<Option<HashMap<String, (Instant, String)>>> = Mutex::new(None);
+
+fn chat_keys() -> std::sync::MutexGuard<'static, Option<HashMap<String, (Instant, String)>>> {
+    CHAT_KEYS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/** Drop a provider's cached chat key. Every write through this module calls it,
+ *  so a key saved or deleted in Settings is used by the very next request. */
+fn forget_chat_key(provider: &str) {
+    if let Some(keys) = chat_keys().as_mut() {
+        keys.remove(provider);
+    }
+}
+
+/** `read` behind the chat cache: a fresh entry is reused, a miss or an expired
+ *  one is read again. Failures are not cached, so a key added later is found. */
+fn cached_chat_key(
+    provider: &str,
+    now: Instant,
+    read: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    if let Some((read_at, key)) = chat_keys().as_ref().and_then(|keys| keys.get(provider)) {
+        if now.saturating_duration_since(*read_at) < CHAT_KEY_TTL {
+            return Ok(key.clone());
+        }
+    }
+    let key = read()?;
+    chat_keys()
+        .get_or_insert_with(HashMap::new)
+        .insert(provider.to_string(), (now, key.clone()));
+    Ok(key)
+}
+
+/** The API key for a chat request, reused across the rounds of a turn (see
+ *  `CHAT_KEY_TTL`). Settings and every other caller read the keychain itself
+ *  through `get_key`. */
+pub fn get_key_for_chat(provider: &str) -> Result<String, String> {
+    cached_chat_key(provider, Instant::now(), || get_key(provider))
+}
+
 /** Store an API key in the login keychain. Upserts if the entry exists. */
 pub fn set_key(provider: &str, key: &str) -> Result<(), String> {
+    // Before and after: only a chat read that spans the whole write can still
+    // cache the old key, and `CHAT_KEY_TTL` bounds even that.
+    forget_chat_key(provider);
     let out = Command::new("security")
         .args([
             "add-generic-password",
@@ -26,6 +79,7 @@ pub fn set_key(provider: &str, key: &str) -> Result<(), String> {
         ])
         .output()
         .map_err(|e| format!("security add failed: {}", e))?;
+    forget_chat_key(provider);
     if out.status.success() {
         Ok(())
     } else {
@@ -48,10 +102,12 @@ pub fn get_key(provider: &str) -> Result<String, String> {
 
 /** Delete an API key from the login keychain. Entry-not-found is treated as success (already gone). */
 pub fn delete_key(provider: &str) -> Result<(), String> {
+    forget_chat_key(provider);
     let out = Command::new("security")
         .args(["delete-generic-password", "-s", SERVICE, "-a", provider])
         .output()
         .map_err(|e| format!("security delete failed: {}", e))?;
+    forget_chat_key(provider);
     if out.status.success() {
         return Ok(());
     }
@@ -217,6 +273,55 @@ pub fn list_keys(providers: &[String]) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_key_is_reused_within_its_window_and_read_again_after() {
+        let provider = "chat-cache-reuse";
+        let start = Instant::now();
+        let mut reads = 0;
+        let mut read = |value: &str| {
+            reads += 1;
+            Ok(value.to_string())
+        };
+        assert_eq!(
+            cached_chat_key(provider, start, || read("k1")).unwrap(),
+            "k1"
+        );
+        let inside = start + CHAT_KEY_TTL - Duration::from_secs(1);
+        assert_eq!(
+            cached_chat_key(provider, inside, || read("k2")).unwrap(),
+            "k1"
+        );
+        let after = start + CHAT_KEY_TTL;
+        assert_eq!(
+            cached_chat_key(provider, after, || read("k2")).unwrap(),
+            "k2"
+        );
+        assert_eq!(reads, 2);
+    }
+
+    #[test]
+    fn a_write_makes_the_next_chat_read_fresh() {
+        let provider = "chat-cache-write";
+        let now = Instant::now();
+        cached_chat_key(provider, now, || Ok("old".into())).unwrap();
+        forget_chat_key(provider);
+        assert_eq!(
+            cached_chat_key(provider, now, || Ok("new".into())).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn a_missing_chat_key_is_not_cached() {
+        let provider = "chat-cache-miss";
+        let now = Instant::now();
+        assert!(cached_chat_key(provider, now, || Err("not_found".into())).is_err());
+        assert_eq!(
+            cached_chat_key(provider, now, || Ok("added".into())).unwrap(),
+            "added"
+        );
+    }
 
     #[test]
     fn list_keys_empty_is_a_noop() {
