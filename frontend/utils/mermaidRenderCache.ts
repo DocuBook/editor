@@ -23,6 +23,15 @@ export interface MermaidRenderCacheOptions {
   maxSvgChars?: number;
   /** Measured size of one result; defaults to `result.svg.length`. */
   sizeOf?: (result: { svg: string }) => number;
+  /** Page-global Mermaid config the SVG depends on (the theme), read once per
+   *  call: `key` joins the cache key, and `apply` runs right before the render
+   *  that call queues. */
+  siteConfig?: () => MermaidSiteConfig;
+}
+
+export interface MermaidSiteConfig {
+  key: string;
+  apply: () => void;
 }
 
 function withId<T extends { svg: string }>(
@@ -53,7 +62,7 @@ interface RenderEntry<T> {
 }
 
 export function cacheMermaidRender<T extends { svg: string }>(
-  render: (id: string, source: string) => Promise<T>,
+  render: (id: string, source: string, config?: MermaidSiteConfig) => Promise<T>,
   options: MermaidRenderCacheOptions = {},
 ) {
   const maxEntries = options.maxEntries ?? DEFAULT_MAX_ENTRIES;
@@ -81,31 +90,34 @@ export function cacheMermaidRender<T extends { svg: string }>(
   };
 
   return async (id: string, source: string): Promise<T> => {
-    const hit = cache.get(source);
+    const config = options.siteConfig?.();
+    // The same source renders to different SVG under a different config.
+    const key = config ? `${config.key}\n${source}` : source;
+    const hit = cache.get(key);
     if (hit) {
       recordCacheHit('mermaid-render');
-      cache.delete(source);
-      cache.set(source, hit);
+      cache.delete(key);
+      cache.set(key, hit);
       const cached = await hit.pending;
       return withId(cached.result, cached.id, id);
     }
     recordCacheMiss('mermaid-render');
     const entry: RenderEntry<T> = { pending: undefined as never, size: 0 };
-    entry.pending = render(id, source).then((result) => {
+    entry.pending = render(id, source, config).then((result) => {
       // Charge the budget only if this entry is still cached — an entry evicted
       // while pending must not add size it no longer owns.
-      if (cache.get(source) === entry) {
+      if (cache.get(key) === entry) {
         entry.size = sizeOf(result);
         totalSize += entry.size;
         evict();
       }
       return { id, result };
     });
-    cache.set(source, entry);
+    cache.set(key, entry);
     entry.pending.catch(() => {
       // A failed render must not poison the cache: drop it so the next caller retries.
-      if (cache.get(source) === entry) {
-        cache.delete(source);
+      if (cache.get(key) === entry) {
+        cache.delete(key);
         totalSize -= entry.size;
         report();
       }
@@ -129,22 +141,27 @@ function discardTempElement(id: string): void {
 }
 
 /** Cache identical diagrams and serialize Mermaid's global renderer on an idle
- *  browser turn. A rejected render cannot poison the queue or cache. */
+ *  browser turn. A rejected render cannot poison the queue or cache. The site
+ *  config read when the render was requested is applied inside the queue, right
+ *  before that render, so the SVG always matches the key it is cached under. */
 export function createQueuedMermaidRender<T extends { svg: string }>(
   render: (id: string, source: string) => Promise<T>,
   options: MermaidRenderCacheOptions = {},
 ) {
   let queue: Promise<unknown> = Promise.resolve();
 
-  return cacheMermaidRender((id, source) => {
+  return cacheMermaidRender((id, source, config) => {
     const run = queue.then(() =>
-      whenIdle(() =>
-        render(id, source).catch((error: unknown) => {
+      // Async, so a throwing `apply` rejects this render instead of stalling
+      // the queue behind a promise that never settles.
+      whenIdle(async () => {
+        config?.apply();
+        return render(id, source).catch((error: unknown) => {
           discardTempElement(id);
           console.error("[mermaid render]", id, error);
           throw error;
-        }),
-      ),
+        });
+      }),
     );
     queue = run.catch(() => {});
     return run;
@@ -192,17 +209,18 @@ export function cacheMermaidParse<T>(
   };
 }
 
-/** A finished, display-ready diagram: `trimDiagramSVG` applied and the label font
- *  already rewritten, i.e. exactly the string the preview injects. */
+/** A finished, display-ready diagram: rendered under the app theme, with
+ *  `trimDiagramSVG` applied and the label font already rewritten, i.e. exactly
+ *  the string the preview injects. */
 export interface DiagramSVGEntry {
   svg: string;
   /** Mermaid IDs are document-global; retain the render ID so each preview can
    *  remap it before inserting the shared SVG into the DOM. */
   renderId: string;
-  /** The font family the SVG was rewritten to. A theme change invalidates the
-   *  entry, since the font is baked into the markup and cannot be re-derived
-   *  without redoing the rewrite. */
-  fontFamily: string;
+  /** Identifies the page styles baked into the markup — the label font and the
+   *  theme colors (see `readDiagramStyle`). A theme change invalidates the
+   *  entry, since neither can be re-derived without rendering again. */
+  styleKey: string;
 }
 
 const DIAGRAM_SVG_MAX_ENTRIES = 60;
@@ -234,11 +252,11 @@ export function peekDiagramSVG(source: string): DiagramSVGEntry | null {
 export function cacheDiagramSVG(
   source: string,
   svg: string,
-  fontFamily: string,
+  styleKey: string,
   renderId = '',
 ): void {
   if (!source || !svg) return;
-  diagramSVGs.set(source, { svg, fontFamily, renderId });
+  diagramSVGs.set(source, { svg, styleKey, renderId });
 }
 
 /** Drop every finished diagram, e.g. when the vault scope ends. */

@@ -77,14 +77,17 @@ import {
   clearDiagramSVG,
   peekDiagramSVG,
 } from '../../../frontend/utils/mermaidRenderCache'
+import { readDiagramStyle } from '../../../frontend/utils/mermaidTheme'
+import { useTheme } from '../../../frontend/stores/theme'
 
 let container: HTMLDivElement
 let root: Root
 const domElement = document.createElement('div')
 
-/** The font the preview bakes into a cached entry: the document's own computed
- *  style, so a seeded entry is a hit rather than a stale-font miss. */
-const documentFont = () => getComputedStyle(domElement).fontFamily
+/** The style key the preview bakes into a cached entry: the document's own
+ *  computed font and palette, so a seeded entry is a hit rather than a
+ *  stale-style miss. */
+const documentStyle = () => readDiagramStyle(domElement).key
 
 /** Awaited, so the effect's own async render (`mermaid.render` -> trim -> font
  *  rewrite -> `setState`) has settled before the assertions run. */
@@ -117,6 +120,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount())
   container.remove()
+  document.documentElement.style.removeProperty('--color-background')
 })
 
 describe('CachedDiagramPreviewWithPopup', () => {
@@ -124,7 +128,7 @@ describe('CachedDiagramPreviewWithPopup', () => {
    *  cache without re-entering Mermaid, `trimDiagramSVG` (forced getBBox reflow)
    *  or the font rewrite. */
   it('paints a cached diagram without re-rendering it', async () => {
-    cacheDiagramSVG('graph TD; A-->B', '<svg id="cached"></svg>', documentFont())
+    cacheDiagramSVG('graph TD; A-->B', '<svg id="cached"></svg>', documentStyle())
 
     await renderDiagram('graph TD; A-->B')
 
@@ -136,7 +140,7 @@ describe('CachedDiagramPreviewWithPopup', () => {
     cacheDiagramSVG(
       'same diagram',
       '<svg id="source-id"><path marker-end="url(#source-id-arrow)"/></svg>',
-      documentFont(),
+      documentStyle(),
       'source-id',
     )
 
@@ -211,7 +215,7 @@ describe('CachedDiagramPreviewWithPopup', () => {
   })
 
   it('paints a cached diagram straight away, with no skeleton frame', () => {
-    cacheDiagramSVG('graph TD; A-->B', '<svg id="cached"></svg>', documentFont())
+    cacheDiagramSVG('graph TD; A-->B', '<svg id="cached"></svg>', documentStyle())
 
     renderDiagramNow('graph TD; A-->B')
 
@@ -230,7 +234,7 @@ describe('CachedDiagramPreviewWithPopup', () => {
   })
 
   it('does not cache a diagram that failed to render, and keeps the last good one up', async () => {
-    cacheDiagramSVG('good', '<svg id="good"></svg>', documentFont())
+    cacheDiagramSVG('good', '<svg id="good"></svg>', documentStyle())
     await renderDiagram('good')
 
     mermaid.render.mockRejectedValue(new Error('invalid'))
@@ -244,8 +248,8 @@ describe('CachedDiagramPreviewWithPopup', () => {
   })
 
   it('serves the cache again when the source changes back', async () => {
-    cacheDiagramSVG('a', '<svg id="a"></svg>', documentFont())
-    cacheDiagramSVG('b', '<svg id="b"></svg>', documentFont())
+    cacheDiagramSVG('a', '<svg id="a"></svg>', documentStyle())
+    cacheDiagramSVG('b', '<svg id="b"></svg>', documentStyle())
 
     await renderDiagram('a')
     expect(container.innerHTML).toContain('id="a"')
@@ -256,5 +260,50 @@ describe('CachedDiagramPreviewWithPopup', () => {
 
     // Both sources came from cache: Mermaid was never asked to render.
     expect(mermaid.render).not.toHaveBeenCalled()
+  })
+
+  /** Mermaid bakes the palette into the SVG, so a theme switch must render the
+   *  diagram again rather than keep serving the entry cached under the old one —
+   *  while the old diagram stays up until the new one is ready. */
+  it('renders again under the new palette when the theme changes', async () => {
+    const root = document.documentElement
+    root.style.setProperty('--color-background', '#000000')
+    cacheDiagramSVG('graph TD; A-->B', '<svg id="old-theme"></svg>', documentStyle())
+    await renderDiagram('graph TD; A-->B')
+    expect(mermaid.render).not.toHaveBeenCalled()
+
+    let resolveRender!: (value: { svg: string }) => void
+    mermaid.render.mockReturnValueOnce(new Promise((resolve) => { resolveRender = resolve }))
+    const next = useTheme.getState().name === 'dark' ? 'light' : 'dark'
+    act(() => {
+      root.style.setProperty('--color-background', '#ffffff')
+      useTheme.getState().setTheme(next)
+    })
+
+    expect(mermaid.render).toHaveBeenCalledOnce()
+    expect(container.innerHTML).toContain('id="old-theme"')
+
+    await act(async () => {
+      resolveRender({ svg: '<svg id="new-theme"></svg>' })
+      await Promise.resolve()
+    })
+    expect(container.innerHTML).not.toContain('id="old-theme"')
+    expect(peekDiagramSVG('graph TD; A-->B')?.styleKey).toBe(documentStyle())
+  })
+
+  /** Settings replaces the editor, so a theme switch usually lands while the
+   *  block is unmounted: the next mount must hold a skeleton and render again,
+   *  not paint the entry cached under the previous palette. */
+  it('does not paint a diagram cached under another theme on mount', async () => {
+    document.documentElement.style.setProperty('--color-background', '#000000')
+    cacheDiagramSVG('graph TD; A-->B', '<svg id="old-theme"></svg>', documentStyle())
+    document.documentElement.style.setProperty('--color-background', '#ffffff')
+    mermaid.render.mockReturnValueOnce(new Promise(() => {}))
+
+    renderDiagramNow('graph TD; A-->B')
+
+    expect(container.innerHTML).not.toContain('id="old-theme"')
+    expect(container.querySelector('[data-testid="skeleton"]')).not.toBeNull()
+    expect(mermaid.render).toHaveBeenCalledOnce()
   })
 })
