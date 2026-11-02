@@ -107,16 +107,6 @@ fn resolve_agent(
 }
 
 pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value>) -> Response {
-    let ai_slot = match state.ai_slots.clone().try_acquire_owned() {
-        Ok(slot) => slot,
-        Err(_) => {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(json!({ "error": "Too many AI requests — try again shortly" })),
-            )
-                .into_response();
-        }
-    };
     tracing::debug!(event = "ai_request_received");
     let string_arg = |key: &str| {
         args.get(key)
@@ -138,6 +128,20 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
     // cancel. A Stop that overtook this request is remembered by the registry.
     let request_guard = state.ai_requests.begin(&request_id);
     let cancel = request_guard.token();
+    // Take the slot after `begin`: a turn that reuses an id has just cancelled its
+    // predecessor, and a turn sent right after Stop follows one that is releasing
+    // its slot now. Both should wait for that slot, not be refused.
+    let slot = tokio::time::timeout(AI_SLOT_WAIT, state.ai_slots.clone().acquire_owned()).await;
+    let ai_slot = match slot {
+        Ok(Ok(slot)) => slot,
+        _ => {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({ "error": "Too many AI requests — try again shortly" })),
+            )
+                .into_response();
+        }
+    };
     let started = std::time::Instant::now();
     let lookup_state = state.clone();
     let lookup = tokio::task::spawn_blocking(move || {
@@ -244,7 +248,17 @@ pub(crate) async fn ask_ai(State(state): State<AppState>, Json(args): Json<Value
                 .data(error),
         })
     });
-    Sse::new(events)
+    let mut response = Sse::new(events)
         .keep_alive(KeepAlive::default())
-        .into_response()
+        .into_response();
+    // A reverse proxy must pass token frames through as they arrive. nginx buffers
+    // proxied responses by default and honours this header to stop; `no-transform`
+    // keeps compressing proxies from holding frames back to fill a gzip block.
+    let headers = response.headers_mut();
+    headers.insert("x-accel-buffering", HeaderValue::from_static("no"));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-cache, no-transform"),
+    );
+    response
 }

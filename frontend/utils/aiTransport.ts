@@ -308,7 +308,6 @@ async function runSendMessages(
         if (abortSignal?.aborted || closed || !isCurrent(e.payload)) return;
         toolBuffer.push(e.payload);
       });
-      const unsubToolsDone = await listen<{ requestId?: string }>("ai:tools_done", () => {});
       /** rust-ai: the first tool-call delta means the provider has started writing
        *  the document operations. Surface it now so the AI menu leaves "thinking"
        *  while the write happens, not only when the completed call lands. */
@@ -824,7 +823,6 @@ async function runSendMessages(
         if (flushTimer) clearTimeout(flushTimer);
         unsubToken();
         unsubTool();
-        unsubToolsDone();
         unsubGenerating();
         unsubDone();
         abortSignal?.removeEventListener?.("abort", cancelCurrentRequest);
