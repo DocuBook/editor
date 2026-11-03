@@ -522,10 +522,16 @@ export const useEditorStore = create<EditorState>()(
         get().setContent(t.path, raw)
         set({ tabs: get().tabs.map(x => x.path === t.path ? { ...x, baseVersion: version ?? contentVersion(raw) } : x) })
         get().setTabDeleted(t.path, false)
-      } catch {
-        get().setTabDeleted(t.path, true)
+      } catch (error) {
+        // Only a missing file is a deletion. A transient error (permission, IPC
+        // timeout) must not flag the tab: every save path skips a deleted tab.
+        if (/no such file|not found|os error 2/i.test(String(error))) get().setTabDeleted(t.path, true)
       }
     })
+    // Dirty tabs are left unread above, so a deleted one whose file the new
+    // branch brought back would stay deleted. Its edits are kept either way.
+    const dirtyDeleted = get().tabs.filter(t => t.dirty && t.deleted).map(t => t.path)
+    if (dirtyDeleted.length) await get().reviveDeletedTabs(dirtyDeleted)
   },
 
   /** Flush WYSIWYG then write every dirty tab to disk — used on app close.
