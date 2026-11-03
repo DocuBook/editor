@@ -42,6 +42,11 @@
     --color-accent: #3b82f6;
     --color-accent-hover: #1d4ed8;
     --color-accent-subtle: rgb(59 130 246 / 10%);
+    /* Diagram nodes: the accent mixed opaquely into the background (14% fill,
+       70% border, ~3:1 on the page). Hex, because Mermaid cannot parse
+       color-mix() and a translucent fill would show edges through nodes. */
+    --color-diagram-node: #131d2e;
+    --color-diagram-node-border: #2d5fb0;
     --color-on-accent: #ffffff;
     --color-ai-cursor: #ef4444;
     --color-ai-cursor-text: #fafafa;
@@ -87,6 +92,8 @@
     --color-accent: #2563eb;
     --color-accent-hover: #1d4ed8;
     --color-accent-subtle: rgb(37 99 235 / 10%);
+    --color-diagram-node: #f0f4fe;
+    --color-diagram-node-border: #7ca1f3;
     --color-on-accent: #ffffff;
     --color-ai-cursor: #dc2626;
     --color-ai-cursor-text: #ffffff;
@@ -586,6 +593,18 @@ body .mobile-sidebar-drawer-body > aside {
    surface above shows through. */
 [data-theme="light"] .shiki {
     color: var(--shiki-light);
+}
+/* Mermaid hardcodes `mix-blend-mode: multiply` on sankey links (no theme
+   variable reaches it), which blends them into a dark page. `!important`
+   beats its rule, scoped to the diagram's #id. */
+[data-theme="dark"] svg[aria-roledescription="sankey"] .link {
+    mix-blend-mode: normal !important;
+}
+/* Mermaid strokes the timeline axis with the section LABEL color (the page
+   background, see mermaidTheme.ts) and the section lines with an inverse of its
+   own pre-override palette, so neither shows. Lines go neutral instead. */
+svg[aria-roledescription="timeline"] line {
+    stroke: var(--color-foreground-subtle) !important;
 }
 /* Code block header: the fence language plus the optional `title="…"` from the
    info string. Chrome, not content — it sits outside the editable code and only
