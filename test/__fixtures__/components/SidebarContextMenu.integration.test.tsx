@@ -409,6 +409,19 @@ describe('SidebarContextMenu in the Sidebar', () => {
     expect(switcher()).not.toBeNull()
   })
 
+  it('swaps the vault switcher for a one-click Back to App while Settings is open', async () => {
+    renderSidebar()
+    await flush()
+    act(() => useSettings.getState().openSettings('git-identity'))
+    await flush()
+    expect(document.querySelector('[aria-label="Switch vault"]')).toBeNull()
+    const back = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Back to App')!
+    act(() => back.click())
+    await flush()
+    expect(useSettings.getState().open).toBe(false)
+    expect(document.querySelector('[aria-label="Switch vault"]')).not.toBeNull()
+  })
+
   /** ⌘, opens Settings straight through the store, unmounting the Search row
    *  with the + popover still open; closing Settings must not bring it back. */
   it('closes the create menu when Settings opens from outside the sidebar', async () => {
@@ -425,5 +438,23 @@ describe('SidebarContextMenu in the Sidebar', () => {
     await flush()
     expect(document.querySelector('[data-plus-btn]')).not.toBeNull()
     expect(document.querySelector('[data-plus-popup]')).toBeNull()
+  })
+
+  /** Same for the vault popover: the switcher row swaps for Back to App under
+   *  Settings, so a popover left open must not come back with the switcher. */
+  it('closes the vault menu when Settings opens from outside the sidebar', async () => {
+    renderSidebar()
+    await flush()
+    act(() => (document.querySelector('[aria-label="Switch vault"]') as HTMLElement).click())
+    expect(document.querySelector('[data-vault-menu]')).not.toBeNull()
+
+    act(() => useSettings.getState().openSettings('git-identity'))
+    await flush()
+    expect(document.querySelector('[data-vault-menu]')).toBeNull()
+
+    act(() => useSettings.getState().closeSettings())
+    await flush()
+    expect(document.querySelector('[aria-label="Switch vault"]')).not.toBeNull()
+    expect(document.querySelector('[data-vault-menu]')).toBeNull()
   })
 })
