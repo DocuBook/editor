@@ -161,12 +161,14 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     await mapWithConcurrency(items, TRASH_ACTION_CONCURRENCY, async (item) => {
       try {
         await invoke(command, { trashName: item.name })
-        /** Deleting flagged any open tab deleted, and every save path skips such a
-         *  tab — so a restored file would silently stop saving until reopened. */
-        if (command === 'restore_file') useEditorStore.getState().setTabDeleted(item.original, false)
       }
       catch(e) { console.error(e); failed.push(e) }
     })
+    /** Deleting flagged any open tab deleted, and every save path skips such a
+     *  tab — so a restored file would silently stop saving until reopened. The
+     *  disk decides which tabs are live again: Finder's Trash reports display
+     *  names, so `original` cannot be trusted as a tab path. */
+    if (command === 'restore_file' && items.length > failed.length) await useEditorStore.getState().reviveDeletedTabs()
     /** A privacy-permission failure is actionable, so it opens the dialog that
      *  deep-links the System Settings pane. Checking the first failure is enough:
      *  a batch fails uniformly when the grant is missing. */

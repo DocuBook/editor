@@ -32,7 +32,7 @@ const editorState = vi.hoisted(() => ({
   openFile: vi.fn(async () => {}),
   flushEditor: vi.fn(async () => {}),
   renameTab: vi.fn(async () => {}),
-  setTabDeleted: vi.fn(),
+  reviveDeletedTabs: vi.fn(async () => {}),
 }))
 
 vi.mock('sonner', () => ({ Toaster: () => null, toast }))
@@ -198,22 +198,30 @@ describe('Sidebar trash toasts', () => {
   })
 
   /** A tab left flagged deleted is skipped by every save path, so edits to a
-   *  restored file would silently never reach disk. */
-  it('clears the deleted flag on the open tab of each restored item', async () => {
+   *  restored file would silently never reach disk. Which tabs come back is the
+   *  store's call (it checks the disk; see editor.reviveDeleted.test.ts). */
+  it('re-checks deleted tabs once after a restore batch', async () => {
+    scenario.items = [fileItem, folderItem]
     await openTrash()
     await putBackAll()
 
-    expect(editorState.setTabDeleted).toHaveBeenCalledTimes(1)
-    expect(editorState.setTabDeleted).toHaveBeenCalledWith(fileItem.original, false)
+    expect(editorState.reviveDeletedTabs).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves the deleted flag set for an item whose restore failed', async () => {
+  it('still re-checks when only part of the batch was restored', async () => {
     scenario.items = [fileItem, folderItem]
     scenario.failRestoreFor = folderItem.name
     await openTrash()
     await putBackAll()
 
-    expect(editorState.setTabDeleted).toHaveBeenCalledTimes(1)
-    expect(editorState.setTabDeleted).toHaveBeenCalledWith(fileItem.original, false)
+    expect(editorState.reviveDeletedTabs).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not re-check when every restore failed', async () => {
+    scenario.failRestoreFor = fileItem.name
+    await openTrash()
+    await putBackAll()
+
+    expect(editorState.reviveDeletedTabs).not.toHaveBeenCalled()
   })
 })
