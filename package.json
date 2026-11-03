@@ -1,7 +1,7 @@
 {
   "name": "@docubook/editor",
   "private": true,
-  "version": "0.6.0",
+  "version": "0.7.0",
   "type": "module",
   "engines": {
     "node": ">=22.23.4 <23",
