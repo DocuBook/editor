@@ -151,6 +151,10 @@ const readWithVersion = async (path: string): Promise<{ raw: string; version: st
   }
   return { raw, version: null }
 }
+/** Whether a read failed because the file is missing. `os error 2` needs the
+ *  word boundary: errno 20–29 (EMFILE, EINVAL, a device not ready…) hit files
+ *  that exist, and must not be mistaken for a deletion. */
+const isNotFound = (error: unknown) => /no such file|not found|os error 2\b/i.test(String(error))
 const autoSaveTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 /** Concurrent tab reloads after a branch switch (see `reloadAllTabs`). */
@@ -315,7 +319,7 @@ export const useEditorStore = create<EditorState>()(
       get().setContent(path, raw)
       set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
     } catch (e) {
-      const notFound = /no such file|not found|os error 2/i.test(String(e))
+      const notFound = isNotFound(e)
       if (createIfMissing && notFound) {
         // Obsidian behavior: opening a wiki link to a missing note creates it.
         try {
@@ -495,7 +499,7 @@ export const useEditorStore = create<EditorState>()(
         get().setContent(tab.path, raw)
         set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, baseVersion: version ?? contentVersion(raw) } : t) })
       } catch (error) {
-        const notFound = /no such file|not found|os error 2/i.test(String(error))
+        const notFound = isNotFound(error)
         if (notFound) {
           // A file removed while the app was closed should not reappear as a blank tab.
           await get().closeTab(tab.path)
@@ -522,10 +526,16 @@ export const useEditorStore = create<EditorState>()(
         get().setContent(t.path, raw)
         set({ tabs: get().tabs.map(x => x.path === t.path ? { ...x, baseVersion: version ?? contentVersion(raw) } : x) })
         get().setTabDeleted(t.path, false)
-      } catch {
-        get().setTabDeleted(t.path, true)
+      } catch (error) {
+        // Only a missing file is a deletion. A transient error (permission, IPC
+        // timeout) must not flag the tab: every save path skips a deleted tab.
+        if (isNotFound(error)) get().setTabDeleted(t.path, true)
       }
     })
+    // Dirty and binary tabs are left unread above, so a deleted one whose file
+    // the new branch brought back would stay deleted. Edits are kept either way.
+    const stale = get().tabs.filter(t => t.deleted && (t.dirty || isBinaryPath(t.path))).map(t => t.path)
+    if (stale.length) await get().reviveDeletedTabs(stale)
   },
 
   /** Flush WYSIWYG then write every dirty tab to disk — used on app close.
