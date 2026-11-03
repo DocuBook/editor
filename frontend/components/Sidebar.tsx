@@ -5,7 +5,7 @@ import { useAuth } from '../stores/auth'
 import { useEditorStore } from '../stores/editor'
 import { pollGitStatus } from '../stores/gitStatus'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
-import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Option, ArrowBigUp } from 'lucide-react'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Option, ArrowBigUp, ArrowLeft } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -136,7 +136,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
    *  ⌘, opens Settings without going through this component: close it there so
    *  it does not reappear when Settings closes. */
   /* oxlint-disable react/set-state-in-effect -- the + row unmounts under Settings */
-  useEffect(() => { if (settingsOpen) setShowPlusMenu(false) }, [settingsOpen])
+  useEffect(() => { if (settingsOpen) { setShowPlusMenu(false); setVaultMenuOpen(false) } }, [settingsOpen])
   /* oxlint-enable react/set-state-in-effect */
 
   const selectPanel = async (panel: SidebarPanelId) => {
@@ -356,6 +356,14 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           this row (the only positioned ancestor), so they span the sidebar. */}
       <div className="relative flex items-center gap-1 border-t border-border-subtle px-2 py-1.5 shrink-0">
         <div ref={vaultMenuRef} className="flex-1 min-w-0">
+          {/* Settings swaps the switcher for a one-click way out. */}
+          {settingsOpen ? (
+            <button onClick={() => { onNavigate(); closeSettings() }}
+              className="flex items-center gap-1.5 w-full min-w-0 cursor-pointer rounded px-2 py-1.5 bg-transparent border-none text-foreground-secondary hover:bg-surface-active hover:text-foreground transition-colors">
+              <ArrowLeft size={14} className="shrink-0" />
+              <span className="text-xs font-semibold truncate">Back to App</span>
+            </button>
+          ) : (<>
           <button onClick={(e) => { setVaultMenuOpen(o => !o); e.currentTarget.blur() }} disabled={loading || trashBusy} aria-label="Switch vault" aria-expanded={vaultMenuOpen}
             className={'flex items-center gap-1 w-full min-w-0 cursor-pointer rounded px-2 py-1.5 bg-transparent border-none hover:bg-surface-active transition-colors disabled:opacity-40 disabled:cursor-not-allowed ' + (vaultMenuOpen ? 'text-foreground' : 'text-foreground-secondary')}>
             <span className="text-xs font-semibold uppercase tracking-wider truncate">{name}</span>
@@ -385,8 +393,9 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
               </div>
             </SidebarPopover>
           )}
+          </>)}
         </div>
-        <ProfileMenu isNative={isTauri} settingsOpen={settingsOpen} onOpenSettings={() => { onOpenSettings(); openSettings() }} onCloseSettings={() => { onNavigate(); closeSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
+        <ProfileMenu isNative={isTauri} onOpenSettings={() => { onOpenSettings(); openSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
       </div>
 
       {ctxItem && (
