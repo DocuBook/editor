@@ -84,6 +84,22 @@ describe('reviveDeletedTabs', () => {
     expect(server.files['a.md']).toContain('typed while deleted')
   })
 
+  it('revives a binary tab by existence alone, without reading it as text', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === 'file_version') {
+        if (args?.path === 'img.png') return contentVersion('bytes')
+        throw new Error('No such file or directory (os error 2)')
+      }
+      throw new Error(`unexpected ${cmd}`)
+    })
+    useEditorStore.setState({ tabs: [deletedTab('img.png'), deletedTab('gone.png')], activeTab: 'img.png' })
+    await useEditorStore.getState().reviveDeletedTabs()
+
+    expect(tab('img.png').deleted).toBe(false)
+    expect(tab('gone.png').deleted).toBe(true)
+    expect(invoke).not.toHaveBeenCalledWith('read_file', expect.anything())
+  })
+
   it('does not touch live tabs', async () => {
     vault({ 'a.md': 'on disk\n' })
     useEditorStore.setState({ tabs: [deletedTab('a.md', { deleted: false })], activeTab: 'a.md' })

@@ -463,8 +463,13 @@ export const useEditorStore = create<EditorState>()(
   setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => (t.path === path || t.path.startsWith(path + '/')) ? { ...t, deleted } : t) }) },
 
   reviveDeletedTabs: async (paths) => {
-    const targets = get().tabs.filter(t => t.deleted && !isBinaryPath(t.path) && (!paths || paths.includes(t.path)))
+    const targets = get().tabs.filter(t => t.deleted && (!paths || paths.includes(t.path)))
     await mapWithConcurrency(targets, TAB_RELOAD_CONCURRENCY, async (t) => {
+      // Previewed via asset URL, never read as text: being on disk is enough.
+      if (isBinaryPath(t.path)) {
+        if (await readFileVersion(t.path) !== null) get().setTabDeleted(t.path, false)
+        return
+      }
       let read: { raw: string; version: string | null }
       try { read = await readWithVersion(t.path) } catch { return } // still gone
       const tab = get().tabs.find(x => x.path === t.path)
