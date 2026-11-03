@@ -439,4 +439,22 @@ describe('SidebarContextMenu in the Sidebar', () => {
     expect(document.querySelector('[data-plus-btn]')).not.toBeNull()
     expect(document.querySelector('[data-plus-popup]')).toBeNull()
   })
+
+  /** Same for the vault popover: the switcher row swaps for Back to App under
+   *  Settings, so a popover left open must not come back with the switcher. */
+  it('closes the vault menu when Settings opens from outside the sidebar', async () => {
+    renderSidebar()
+    await flush()
+    act(() => (document.querySelector('[aria-label="Switch vault"]') as HTMLElement).click())
+    expect(document.querySelector('[data-vault-menu]')).not.toBeNull()
+
+    act(() => useSettings.getState().openSettings('git-identity'))
+    await flush()
+    expect(document.querySelector('[data-vault-menu]')).toBeNull()
+
+    act(() => useSettings.getState().closeSettings())
+    await flush()
+    expect(document.querySelector('[aria-label="Switch vault"]')).not.toBeNull()
+    expect(document.querySelector('[data-vault-menu]')).toBeNull()
+  })
 })

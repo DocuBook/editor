@@ -132,10 +132,11 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
   useEffect(() => { if (!useSettings.getState().open) setActivePanel('vault') }, [vaultPath, isOpen])
   /* oxlint-enable react/set-state-in-effect */
 
-  /** The + popover lives in the Search row, which unmounts under Settings, and
-   *  ⌘, opens Settings without going through this component: close it there so
-   *  it does not reappear when Settings closes. */
-  /* oxlint-disable react/set-state-in-effect -- the + row unmounts under Settings */
+  /** The + popover lives in the Search row and the vault popover in the switcher
+   *  row, both of which unmount under Settings, and ⌘, opens Settings without
+   *  going through this component: close them there so they do not reappear
+   *  when Settings closes. */
+  /* oxlint-disable react/set-state-in-effect -- the + and vault rows unmount under Settings */
   useEffect(() => { if (settingsOpen) { setShowPlusMenu(false); setVaultMenuOpen(false) } }, [settingsOpen])
   /* oxlint-enable react/set-state-in-effect */
 
