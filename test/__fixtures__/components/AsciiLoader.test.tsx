@@ -36,13 +36,14 @@ describe('AsciiLoader', () => {
   const loader = () => container.querySelector('.ai-ascii-loader')!
   const render = (kind: AsciiLoaderKind) => act(() => { root.render(<AsciiLoader kind={kind} />) })
 
-  it('draws every kind in printable ASCII cells of the slot width', () => {
+  it('draws every kind in printable cells of the slot width', () => {
     for (const [kind, { frames }] of Object.entries(ASCII_LOADER_FRAMES)) {
       expect(frames.length, kind).toBeGreaterThan(1)
       // The slot is 5ch: one width across kinds keeps the label from shifting.
       for (const frame of frames) {
         expect(frame, kind).toHaveLength(5)
-        expect(frame, kind).toMatch(/^\[[\x20-\x7e]{3}\]$/)
+        // Printable ASCII, plus the generating wave's `≈`.
+        expect(frame, kind).toMatch(/^\[[\x20-\x7e≈]{3}\]$/)
       }
       // Reduced motion shows the first frame alone: it must draw something.
       expect(frames[0], kind).not.toBe('[   ]')

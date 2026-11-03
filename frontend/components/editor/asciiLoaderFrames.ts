@@ -14,6 +14,9 @@ export const ASCII_LOADER_FRAMES: Record<AsciiLoaderKind, { frames: string[]; in
   reasoning: { frames: ['[...]', '[ ..]', '[  .]', '[   ]', '[.  ]', '[.. ]'], interval: 150 },
   researching: { frames: ['[*  ]', '[ * ]', '[  *]', '[ * ]'], interval: 130 },
   retrying: { frames: ['[<<<]', '[<< ]', '[<  ]', '[   ]', '[  <]', '[ <<]'], interval: 110 },
-  generating: { frames: ['[===]', '[ ==]', '[  =]', '[   ]', '[=  ]', '[== ]'], interval: 110 },
+  /** `≈` is the one glyph outside ASCII: a wave reads as output flowing in.
+   *  It draws as wide as the `=` it replaced, and the slot is a fixed 5ch, so
+   *  the label beside it stays put either way. */
+  generating: { frames: ['[≈≈≈]', '[ ≈≈]', '[  ≈]', '[   ]', '[≈  ]', '[≈≈ ]'], interval: 110 },
   'ai-writing': { frames: ['[_  ]', '[a_ ]', '[ab_]', '[abc]'], interval: 140 },
 }
