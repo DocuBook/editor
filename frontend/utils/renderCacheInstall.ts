@@ -49,6 +49,25 @@ function applyMermaidTheme(mermaidApi: typeof mermaid, { themeVariables }: Merma
   }
 }
 
+/** Mindmap shapes drawn around the label (circle, square, rounded, hexagon) leave
+ *  an SVG-text label at x=0 of the node and rely on `text-anchor: middle`, which
+ *  Mermaid only sets for HTML labels — so with `htmlLabels: false` (BlockNote's
+ *  default, for exports) the label starts at the node's center and runs off the
+ *  shape and the SVG. The shapes that center by translating the label (default,
+ *  cloud, bang) have no rect/circle/polygon child and are left alone. Set as an
+ *  attribute, not CSS, so exported SVG carries the fix too. */
+export function centerMindmapLabels(svg: string): string {
+  if (!svg.includes('aria-roledescription="mindmap"')) return svg;
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  if (doc.querySelector('parsererror')) return svg;
+  const labels = doc.querySelectorAll(
+    'g.mindmap-node:has(> circle, > rect, > polygon) > g.label text',
+  );
+  if (!labels.length) return svg;
+  labels.forEach((text) => text.setAttribute('text-anchor', 'middle'));
+  return new XMLSerializer().serializeToString(doc.documentElement);
+}
+
 /** Install the renderer memoization, once, on the singleton library objects.
  *
  *  Mermaid and KaTeX are both page-global: `@blocknote/diagram-block` imports the
@@ -63,7 +82,11 @@ export function installRenderCaches(): void {
   // `render` both memoizes by source and theme and serializes the global
   // renderer on an idle turn, applying the theme read when the render was
   // requested; `parse` memoizes the validator the export renderer runs first.
-  (mermaid as any).render = createQueuedMermaidRender(mermaid.render, {
+  const render = mermaid.render.bind(mermaid);
+  (mermaid as any).render = createQueuedMermaidRender(async (id: string, source: string) => {
+    const result = await render(id, source);
+    return { ...result, svg: centerMindmapLabels(result.svg) };
+  }, {
     siteConfig: () => {
       const theme = readMermaidTheme();
       return { key: theme.key, apply: () => applyMermaidTheme(mermaid, theme) };

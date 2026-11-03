@@ -12,21 +12,34 @@ afterEach(() => {
 describe("Mermaid theme from the app's color tokens", () => {
   it("maps each theme variable to the token it names, leaving unset ones to Mermaid", () => {
     root.style.setProperty("--color-background", "#0c0c0d");
-    root.style.setProperty("--color-surface-active", "#222225");
+    root.style.setProperty("--color-diagram-node", "#131d2e");
     root.style.setProperty("--color-foreground", "#e4e4e7");
 
     const { themeVariables } = readMermaidTheme();
 
     expect(themeVariables).toMatchObject({
       background: "#0c0c0d",
-      mainBkg: "#222225",
-      nodeBkg: "#222225",
+      mainBkg: "#131d2e",
+      nodeBkg: "#131d2e",
       primaryTextColor: "#e4e4e7",
       textColor: "#e4e4e7",
     });
     // No `--color-accent` on this page: Mermaid derives it, rather than being
     // handed an empty string it cannot parse.
     expect(themeVariables).not.toHaveProperty("primaryColor");
+  });
+
+  it("fills the nested style objects some diagrams read, omitting empty ones", () => {
+    root.style.setProperty("--color-foreground", "#e4e4e7");
+    root.style.setProperty("--color-surface-active", "#222225");
+
+    const { themeVariables } = readMermaidTheme();
+
+    expect(themeVariables.packet).toEqual({ labelColor: "#e4e4e7", blockFillColor: "#222225" });
+    expect(themeVariables.treeView).toEqual({ labelColor: "#e4e4e7" });
+
+    root.removeAttribute("style");
+    expect(readMermaidTheme().themeVariables).not.toHaveProperty("packet");
   });
 
   it("follows the computed color-scheme for Mermaid's dark-mode derivations", () => {
