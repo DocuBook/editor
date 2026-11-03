@@ -32,3 +32,4 @@ src-tauri/target/
 .env.*
 !.env.example
 test/artifacts/
+server/data/

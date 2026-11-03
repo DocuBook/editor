@@ -339,8 +339,8 @@ function ToolbarComponents({ children }: { children: ReactNode }) {
  *
  *  The same component renders twice over: as the bubble menu, and — while a
  *  touch keyboard is up — as BlockNote's IME strip pinned above it (`uiMode`
- *  "mobile"). Both scroll horizontally when they do not fit; the bubble adds a
- *  chevron that pages it, the strip a trash button that deletes the block. */
+ *  "mobile"). Both scroll horizontally when they do not fit, with a pinned
+ *  chevron that pages the row; the strip also carries a delete-block button. */
 export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: boolean; blockActions?: boolean } = {}) => {
   const editor = useBlockNoteEditor<any, any, any>()
   const Components = useComponentsContext()!
@@ -363,7 +363,12 @@ export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: b
      from re-appearing over the document mid-run, before the AI menu closes. */
   if (!editor.isEditable) return null
 
-  const blockButtons = blockActions && (<><InsertBlockButton /><MoveBlockUpButton /><MoveBlockDownButton /></>)
+  /* Delete rides with the block actions on the IME strip at every width: touch
+     has no side menu (and its drag-handle "Delete") even on a tablet. */
+  const blockButtons = (<>
+    {blockActions && <><InsertBlockButton /><MoveBlockUpButton /><MoveBlockDownButton /></>}
+    {ime && <DeleteBlockButton />}
+  </>)
 
   // Both orders keep the upstream array order — only the split point moves.
   if (!compact && !ime) {
@@ -403,7 +408,7 @@ export const FormattingToolbarWithAI = ({ compact, blockActions }: { compact?: b
     <Components.FormattingToolbar.Root className="bn-toolbar bn-formatting-toolbar formatting-toolbar-scroll">
       <ToolbarComponents>
         {row}
-        {ime ? <DeleteBlockButton /> : <ToolbarScrollButton />}
+        <ToolbarScrollButton />
       </ToolbarComponents>
     </Components.FormattingToolbar.Root>
   )
