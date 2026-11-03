@@ -196,4 +196,24 @@ describe('Sidebar trash toasts', () => {
     expect(dialog!.textContent).toContain('Put Back needs Accessibility access')
     expect(toastCount()).toBe(0)
   })
+
+  /** A tab left flagged deleted is skipped by every save path, so edits to a
+   *  restored file would silently never reach disk. */
+  it('clears the deleted flag on the open tab of each restored item', async () => {
+    await openTrash()
+    await putBackAll()
+
+    expect(editorState.setTabDeleted).toHaveBeenCalledTimes(1)
+    expect(editorState.setTabDeleted).toHaveBeenCalledWith(fileItem.original, false)
+  })
+
+  it('leaves the deleted flag set for an item whose restore failed', async () => {
+    scenario.items = [fileItem, folderItem]
+    scenario.failRestoreFor = folderItem.name
+    await openTrash()
+    await putBackAll()
+
+    expect(editorState.setTabDeleted).toHaveBeenCalledTimes(1)
+    expect(editorState.setTabDeleted).toHaveBeenCalledWith(fileItem.original, false)
+  })
 })

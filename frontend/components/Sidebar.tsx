@@ -159,7 +159,12 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
     // Independent per-item backend calls: a bounded fan-out beats a serial loop
     // for a large selection, without turning a batch action into a flood.
     await mapWithConcurrency(items, TRASH_ACTION_CONCURRENCY, async (item) => {
-      try { await invoke(command, { trashName: item.name }) }
+      try {
+        await invoke(command, { trashName: item.name })
+        /** Deleting flagged any open tab deleted, and every save path skips such a
+         *  tab — so a restored file would silently stop saving until reopened. */
+        if (command === 'restore_file') useEditorStore.getState().setTabDeleted(item.original, false)
+      }
       catch(e) { console.error(e); failed.push(e) }
     })
     /** A privacy-permission failure is actionable, so it opens the dialog that
