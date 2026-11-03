@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
 /** Which row FormattingToolbarWithAI renders: the desktop bubble, the compact
- *  (<640px web) bubble, or the IME strip (`uiMode` "mobile"). Pins the trailing
- *  control each one gets and the compact order, where alignment and indent go
+ *  (<640px web) bubble, or the IME strip (`uiMode` "mobile"). Pins where the
+ *  delete button and the trailing chevron land and the compact order, where alignment and indent go
  *  to the scrolled-off tail. A live BlockNote editor cannot be constructed
  *  headless, so the editor, the components and the row's child buttons are
  *  stubs that render a marker each. */
@@ -130,20 +130,27 @@ describe('FormattingToolbarWithAI', () => {
     expect(markers()).toEqual([...LEAD, 'Link', 'AI', ...BLOCK_ACTIONS, ...TAIL, 'ToolbarScrollButton'])
   })
 
-  it('pins the delete button on the compact IME strip instead of the chevron', () => {
+  it('puts delete beside the block actions on the compact IME strip and pins the chevron', () => {
     stubs.uiMode = 'mobile'
     act(() => root.render(<FormattingToolbarWithAI compact blockActions />))
 
     expect(rootKind()).toContain('formatting-toolbar-scroll')
-    expect(markers()).toEqual([...LEAD, 'Link', 'AI', ...BLOCK_ACTIONS, ...TAIL, 'DeleteBlockButton'])
+    expect(markers()).toEqual([...LEAD, 'Link', 'AI', ...BLOCK_ACTIONS, 'DeleteBlockButton', ...TAIL, 'ToolbarScrollButton'])
   })
 
-  it('keeps the desktop order on a wide IME strip, still scrolling with the delete button', () => {
+  it('keeps the desktop order on a wide IME strip, still scrolling with the chevron', () => {
     stubs.uiMode = 'mobile'
     act(() => root.render(<FormattingToolbarWithAI blockActions />))
 
     expect(rootKind()).toContain('formatting-toolbar-scroll')
-    expect(markers()).toEqual([...BLOCK_ACTIONS, ...UPSTREAM, 'Link', 'AI', 'DeleteBlockButton'])
+    expect(markers()).toEqual([...BLOCK_ACTIONS, 'DeleteBlockButton', ...UPSTREAM, 'Link', 'AI', 'ToolbarScrollButton'])
+  })
+
+  it('keeps delete on an IME strip that has no block actions (a touch tablet)', () => {
+    stubs.uiMode = 'mobile'
+    act(() => root.render(<FormattingToolbarWithAI />))
+
+    expect(markers()).toEqual(['DeleteBlockButton', ...UPSTREAM, 'Link', 'AI', 'ToolbarScrollButton'])
   })
 
   it('renders nothing while the editor is read-only', () => {

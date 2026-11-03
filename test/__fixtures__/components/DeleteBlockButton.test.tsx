@@ -65,12 +65,12 @@ describe('DeleteBlockButton', () => {
     expect(container.querySelector('button')).toBeNull()
   })
 
-  it('is pinned to the row and deletes the block at the cursor on click', () => {
+  it('scrolls with the row and deletes the block at the cursor on click', () => {
     act(() => root.render(<DeleteBlockButton />))
     const button = container.querySelector('button')!
 
     expect(button.getAttribute('aria-label')).toBe('Delete block')
-    expect(button.classList.contains('formatting-toolbar-pinned')).toBe(true)
+    expect(button.classList.contains('formatting-toolbar-pinned')).toBe(false)
 
     act(() => button.click())
     expect(stubs.editor.removeBlocks).toHaveBeenCalledWith([{ id: 'b2' }])
