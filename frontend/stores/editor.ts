@@ -81,6 +81,10 @@ interface EditorState {
   setEditedContent: (path: string, md: string) => void
   setTabDirty: (path: string, dirty: boolean) => void
   setTabDeleted: (path: string, deleted: boolean) => void
+  /** Re-check deleted tabs (all, or just `paths`) against the disk and revive
+   *  those whose file exists again. The disk decides, not a trash entry: macOS
+   *  Finder's Trash reports display names, not vault paths. */
+  reviveDeletedTabs: (paths?: string[]) => Promise<void>
   /** Flush the WYSIWYG editor and write every dirty tab to disk (graceful close). */
   persistAllDirty: () => Promise<void>
   /** Adopt the on-disk content for a conflicted tab, dropping the local edit. */
@@ -292,7 +296,15 @@ export const useEditorStore = create<EditorState>()(
         return
       }
     }
-    if (get().tabs.find(t => t.path === path)) { set({ activeTab: path, tabs: get().tabs.map(t => t.path === path ? { ...t, view: undefined, diffStaged: undefined, diffPath: undefined } : t) }); return }
+    const existing = get().tabs.find(t => t.path === path)
+    if (existing) {
+      set({ activeTab: path, tabs: get().tabs.map(t => t.path === path ? { ...t, view: undefined, diffStaged: undefined, diffPath: undefined } : t) })
+      // A deleted tab never re-reads on its own: if the file is back (recreated,
+      // restored in Finder), pick it up instead of showing stale content that
+      // no save path would write.
+      if (existing.deleted) await get().reviveDeletedTabs([path])
+      return
+    }
     set({ tabs: [...get().tabs, { path, name, content: null, frontmatter: '', editedContent: null, dirty: false, deleted: false, baseVersion: null }], activeTab: path })
     // Binary/image files are previewed via asset URL, never read as UTF-8 text.
     if (isBinaryPath(path)) return
@@ -449,6 +461,30 @@ export const useEditorStore = create<EditorState>()(
     if (dirty) scheduleAutoSave(path)
   },
   setTabDeleted: (path, deleted) => { set({ tabs: get().tabs.map(t => (t.path === path || t.path.startsWith(path + '/')) ? { ...t, deleted } : t) }) },
+
+  reviveDeletedTabs: async (paths) => {
+    const targets = get().tabs.filter(t => t.deleted && (!paths || paths.includes(t.path)))
+    await mapWithConcurrency(targets, TAB_RELOAD_CONCURRENCY, async (t) => {
+      // Previewed via asset URL, never read as text: being on disk is enough.
+      if (isBinaryPath(t.path)) {
+        if (await readFileVersion(t.path) !== null) get().setTabDeleted(t.path, false)
+        return
+      }
+      let read: { raw: string; version: string | null }
+      try { read = await readWithVersion(t.path) } catch { return } // still gone
+      const tab = get().tabs.find(x => x.path === t.path)
+      if (!tab) return
+      if (!tab.dirty) {
+        get().setContent(tab.path, read.raw)
+        set({ tabs: get().tabs.map(x => x.path === tab.path ? { ...x, deleted: false, baseVersion: read.version ?? contentVersion(read.raw) } : x) })
+      } else {
+        // Edits typed while deleted keep their baseline: if a different file came
+        // back, the save surfaces a conflict instead of overwriting it.
+        set({ tabs: get().tabs.map(x => x.path === tab.path ? { ...x, deleted: false } : x) })
+        scheduleAutoSave(tab.path)
+      }
+    })
+  },
 
   /** Re-read persisted tab identities after the vault has resumed. */
   restoreSessionTabs: async () => {
