@@ -1,8 +1,7 @@
 /** Delete the current block — the side menu's drag-handle "Delete", for the
  *  IME toolbar: the side menu is hover-driven, which a touch pointer cannot do,
  *  so a phone had no way to drop a whole block (erasing its text leaves the
- *  block behind). Pinned to the strip's trailing edge (see index.css) so it
- *  stays reachable however far the row is scrolled.
+ *  block behind). Sits in the row beside the block actions and scrolls with it.
  *
  *  No disabled state, like MoveBlockButtons: with no selection or cursor the
  *  command is a no-op (see utils/deleteBlock). */
@@ -17,7 +16,7 @@ export function DeleteBlockButton() {
   if (!editor.isEditable) return null
   return (
     <Components.FormattingToolbar.Button
-      className="bn-button formatting-toolbar-pinned"
+      className="bn-button"
       label="Delete block"
       mainTooltip="Delete block"
       icon={<Trash2 size={14} />}

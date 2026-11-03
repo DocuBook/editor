@@ -180,22 +180,41 @@ html[data-toolbar-popup-open] .bn-editor {
     scrollbar-width: none;
     /* Keeps a focused button from scrolling in under the pinned control. */
     scroll-padding-inline-end: 40px;
+    /* A sticky child stops at the padding edge, so the row's 2px end padding
+       left a strip right of the chevron where scrolled buttons showed through.
+       The hidden chevron's gap stands in for it when the row fits (below). */
+    padding-inline-end: 0;
 }
 .bn-mantine .bn-toolbar.formatting-toolbar-scroll::-webkit-scrollbar {
     display: none;
 }
 
-/* The row's trailing control — the chevron on the bubble, the trash on the IME
-   strip — stays put while the row scrolls under it. The shadow is the menu's
-   own colour, so the buttons fade into the control instead of being cut. */
+/* The IME strip spans the keyboard's full width: it is docked to the keyboard,
+   not floating, so no gutters and no rounded card. Same specificity as the cap
+   above, so it must stay after it. */
+.bn-mobile-formatting-toolbar .bn-toolbar.formatting-toolbar-scroll {
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+    border-inline: 0;
+}
+
+/* The row's trailing chevron stays put while the row scrolls under it, flush
+   with the right edge. The shadow is the menu's own colour, so the buttons fade into the control instead of being cut. */
 .bn-mantine .bn-toolbar .formatting-toolbar-pinned {
     position: sticky;
     right: 0;
     z-index: 1;
     box-shadow: -8px 0 8px -2px var(--bn-colors-menu-background);
 }
+/* Collapsed rather than removed: its 2px flex gap is the row's end padding. */
 .bn-mantine .bn-toolbar .formatting-toolbar-pinned.is-hidden {
-    display: none;
+    visibility: hidden;
+    width: 0;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    box-shadow: none;
 }
 
 #root .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {

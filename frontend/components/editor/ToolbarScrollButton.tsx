@@ -1,5 +1,5 @@
-/** Scrolls the compact (<640px web) formatting toolbar — the trigger that
- *  replaced its "More formatting" overflow panel.
+/** Scrolls the compact (<640px web) formatting toolbar and the IME strip —
+ *  the trigger that replaced the bubble's "More formatting" overflow panel.
  *
  *  The compact row holds every button and is capped at the viewport width
  *  (`.formatting-toolbar-scroll` in index.css), so the tail that used to land

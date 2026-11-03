@@ -6,7 +6,7 @@
  *  Inserts directly; the slash menu is not opened here (see utils/insertBlock
  *  for why). Reordering is the companion MoveBlockButtons, not a drag handle:
  *  dragging is HTML5 drag-and-drop, which touch does not fire. */
-import { Plus } from 'lucide-react'
+import { ListPlus } from 'lucide-react'
 import { useBlockNoteEditor, useComponentsContext } from '@blocknote/react'
 import { insertBlockAtCursor } from '../../utils/insertBlock'
 
@@ -21,7 +21,7 @@ export function InsertBlockButton() {
       className="bn-button"
       label="Insert paragraph"
       mainTooltip="Insert paragraph"
-      icon={<Plus size={14} />}
+      icon={<ListPlus size={14} />}
       onClick={() => insertBlockAtCursor(editor)}
     />
   )
