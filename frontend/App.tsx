@@ -14,6 +14,7 @@ import { useEditorStore, installUnloadSave } from './stores/editor'
 import { useVaultStore } from './stores/vault'
 import { useSyncStore, installSyncListeners, isSyncRecordInScope } from './stores/sync'
 import ConflictDialog from './components/ConflictDialog'
+import DeletedEditsDialog from './components/DeletedEditsDialog'
 import SyncStatusBadge from './components/editor/SyncStatusBadge'
 import { listen, invoke, closeWindow, isTauri } from './lib/ipc'
 import { useAuth, useAuthGuard } from './stores/auth'
@@ -185,6 +186,9 @@ export default function App() {
     let cancelled = false
     listen('app:before-close', async () => {
       try {
+        // Edits in a deleted tab are never saved on their own: ask first, and
+        // stay open when the user cancels or a recreate hit a conflict.
+        if (!(await useEditorStore.getState().confirmDeletedBeforeQuit())) return
         await useEditorStore.getState().persistAllDirty()
         if (!cancelled) await invoke('app_ready_to_close')
       } catch (error) {
@@ -314,6 +318,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <DeletedEditsDialog />
       {activeConflict && (
         <ConflictDialog
           key={activeConflict.path}

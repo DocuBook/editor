@@ -42,6 +42,7 @@ vi.mock('../../../frontend/components/SettingsHeader', () => ({
   ),
 }))
 vi.mock('../../../frontend/components/StatusBar', () => ({ default: () => null }))
+vi.mock('../../../frontend/components/DeletedEditsDialog', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/SetupWizard', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/Login', () => ({ default: () => null }))
 vi.mock('../../../frontend/stores/gitStatus', () => ({ useGitStatusRefresh: () => {} }))

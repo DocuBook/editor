@@ -45,6 +45,11 @@ export interface Tab {
 }
 
 export type EditMode = 'editor' | 'code'
+export type DeletedChoice = 'save' | 'discard' | 'cancel'
+
+/** A deleted tab is still editable, but every save path skips it. Edits typed
+ *  into one are lost unless the user is asked first. */
+const hasDeletedEdits = (tab: Tab) => tab.deleted && tab.dirty && tab.editedContent !== null
 
 interface EditorState {
   tabs: Tab[]; activeTab: string | null; editMode: EditMode
@@ -75,6 +80,14 @@ interface EditorState {
    *  edits survive the remap (the editor remounts under the new key). */
   renameTab: (fromPath: string, toPath: string) => Promise<void>
   closeTab: (path: string) => Promise<void>
+  /** Set while the user is asked what to do with edits typed into deleted tabs
+   *  (see `askAboutDeleted`); the dialog reads it and answers via `answerDeletedPrompt`. */
+  deletedPrompt: { names: string[] } | null
+  answerDeletedPrompt: (choice: DeletedChoice) => void
+  /** Desktop quit: ask about every deleted tab that still holds unsaved edits.
+   *  Resolves true when the app may quit — on Discard, or after Save recreated
+   *  the files — and false on Cancel or a conflict that needs resolving. */
+  confirmDeletedBeforeQuit: () => Promise<boolean>
   closeAllTabs: () => void
   setContent: (path: string, fileContent: string) => void
   setFrontmatter: (path: string, fm: string) => void
@@ -214,11 +227,15 @@ export const useEditorStore = create<EditorState>()(
    *  - permanent failure (bad path, permissions) → rethrown so the caller can
    *                report it; retrying forever would be pointless.
    */
-  const saveTabToDisk = async (tab: Tab) => {
+  const saveTabToDisk = async (tab: Tab, recreate = false) => {
     const content = tabDiskContent(tab)
-    if (content === tab.content) { get().setTabDirty(tab.path, false); return }
+    if (!recreate && content === tab.content) { get().setTabDirty(tab.path, false); return }
 
-    const baseVersion = tab.baseVersion ?? null
+    /** Recreating a deleted file writes with no baseline: the backend then writes
+     *  only while nothing exists at the path, so a file that came back in the
+     *  meantime is a conflict instead of being overwritten. */
+    const baseVersion = recreate ? null : tab.baseVersion ?? null
+    const revived: Partial<Tab> = recreate ? { deleted: false } : {}
     /** The tab shows a write that is still queued: this edit continues it. A
      *  direct write would land first (disk still holds the old version), and the
      *  queued predecessor would then conflict with it, offering the OLDER text
@@ -227,7 +244,7 @@ export const useEditorStore = create<EditorState>()(
      *  write is itself still waiting on a predecessor, that is the one to wait
      *  for: the queued write is superseded here and will never be sent. */
     const queued = useSyncStore.getState().queuedWrite(tab.path)
-    if (queued && queued.content === tab.content) {
+    if (!recreate && queued && queued.content === tab.content) {
       useSyncStore.getState().enqueue({ path: tab.path, content, baseVersion, parentVersion: queued.parentVersion ?? queued.contentVersion })
       settleWrite(tab.path, content)
       void useSyncStore.getState().drain()
@@ -239,7 +256,7 @@ export const useEditorStore = create<EditorState>()(
     } catch (error) {
       if (isRetryableError(error)) {
         useSyncStore.getState().enqueue({ path: tab.path, content, baseVersion })
-        settleWrite(tab.path, content)
+        settleWrite(tab.path, content, revived)
         logger.warn('write_queued_offline', { path: tab.path })
         return
       }
@@ -262,7 +279,18 @@ export const useEditorStore = create<EditorState>()(
       return
     }
 
-    settleWrite(tab.path, content, { baseVersion: outcome.version })
+    settleWrite(tab.path, content, { baseVersion: outcome.version, ...revived })
+  }
+
+  /** At most one question is open: a second request while it waits is treated as
+   *  Cancel, so two dialogs never stack. */
+  let deletedAnswer: ((choice: DeletedChoice) => void) | null = null
+  const askAboutDeleted = (names: string[]) => {
+    if (deletedAnswer) return Promise.resolve<DeletedChoice>('cancel')
+    return new Promise<DeletedChoice>(resolve => {
+      deletedAnswer = resolve
+      set({ deletedPrompt: { names } })
+    })
   }
 
   const scheduleAutoSave = (path: string) => {
@@ -276,7 +304,7 @@ export const useEditorStore = create<EditorState>()(
   let flushPromise: Promise<void> | null = null
   let persistChain: Promise<void> = Promise.resolve()
   return {
-  tabs: [], activeTab: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null,
+  tabs: [], activeTab: null, deletedPrompt: null, editMode: 'editor', blockEditor: null, canUndo: false, canRedo: false, _flushEditor: null as (() => void | Promise<void>) | null,
   setBlockEditor: (e) => { set({ blockEditor: e }); if (e) get().setUndoRedoState(); else set({ canUndo: false, canRedo: false }) },
   setUndoRedoState: () => {
     const state = get().blockEditor?.prosemirrorState
@@ -414,6 +442,22 @@ export const useEditorStore = create<EditorState>()(
         toast.error(`Could not save "${tab.name}". The tab was kept open; check disk access and try again.`)
         return
       }
+    } else if (tab && hasDeletedEdits(tab)) {
+      /** The file is gone, so closing would drop what was typed since: ask first. */
+      const choice = await askAboutDeleted([tab.name])
+      if (choice === 'cancel') return
+      if (choice === 'save') {
+        const latest = get().tabs.find(t => t.path === path)
+        if (!latest) return
+        try { await saveTabToDisk(latest, true) } catch (error) {
+          logger.error('tab_save_failed', { error, fileName: tab.name })
+          toast.error(`Could not save "${tab.name}". The tab was kept open; check disk access and try again.`)
+          return
+        }
+        // A file that came back is a conflict, not a write: the tab stays dirty
+        // so the conflict dialog can resolve it instead of the edit vanishing.
+        if (get().tabs.find(t => t.path === path)?.dirty) return
+      }
     }
     const currentTabs = get().tabs
     const closingIndex = currentTabs.findIndex(t => t.path === path)
@@ -431,6 +475,27 @@ export const useEditorStore = create<EditorState>()(
       activeTab = (tabs[closingIndex] ?? tabs[tabs.length - 1])?.path ?? null
     }
     set({ tabs, activeTab })
+  },
+
+  answerDeletedPrompt: (choice) => {
+    const answer = deletedAnswer
+    deletedAnswer = null
+    set({ deletedPrompt: null })
+    answer?.(choice)
+  },
+
+  confirmDeletedBeforeQuit: async () => {
+    await get().flushEditor()
+    const names = get().tabs.filter(hasDeletedEdits).map(t => t.name)
+    if (!names.length) return true
+    const choice = await askAboutDeleted(names)
+    if (choice === 'cancel') return false
+    if (choice === 'discard') return true
+    for (const { path } of get().tabs.filter(hasDeletedEdits)) {
+      const tab = get().tabs.find(t => t.path === path)
+      if (tab) await saveTabToDisk(tab, true)
+    }
+    return !get().tabs.some(hasDeletedEdits)
   },
 
   closeAllTabs: () => {
@@ -654,7 +719,10 @@ export function installUnloadSave(): () => void {
   }
   const onVisibility = () => { if (document.visibilityState === 'hidden') save() }
   const onBeforeUnload = (event: BeforeUnloadEvent) => {
-    if (!hasUnsaved()) return
+    // A deleted tab's edits are never saved here (that would recreate a file the
+    // user deleted), but leaving still loses them, so the browser must ask.
+    const hasDeletedUnsaved = useEditorStore.getState().tabs.some(hasDeletedEdits)
+    if (!hasUnsaved() && !hasDeletedUnsaved) return
     save()
     event.preventDefault()
     // Older Safari and Chrome show the prompt only when returnValue is set.
