@@ -17,9 +17,10 @@ import { useEditorStore } from '../../../frontend/stores/editor'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
+/** Shaped like the backend reply: `name` is the file stem, without `.md`. */
 const BACKLINKS = [
-  { path: 'Daily/2026-11-03.md', name: '2026-11-03.md', snippet: 'update [[Roadmap]] hari ini' },
-  { path: 'Ideas.md', name: 'Ideas.md', snippet: '' },
+  { path: 'Daily/2026-11-03.md', name: '2026-11-03', snippet: 'update [[Roadmap]] hari ini' },
+  { path: 'Ideas.md', name: 'Ideas', snippet: '' },
 ]
 
 let root: Root | null = null
@@ -105,7 +106,7 @@ describe('InlineProperties — Wikilinks', () => {
     expect(rows[1].textContent).toBe('Ideas')
   })
 
-  it('opens the linking note when its row is clicked', async () => {
+  it('opens the linking note with its basename as the tab title, like every other openFile caller', async () => {
     invokeMock.mockResolvedValue(JSON.stringify(BACKLINKS))
     await render()
     await act(async () => { toggle()!.click() })
