@@ -27,34 +27,6 @@ import { useSettings } from '../stores/settings'
 /** Concurrent restore/permanent-delete calls for one trash batch. */
 const TRASH_ACTION_CONCURRENCY = 4
 
-/** Panel showing backlinks for the currently active file. */
-function BacklinksPanel({ onNavigate }: { onNavigate: () => void }) {
-  const [items, setItems] = useState<{path:string;name:string;snippet:string}[]>([])
-  const { openFile } = useEditorStore()
-  const activeTab = useEditorStore(s => s.activeTab)
-
-  /* oxlint-disable react/set-state-in-effect -- clears backlinks when no tab is active */
-  useEffect(() => {
-    if (!activeTab) { setItems([]); return }
-    invoke<string>('wiki_backlinks', { path: activeTab }).then(s => { try { setItems(JSON.parse(s)) } catch(e) { console.error('Backlinks parse:', e); setItems([]) } }).catch(e => console.error('Backlinks:', e))
-  }, [activeTab])
-  /* oxlint-enable react/set-state-in-effect */
-
-  if (items.length === 0) return null
-  return (
-    <div className="p-2">
-      <div className="text-muted uppercase tracking-wider mb-1 px-1">Backlinks ({items.length})</div>
-      {items.map(item => (
-        <div key={item.path} onClick={async () => { await openFile(item.path, item.name); onNavigate() }}
-          className="text-foreground-subtle hover:text-foreground-secondary cursor-pointer py-1 px-1 rounded hover:bg-surface-active">
-          <div className="truncate">{item.name}</div>
-          {item.snippet && <div className="truncate text-[10px] text-muted">{item.snippet}</div>}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 interface SidebarProps {
   id?: string
   onOpenSettings: () => void
@@ -293,7 +265,7 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       )}
 
       {/* Settings owns the whole tree area: while it is open, NO other tree panel
-          (vault / git / trash / backlinks) renders — the nav list sits where the
+          (vault / git / trash) renders — the nav list sits where the
           file tree normally is, directly under the search bar (which Settings
           also hides, since it owns the whole column). */}
       {!settingsOpen && isOpen && activePanel === 'vault' && (
@@ -347,11 +319,6 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
         />
       )}
       {!isOpen && activePanel !== 'trash' && !settingsOpen && <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>}
-      {!settingsOpen && isOpen && activePanel === 'vault' && (
-        <div className="max-h-32 overflow-y-auto text-xs">
-          <BacklinksPanel onNavigate={onNavigate} />
-        </div>
-      )}
       {/* One compact footer row on every panel: the vault switcher takes the
           width, the profile avatar sits at the end. Both popovers anchor to
           this row (the only positioned ancestor), so they span the sidebar. */}

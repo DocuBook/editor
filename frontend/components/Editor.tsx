@@ -12,6 +12,7 @@ import { WelcomeScreen } from './editor/WelcomeScreen'
 import { TabBar } from './editor/TabBar'
 import { ImagePreview, PlainTextViewer, MarkdownEditor } from './editor/previews'
 import { DiffViewer } from './editor/DiffViewer'
+import InlineProperties from './editor/InlineProperties'
 import { clearEditorCache } from '../utils/editorCache'
 import { splitFrontmatter } from '../utils/frontmatter'
 import { clearDiagramSVG } from '../utils/mermaidRenderCache'
@@ -179,6 +180,8 @@ export default function Editor({ sidebarOpen, isDesktop, sidebarToggleRef, onTog
             it keeps the document's last line readable above a long prompt instead of
             trapped under it. */}
         <div ref={setEditorScroll} className={'editor-content flex-1 min-h-0 overflow-y-auto pt-6 px-4 pb-8 ' + (kind === 'wysiwyg' && editMode === 'editor' && !diffView ? 'pb-50' : '')}>
+          {/* Raw mode shows properties as frontmatter, so the inline block only joins the rich editor. */}
+          {kind === 'wysiwyg' && editMode === 'editor' && !diffView && file.content != null && <InlineProperties key={file.path} path={file.path} />}
           {inner}
         </div>
         {kind === 'wysiwyg' && editMode === 'editor' && !diffView && (
