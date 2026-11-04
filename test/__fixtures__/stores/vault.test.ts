@@ -9,6 +9,9 @@ vi.mock('../../../frontend/lib/ipc', () => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import { invoke } from '../../../frontend/lib/ipc'
+import { toast } from 'sonner'
+
+const toastError = toast.error as unknown as ReturnType<typeof vi.fn>
 
 /** Regression: after a file CRUD, loadTree must flatten from the FRESH
  *  childrenCache — a same-call flatten reads the pre-update cache and hides
@@ -54,6 +57,55 @@ describe('vault store lifecycle', () => {
     expect(mockInvoke).not.toHaveBeenCalledWith('close_vault')
     expect(useEditorStore.getState().tabs).toHaveLength(1)
     expect(useVaultStore.getState()).toMatchObject({ name: 'notes', isOpen: true, vaultPath: '/tmp/notes' })
+  })
+
+  /** A deleted tab's edits are never saved, so closing the vault used to drop
+   *  them silently: the transition saves what it can and then clears the tabs. */
+  describe('closing a vault with edits typed into a deleted tab', () => {
+    const asked = () => vi.waitFor(() => expect(useEditorStore.getState().deletedPrompt).not.toBeNull())
+    beforeEach(() => {
+      const mockInvoke = invoke as unknown as ReturnType<typeof vi.fn>
+      mockInvoke.mockImplementation(async (cmd: string) =>
+        cmd === 'write_file_checked' ? JSON.stringify({ status: 'written', version: 'v1' }) : undefined)
+      useVaultStore.setState({ name: 'notes', isOpen: true, vaultPath: '/tmp/notes' })
+      useEditorStore.setState({
+        tabs: [{ path: 'gone.md', name: 'gone.md', content: 'old\n', frontmatter: '', editedContent: 'typed after delete', dirty: true, deleted: true, baseVersion: 'v0' }],
+        activeTab: 'gone.md', deletedPrompt: null,
+      })
+    })
+
+    it('stays open on Cancel, with the tab and its edit intact', async () => {
+      const closing = useVaultStore.getState().closeVault()
+      await asked()
+      useEditorStore.getState().answerDeletedPrompt('cancel')
+      await closing
+
+      expect(invoke).not.toHaveBeenCalledWith('close_vault')
+      expect(useEditorStore.getState().tabs).toHaveLength(1)
+      expect(useVaultStore.getState()).toMatchObject({ isOpen: true, loading: false })
+      expect(toastError).not.toHaveBeenCalled()
+    })
+
+    it('closes without a write on Discard', async () => {
+      const closing = useVaultStore.getState().closeVault()
+      await asked()
+      useEditorStore.getState().answerDeletedPrompt('discard')
+      await closing
+
+      expect(invoke).not.toHaveBeenCalledWith('write_file_checked', expect.anything())
+      expect(invoke).toHaveBeenCalledWith('close_vault')
+      expect(useEditorStore.getState().tabs).toEqual([])
+    })
+
+    it('recreates the file with no baseline on Save, then closes', async () => {
+      const closing = useVaultStore.getState().closeVault()
+      await asked()
+      useEditorStore.getState().answerDeletedPrompt('save')
+      await closing
+
+      expect(invoke).toHaveBeenCalledWith('write_file_checked', { path: 'gone.md', content: 'typed after delete\n', baseVersion: null })
+      expect(invoke).toHaveBeenCalledWith('close_vault')
+    })
   })
 
   it('shows a newly created file in an expanded folder after loadTree', async () => {

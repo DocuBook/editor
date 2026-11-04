@@ -48,6 +48,14 @@ export const useVaultStore = create<VaultState>()(
         if (transitionId !== id) return false
         try {
           await useEditorStore.getState().persistAllDirty()
+          // Closing the tabs would drop edits typed into a deleted tab (nothing
+          // saves those on its own), so the user decides first. Cancel is not a
+          // failure: the vault just stays as it is.
+          if (!preserveTabs && !(await useEditorStore.getState().confirmDeletedEdits())) {
+            transitioning = false
+            set({ loading: false })
+            return false
+          }
           // The backend resolves relative write paths against its active vault.
           // Quiesce dispatched sync writes before closing or opening a vault.
           setSyncVaultScope('')

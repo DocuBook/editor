@@ -84,10 +84,11 @@ interface EditorState {
    *  (see `askAboutDeleted`); the dialog reads it and answers via `answerDeletedPrompt`. */
   deletedPrompt: { names: string[] } | null
   answerDeletedPrompt: (choice: DeletedChoice) => void
-  /** Desktop quit: ask about every deleted tab that still holds unsaved edits.
-   *  Resolves true when the app may quit — on Discard, or after Save recreated
-   *  the files — and false on Cancel or a conflict that needs resolving. */
-  confirmDeletedBeforeQuit: () => Promise<boolean>
+  /** Before the tabs go away (desktop quit, closing or switching the vault): ask
+   *  about every deleted tab that still holds unsaved edits. Resolves true when
+   *  it is safe to go on — on Discard, or after Save recreated the files — and
+   *  false on Cancel or a conflict that needs resolving. */
+  confirmDeletedEdits: () => Promise<boolean>
   closeAllTabs: () => void
   setContent: (path: string, fileContent: string) => void
   setFrontmatter: (path: string, fm: string) => void
@@ -484,7 +485,7 @@ export const useEditorStore = create<EditorState>()(
     answer?.(choice)
   },
 
-  confirmDeletedBeforeQuit: async () => {
+  confirmDeletedEdits: async () => {
     await get().flushEditor()
     const names = get().tabs.filter(hasDeletedEdits).map(t => t.name)
     if (!names.length) return true
@@ -638,7 +639,8 @@ export const useEditorStore = create<EditorState>()(
     // Prefer the exact bytes captured at conflict time. Re-reading could take yet
     // another writer's version and quietly discard the one the user just chose.
     get().setContent(path, conflict.theirs)
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion } : t) })
+    // The file is on disk, so a tab that was flagged deleted is live again.
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion, deleted: false } : t) })
     useSyncStore.getState().resolveKeepTheirs(path)
   },
 
@@ -661,7 +663,7 @@ export const useEditorStore = create<EditorState>()(
     if (!resolved) return
     const raw = await readFileVersion(path)
     get().setContent(path, conflict.mine)
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine) } : t) })
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine), deleted: false } : t) })
   },
 
 

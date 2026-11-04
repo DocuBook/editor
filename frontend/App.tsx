@@ -188,7 +188,7 @@ export default function App() {
       try {
         // Edits in a deleted tab are never saved on their own: ask first, and
         // stay open when the user cancels or a recreate hit a conflict.
-        if (!(await useEditorStore.getState().confirmDeletedBeforeQuit())) return
+        if (!(await useEditorStore.getState().confirmDeletedEdits())) return
         await useEditorStore.getState().persistAllDirty()
         if (!cancelled) await invoke('app_ready_to_close')
       } catch (error) {

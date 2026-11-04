@@ -106,7 +106,7 @@ describe('quitting the desktop app with edits in a deleted tab', () => {
   })
 
   it('asks once for all the deleted tabs and stays open on Cancel', async () => {
-    const quitting = useEditorStore.getState().confirmDeletedBeforeQuit()
+    const quitting = useEditorStore.getState().confirmDeletedEdits()
     await asked()
     expect(prompt()).toEqual({ names: ['a.md', 'b.md'] })
     useEditorStore.getState().answerDeletedPrompt('cancel')
@@ -116,7 +116,7 @@ describe('quitting the desktop app with edits in a deleted tab', () => {
   })
 
   it('lets the app quit on Discard, still without a write', async () => {
-    const quitting = useEditorStore.getState().confirmDeletedBeforeQuit()
+    const quitting = useEditorStore.getState().confirmDeletedEdits()
     await asked()
     useEditorStore.getState().answerDeletedPrompt('discard')
 
@@ -125,7 +125,7 @@ describe('quitting the desktop app with edits in a deleted tab', () => {
   })
 
   it('recreates each file on Save, then lets the app quit', async () => {
-    const quitting = useEditorStore.getState().confirmDeletedBeforeQuit()
+    const quitting = useEditorStore.getState().confirmDeletedEdits()
     await asked()
     useEditorStore.getState().answerDeletedPrompt('save')
 
@@ -135,7 +135,7 @@ describe('quitting the desktop app with edits in a deleted tab', () => {
 
   it('stays open when a file came back, so the conflict can be resolved', async () => {
     backend({ fileBack: true })
-    const quitting = useEditorStore.getState().confirmDeletedBeforeQuit()
+    const quitting = useEditorStore.getState().confirmDeletedEdits()
     await asked()
     useEditorStore.getState().answerDeletedPrompt('save')
 
@@ -145,7 +145,7 @@ describe('quitting the desktop app with edits in a deleted tab', () => {
 
   it('does not ask when no deleted tab has unsaved edits', async () => {
     useEditorStore.setState({ tabs: [tab('a.md', { dirty: false })] })
-    expect(await useEditorStore.getState().confirmDeletedBeforeQuit()).toBe(true)
+    expect(await useEditorStore.getState().confirmDeletedEdits()).toBe(true)
     expect(prompt()).toBeNull()
   })
 })
@@ -173,5 +173,33 @@ describe('leaving the web build with edits in a deleted tab', () => {
     const event = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(event)
     expect(event.defaultPrevented).toBe(false)
+  })
+})
+
+/** Save turned into a conflict because a file came back. Resolving it writes or
+ *  adopts that file, so the tab must be live again: left flagged deleted, every
+ *  later edit would be skipped by the save paths, the bug this change is about. */
+describe('resolving the conflict a recreate ran into', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    backend({ fileBack: true })
+    useSyncStore.getState().reset()
+    useEditorStore.setState({ tabs: [tab('a.md')], activeTab: 'a.md', _flushEditor: null, deletedPrompt: null })
+    const closing = useEditorStore.getState().closeTab('a.md')
+    await asked()
+    useEditorStore.getState().answerDeletedPrompt('save')
+    await closing
+  })
+
+  it('Keep mine writes the edit and revives the tab', async () => {
+    await useEditorStore.getState().applyConflictMine('a.md')
+    expect(useEditorStore.getState().tabs.find(t => t.path === 'a.md')!.deleted).toBe(false)
+  })
+
+  it('Keep theirs adopts the file on disk and revives the tab', async () => {
+    await useEditorStore.getState().applyConflictTheirs('a.md')
+    const revived = useEditorStore.getState().tabs.find(t => t.path === 'a.md')!
+    expect(revived.deleted).toBe(false)
+    expect(revived.content).toBe('someone else\n')
   })
 })

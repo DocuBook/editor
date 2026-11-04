@@ -49,6 +49,11 @@ describe('DeletedEditsDialog', () => {
     expect(dialog()!.textContent).toContain('a.md, b.md')
   })
 
+  it('puts the focus on Cancel, so a stray Enter never recreates a deleted file', () => {
+    act(() => useEditorStore.setState({ deletedPrompt: { names: ['a.md'] } }))
+    expect(document.activeElement).toBe(button('Cancel'))
+  })
+
   it('cancels on Escape', () => {
     act(() => useEditorStore.setState({ deletedPrompt: { names: ['a.md'] } }))
     act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })

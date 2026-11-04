@@ -6,7 +6,8 @@ import { useEditorStore } from '../stores/editor'
  *
  *  Closing the tab or quitting would drop them, because every save path skips a
  *  deleted tab. Save recreates the file at the same path (and turns into a
- *  conflict if a file has come back there); Discard drops the edits. */
+ *  conflict if a file has come back there); Discard drops the edits. Cancel has
+ *  the focus, so a stray Enter never recreates a file the user deleted. */
 export default function DeletedEditsDialog() {
   const prompt = useEditorStore(state => state.deletedPrompt)
   const answer = useEditorStore(state => state.answerDeletedPrompt)
@@ -30,9 +31,9 @@ export default function DeletedEditsDialog() {
           Save to recreate {many ? 'them' : 'it'}, or discard your changes.
         </div>
         <div className="flex justify-end gap-2">
-          <button onClick={() => answer('cancel')} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
+          <button autoFocus onClick={() => answer('cancel')} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-transparent text-foreground-secondary cursor-pointer hover:bg-surface-active">Cancel</button>
           <button onClick={() => answer('discard')} className="text-xs px-3 py-1.5 rounded bg-danger text-on-danger cursor-pointer border-none">Discard</button>
-          <button autoFocus onClick={() => answer('save')} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-surface-active text-foreground cursor-pointer">Save</button>
+          <button onClick={() => answer('save')} className="text-xs px-3 py-1.5 rounded border border-border-subtle bg-surface-active text-foreground cursor-pointer">Save</button>
         </div>
       </div>
     </div>
