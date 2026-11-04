@@ -9,6 +9,7 @@ const closeHandshake = vi.hoisted(() => ({
   handlers: new Map<string, () => Promise<void>>(),
   persistAllDirty: vi.fn(async () => {}),
   confirmDeletedEdits: vi.fn(async () => true),
+  isTauri: false,
 }))
 const vaultState = vi.hoisted(() => ({
   isOpen: true,
@@ -67,7 +68,7 @@ vi.mock('../../../frontend/stores/auth', () => ({
   useAuthGuard: () => {},
 }))
 vi.mock('../../../frontend/lib/ipc', () => ({
-  isTauri: false,
+  get isTauri() { return closeHandshake.isTauri },
   listen: vi.fn(async (event: string, handler: () => Promise<void>) => { closeHandshake.handlers.set(event, handler); return () => {} }),
   invoke: vi.fn(async () => undefined),
 }))
@@ -242,11 +243,18 @@ describe('desktop close handshake', () => {
   })
 
   it('drops a close held before the handler existed, so it cannot skip the save later', async () => {
-    act(() => root.unmount())
-    vi.mocked(invoke).mockClear()
-    root = createRoot(document.getElementById('root')!)
-    await act(async () => { root.render(<App />) })
+    const remount = async (desktop: boolean) => {
+      act(() => root.unmount())
+      closeHandshake.isTauri = desktop
+      vi.mocked(invoke).mockClear()
+      root = createRoot(document.getElementById('root')!)
+      await act(async () => { root.render(<App />) })
+    }
+    await remount(true)
     expect(calls('app_cancel_close')).toHaveLength(1)
+    // The web build has no such command: the server would answer 400.
+    await remount(false)
+    expect(calls('app_cancel_close')).toHaveLength(0)
   })
 
   it('acknowledges the close before it asks or saves, so a second close is held', async () => {

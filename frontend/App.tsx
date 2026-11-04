@@ -214,7 +214,8 @@ export default function App() {
       unsub = u
       // A close held while this handler did not exist (crash screen, before a
       // Reload) must not count against the next one: it would skip the save and prompt.
-      invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
+      // Desktop only: the web server has no such command and answers 400.
+      if (isTauri) invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
     })
     return () => { cancelled = true; unsub?.() }
   }, [])
