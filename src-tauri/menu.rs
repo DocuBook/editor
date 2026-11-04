@@ -19,9 +19,15 @@ pub const CLOSE_TAB: &str = "close_tab";
 /// Menu id of the *Close Window* item — closes the window directly.
 pub const CLOSE_WINDOW: &str = "close_window";
 
+/// Menu id of the *Quit* item — closes the window, so quitting runs the same
+/// save-and-ask handshake as closing it (see `WindowEvent::CloseRequested`).
+pub const QUIT: &str = "quit";
+
 /// Accelerators live next to the items, in one place.
 const ACCEL_CLOSE_TAB: &str = "CmdOrCtrl+W";
 const ACCEL_CLOSE_WINDOW: &str = "CmdOrCtrl+Shift+W";
+#[cfg(target_os = "macos")]
+const ACCEL_QUIT: &str = "CmdOrCtrl+Q";
 
 /// Builds the application menu.
 pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
@@ -41,6 +47,17 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     let close_window =
         MenuItem::with_id(app, CLOSE_WINDOW, "Close Window", true, Some(ACCEL_CLOSE_WINDOW))?;
 
+    // Quit: Tauri's predefined item asks the OS to terminate the app, which may
+    // not raise `CloseRequested`, so the save and the deleted-tab prompt would be
+    // skipped. This item closes the window instead and keeps the platform's
+    // label and shortcut.
+    #[cfg(target_os = "macos")]
+    let quit = MenuItem::with_id(app, QUIT, format!("Quit {}", pkg.name), true, Some(ACCEL_QUIT))?;
+    #[cfg(windows)]
+    let quit = MenuItem::with_id(app, QUIT, "&Exit", true, None::<&str>)?;
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let quit = MenuItem::with_id(app, QUIT, "&Quit", true, None::<&str>)?;
+
     // File: the default File menu only held Close Window (plus Quit outside
     // macOS), so it becomes the home of the tab action.
     #[cfg(not(target_os = "macos"))]
@@ -48,7 +65,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         .item(&close_tab)
         .item(&close_window)
         .separator()
-        .quit()
+        .item(&quit)
         .build()?;
     #[cfg(target_os = "macos")]
     let file = SubmenuBuilder::new(app, "File")
@@ -92,7 +109,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             .hide()
             .hide_others()
             .separator()
-            .quit()
+            .item(&quit)
             .build()?,
     );
     let menu = menu
