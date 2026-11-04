@@ -7,6 +7,8 @@
 [default]
 permissions = [
   "allow-app-ready-to-close",
+  "allow-app-close-ack",
+  "allow-app-cancel-close",
   "allow-ask-ai",
   "allow-ai-settings",
   "allow-cancel-ai",
@@ -104,6 +106,26 @@ commands.allow = ["app_ready_to_close"]
 identifier = "deny-app-ready-to-close"
 description = "Denies the app_ready_to_close command."
 commands.deny = ["app_ready_to_close"]
+
+[[permission]]
+identifier = "allow-app-close-ack"
+description = "Enables the app_close_ack command."
+commands.allow = ["app_close_ack"]
+
+[[permission]]
+identifier = "deny-app-close-ack"
+description = "Denies the app_close_ack command."
+commands.deny = ["app_close_ack"]
+
+[[permission]]
+identifier = "allow-app-cancel-close"
+description = "Enables the app_cancel_close command."
+commands.allow = ["app_cancel_close"]
+
+[[permission]]
+identifier = "deny-app-cancel-close"
+description = "Denies the app_cancel_close command."
+commands.deny = ["app_cancel_close"]
 
 [[permission]]
 identifier = "allow-ask-ai"

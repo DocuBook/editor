@@ -14,6 +14,7 @@ import { useEditorStore, installUnloadSave } from './stores/editor'
 import { useVaultStore } from './stores/vault'
 import { useSyncStore, installSyncListeners, isSyncRecordInScope } from './stores/sync'
 import ConflictDialog from './components/ConflictDialog'
+import DeletedEditsDialog from './components/DeletedEditsDialog'
 import SyncStatusBadge from './components/editor/SyncStatusBadge'
 import { listen, invoke, closeWindow, isTauri } from './lib/ipc'
 import { useAuth, useAuthGuard } from './stores/auth'
@@ -184,14 +185,38 @@ export default function App() {
     let unsub: (() => void) | undefined
     let cancelled = false
     listen('app:before-close', async () => {
+      let closing = false
       try {
+        // First: tell the window this close reached a live handler, so a second
+        // close is held while we ask or save. A handler that never gets here (crash
+        // screen, frozen webview) lets the next close through after a timeout.
+        await invoke('app_close_ack')
+        // Edits in a deleted tab are never saved on their own: ask first, and
+        // stay open when the user cancels or a recreate hit a conflict.
+        if (!(await useEditorStore.getState().confirmDeletedEdits())) return
         await useEditorStore.getState().persistAllDirty()
-        if (!cancelled) await invoke('app_ready_to_close')
+        if (!cancelled) {
+          await invoke('app_ready_to_close')
+          closing = true
+        }
       } catch (error) {
         logger.error('app_close_failed', { error })
         toast.error('App stayed open because changes could not be saved. Check disk access and try closing again.')
+      } finally {
+        // `app_ready_to_close` records the confirmation before it closes the
+        // window. If that call failed the window stayed open with the close still
+        // confirmed, so withdraw it, or the next close would skip the save and the
+        // prompt above and go straight through. It is harmless on the other paths.
+        if (!closing) await invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
       }
-    }).then(u => { if (!cancelled) unsub = u })
+    }).then(u => {
+      if (cancelled) return
+      unsub = u
+      // A close held while this handler did not exist (crash screen, before a
+      // Reload) must not count against the next one: it would skip the save and prompt.
+      // Desktop only: the web server has no such command and answers 400.
+      if (isTauri) invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
+    })
     return () => { cancelled = true; unsub?.() }
   }, [])
 
@@ -314,6 +339,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <DeletedEditsDialog />
       {activeConflict && (
         <ConflictDialog
           key={activeConflict.path}

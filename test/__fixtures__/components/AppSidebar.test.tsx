@@ -4,6 +4,13 @@ import { act, useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+/** The desktop close handshake: `app:before-close` handlers captured from `listen`. */
+const closeHandshake = vi.hoisted(() => ({
+  handlers: new Map<string, () => Promise<void>>(),
+  persistAllDirty: vi.fn(async () => {}),
+  confirmDeletedEdits: vi.fn(async () => true),
+  isTauri: false,
+}))
 const vaultState = vi.hoisted(() => ({
   isOpen: true,
   openVault: vi.fn(async () => {}),
@@ -42,11 +49,12 @@ vi.mock('../../../frontend/components/SettingsHeader', () => ({
   ),
 }))
 vi.mock('../../../frontend/components/StatusBar', () => ({ default: () => null }))
+vi.mock('../../../frontend/components/DeletedEditsDialog', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/SetupWizard', () => ({ default: () => null }))
 vi.mock('../../../frontend/components/Login', () => ({ default: () => null }))
 vi.mock('../../../frontend/stores/gitStatus', () => ({ useGitStatusRefresh: () => {} }))
 vi.mock('../../../frontend/stores/editor', () => ({
-  useEditorStore: { getState: () => ({ persistAllDirty: vi.fn(async () => {}) }) },
+  useEditorStore: { getState: () => ({ persistAllDirty: closeHandshake.persistAllDirty, confirmDeletedEdits: closeHandshake.confirmDeletedEdits }) },
   installUnloadSave: () => () => {},
 }))
 vi.mock('../../../frontend/stores/vault', () => ({
@@ -59,13 +67,19 @@ vi.mock('../../../frontend/stores/auth', () => ({
   useAuth: Object.assign(() => ({ status: 'ready' }), { getState: () => ({ init: vi.fn() }) }),
   useAuthGuard: () => {},
 }))
-vi.mock('../../../frontend/lib/ipc', () => ({ isTauri: false, listen: vi.fn(async () => () => {}), invoke: vi.fn() }))
+vi.mock('../../../frontend/lib/ipc', () => ({
+  get isTauri() { return closeHandshake.isTauri },
+  listen: vi.fn(async (event: string, handler: () => Promise<void>) => { closeHandshake.handlers.set(event, handler); return () => {} }),
+  invoke: vi.fn(async () => undefined),
+}))
 vi.mock('../../../frontend/utils/logger', () => ({ logger: { error: vi.fn() } }))
 /* The real Toaster, so the toast describe below exercises what App configures. */
 vi.mock('sonner', async (importOriginal) => ({ ...(await importOriginal<typeof import('sonner')>()), toast: { error: vi.fn() } }))
 
 import App from '../../../frontend/App'
 import { useSettings } from '../../../frontend/stores/settings'
+import { invoke } from '../../../frontend/lib/ipc'
+import { toast as sonnerToast } from 'sonner'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -206,5 +220,74 @@ describe('toasts', () => {
 
     act(() => close.click())
     await vi.waitFor(() => expect(document.querySelector('[data-sonner-toast]')).toBeNull())
+  })
+})
+
+/** The backend's handshake is one-shot: it lets the next window close straight
+ *  through unless the frontend re-arms it with `app_cancel_close`. So every way
+ *  of staying open has to say so, or the following close skips the save and the
+ *  deleted-tab prompt. */
+describe('desktop close handshake', () => {
+  const beforeClose = () => closeHandshake.handlers.get('app:before-close')!
+  const calls = (cmd: string) => vi.mocked(invoke).mock.calls.filter(([name]) => name === cmd)
+  beforeEach(() => {
+    closeHandshake.persistAllDirty.mockReset().mockResolvedValue(undefined)
+    closeHandshake.confirmDeletedEdits.mockReset().mockResolvedValue(true)
+    vi.mocked(invoke).mockReset().mockResolvedValue(undefined)
+  })
+
+  it('closes the window once everything is saved, without re-arming', async () => {
+    await act(async () => { await beforeClose()() })
+    expect(calls('app_ready_to_close')).toHaveLength(1)
+    expect(calls('app_cancel_close')).toHaveLength(0)
+  })
+
+  it('drops a close held before the handler existed, so it cannot skip the save later', async () => {
+    const remount = async (desktop: boolean) => {
+      act(() => root.unmount())
+      closeHandshake.isTauri = desktop
+      vi.mocked(invoke).mockClear()
+      root = createRoot(document.getElementById('root')!)
+      await act(async () => { root.render(<App />) })
+    }
+    await remount(true)
+    expect(calls('app_cancel_close')).toHaveLength(1)
+    // The web build has no such command: the server would answer 400.
+    await remount(false)
+    expect(calls('app_cancel_close')).toHaveLength(0)
+  })
+
+  it('acknowledges the close before it asks or saves, so a second close is held', async () => {
+    const order: string[] = []
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => { order.push(cmd) })
+    closeHandshake.confirmDeletedEdits.mockImplementation(async () => { order.push('confirm'); return true })
+    closeHandshake.persistAllDirty.mockImplementation(async () => { order.push('save') })
+    await act(async () => { await beforeClose()() })
+    expect(order).toEqual(['app_close_ack', 'confirm', 'save', 'app_ready_to_close'])
+  })
+
+  it('re-arms and stays open when the user cancels, so the next close asks again', async () => {
+    closeHandshake.confirmDeletedEdits.mockResolvedValue(false)
+    await act(async () => { await beforeClose()() })
+    expect(calls('app_ready_to_close')).toHaveLength(0)
+    expect(calls('app_cancel_close')).toHaveLength(1)
+
+    await act(async () => { await beforeClose()() })
+    expect(closeHandshake.confirmDeletedEdits).toHaveBeenCalledTimes(2)
+    expect(calls('app_cancel_close')).toHaveLength(2)
+  })
+
+  it('re-arms when a save fails, so the next close saves again', async () => {
+    closeHandshake.persistAllDirty.mockRejectedValue(new Error('disk full'))
+    await act(async () => { await beforeClose()() })
+    expect(vi.mocked(sonnerToast.error)).toHaveBeenCalled()
+    expect(calls('app_ready_to_close')).toHaveLength(0)
+    expect(calls('app_cancel_close')).toHaveLength(1)
+  })
+
+  it('re-arms when the backend refuses to close', async () => {
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => { if (cmd === 'app_ready_to_close') throw new Error('close failed') })
+    await act(async () => { await beforeClose()() })
+    expect(calls('app_cancel_close')).toHaveLength(1)
   })
 })

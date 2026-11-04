@@ -52,6 +52,8 @@ const cmds = lib
 const DESKTOP_ONLY = new Map([
   ["read_file_binary", "web serves binaries through GET /api/file"],
   ["app_ready_to_close", "graceful-shutdown handshake, desktop window only"],
+  ["app_close_ack", "tells the window a close request reached the frontend, desktop window only"],
+  ["app_cancel_close", "re-arms the shutdown handshake after the frontend stays open, desktop window only"],
   ["list_editors", "enumerates local editor apps via LaunchServices, desktop only"],
   ["open_in_editor", "opens a local GUI editor, desktop window only"],
   ["reveal_in_finder", "reveals a local path in the OS file manager, desktop only"],
