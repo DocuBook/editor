@@ -199,9 +199,10 @@ export default function App() {
         logger.error('app_close_failed', { error })
         toast.error('App stayed open because changes could not be saved. Check disk access and try closing again.')
       } finally {
-        // The shutdown handshake is one-shot: whenever the window stays open, the
-        // backend must be re-armed, or the next close would skip the save and the
-        // prompt above and go straight through.
+        // `app_ready_to_close` records the confirmation before it closes the
+        // window. If that call failed the window stayed open with the close still
+        // confirmed, so withdraw it, or the next close would skip the save and the
+        // prompt above and go straight through. It is harmless on the other paths.
         if (!closing) await invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
       }
     }).then(u => { if (!cancelled) unsub = u })

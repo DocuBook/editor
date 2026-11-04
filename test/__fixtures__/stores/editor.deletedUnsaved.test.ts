@@ -115,6 +115,18 @@ describe('quitting the desktop app with edits in a deleted tab', () => {
     expect(writes()).toHaveLength(0)
   })
 
+  /** A second window close while the prompt waits raises the handshake again.
+   *  It must not answer for the user or close the first question. */
+  it('answers Cancel to a second request while the prompt is open, and keeps the first alive', async () => {
+    const first = useEditorStore.getState().confirmDeletedEdits()
+    await asked()
+    expect(await useEditorStore.getState().confirmDeletedEdits()).toBe(false)
+    expect(prompt()).toEqual({ names: ['a.md', 'b.md'] })
+
+    useEditorStore.getState().answerDeletedPrompt('discard')
+    expect(await first).toBe(true)
+  })
+
   it('lets the app quit on Discard, still without a write', async () => {
     const quitting = useEditorStore.getState().confirmDeletedEdits()
     await asked()

@@ -80,7 +80,10 @@ pub fn run() {
             // Graceful shutdown: ask the frontend to flush & save, then confirm.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
-                if state.closing.swap(true, Ordering::SeqCst) {
+                // Only `app_ready_to_close` sets this, right before it closes the window:
+                // until then every close request is held and re-raised, including
+                // one that arrives while the frontend is still asking the user.
+                if state.closing.load(Ordering::SeqCst) {
                     return; // already confirmed by the frontend — allow close
                 }
                 let _ = window.emit("app:before-close", ());

@@ -15,9 +15,9 @@ pub fn app_ready_to_close(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/** Frontend decided to stay open (the user cancelled, a conflict needs
- *  resolving, a save failed). The handshake is one-shot, so re-arm it: the next
- *  window close must raise `app:before-close` again instead of slipping through. */
+/** Frontend decided to stay open after `app_ready_to_close` had already been
+ *  accepted but the window did not close. Clear the confirmation, so the next
+ *  window close raises `app:before-close` again instead of slipping through. */
 #[tauri::command]
 pub fn app_cancel_close(state: State<AppState>) {
     state.closing.store(false, Ordering::SeqCst);
