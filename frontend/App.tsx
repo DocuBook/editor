@@ -185,15 +185,24 @@ export default function App() {
     let unsub: (() => void) | undefined
     let cancelled = false
     listen('app:before-close', async () => {
+      let closing = false
       try {
         // Edits in a deleted tab are never saved on their own: ask first, and
         // stay open when the user cancels or a recreate hit a conflict.
         if (!(await useEditorStore.getState().confirmDeletedEdits())) return
         await useEditorStore.getState().persistAllDirty()
-        if (!cancelled) await invoke('app_ready_to_close')
+        if (!cancelled) {
+          await invoke('app_ready_to_close')
+          closing = true
+        }
       } catch (error) {
         logger.error('app_close_failed', { error })
         toast.error('App stayed open because changes could not be saved. Check disk access and try closing again.')
+      } finally {
+        // The shutdown handshake is one-shot: whenever the window stays open, the
+        // backend must be re-armed, or the next close would skip the save and the
+        // prompt above and go straight through.
+        if (!closing) await invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
       }
     }).then(u => { if (!cancelled) unsub = u })
     return () => { cancelled = true; unsub?.() }

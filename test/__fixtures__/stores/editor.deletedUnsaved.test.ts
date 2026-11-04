@@ -176,10 +176,11 @@ describe('leaving the web build with edits in a deleted tab', () => {
   })
 })
 
-/** Save turned into a conflict because a file came back. Resolving it writes or
- *  adopts that file, so the tab must be live again: left flagged deleted, every
- *  later edit would be skipped by the save paths, the bug this change is about. */
-describe('resolving the conflict a recreate ran into', () => {
+/** Save turned into a conflict because a file came back. From then on the tab is
+ *  an ordinary conflicted tab: left flagged deleted, every save path would skip
+ *  it, the bug this change is about. */
+describe('after a recreate ran into a file that came back', () => {
+  const live = () => useEditorStore.getState().tabs.find(t => t.path === 'a.md')!
   beforeEach(async () => {
     vi.clearAllMocks()
     backend({ fileBack: true })
@@ -191,15 +192,27 @@ describe('resolving the conflict a recreate ran into', () => {
     await closing
   })
 
-  it('Keep mine writes the edit and revives the tab', async () => {
-    await useEditorStore.getState().applyConflictMine('a.md')
-    expect(useEditorStore.getState().tabs.find(t => t.path === 'a.md')!.deleted).toBe(false)
+  it('is no longer a deleted tab while the conflict waits', () => {
+    expect(live().deleted).toBe(false)
+    expect(live().dirty).toBe(true)
   })
 
-  it('Keep theirs adopts the file on disk and revives the tab', async () => {
+  it('Keep mine writes what was typed since the conflict, and the tab keeps saving', async () => {
+    useEditorStore.getState().setEditedContent('a.md', 'typed while the dialog waited')
+    await useEditorStore.getState().applyConflictMine('a.md')
+
+    expect(writes().at(-1)![1]).toMatchObject({ path: 'a.md', content: 'typed while the dialog waited\n', baseVersion: 'v-theirs' })
+    expect(live().deleted).toBe(false)
+
+    useEditorStore.getState().setEditedContent('a.md', 'typed after resolving')
+    useEditorStore.getState().setTabDirty('a.md', true)
+    await useEditorStore.getState().persistAllDirty()
+    expect(writes().at(-1)![1]).toMatchObject({ path: 'a.md', content: 'typed after resolving\n' })
+  })
+
+  it('Keep theirs adopts the file on disk', async () => {
     await useEditorStore.getState().applyConflictTheirs('a.md')
-    const revived = useEditorStore.getState().tabs.find(t => t.path === 'a.md')!
-    expect(revived.deleted).toBe(false)
-    expect(revived.content).toBe('someone else\n')
+    expect(live().deleted).toBe(false)
+    expect(live().content).toBe('someone else\n')
   })
 })

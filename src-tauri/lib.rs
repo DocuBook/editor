@@ -85,14 +85,6 @@ pub fn run() {
                 }
                 let _ = window.emit("app:before-close", ());
                 api.prevent_close();
-                // Fallback: force close if the frontend never confirms (e.g. crashed).
-                let win = window.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_secs(3));
-                    if !win.state::<AppState>().closing.load(Ordering::SeqCst) {
-                        let _ = win.close();
-                    }
-                });
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -166,6 +158,7 @@ pub fn run() {
             commands::web_tools::delete_web_search_key,
             commands::app::health,
             commands::app::app_ready_to_close,
+            commands::app::app_cancel_close,
             commands::vault::open_system_settings,
             commands::vault::list_editors,
             commands::vault::open_in_editor,

@@ -277,6 +277,10 @@ export const useEditorStore = create<EditorState>()(
         baseContent: tab.content,
       })
       logger.warn('write_conflict', { path: tab.path })
+      // A file exists at the path now, so this is an ordinary conflicted tab, not
+      // a deleted one. Left flagged, nothing typed while the dialog waits (or
+      // after it is resolved) would ever be saved.
+      if (recreate) set({ tabs: get().tabs.map(t => t.path === tab.path ? { ...t, deleted: false } : t) })
       return
     }
 
@@ -492,11 +496,14 @@ export const useEditorStore = create<EditorState>()(
     const choice = await askAboutDeleted(names)
     if (choice === 'cancel') return false
     if (choice === 'discard') return true
-    for (const { path } of get().tabs.filter(hasDeletedEdits)) {
+    const paths = get().tabs.filter(hasDeletedEdits).map(t => t.path)
+    for (const path of paths) {
       const tab = get().tabs.find(t => t.path === path)
       if (tab) await saveTabToDisk(tab, true)
     }
-    return !get().tabs.some(hasDeletedEdits)
+    // A file that came back is a conflict, not a write: the tab stays dirty and
+    // its edit lives only in the conflict record, so quitting now would lose it.
+    return !get().tabs.some(t => paths.includes(t.path) && t.dirty)
   },
 
   closeAllTabs: () => {
@@ -639,8 +646,7 @@ export const useEditorStore = create<EditorState>()(
     // Prefer the exact bytes captured at conflict time. Re-reading could take yet
     // another writer's version and quietly discard the one the user just chose.
     get().setContent(path, conflict.theirs)
-    // The file is on disk, so a tab that was flagged deleted is live again.
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion, deleted: false } : t) })
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: conflict.theirsVersion } : t) })
     useSyncStore.getState().resolveKeepTheirs(path)
   },
 
@@ -663,7 +669,7 @@ export const useEditorStore = create<EditorState>()(
     if (!resolved) return
     const raw = await readFileVersion(path)
     get().setContent(path, conflict.mine)
-    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine), deleted: false } : t) })
+    set({ tabs: get().tabs.map(t => t.path === path ? { ...t, baseVersion: raw ?? contentVersion(conflict.mine) } : t) })
   },
 
 
