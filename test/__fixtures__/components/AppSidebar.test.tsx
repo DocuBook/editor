@@ -69,7 +69,7 @@ vi.mock('../../../frontend/stores/auth', () => ({
 vi.mock('../../../frontend/lib/ipc', () => ({
   isTauri: false,
   listen: vi.fn(async (event: string, handler: () => Promise<void>) => { closeHandshake.handlers.set(event, handler); return () => {} }),
-  invoke: vi.fn(),
+  invoke: vi.fn(async () => undefined),
 }))
 vi.mock('../../../frontend/utils/logger', () => ({ logger: { error: vi.fn() } }))
 /* The real Toaster, so the toast describe below exercises what App configures. */
@@ -239,6 +239,14 @@ describe('desktop close handshake', () => {
     await act(async () => { await beforeClose()() })
     expect(calls('app_ready_to_close')).toHaveLength(1)
     expect(calls('app_cancel_close')).toHaveLength(0)
+  })
+
+  it('drops a close held before the handler existed, so it cannot skip the save later', async () => {
+    act(() => root.unmount())
+    vi.mocked(invoke).mockClear()
+    root = createRoot(document.getElementById('root')!)
+    await act(async () => { root.render(<App />) })
+    expect(calls('app_cancel_close')).toHaveLength(1)
   })
 
   it('acknowledges the close before it asks or saves, so a second close is held', async () => {

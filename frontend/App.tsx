@@ -209,7 +209,13 @@ export default function App() {
         // prompt above and go straight through. It is harmless on the other paths.
         if (!closing) await invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
       }
-    }).then(u => { if (!cancelled) unsub = u })
+    }).then(u => {
+      if (cancelled) return
+      unsub = u
+      // A close held while this handler did not exist (crash screen, before a
+      // Reload) must not count against the next one: it would skip the save and prompt.
+      invoke('app_cancel_close').catch(error => logger.error('app_cancel_close_failed', { error }))
+    })
     return () => { cancelled = true; unsub?.() }
   }, [])
 
