@@ -520,28 +520,70 @@ body .mobile-sidebar-drawer-body > aside {
 .ProseMirror > * {
     margin: 0.125rem 0;
 }
+/* Heading scale, in em of the editor's 16px body text.
+
+   BlockNote sizes a heading block as `font-size: var(--level)` and resets the
+   h1–h6 inside it to `font-size: inherit; margin: 0` from a sheet that loads
+   after this one with the same specificity, so sizing the `h1` itself never
+   applied: a 2.25rem h1 rendered at upstream's 3em (48px). The scale therefore
+   sets `--level`. Upstream's h4 and h5 (1em, 0.9em) matched or undercut a
+   paragraph and stood apart by weight alone; here every step stays at or above
+   body size and below the one before it.
+
+   Phones get a tighter scale: at 48px a short title broke over three lines of
+   a 343px column, and the top three steps took most of the first screen. */
+#root .bn-editor {
+    --heading-1: 2.25em;
+    --heading-2: 1.75em;
+    --heading-3: 1.375em;
+    --heading-4: 1.125em;
+    --heading-5: 1em;
+}
+@media (max-width: 639px) {
+    #root .bn-editor {
+        --heading-1: 1.75em;
+        --heading-2: 1.375em;
+        --heading-3: 1.1875em;
+        --heading-4: 1.0625em;
+    }
+}
+/* Level 1 is the default prop, which BlockNote leaves out of the DOM: there is
+   no `data-level="1"`, so it is the bare heading rule, as upstream has it. */
+#root .bn-editor [data-content-type="heading"] { --level: var(--heading-1); }
+#root .bn-editor [data-content-type="heading"][data-level="2"] { --level: var(--heading-2); }
+#root .bn-editor [data-content-type="heading"][data-level="3"] { --level: var(--heading-3); }
+#root .bn-editor [data-content-type="heading"][data-level="4"] { --level: var(--heading-4); }
+#root .bn-editor [data-content-type="heading"][data-level="5"] { --level: var(--heading-5); }
+/* Weight and colour step down with the size, and on the heading element: the
+   UA stylesheet makes it bold, which would override a weight inherited from
+   the block. Line height tightens as the size grows. h5 is the body size, so
+   it reads as a label through weight and the secondary colour. */
 .ProseMirror h1 {
-    font-size: 2.25rem;
     font-weight: 800;
-    margin: 2rem 0 0.25rem;
     line-height: 1.25;
     color: var(--color-foreground-heading);
     letter-spacing: -0.02em;
 }
 .ProseMirror h2 {
-    font-size: 1.65rem;
     font-weight: 700;
-    margin: 1.75rem 0 0.25rem;
     line-height: 1.3;
     color: var(--color-foreground);
     letter-spacing: -0.01em;
 }
 .ProseMirror h3 {
-    font-size: 1.3rem;
     font-weight: 600;
-    margin: 1.5rem 0 0.25rem;
     line-height: 1.4;
     color: var(--color-foreground-quaternary);
+}
+.ProseMirror h4 {
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--color-foreground-quaternary);
+}
+.ProseMirror h5 {
+    font-weight: 600;
+    line-height: 1.5;
+    color: var(--color-foreground-secondary);
 }
 .ProseMirror p {
     margin: 0.25rem 0;
