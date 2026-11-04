@@ -55,7 +55,9 @@ pub fn run() {
                     let _ = w.emit("app:close-tab", ());
                 }
             }
-            menu::CLOSE_WINDOW => {
+            // Quit goes through the window close, which holds it until the frontend
+            // has saved and asked; a predefined Quit would terminate without that.
+            menu::CLOSE_WINDOW | menu::QUIT => {
                 if let Some(w) = app.get_webview_window("main") {
                     let _ = w.close();
                 }
