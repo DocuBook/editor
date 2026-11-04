@@ -187,6 +187,10 @@ export default function App() {
     listen('app:before-close', async () => {
       let closing = false
       try {
+        // First: tell the window this close reached a live handler, so a second
+        // close is held while we ask or save. A handler that never gets here (crash
+        // screen, frozen webview) lets the next close through after a timeout.
+        await invoke('app_close_ack')
         // Edits in a deleted tab are never saved on their own: ask first, and
         // stay open when the user cancels or a recreate hit a conflict.
         if (!(await useEditorStore.getState().confirmDeletedEdits())) return

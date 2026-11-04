@@ -241,6 +241,15 @@ describe('desktop close handshake', () => {
     expect(calls('app_cancel_close')).toHaveLength(0)
   })
 
+  it('acknowledges the close before it asks or saves, so a second close is held', async () => {
+    const order: string[] = []
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => { order.push(cmd) })
+    closeHandshake.confirmDeletedEdits.mockImplementation(async () => { order.push('confirm'); return true })
+    closeHandshake.persistAllDirty.mockImplementation(async () => { order.push('save') })
+    await act(async () => { await beforeClose()() })
+    expect(order).toEqual(['app_close_ack', 'confirm', 'save', 'app_ready_to_close'])
+  })
+
   it('re-arms and stays open when the user cancels, so the next close asks again', async () => {
     closeHandshake.confirmDeletedEdits.mockResolvedValue(false)
     await act(async () => { await beforeClose()() })

@@ -39,6 +39,8 @@ pub(crate) struct AppState {
     pub(crate) ai_requests: std::sync::Arc<rust_ai::requests::AiRequests>,
     /** Set when the frontend confirmed it is safe to close (graceful shutdown). */
     pub(crate) closing: AtomicBool,
+    /** Tells a frontend that is answering a close from one that is not listening. */
+    pub(crate) close_gate: Mutex<commands::app::CloseGate>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -75,16 +77,24 @@ pub fn run() {
             git: Mutex::new(None),
             ai_requests: std::sync::Arc::new(rust_ai::requests::AiRequests::new()),
             closing: AtomicBool::new(false),
+            close_gate: Mutex::new(Default::default()),
         })
         .on_window_event(|window, event| {
             // Graceful shutdown: ask the frontend to flush & save, then confirm.
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let state = window.state::<AppState>();
-                // Only `app_ready_to_close` sets this, right before it closes the window:
-                // until then every close request is held and re-raised, including
-                // one that arrives while the frontend is still asking the user.
-                if state.closing.load(Ordering::SeqCst) {
-                    return; // already confirmed by the frontend — allow close
+                // `app_ready_to_close` sets `closing` right before it closes the window.
+                // Until then a close is held and re-raised, including one that arrives
+                // while the frontend is asking the user. Only a close the frontend never
+                // acknowledged (crash screen, frozen webview) gets through after a timeout.
+                let confirmed = state.closing.load(Ordering::SeqCst);
+                let allow = state.close_gate.lock().expect("lock").allows(
+                    confirmed,
+                    std::time::Instant::now(),
+                    commands::app::CLOSE_ACK_TIMEOUT,
+                );
+                if allow {
+                    return;
                 }
                 let _ = window.emit("app:before-close", ());
                 api.prevent_close();
@@ -161,6 +171,7 @@ pub fn run() {
             commands::web_tools::delete_web_search_key,
             commands::app::health,
             commands::app::app_ready_to_close,
+            commands::app::app_close_ack,
             commands::app::app_cancel_close,
             commands::vault::open_system_settings,
             commands::vault::list_editors,

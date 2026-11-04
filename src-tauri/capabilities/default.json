@@ -9,6 +9,7 @@
     "core:default",
     "dialog:default",
     "allow-app-ready-to-close",
+    "allow-app-close-ack",
     "allow-app-cancel-close",
     "allow-ask-ai",
     "allow-cancel-ai",
