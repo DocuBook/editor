@@ -53,8 +53,10 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
     // label and shortcut.
     #[cfg(target_os = "macos")]
     let quit = MenuItem::with_id(app, QUIT, format!("Quit {}", pkg.name), true, Some(ACCEL_QUIT))?;
-    #[cfg(not(target_os = "macos"))]
-    let quit = MenuItem::with_id(app, QUIT, "Quit", true, None::<&str>)?;
+    #[cfg(windows)]
+    let quit = MenuItem::with_id(app, QUIT, "&Exit", true, None::<&str>)?;
+    #[cfg(not(any(windows, target_os = "macos")))]
+    let quit = MenuItem::with_id(app, QUIT, "&Quit", true, None::<&str>)?;
 
     // File: the default File menu only held Close Window (plus Quit outside
     // macOS), so it becomes the home of the tab action.
