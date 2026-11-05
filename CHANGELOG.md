@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.0 — 2026-11-04
+
+
+### Features
+
+* **editor:** a heading scale that steps down to h5 and tightens on phones ([#446](https://github.com/DocuBook/editor/issues/446)) ([2fd9078](https://github.com/DocuBook/editor/commit/2fd90782d0c9a0de75271c55d4cb48a7dbcc39fb))
+* **editor:** show wikilink backlinks as an inline property above the note ([#450](https://github.com/DocuBook/editor/issues/450)) ([0f924c0](https://github.com/DocuBook/editor/commit/0f924c092f2b11bdb0d1fc428937595400b96cb5))
+
+
+### Bug Fixes
+
+* **desktop:** route menu Quit through the window close handshake ([#449](https://github.com/DocuBook/editor/issues/449)) ([1a87d7a](https://github.com/DocuBook/editor/commit/1a87d7a294d3bc6439dc1fc20c2dd32a4e9b1ba5))
+* **editor:** ask before dropping edits typed into a deleted tab ([#447](https://github.com/DocuBook/editor/issues/447)) ([d6fe1dd](https://github.com/DocuBook/editor/commit/d6fe1dd4841d06adb09cd8a97e7767041adaa047))
+* **editor:** keep tab deleted state correct across a branch switch ([#441](https://github.com/DocuBook/editor/issues/441)) ([f494040](https://github.com/DocuBook/editor/commit/f494040efad25b03afd636fa54c2353b562b6a1c))
+* **editor:** one-click Back to App from settings in the vault picker row ([#445](https://github.com/DocuBook/editor/issues/445)) ([5704f03](https://github.com/DocuBook/editor/commit/5704f031569a2b593015621e2b1f674f328e2f0f))
+* **editor:** readable Mermaid diagrams in both themes ([#444](https://github.com/DocuBook/editor/issues/444)) ([925fae6](https://github.com/DocuBook/editor/commit/925fae6e687f65b1ee038643518e20c4914ec325))
+
 ## v0.7.0 — 2026-11-03
 
 
