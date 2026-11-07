@@ -111,7 +111,7 @@ jobs:
     needs: [lint]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - name: Cache cargo (registry + targets)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -169,7 +169,7 @@ jobs:
       # then rejects the driver's PushAPIEnabled context setting at newPage.
       - name: Install Playwright browsers
         run: npx --no-install playwright install chromium webkit
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - name: Cache cargo (server target)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -209,7 +209,7 @@ jobs:
     needs: [lint]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       - name: Cache cargo (server target, Linux)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -240,7 +240,7 @@ jobs:
       # npm audit reads package-lock.json; no install needed.
       - name: npm audit (fail on high)
         run: npm audit --audit-level=high
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
       # `core` is a path dependency of both consumers, so a dependency bump in
       # core/Cargo.toml must also move server/ and src-tauri/'s locks. Dependabot
       # updates only core/Cargo.lock (PR 412), and only the Docker image and
@@ -314,7 +314,7 @@ jobs:
       # the action runs `rustup target add` for the pinned toolchain — arm64
       # runners install only the native target, so this is what adds
       # x86_64-apple-darwin for the cross-compiled job.
-      - uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@a188e68d0fd2bd36ad51dccb2b07ba6e75105f30 # v2.0.1
         with:
           target: ${{ matrix.target }}
       - name: Cache cargo (release targets, ${{ matrix.target }})
