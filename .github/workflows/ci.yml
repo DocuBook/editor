@@ -258,7 +258,7 @@ jobs:
             }
           done
       # Prebuilt, checksum-verified binary instead of compiling cargo-audit each run.
-      - uses: taiki-e/install-action@86f7a0ffb25f40114606501a311ebcfaf882ea32 # v2.88.0
+      - uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-audit@0.22.2
       - name: cargo audit
