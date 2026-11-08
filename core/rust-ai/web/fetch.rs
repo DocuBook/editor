@@ -295,7 +295,7 @@ fn extract(requested: &str, url: &Url, content_type: &str, body: &[u8], body_tru
 ///
 /// Markdown keeps what plain text flattens: headings, list items, table cells,
 /// code blocks and link targets. Bare URLs are still read from the plain text,
-/// since Markdown escapes their dots.
+/// since Markdown may escape characters in them.
 fn html_text(html: &str, url: &Url) -> (String, String, Vec<String>) {
     let article = dom_smoothie::Readability::new(html, Some(url.as_str()), None).and_then(|mut readability| readability.parse());
     let (title, (text, mut shown), plain) = match article {
@@ -512,8 +512,8 @@ npm run build</code></pre>
         assert_eq!(page.title, "Install guide");
         for expected in [
             "## Requirements",
-            "- Node 22 or newer\n- Rust 1\\.80",
-            "1. Clone the repo\n1. Run the installer",
+            "- Node 22 or newer\n- Rust 1.80",
+            "1. Clone the repo\n2. Run the installer",
             "```\nnpm install\nnpm run build\n```",
             "| Platform | Status |\n| - | - |\n| macOS | Stable |\n| Linux | Beta |",
             "[FAQ](https://e.example/docs/faq)",
@@ -521,8 +521,7 @@ npm run build</code></pre>
             assert!(page.text.contains(expected), "missing {expected:?} in:\n{}", page.text);
         }
         assert!(!page.text.contains("Home"), "navigation is not main content");
-        // Markdown escapes the dots of a bare URL; bare URLs are read from the plain text.
-        assert!(page.text.contains("https://notes\\.example"));
+        assert!(page.text.contains("https://notes.example/v1.2"));
         assert_eq!(shown, ["https://e.example/docs/faq", "https://notes.example/v1.2"]);
     }
 
@@ -548,7 +547,7 @@ npm run build</code></pre>
         assert!(page.text.contains("run it") && !page.text.contains("javascript:"), "{}", page.text);
         assert!(page.text.contains("mail us") && !page.text.contains("mailto:"), "{}", page.text);
         assert!(page.text.contains("![Main window](https://e.example/shot.png)"), "{}", page.text);
-        assert!(page.text.contains("Tiny \\<logo\\>") && !page.text.contains("base64"), "{}", page.text);
+        assert!(page.text.contains("Tiny \\<logo>") && !page.text.contains("base64"), "{}", page.text);
         assert!(!page.text.contains("spacer") && !page.text.contains("steal()"), "{}", page.text);
     }
 
