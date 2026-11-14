@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.8.1 — 2026-11-14
+
+
+### Security
+
+* **deps:** bump ammonia to 4.2.5 for rustsec-2026-0533 ([#471](https://github.com/DocuBook/editor/issues/471)) ([3468133](https://github.com/DocuBook/editor/commit/34681334b38124a85ccaa376ef6b6d40efa57b58))
+
 ## v0.8.0 — 2026-11-04
 
 
