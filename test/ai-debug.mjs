@@ -29,6 +29,11 @@ await runSuite('ai-debug', {
     { path: 'notes.md', content: ORIGINAL_MARKDOWN },
     { path: 'other.md', content: '# Other page\n\nseparate content' },
   ],
+  /* The Path A payload carries `onerror` on purpose. Chromium 158+ reports the
+     page CSP against an inline handler even when the markup is only parsed into
+     an inert document (BlockNote's HTML parser); nothing runs, and the
+     "hostile HTML stays inert" check below guards the editor DOM. */
+  allow: [/^Executing inline event handler violates the following Content Security Policy directive 'script-src 'self''/],
   setup: async ({ page, vaultPath }) => {
     /** Mock Path B text output and Path A tool calls at browser fetch level. */
     askAiHits = await mockAskAi(page, request => {
