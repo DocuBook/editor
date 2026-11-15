@@ -9,8 +9,9 @@
 //! - Login rate limit: 6 failed attempts / 60 s per client IP, blocked on the
 //!   7th (count > MAX_ATTEMPTS) — in-memory.
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
-use rand::rngs::OsRng;
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use sha2::{Digest, Sha256};
 
 use argon2::Argon2;
