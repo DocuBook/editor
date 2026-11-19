@@ -321,16 +321,14 @@ pub(crate) fn sync(state: &AppState, cmd: &str, args: Value) -> Result<String, S
                 Some(serde_json::Value::String(v)) => Some(v.clone()),
                 _ => None,
             };
-            let r = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
-                Some(v) => v
-                    .write_file_checked(&s("path"), &s("content"), base.as_deref())
-                    .and_then(|o| serde_json::to_string(&o).map_err(|e| e.to_string())),
+            let outcome = match state.vault.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+                Some(v) => v.write_file_checked(&s("path"), &s("content"), base.as_deref()),
                 None => Err("No vault".into()),
-            };
-            if matches!(r.as_deref(), Ok(v) if v.contains("\"written\"")) {
+            }?;
+            if matches!(outcome, docubook_core::vault::WriteOutcome::Written { .. }) {
                 cmds::rescan_wiki(state);
             }
-            r
+            serde_json::to_string(&outcome).map_err(|e| e.to_string())
         }
         // WYSIWYG-only snapshot cache: never rescans the wiki (not Markdown) and
         // never invalidates the tree/search caches (the dir is an ignored entry).
