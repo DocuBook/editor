@@ -36,7 +36,7 @@ export default function App() {
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true)
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false)
   /** Settings now lives in the editor container, not a dialog. The store is the
-   *  single flag every entry point drives (sidebar tree, profile menu, ⌘,). */
+   *  single flag every entry point drives (sidebar tree, settings icon, ⌘,). */
   const settingsOpen = useSettings(s => s.open)
   const openSettingsStore = useSettings(s => s.openSettings)
   /** Search lives here (not in Sidebar) so ⌘F/⌘P and the modal keep working
@@ -57,7 +57,7 @@ export default function App() {
   /** Settings is NOT a modal: it renders in the editor container and leaves the
    *  workspace interactive, so it is deliberately absent here. The mobile drawer
    *  may stay open over the pane, so the settings tree remains reachable for
-   *  further navigation — the external entry points (⌘, / profile menu) close the
+   *  further navigation — the external entry points (⌘, / settings icon) close the
    *  drawer themselves when they open the pane. */
   const modalOpen = searchOpen || shortcutsOpen || confirmCloseVault
   const sidebarOpen = isDesktop ? desktopSidebarOpen : mobileDrawerOpen
@@ -241,6 +241,7 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === 'j' && isVaultOpen) { e.preventDefault(); toggleSidebar() }
       if ((e.metaKey || e.ctrlKey) && e.key === 'o') { e.preventDefault(); openVault() }
       if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); openSettings() }
+      if ((e.metaKey || e.ctrlKey) && e.key === '/') { e.preventDefault(); openShortcuts() }
       /** File search — same binding as before, but registered here (App is
        *  always mounted) so it works with the sidebar closed too. */
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && (e.key === 'f' || e.key === 'p') && status === 'ready') {
@@ -251,7 +252,7 @@ export default function App() {
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
-  }, [isVaultOpen, openSearch, openSettings, openVault, status, toggleSidebar])
+  }, [isVaultOpen, openSearch, openSettings, openShortcuts, openVault, status, toggleSidebar])
 
   /** Suppress default browser context menu (Reload, Back, etc.) */
   /** Only in production — dev mode needs right-click for Inspect Element */
@@ -282,7 +283,7 @@ export default function App() {
     <div className="editor-shell h-screen overflow-hidden flex flex-col bg-background text-foreground">
       <div className="flex flex-1 min-h-0">
         {isVaultOpen && isDesktop && desktopSidebarOpen && (
-          <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
+          <Sidebar id="desktop-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} registerSearchFolder={registerSearchFolder} />
         )}
         <main className="flex-1 flex flex-col min-w-0 min-h-0">
           <SyncStatusBadge />
@@ -323,7 +324,7 @@ export default function App() {
         lockScroll
         classNames={{ overlay: 'mobile-sidebar-drawer-overlay', content: 'mobile-sidebar-drawer-content', header: 'mobile-sidebar-drawer-header', title: 'mobile-sidebar-drawer-title', body: 'mobile-sidebar-drawer-body', close: 'mobile-sidebar-drawer-close' }}
       >
-        <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onOpenShortcuts={openShortcuts} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
+        <Sidebar id="mobile-sidebar" onOpenSettings={openSettings} onOpenSearch={openSearch} onRequestCloseVault={requestCloseVault} onNavigate={closeMobileDrawer} registerSearchFolder={registerSearchFolder} />
       </Drawer>
       {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} onSelect={(p) => searchFolderRef.current(p)} />}
       {shortcutsOpen && <ShortcutsModal onClose={() => setShortcutsOpen(false)} />}

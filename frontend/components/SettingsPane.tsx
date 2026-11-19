@@ -12,7 +12,7 @@ import WebToolsSettings from './settings/WebToolsSettings'
 
 /** The settings surface — the ONE implementation of the settings UI, rendered in
  *  the editor container and navigated by the sidebar tree. Every entry point
- *  (profile menu, ⌘,) flips the store's `open` flag; this component reads the
+ *  (settings icon, ⌘,) flips the store's `open` flag; this component reads the
  *  store's selected section and renders that section's MENU page. */
 export default function SettingsPane() {
   /** Section the sidebar last anchored to. Its MENU owns the page rendered here;

@@ -78,7 +78,6 @@ async function renderSidebar(onOpenSearch = vi.fn()) {
       id="sidebar"
       onOpenSettings={() => {}}
       onOpenSearch={onOpenSearch}
-      onOpenShortcuts={() => {}}
 
       onRequestCloseVault={() => {}}
       registerSearchFolder={() => () => {}}
@@ -150,6 +149,16 @@ describe('Sidebar search bar scoping', () => {
    *  tree), so the bar leaves with it instead of floating above a tree it no longer
    *  searches. Settings is not a panel tab: `activePanel` stays 'vault' throughout,
    *  so the status flag is what has to be driven here. */
+  it('opens Settings from the footer settings icon', async () => {
+    await renderSidebar()
+
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open settings"]')!.click())
+    await settle()
+
+    expect(useSettings.getState().open).toBe(true)
+    expect(document.querySelector('[data-testid="settings-nav"]')).not.toBeNull()
+  })
+
   it('hides the bar while Settings is open', async () => {
     await renderSidebar()
     expect(searchBar()).not.toBeNull()
