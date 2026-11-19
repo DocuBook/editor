@@ -14,7 +14,7 @@ import '@blocknote/math-block/style.css'
 
 import { combineByGroup, insertOrUpdateBlockForSlashMenu } from '@blocknote/core'
 import { SourceBlockWithPreviewExtension } from '@blocknote/core/extensions'
-import { Selection, TextSelection } from 'prosemirror-state'
+import { Selection, TextSelection } from '@tiptap/pm/state'
 import { getMathSlashMenuItems } from '@blocknote/math-block'
 import { getDiagramSlashMenuItems } from '@blocknote/diagram-block'
 
