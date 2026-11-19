@@ -24,7 +24,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }))
 vi.mock('@tauri-apps/api/event', () => ({ listen: tauriListen }))
 
-import { invoke, listen } from '../../../frontend/lib/ipc'
+import { fileUrl, invoke, listen } from '../../../frontend/lib/ipc'
 
 afterEach(() => {
   tauriInvoke.mockReset()
@@ -78,5 +78,13 @@ describe('desktop ask_ai channel', () => {
     tauriListen.mockResolvedValue(() => {})
     await listen('app:before-close', () => {})
     expect(tauriListen).toHaveBeenCalledWith('app:before-close', expect.any(Function))
+  })
+})
+
+describe('desktop fileUrl', () => {
+  it('builds a data: URL from the binary read_file_binary response', async () => {
+    tauriInvoke.mockResolvedValue(new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer)
+    await expect(fileUrl('img/a.png')).resolves.toBe('data:image/png;base64,iVBORw==')
+    expect(tauriInvoke).toHaveBeenCalledWith('read_file_binary', { path: 'img/a.png' })
   })
 })
