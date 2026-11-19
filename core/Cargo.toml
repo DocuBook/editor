@@ -16,7 +16,6 @@ path = "lib.rs"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
-base64 = "0.23"
 pulldown-cmark = "0.13.5"
 ammonia = "4"
 regex = "1"

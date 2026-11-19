@@ -371,7 +371,8 @@ export function isSafeImageUrl(url: string): boolean {
 /**
  * Resolve a vault-relative path to a loadable URL:
  * - Tauri: reads the file via IPC (path-traversal protected) and returns a
- *   base64 data: URL — no asset protocol, no whole-filesystem webview access.
+ *   data: URL built from a binary IPC response — no asset protocol, no
+ *   whole-filesystem webview access.
  * - Web:   `/api/file?path=…` (server endpoint, behind the same auth gate).
  *
  *  The path stays vault-relative on the wire: the URL must not disclose the
@@ -380,8 +381,15 @@ export function isSafeImageUrl(url: string): boolean {
  */
 export async function fileUrl(relPath: string): Promise<string> {
   if (isTauri) {
-    const b64 = await invoke<string>('read_file_binary', { path: relPath })
-    return `data:${mimeFromPath(relPath)};base64,${b64}`
+    // Binary IPC response: bytes cross the bridge raw; the browser encodes the
+    // data: URL natively (a data URL needs no revoke, unlike a blob: URL).
+    const bytes = await invoke<ArrayBuffer>('read_file_binary', { path: relPath })
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(new Blob([bytes], { type: mimeFromPath(relPath) }))
+    })
   }
   return webFileUrl(relPath)
 }
