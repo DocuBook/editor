@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { BlockNoteEditor } from '@blocknote/core'
-import { TextSelection } from 'prosemirror-state'
+import { TextSelection } from '@tiptap/pm/state'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getSchema } from '../../../frontend/components/editor/setup'
 import { captureAISelection, getAISelectionSnapshot, hasAISelection, openAIMenuAtAnchor, restoreAISelection } from '../../../frontend/utils/aiBlocks'

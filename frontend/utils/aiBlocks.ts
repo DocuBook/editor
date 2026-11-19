@@ -1,5 +1,5 @@
 
-import { TextSelection } from "prosemirror-state";
+import { TextSelection } from "@tiptap/pm/state";
 import { mathDollarToMathML } from "./mathMarkdown";
 
 type AISelectionSnapshot = {

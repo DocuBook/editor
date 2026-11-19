@@ -8,7 +8,7 @@
  * (duplicating the unselected text).
  */
 import { BlockNoteEditor } from '@blocknote/core'
-import { TextSelection } from 'prosemirror-state'
+import { TextSelection } from '@tiptap/pm/state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { getSchema } from '../../../frontend/components/editor/setup'
 import { buildHtmlDocumentState, captureAISelection, createSelectionAwareDocumentStateBuilder, openAIMenuAtAnchor } from '../../../frontend/utils/aiBlocks'

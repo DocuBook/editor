@@ -1,5 +1,5 @@
-import { Decoration, DecorationSet } from 'prosemirror-view'
-import { Plugin, PluginKey } from 'prosemirror-state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { createAiTransport } from './aiTransport'
 import { buildHtmlDocumentState, captureAISelection, dropAISelectionSnapshot, hasAISelection, releaseAISelection, replaceSelectedBlockContent, restoreAISelection } from './aiBlocks'
 import { softKeyboardOnFocus } from './softKeyboard'
