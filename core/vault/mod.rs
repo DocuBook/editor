@@ -11,7 +11,7 @@ pub mod mentions;
 /// truth shared by the desktop IPC and the web API (`httpm::MAX_FILE_BYTES`
 /// aliases it) so the same vault cannot open a file in one runtime and reject
 /// it in the other. Kept modest because both paths materialize the whole file:
-/// desktop inlines it as a base64 data URL, web sends it as one response body.
+/// desktop inlines it as a data URL, web sends it as one response body.
 pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Vault-relative root of the WYSIWYG snapshot cache. Ignored by tree/walk/
@@ -420,16 +420,14 @@ impl Vault {
         let data = Self::read_limited(&self.safe_path(&target)?, max_bytes)?;
         Ok(String::from_utf8_lossy(&data).to_string())
     }
-/** Read a binary file as base64 (images etc). Same path-traversal protection
- *  as read_file; used for previews where the raw bytes must round-trip intact. */
+/** Read a binary file's raw bytes (images etc). Same path-traversal protection
+ *  as read_file; the desktop IPC sends them as a binary response, not text. */
     #[allow(dead_code)] // wired only in the desktop crate (web serves via /api/file)
-    pub fn read_file_binary(&self, path: &str) -> Result<String, String> {
-        use base64::Engine;
+    pub fn read_file_binary(&self, path: &str) -> Result<Vec<u8>, String> {
         let f = self.safe_path(path)?;
         // Same cap as text reads: a pathological image must not become a
-        // multi-hundred-MB base64 string pinned in the webview's DOM.
-        let data = Self::read_limited(&f, MAX_FILE_BYTES)?;
-        Ok(base64::engine::general_purpose::STANDARD.encode(data))
+        // multi-hundred-MB data URL pinned in the webview's DOM.
+        Self::read_limited(&f, MAX_FILE_BYTES)
     }
 /** Write content to a file, creating parent directories if needed. The
      *  write is atomic (see [`write_atomic`]): a crash mid-save leaves the old

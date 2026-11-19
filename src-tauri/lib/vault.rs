@@ -179,9 +179,10 @@ pub fn file_version(path: &str, state: State<AppState>) -> Result<Option<String>
 }
 
 #[tauri::command]
-pub fn read_file_binary(path: &str, state: State<AppState>) -> Result<String, String> {
+pub fn read_file_binary(path: &str, state: State<AppState>) -> Result<tauri::ipc::Response, String> {
+    // Raw bytes reach JS as an ArrayBuffer — no base64/JSON text on the bridge.
     match state.vault.lock().expect("lock").as_ref() {
-        Some(v) => v.read_file_binary(path), None => Err("No vault".to_string())
+        Some(v) => v.read_file_binary(path).map(tauri::ipc::Response::new), None => Err("No vault".to_string())
     }
 }
 

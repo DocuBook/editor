@@ -639,7 +639,7 @@ commands.deny = ["file_version"]
 
 [[permission]]
 identifier = "allow-read-file-binary"
-description = "Enables the read_file_binary command (base64 binary previews)."
+description = "Enables the read_file_binary command (binary previews)."
 commands.allow = ["read_file_binary"]
 
 [[permission]]

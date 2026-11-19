@@ -178,7 +178,6 @@ name = "docubook-core"
 version = "0.8.1"
 dependencies = [
  "ammonia",
- "base64",
  "bytes",
  "dom_query",
  "dom_smoothie",
