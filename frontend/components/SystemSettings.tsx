@@ -5,6 +5,7 @@ import PasswordInput from './PasswordInput'
 import PasswordRequirements from './PasswordRequirements'
 import { passwordError } from '../utils/passwordPolicy'
 import { toast } from 'sonner'
+import { LogOut } from 'lucide-react'
 
 interface ConfigView {
   admin: { email: string } | null
@@ -71,7 +72,11 @@ export default function SystemSettings() {
       <div>
         {cfg.admin ? (
           <>
-            <div className="text-xs text-muted mb-3">Signed in as <span className="text-foreground">{cfg.admin.email}</span></div>
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <div className="text-xs text-muted min-w-0 truncate">Signed in as <span className="text-foreground">{cfg.admin.email}</span></div>
+              {/* Outside the password form: a button inside it would submit it on the way out. */}
+              <button type="button" onClick={() => { void useAuth.getState().logout() }} className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 rounded-md bg-transparent text-danger border border-border cursor-pointer text-xs whitespace-nowrap hover:border-danger hover:bg-danger-surface transition-colors"><LogOut size={13} /> Log out</button>
+            </div>
             <form onSubmit={changePw} className="flex flex-col gap-2">
               <div>
                 <label className={label}>Current password</label>

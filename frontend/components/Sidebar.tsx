@@ -1,11 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 import { useVaultStore, type FileInfo } from '../stores/vault'
-import { useAuth } from '../stores/auth'
 import { useEditorStore } from '../stores/editor'
 import { pollGitStatus } from '../stores/gitStatus'
 import { invoke, isMacTauri, isTauri, trashPermissionError } from '../lib/ipc'
-import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Option, ArrowBigUp, ArrowLeft } from 'lucide-react'
+import { Search, Check, ChevronsUpDown, Folder, FileText, FolderOpen, Plus, X, Command, Option, ArrowBigUp, ArrowLeft, Settings } from 'lucide-react'
 import { toast } from 'sonner'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { useKeyboard } from '../hooks/useKeyboard'
@@ -20,7 +19,6 @@ import GitPanel from './panels/GitPanel'
 import SidebarTabMenu, { type SidebarPanelId } from './panels/SidebarTabMenu'
 import TrashPanel, { type TrashItem } from './panels/TrashPanel'
 import PermissionDialog from './PermissionDialog'
-import ProfileMenu from './ProfileMenu'
 import SettingsNav from './settings/SettingsNav'
 import { useSettings } from '../stores/settings'
 
@@ -31,20 +29,19 @@ interface SidebarProps {
   id?: string
   onOpenSettings: () => void
   onOpenSearch: () => void
-  onOpenShortcuts: () => void
 
   onRequestCloseVault: () => void
   onNavigate?: () => void
   registerSearchFolder: (fn: (path: string) => void) => () => void
 }
 
-export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortcuts, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
+export default function Sidebar({ id, onOpenSettings, onOpenSearch, onRequestCloseVault, onNavigate = () => {}, registerSearchFolder }: SidebarProps) {
   const [showPlusMenu, setShowPlusMenu] = useState(false)
   const plusMenuRef = useRef<HTMLDivElement>(null)
   const vaultMenuRef = useRef<HTMLDivElement>(null)
   const [vaultMenuOpen, setVaultMenuOpen] = useState(false)
   const [activePanel, setActivePanel] = useState<SidebarPanelId>('vault')
-  /** Settings is NOT a sidebar panel and has no tab: the profile menu (and ⌘,)
+  /** Settings is NOT a sidebar panel and has no tab: the footer settings icon (and ⌘,)
    *  is the ONLY trigger, and it flips this store flag. While it is on, the tree
    *  area swaps to the settings tree; the panel tabs stay as they were. */
   const settingsOpen = useSettings(s => s.open)
@@ -320,8 +317,8 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
       )}
       {!isOpen && activePanel !== 'trash' && !settingsOpen && <div className="flex-1 flex items-center justify-center p-4 text-sm text-foreground-subtle italic">Open a vault to start</div>}
       {/* One compact footer row on every panel: the vault switcher takes the
-          width, the profile avatar sits at the end. Both popovers anchor to
-          this row (the only positioned ancestor), so they span the sidebar. */}
+          width, the settings icon sits at the end. The vault popover anchors to
+          this row (the only positioned ancestor), so it spans the sidebar. */}
       <div className="relative flex items-center gap-1 border-t border-border-subtle px-2 py-1.5 shrink-0">
         <div ref={vaultMenuRef} className="flex-1 min-w-0">
           {/* Settings swaps the switcher for a one-click way out. */}
@@ -363,7 +360,10 @@ export default function Sidebar({ id, onOpenSettings, onOpenSearch, onOpenShortc
           )}
           </>)}
         </div>
-        <ProfileMenu isNative={isTauri} onOpenSettings={() => { onOpenSettings(); openSettings() }} onOpenShortcuts={onOpenShortcuts} onLogout={() => { void useAuth.getState().logout() }} />
+        <button type="button" onClick={() => { onOpenSettings(); openSettings() }} aria-label="Open settings" title="Settings (⌘,)"
+          className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded border-none bg-transparent text-foreground-secondary hover:bg-surface-hover hover:text-foreground">
+          <Settings size={15} />
+        </button>
       </div>
 
       {ctxItem && (

@@ -41,6 +41,7 @@ const SHORTCUTS = [
   { category: 'AI & Settings', items: [
     { keys: '\u02C6\u2325L', desc: 'Focus AI composer' },
     { keys: '\u2318,', desc: 'Settings' },
+    { keys: '\u2318/', desc: 'Keyboard shortcuts' },
   ]},
   { category: 'Writing', items: [
     { keys: 'Tab / \u21E7Tab', desc: 'Indent / outdent block' },

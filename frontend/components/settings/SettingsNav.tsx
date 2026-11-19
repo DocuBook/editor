@@ -9,7 +9,7 @@ import { isTauri } from '../../lib/ipc'
 const DEPTH_1 = 'depth-1'
 
 /** Settings navigation, rendered in the sidebar in place of the vault tree while
- *  the settings store's `open` flag is on (set by the profile menu / ⌘,).
+ *  the settings store's `open` flag is on (set by the settings icon / ⌘,).
  *
  *  A MENU row does BOTH things at once: it collapses/expands its list (the vault
  *  tree's affordance) and opens its OWN page in the editor container. Its list

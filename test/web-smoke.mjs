@@ -52,7 +52,7 @@ await runSuite('web-smoke', {
   await page.locator(click('Open Folder')).click()
   await page.waitForSelector(`button:has-text("${vaultPath.split('/').pop()}")`, { timeout: 4000 })
   await page.locator(`button:has-text("${vaultPath.split('/').pop()}")`).click()
-  await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 8000 })
+  await page.waitForSelector('[aria-label="Open settings"]', { timeout: 8000 })
 
   // ── Sidebar panel tabs (web/Docker) ──
   /* The Trash tab used to be disabled on web whenever the trash was empty
@@ -85,8 +85,8 @@ await runSuite('web-smoke', {
   await page.locator('[data-testid="sidebar-toggle"]').click()
   await page.waitForSelector('[aria-label="Search project files"]', { timeout: 4000 })
 
-  // ── Logout → Login ──
-  await page.locator('[aria-label="Open profile menu"]').click()
+  // ── Logout → Login (Settings → Account; the sidebar footer has only a settings icon) ──
+  await page.locator('[aria-label="Open settings"]').click()
   await page.waitForSelector(click('Log out'), { timeout: 4000 })
   await page.locator(click('Log out')).click()
   await page.waitForSelector('text=Sign in', { timeout: 8000 })
@@ -98,9 +98,9 @@ await runSuite('web-smoke', {
   await page.waitForSelector(click('Sign in'), { timeout: 5000 })
   await page.locator(click('Sign in')).click()
   // Argon2id login can take >1s — wait for the main UI, not a fixed timeout.
-  await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 10000 })
+  await page.waitForSelector('[aria-label="Open settings"]', { timeout: 10000 })
   const afterLogin = await page.locator('body').innerText()
-  ok('login: main UI visible', !/Sign in/i.test(afterLogin) && await page.locator('[aria-label="Open profile menu"]').isVisible(), afterLogin.slice(0, 80))
+  ok('login: main UI visible', !/Sign in/i.test(afterLogin) && await page.locator('[aria-label="Open settings"]').isVisible(), afterLogin.slice(0, 80))
 
   // ── Restart: admin config AND session must persist (sessions.json on /data) ──
   await restart()
@@ -113,7 +113,7 @@ await runSuite('web-smoke', {
     JSON.stringify(st))
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForFunction(() => !document.querySelector('input[type="email"]') && !Array.from(document.querySelectorAll('button')).some(button => button.textContent?.includes('Create admin account')), { timeout: 10000 })
-  await page.waitForSelector('[aria-label="Open profile menu"]', { timeout: 10000 })
+  await page.waitForSelector('[aria-label="Open settings"]', { timeout: 10000 })
   const afterReload = await page.locator('body').innerText()
   ok('restart: session persists — still logged in (no login page)', !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
 })

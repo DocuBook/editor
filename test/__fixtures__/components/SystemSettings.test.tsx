@@ -106,11 +106,17 @@ describe('SystemSettings — change password', () => {
   })
 })
 
-describe('SystemSettings — account actions', () => {
-  it('does not render a sign-out action in settings', async () => {
+describe('SystemSettings — log out', () => {
+  /** Settings → Account is the only log-out entry point (the profile menu is gone). */
+  it('logs out without submitting the password form', async () => {
     render()
     await flush()
+    fillAllPasswords()
 
-    expect(Array.from(document.querySelectorAll('button')).some(button => button.textContent?.trim() === 'Sign out')).toBe(false)
+    act(() => buttonByText('Log out').click())
+    await flush()
+
+    expect(invoke).toHaveBeenCalledWith('logout')
+    expect(invoke.mock.calls.map(c => c[0])).not.toContain('change_password')
   })
 })

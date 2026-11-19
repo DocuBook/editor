@@ -42,7 +42,7 @@ export const PAGE_FIRST_SECTION: Record<SettingsPageId, SettingsSectionId> = {
 
 interface SettingsState {
   /** Whether the settings surface is showing in the editor container. Replaces
-   *  the old modal's local `open` boolean: the sidebar, ⌘, and the profile menu
+   *  the old modal's local `open` boolean: the sidebar, ⌘, and the settings icon
    *  all drive this ONE flag, so any entry point opens the same surface. */
   open: boolean
   /** Section the sidebar last anchored to. The pane scrolls to it; a plain

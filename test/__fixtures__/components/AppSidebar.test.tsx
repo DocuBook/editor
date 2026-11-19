@@ -145,12 +145,12 @@ describe('responsive sidebar', () => {
     expect(document.activeElement).toBe(toggle)
   })
 
-  /** Settings is opened by the profile menu / ⌘, (the store), NOT a sidebar tab.
+  /** Settings is opened by the sidebar settings icon / ⌘, (the store), NOT a sidebar tab.
    *  Because Settings is not a blocking modal, the drawer stays usable from the
    *  Settings surface too: opening it, then toggling again, re-opens the drawer. */
   it('lets the Settings header re-open the mobile drawer over the pane', () => {
     act(() => setDesktop(false))
-    // Reach Settings the mobile way: through the drawer's profile menu.
+    // Reach Settings the mobile way: through the drawer's settings icon.
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="toggle-sidebar"]')!.click())
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="sidebar-settings"]')!.click())
     expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
@@ -189,7 +189,7 @@ describe('responsive sidebar', () => {
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-size')).toBe('70%')
   })
 
-  /** Settings is opened by the profile menu / ⌘, (the store), NOT a sidebar tab.
+  /** Settings is opened by the sidebar settings icon / ⌘, (the store), NOT a sidebar tab.
    *  Because Settings is not a blocking modal, the mobile drawer may stay open
    *  over the pane so the settings tree remains reachable on a phone. */
   it('keeps the mobile drawer reachable when Settings is opened', () => {
@@ -202,6 +202,21 @@ describe('responsive sidebar', () => {
 
     expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')
+  })
+})
+
+describe('keyboard shortcuts dialog', () => {
+  /** With the profile menu gone, ⌘/ is the dialog's only entry point. */
+  it('opens on ⌘/ and Ctrl+/', () => {
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', metaKey: true, bubbles: true })) })
+    expect(document.body.textContent).toContain('Keyboard Shortcuts')
+
+    act(() => root.unmount())
+    root = createRoot(document.getElementById('root')!)
+    act(() => root.render(<App />))
+    expect(document.body.textContent).not.toContain('Keyboard Shortcuts')
+    act(() => { window.dispatchEvent(new KeyboardEvent('keydown', { key: '/', ctrlKey: true, bubbles: true })) })
+    expect(document.body.textContent).toContain('Keyboard Shortcuts')
   })
 })
 
