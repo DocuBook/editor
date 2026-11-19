@@ -3,8 +3,8 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Schema } from 'prosemirror-model'
-import { EditorState, TextSelection } from 'prosemirror-state'
+import { Schema } from '@tiptap/pm/model'
+import { EditorState, TextSelection } from '@tiptap/pm/state'
 
 vi.mock('../../../frontend/utils/aiMenu', () => ({
   getDefaultAIMenuItems: () => [

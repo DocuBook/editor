@@ -8,7 +8,7 @@
  * its numbering.
  */
 import { BlockNoteEditor } from '@blocknote/core'
-import { TextSelection } from 'prosemirror-state'
+import { TextSelection } from '@tiptap/pm/state'
 import { afterEach, describe, expect, it } from 'vitest'
 import { getSchema } from '../../../frontend/components/editor/setup'
 import { buildDocumentContext, buildHtmlDocumentState, CURSOR_MARKER } from '../../../frontend/utils/aiBlocks'
