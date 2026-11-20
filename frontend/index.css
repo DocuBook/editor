@@ -558,8 +558,9 @@ body .mobile-sidebar-drawer-body > aside {
     --heading-5: var(--user-font-heading-5, var(--heading-5-default));
 }
 /* Body text. `1em` is what BlockNote's `font-size: inherit` already gives; the
-   #root selector outranks that rule, which loads later. */
-#root .bn-editor p {
+   #root selector outranks that rule, which loads later. Math/diagram
+   placeholders are a <p> too, sized by BlockNote (.9rem / .7rem): left alone. */
+#root .bn-editor p:not(.bn-preview-placeholder-text) {
     font-size: var(--user-font-paragraph, 1em);
 }
 /* Level 1 is the default prop, which BlockNote leaves out of the DOM: there is

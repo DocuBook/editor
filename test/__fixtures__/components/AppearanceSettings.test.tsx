@@ -68,6 +68,26 @@ describe('AppearanceSettings', () => {
     expect(useTypography.getState().sizes).toEqual({ paragraph: 18 })
   })
 
+  it('keeps focus on the field after Enter', () => {
+    const field = input('heading-1')
+    act(() => field.focus())
+    act(() => type(field, '30'))
+    act(() => { field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })
+
+    expect(useTypography.getState().sizes).toEqual({ 'heading-1': 30 })
+    expect(field.isConnected).toBe(true)
+    expect(document.activeElement).toBe(field)
+  })
+
+  it('shows the clamped value even when it equals the stored one', () => {
+    act(() => useTypography.getState().setSize('heading-2', 96))
+    act(() => type(input('heading-2'), '500'))
+    act(() => { input('heading-2').dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
+
+    expect(useTypography.getState().sizes).toEqual({ 'heading-2': 96 })
+    expect(input('heading-2').value).toBe('96')
+  })
+
   it('clamps an out-of-range size and offers a reset', () => {
     act(() => type(input('heading-2'), '500'))
     act(() => { input('heading-2').dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })

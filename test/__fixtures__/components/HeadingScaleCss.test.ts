@@ -59,7 +59,9 @@ describe('editor heading scale stylesheet', () => {
   it('uses a Settings override before the CSS default', () => {
     const editor = rulesFor('#root .bn-editor').map(rule => rule.body).join(' ')
     for (const level of LEVELS) expect(editor).toContain(`--heading-${level}: var(--user-font-heading-${level}, var(--heading-${level}-default))`)
-    expect(rulesFor('#root .bn-editor p')[0]?.body).toContain('font-size: var(--user-font-paragraph, 1em)')
+    // Math/diagram placeholders (also a <p>) keep BlockNote's own size.
+    expect(rulesFor('#root .bn-editor p:not(.bn-preview-placeholder-text)')[0]?.body).toContain('font-size: var(--user-font-paragraph, 1em)')
+    expect(rulesFor('#root .bn-editor p')).toEqual([])
   })
 
   it.each([['desktop'], ['phone']])('steps down from h1 to h5 without going under body size on %s', (name) => {

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useTheme, type ThemePreference } from '../stores/theme'
 import { FONT_LEVELS, MAX_FONT_PX, MIN_FONT_PX, defaultFontPx, useTypography, type FontLevel } from '../stores/typography'
 
@@ -54,7 +55,7 @@ function FontSizes() {
       </div>
       <div className="flex flex-col gap-1.5">
         {FONT_LEVELS.map(level => (
-          <FontSizeRow key={`${level.id}:${sizes[level.id] ?? ''}`} id={level.id} label={level.label} value={sizes[level.id]} onCommit={px => setSize(level.id, px)} />
+          <FontSizeRow key={level.id} id={level.id} label={level.label} value={sizes[level.id]} onCommit={px => setSize(level.id, px)} />
         ))}
       </div>
       <p className="mt-1.5 text-[11px] text-muted">Empty uses the default. Applies to every screen size.</p>
@@ -63,22 +64,30 @@ function FontSizes() {
 }
 
 /** Uncontrolled while typing: the size is committed on blur or Enter, so an
- *  in-between value ("3" on the way to "32") is never applied or rejected. */
+ *  in-between value ("3" on the way to "32") is never applied or rejected. The
+ *  row is never remounted (Enter keeps focus); the field is rewritten instead,
+ *  with the applied value after a commit and the stored one after a reset. */
 function FontSizeRow({ id, label, value, onCommit }: { id: FontLevel; label: string; value: number | undefined; onCommit: (px: number | undefined) => void }) {
   const inputId = `font-size-${id}`
-  const commit = (raw: string) => {
-    const px = raw.trim() === '' ? undefined : Number(raw)
-    if (px === value) return
-    onCommit(px === undefined || !Number.isFinite(px) ? undefined : Math.min(MAX_FONT_PX, Math.max(MIN_FONT_PX, px)))
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (inputRef.current) inputRef.current.value = value === undefined ? '' : String(value)
+  }, [value])
+  const commit = (input: HTMLInputElement) => {
+    const raw = input.value.trim()
+    const number = raw === '' ? NaN : Number(raw)
+    const px = Number.isFinite(number) ? Math.min(MAX_FONT_PX, Math.max(MIN_FONT_PX, number)) : undefined
+    input.value = px === undefined ? '' : String(px)
+    if (px !== value) onCommit(px)
   }
   return (
     <div className="flex items-center justify-between gap-3">
       <label htmlFor={inputId} className="text-[13px] text-foreground-secondary">{label}</label>
       <div className="flex items-center gap-1.5">
-        <input id={inputId} type="number" inputMode="decimal" min={MIN_FONT_PX} max={MAX_FONT_PX} step={1}
+        <input ref={inputRef} id={inputId} type="number" inputMode="decimal" min={MIN_FONT_PX} max={MAX_FONT_PX} step={1}
           defaultValue={value ?? ''} placeholder={String(defaultFontPx(id))}
-          onBlur={event => commit(event.currentTarget.value)}
-          onKeyDown={event => { if (event.key === 'Enter') commit(event.currentTarget.value) }}
+          onBlur={event => commit(event.currentTarget)}
+          onKeyDown={event => { if (event.key === 'Enter') commit(event.currentTarget) }}
           className="w-20 bg-background border border-border rounded-md px-2 py-1 text-right text-[13px] text-foreground outline-none focus:border-accent placeholder:text-muted" />
         <span className="text-[11px] text-muted">px</span>
       </div>
