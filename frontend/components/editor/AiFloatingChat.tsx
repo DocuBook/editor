@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 
 import { Zap, ArrowUp, Check, RotateCcw, X, FileText, Folder, ChevronsUpDown, Command, CornerDownLeft } from 'lucide-react'
 import type { AiMenuState, AiPhase } from '../../utils/aiExtension'
-import { AsciiLoader } from './AsciiLoader'
 import { getDefaultAIMenuItems } from '../../utils/aiMenu'
 import { useEditorStore } from '../../stores/editor'
 import { useVaultStore } from '../../stores/vault'
@@ -109,6 +108,19 @@ const PHASE_LABEL: Record<AiPhase, string> = {
   researching: 'Reading sources…',
   retrying: 'Retrying…',
 }
+
+/** Lucide `bot`, inlined so CSS can target the eyes (blink) without relying on
+ *  lucide-react's child order. Decorative: the label beside it is what is read. */
+const STATUS_BOT = (
+  <svg aria-hidden="true" className="ai-status-bot shrink-0 text-accent" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 8V4H8" />
+    <rect width="16" height="12" x="4" y="8" rx="2" />
+    <path d="M2 14h2" />
+    <path d="M20 14h2" />
+    <path className="ai-bot-eye" d="M15 13v2" />
+    <path className="ai-bot-eye" d="M9 13v2" />
+  </svg>
+)
 
 /** Above this many models (every provider's list together) the picker grows a
  *  search box: a short list is faster to scan than to type into, while a
@@ -771,7 +783,8 @@ export default function AiFloatingChat({ scrollContainer, obscured = false }: { 
   const outOfRetries = typeof aiMenu !== 'string' && aiMenu.status === 'error' && aiMenu.retriesLeft === 0
 
   const thinkingPhase: AiPhase = (typeof aiMenu !== 'string' && aiMenu.phase) || 'thinking'
-  const statusBar = status === 'thinking' || status === 'generating' || status === 'ai-writing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><AsciiLoader kind={status === 'thinking' ? thinkingPhase : status} className="text-accent" /><span className="text-xs text-foreground-secondary">{status === 'thinking' ? PHASE_LABEL[thinkingPhase] : status === 'generating' ? 'Generating…' : 'Writing…'}</span><button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className={`ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Stop</button></div> : status === 'user-reviewing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><span className="text-xs text-foreground-secondary">Review the changes</span><div className="ml-auto flex items-center gap-2"><button onClick={revert} onMouseDown={(event) => event.preventDefault()} className={`cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Revert</button><button onClick={accept} onMouseDown={(event) => event.preventDefault()} className={`flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 ${CONTROL_TEXT} text-on-accent hover:bg-accent-hover`}><Check size={11} />Accept <span className="ml-1 inline-flex items-center gap-0.5 opacity-80"><Command size={10} /><CornerDownLeft size={10} /></span></button></div></div> : status === 'error' ? <div className="ai-chat-status border-b border-border-subtle px-3 py-2"><div className="wrap-break-word text-[11px] text-danger">{typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}</div>{outOfRetries && <div className="mt-1 text-[10px] text-muted">Retry limit reached — rephrase the prompt or cancel.</div>}<div className="mt-2 flex justify-end gap-2"><button onClick={() => { setExpanded(false); ai.rejectChanges() }} className={`cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Cancel</button><button disabled={outOfRetries} onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className={`flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 ${CONTROL_TEXT} text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35`}><RotateCcw size={11} />Retry</button></div></div> : null
+  const statusLabel = status === 'thinking' ? PHASE_LABEL[thinkingPhase] : status === 'generating' ? 'Generating…' : 'Writing…'
+  const statusBar = status === 'thinking' || status === 'generating' || status === 'ai-writing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2">{STATUS_BOT}<span className="ai-status-label text-xs">{statusLabel}</span><button onClick={() => { setExpanded(false); ai.abort?.('stopped by user').catch(() => {}) }} className={`ml-auto cursor-pointer rounded border border-border-subtle bg-surface-active px-2 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Stop</button></div> : status === 'user-reviewing' ? <div className="ai-chat-status flex items-center gap-2 border-b border-border-subtle px-3 py-2"><span className="text-xs text-foreground-secondary">Review the changes</span><div className="ml-auto flex items-center gap-2"><button onClick={revert} onMouseDown={(event) => event.preventDefault()} className={`cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Revert</button><button onClick={accept} onMouseDown={(event) => event.preventDefault()} className={`flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 ${CONTROL_TEXT} text-on-accent hover:bg-accent-hover`}><Check size={11} />Accept <span className="ml-1 inline-flex items-center gap-0.5 opacity-80"><Command size={10} /><CornerDownLeft size={10} /></span></button></div></div> : status === 'error' ? <div className="ai-chat-status border-b border-border-subtle px-3 py-2"><div className="wrap-break-word text-[11px] text-danger">{typeof aiMenu !== 'string' && aiMenu.error ? String(aiMenu.error?.message ?? aiMenu.error) : 'Something went wrong'}</div>{outOfRetries && <div className="mt-1 text-[10px] text-muted">Retry limit reached — rephrase the prompt or cancel.</div>}<div className="mt-2 flex justify-end gap-2"><button onClick={() => { setExpanded(false); ai.rejectChanges() }} className={`cursor-pointer rounded border border-border-subtle bg-surface-active px-2.5 py-1 ${CONTROL_TEXT} text-foreground-secondary hover:text-foreground`}>Cancel</button><button disabled={outOfRetries} onClick={() => { setExpanded(false); ai.retry()?.catch(() => {}) }} className={`flex cursor-pointer items-center gap-1 rounded border-none bg-accent px-2.5 py-1 ${CONTROL_TEXT} text-on-accent hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-35`}><RotateCcw size={11} />Retry</button></div></div> : null
 
   return <div ref={rootRef} aria-hidden={obscured || undefined} data-ai-chat-hidden={covered ? 'true' : 'false'} className="editor-ai-floating absolute bottom-5 left-1/2 z-50 flex flex-col items-end gap-2">
     <div ref={surfaceRef} className="ai-chat-surface relative flex w-full flex-col overflow-visible rounded-xl border border-border transition-colors focus-within:border-accent">{promptPanel}{statusBar}{modelPicker}{mentionPanel}{promptInput}</div>

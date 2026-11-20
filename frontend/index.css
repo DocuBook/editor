@@ -908,6 +908,50 @@ body .web-fetch-checkbox-label {
     }
 }
 
+/* AI status: the bot bobs and blinks while a request runs, and an accent shine
+   sweeps across its label. */
+@keyframes ai-bot-bob {
+    from { transform: translateY(0.5px); }
+    to { transform: translateY(-1px); }
+}
+@keyframes ai-bot-blink {
+    0%, 88%, 100% { transform: scaleY(1); }
+    94% { transform: scaleY(0.15); }
+}
+/* 300% wide with the band in the middle: 100% → 0% carries it from past the
+   left edge to past the right one, and the gradient always covers the text. */
+@keyframes ai-text-shine {
+    from { background-position: 100% 0; }
+    to { background-position: 0 0; }
+}
+.ai-status-bot {
+    animation: ai-bot-bob 600ms ease-in-out infinite alternate;
+}
+.ai-status-bot .ai-bot-eye {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: ai-bot-blink 2.4s ease-in-out infinite;
+}
+.ai-status-label {
+    background: linear-gradient(90deg, var(--color-foreground-secondary) 45%, var(--color-accent) 50%, var(--color-foreground-secondary) 55%) 0 0 / 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: ai-text-shine 1.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .ai-status-bot,
+    .ai-status-bot .ai-bot-eye {
+        animation: none;
+    }
+    /* A still gradient would leave an accent tint on one end: plain text instead. */
+    .ai-status-label {
+        animation: none;
+        background: none;
+        color: var(--color-foreground-secondary);
+    }
+}
+
 /* The tab bar and the sidebar share ONE chrome surface (--color-surface), so the
    two read as a single continuous shell in light theme instead of the bar
    sitting on the document's white. The bar is the full-width strip; the row of
