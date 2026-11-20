@@ -9,6 +9,7 @@
  */
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { MantineProvider } from '@mantine/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { settle } from '../harness'
@@ -22,6 +23,10 @@ vi.mock('../../../frontend/lib/ipc', async importOriginal => ({
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 import SettingsPane from '../../../frontend/components/SettingsPane'
+
+globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver
+// MantineProvider reads the colour scheme through matchMedia, which jsdom lacks.
+window.matchMedia ??= ((query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
 import { useAiSettings } from '../../../frontend/stores/aiSettings'
 import { useSettings } from '../../../frontend/stores/settings'
 
@@ -31,7 +36,8 @@ let root: Root | null
 
 async function render() {
   root = createRoot(document.getElementById('root')!)
-  act(() => root!.render(<SettingsPane />))
+  // The app renders every page under main.tsx's MantineProvider (Appearance uses Mantine).
+  act(() => root!.render(<MantineProvider><SettingsPane /></MantineProvider>))
   await settle()
 }
 

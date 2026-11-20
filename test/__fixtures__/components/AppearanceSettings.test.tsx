@@ -3,12 +3,14 @@
  *  the editor font sizes, which commit on blur or Enter, never mid-typing. */
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
+import { MantineProvider } from '@mantine/core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMemoryStorage } from '../memoryStorage'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 vi.stubGlobal('localStorage', createMemoryStorage().storage)
+globalThis.ResizeObserver ??= class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver
 vi.stubGlobal('matchMedia', vi.fn((query: string) => ({ matches: query.includes('dark'), media: query, addEventListener: () => {}, removeEventListener: () => {} })))
 
 const { default: AppearanceSettings } = await import('../../../frontend/components/AppearanceSettings')
@@ -16,7 +18,8 @@ const { useTheme } = await import('../../../frontend/stores/theme')
 const { useTypography } = await import('../../../frontend/stores/typography')
 
 let root: Root
-const radio = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="radio"]')).find(button => button.textContent === label)!
+/** Mantine's SegmentedControl: a native radio per option, labelled by its text. */
+const radio = (value: string) => document.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`)!
 const input = (id: string) => document.getElementById(`font-size-${id}`) as HTMLInputElement
 const type = (element: HTMLInputElement, value: string) => {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(element, value)
@@ -28,20 +31,22 @@ beforeEach(() => {
   useTypography.getState().reset()
   document.body.innerHTML = '<div id="root"></div>'
   root = createRoot(document.getElementById('root')!)
-  act(() => root.render(<AppearanceSettings />))
+  act(() => root.render(<MantineProvider><AppearanceSettings /></MantineProvider>))
 })
 
 afterEach(() => act(() => root.unmount()))
 
 describe('AppearanceSettings', () => {
   it('defaults to System and pins Light or Dark', () => {
-    expect(radio('System').getAttribute('aria-checked')).toBe('true')
+    expect(radio('system').checked).toBe(true)
     expect(document.body.textContent).toContain('currently Dark')
+    // Each option carries its icon next to its label.
+    for (const value of ['system', 'light', 'dark']) expect(document.querySelector(`label[for="${radio(value).id}"] svg`)).not.toBeNull()
 
-    act(() => radio('Light').click())
+    act(() => radio('light').click())
 
     expect(useTheme.getState()).toMatchObject({ preference: 'light', name: 'light' })
-    expect(radio('Light').getAttribute('aria-checked')).toBe('true')
+    expect(radio('light').checked).toBe(true)
     expect(document.body.textContent).not.toContain('currently')
   })
 
