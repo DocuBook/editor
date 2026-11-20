@@ -59,10 +59,13 @@ expectEqual('a long headline is cut on a word boundary',
 expectEqual('no entries: bare title', releaseTitle('0.9.0', ':robot: release\n\n## [0.9.0](x) (2026-11-20)\n'), 'chore(release): v0.9.0')
 expectEqual('title joins version and subject', releaseTitle('0.9.0', body), 'chore(release): v0.9.0 — animated bot icon for the AI status line')
 
-// 2. release-please 17's matcher, verbatim (build/src/util/pull-request-title.js
-//    generateMatchPattern + build/src/version.js VERSION_REGEX).
+// 2. release-please 17's matcher (build/src/util/pull-request-title.js
+//    generateMatchPattern + build/src/version.js VERSION_REGEX), verbatim except
+//    for the leading backslash escape. Upstream has none; the pattern is
+//    required below to contain no backslash, so the two agree on every config
+//    this guard accepts.
 function generateMatchPattern(pattern) {
-  return new RegExp(`^${pattern.replace(/\[/g, '\\[').replace(/\]/g, '\\]').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
+  return new RegExp(`^${pattern.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]').replace(/\(/g, '\\(').replace(/\)/g, '\\)')
     .replace('${scope}', '(\\((?<branch>[\\w-./]+)\\))?')
     .replace('${component}', ' ?(?<component>@?[\\w-./]*)?')
     .replace('${version}', 'v?(?<version>[0-9].*)')
@@ -75,6 +78,7 @@ const parsedVersion = (title, pattern) => {
 }
 
 const pattern = JSON.parse(readFileSync(join(root, 'release-please-config.json'), 'utf8'))['pull-request-title-pattern']
+expectEqual('pull-request-title-pattern contains no backslash', pattern.includes('\\'), false)
 for (const title of [
   releaseTitle('0.9.0', body),
   releaseTitle('0.9.0', ''),
