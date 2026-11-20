@@ -255,7 +255,7 @@ describe('AI floating composer', () => {
     [{ blockId: 'b1', status: 'thinking', phase: 'retrying' }, 'retrying', 'Retrying…'],
     [{ blockId: 'b1', status: 'generating' }, 'generating', 'Generating…'],
     [{ blockId: 'b1', status: 'ai-writing' }, 'ai-writing', 'Writing…'],
-  ])('shows the %o status line with its own ASCII loader', (menuState, kind, label) => {
+  ])('shows the %o status line with the bot icon and a shining %s label', (menuState, _kind, label) => {
     const ai = makeAi(menuState)
     useEditorStore.setState({
       blockEditor: {
@@ -267,8 +267,9 @@ describe('AI floating composer', () => {
 
     act(() => root!.render(<AiFloatingChat />))
     const statusLine = document.querySelector('.ai-chat-status')!
-    expect(statusLine.querySelector('.ai-ascii-loader')?.getAttribute('data-kind')).toBe(kind)
-    expect(statusLine.textContent).toContain(label)
+    expect(statusLine.querySelector('svg.ai-status-bot')?.getAttribute('aria-hidden')).toBe('true')
+    expect(statusLine.querySelectorAll('svg.ai-status-bot .ai-bot-eye')).toHaveLength(2)
+    expect(statusLine.querySelector('.ai-status-label')?.textContent).toBe(label)
     // The icon spinner it replaced is gone.
     expect(statusLine.querySelector('svg.animate-spin')).toBeNull()
   })
