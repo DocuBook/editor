@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.9.0 — 2026-11-20
+
+
+### Features
+
+* **ai:** animated bot icon and shining label for the AI status line ([#478](https://github.com/DocuBook/editor/issues/478)) ([2995a44](https://github.com/DocuBook/editor/commit/2995a440ff31ba675545eb19dffd01ca75bcb459))
+* **settings:** Mantine controls for the Appearance section ([#481](https://github.com/DocuBook/editor/issues/481)) ([9ae7a8e](https://github.com/DocuBook/editor/commit/9ae7a8ef26ae3d2d4cb6c3886d49695606fb870c))
+* **settings:** system theme by default and editor font sizes in one Appearance section ([#480](https://github.com/DocuBook/editor/issues/480)) ([3159252](https://github.com/DocuBook/editor/commit/3159252fda2f47059ea1c88607972d2aa404a8ba))
+
+
+### Bug Fixes
+
+* **deps:** bump libz-sys to 1.1.33 (RUSTSEC-2026-0544) ([#474](https://github.com/DocuBook/editor/issues/474)) ([85b6abe](https://github.com/DocuBook/editor/commit/85b6abe6673e38e2a7e6d58949d4221c78ebb73f))
+* **deps:** bump libz-sys to 1.1.33 for RUSTSEC-2026-0544 ([85b6abe](https://github.com/DocuBook/editor/commit/85b6abe6673e38e2a7e6d58949d4221c78ebb73f))
+
+
+### Performance
+
+* **ipc:** raw-byte binary reads + enum-based write check on the server ([#473](https://github.com/DocuBook/editor/issues/473)) ([bfcda9d](https://github.com/DocuBook/editor/commit/bfcda9da6f4e2de04e37d0d042d1f438bd0245a5))
+
+
+### Refactor
+
+* **settings:** move Git under General as its own section ([#482](https://github.com/DocuBook/editor/issues/482)) ([49a8410](https://github.com/DocuBook/editor/commit/49a84105a42a3ddc8227d3bf014365e373d30e0f))
+* **sidebar:** replace the profile menu with a settings icon ([#476](https://github.com/DocuBook/editor/issues/476)) ([f80a697](https://github.com/DocuBook/editor/commit/f80a69753a94ef47f33a530f560be9d1867db0da))
+
+
+### CI
+
+* **release:** title the release PR with a subject from its changelog ([#479](https://github.com/DocuBook/editor/issues/479)) ([aa87715](https://github.com/DocuBook/editor/commit/aa87715890be17f2baf716c517c731df63e12a30))
+
 ## v0.8.1 — 2026-11-16
 
 
