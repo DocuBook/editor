@@ -1,11 +1,13 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
+import { NumberInput, SegmentedControl } from '@mantine/core'
+import { Monitor, Moon, Sun } from 'lucide-react'
 import { useTheme, type ThemePreference } from '../stores/theme'
 import { FONT_LEVELS, MAX_FONT_PX, MIN_FONT_PX, defaultFontPx, useTypography, type FontLevel } from '../stores/typography'
 
-const THEME_OPTIONS: { id: ThemePreference; label: string }[] = [
-  { id: 'system', label: 'System' },
-  { id: 'light', label: 'Light' },
-  { id: 'dark', label: 'Dark' },
+const THEME_OPTIONS: { value: ThemePreference; label: string; Icon: typeof Monitor }[] = [
+  { value: 'system', label: 'System', Icon: Monitor },
+  { value: 'light', label: 'Light', Icon: Sun },
+  { value: 'dark', label: 'Dark', Icon: Moon },
 ]
 
 const subheading = 'text-xs font-medium text-foreground mb-2 block'
@@ -23,20 +25,20 @@ export default function AppearanceSettings() {
 function ThemePicker() {
   const { preference, name, setTheme } = useTheme()
   return (
-    <div role="radiogroup" aria-label="Theme">
-      <span className={subheading}>Theme</span>
-      <div className="flex gap-2">
-        {THEME_OPTIONS.map(option => {
-          const selected = preference === option.id
-          return (
-            <button key={option.id} type="button" role="radio" aria-checked={selected} onClick={() => setTheme(option.id)}
-              className={'flex-1 px-3 py-2 rounded-md cursor-pointer border text-[13px] transition-colors ' +
-                (selected ? 'border-accent text-foreground' : 'border-border text-foreground-secondary hover:bg-surface-active hover:text-foreground')}>
-              {option.label}
-            </button>
-          )
-        })}
-      </div>
+    <div>
+      <span className={subheading} id="appearance-theme-label">Theme</span>
+      <SegmentedControl
+        fullWidth
+        withItemsBorders={false}
+        aria-labelledby="appearance-theme-label"
+        value={preference}
+        onChange={value => setTheme(value as ThemePreference)}
+        classNames={{ root: 'appearance-segmented', indicator: 'appearance-segmented-indicator', label: 'appearance-segmented-label' }}
+        data={THEME_OPTIONS.map(({ value, label, Icon }) => ({
+          value,
+          label: <span className="flex items-center justify-center gap-1.5"><Icon size={14} aria-hidden="true" />{label}</span>,
+        }))}
+      />
       {preference === 'system' && <p className="mt-1.5 text-[11px] text-muted">Following your system — currently {name === 'dark' ? 'Dark' : 'Light'}.</p>}
     </div>
   )
@@ -63,34 +65,44 @@ function FontSizes() {
   )
 }
 
-/** Uncontrolled while typing: the size is committed on blur or Enter, so an
- *  in-between value ("3" on the way to "32") is never applied or rejected. The
- *  row is never remounted (Enter keeps focus); the field is rewritten instead,
- *  with the applied value after a commit and the stored one after a reset. */
+/** The size is committed on blur or Enter, so an in-between value ("3" on the
+ *  way to "32") is never applied or rejected. The draft is rewritten with the
+ *  applied value after a commit (clamped or cleared) and with the stored one
+ *  after a reset. Mantine's own clamp is off: it would rewrite the draft on
+ *  blur before this commit reads it. */
 function FontSizeRow({ id, label, value, onCommit }: { id: FontLevel; label: string; value: number | undefined; onCommit: (px: number | undefined) => void }) {
   const inputId = `font-size-${id}`
-  const inputRef = useRef<HTMLInputElement>(null)
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.value = value === undefined ? '' : String(value)
-  }, [value])
-  const commit = (input: HTMLInputElement) => {
-    const raw = input.value.trim()
-    const number = raw === '' ? NaN : Number(raw)
+  const [draft, setDraft] = useState<string | number>(value ?? '')
+  /* oxlint-disable react/set-state-in-effect -- rewrites the draft after a commit or reset */
+  useEffect(() => { setDraft(value ?? '') }, [value])
+  /* oxlint-enable react/set-state-in-effect */
+  const commit = () => {
+    const number = typeof draft === 'number' ? draft : draft.trim() === '' ? NaN : Number(draft)
     const px = Number.isFinite(number) ? Math.min(MAX_FONT_PX, Math.max(MIN_FONT_PX, number)) : undefined
-    input.value = px === undefined ? '' : String(px)
+    setDraft(px ?? '')
     if (px !== value) onCommit(px)
   }
   return (
     <div className="flex items-center justify-between gap-3">
       <label htmlFor={inputId} className="text-[13px] text-foreground-secondary">{label}</label>
-      <div className="flex items-center gap-1.5">
-        <input ref={inputRef} id={inputId} type="number" inputMode="decimal" min={MIN_FONT_PX} max={MAX_FONT_PX} step={1}
-          defaultValue={value ?? ''} placeholder={String(defaultFontPx(id))}
-          onBlur={event => commit(event.currentTarget)}
-          onKeyDown={event => { if (event.key === 'Enter') commit(event.currentTarget) }}
-          className="w-20 bg-background border border-border rounded-md px-2 py-1 text-right text-[13px] text-foreground outline-none focus:border-accent placeholder:text-muted" />
-        <span className="text-[11px] text-muted">px</span>
-      </div>
+      <NumberInput
+        id={inputId}
+        size="xs"
+        w={88}
+        hideControls
+        clampBehavior="none"
+        allowDecimal={false}
+        allowNegative={false}
+        min={MIN_FONT_PX}
+        max={MAX_FONT_PX}
+        value={draft}
+        onChange={setDraft}
+        placeholder={String(defaultFontPx(id))}
+        rightSection={<span className="text-[11px] text-muted">px</span>}
+        onBlur={commit}
+        onKeyDown={event => { if (event.key === 'Enter') commit() }}
+        classNames={{ input: 'web-search-picker-input text-right placeholder:text-muted' }}
+      />
     </div>
   )
 }

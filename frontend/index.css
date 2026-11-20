@@ -744,6 +744,24 @@ body .web-search-picker-input {
     font-size: 12px;
     font-family: var(--font-mono, ui-monospace, monospace);
 }
+/* Settings → Appearance theme toggle (Mantine SegmentedControl) on the app's
+   tokens: Mantine's own palette does not follow data-theme. */
+body .appearance-segmented {
+    background: var(--color-surface-active);
+    border: 1px solid var(--color-border);
+}
+body .appearance-segmented-indicator {
+    background: var(--color-background);
+    box-shadow: 0 0 0 1px var(--color-border);
+}
+body .appearance-segmented-label {
+    color: var(--color-foreground-secondary);
+    font-size: 13px;
+}
+body .appearance-segmented-label[data-active],
+body .appearance-segmented-label:not([data-disabled]):hover {
+    color: var(--color-foreground);
+}
 body .web-search-picker-input:focus {
     border-color: var(--color-accent);
 }
