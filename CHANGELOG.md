@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.1 — 2026-11-20
+
+
+### Bug Fixes
+
+* **ci:** fill the image tag in the release notes' docker command ([#483](https://github.com/DocuBook/editor/issues/483)) ([72d6743](https://github.com/DocuBook/editor/commit/72d67433538435bb6eaac93a04e9bcb7a88a2dd6))
+
 ## v0.9.0 — 2026-11-20
 
 
