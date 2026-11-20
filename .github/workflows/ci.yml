@@ -533,13 +533,15 @@ jobs:
           sha256sum "${DMGS[@]}" > SHA256SUMS.txt
           # Arm64 ad-hoc-signed download triggers Gatekeeper "app is damaged".
           # Users clear it once before first launch.
+          # Quoted heredoc: the Markdown backticks must not run as commands, so
+          # nothing in it expands. The image tag is filled in right after it.
           cat >> /tmp/release-notes.md <<'EOF'
 
           ---
           **Web (Docker):** self-host via the container image
           ([`ghcr.io/docubook/editor`](https://github.com/DocuBook/editor/pkgs/container/editor)):
           ```bash
-          docker run -d --name docubook -p 8080:8080 -v docubook:/data ghcr.io/docubook/editor:$TAG
+          docker run -d --name docubook -p 8080:8080 -v docubook:/data ghcr.io/docubook/editor:@IMAGE_TAG@
           ```
 
           ---
@@ -551,6 +553,10 @@ jobs:
           **macOS (Intel — `*_x64.dmg`):** right-click the app → *Open* →
           *Open Anyway* on the Gatekeeper dialog.
           EOF
+          # docker.yml tags the image {{version}}: the release tag without its "v".
+          # Bash substitution, not `sed -i` (GNU/BSD differ; the guard runs on macOS).
+          notes=$(< /tmp/release-notes.md)
+          printf '%s\n' "${notes//@IMAGE_TAG@/${TAG#v}}" > /tmp/release-notes.md
           RELEASE_FLAGS=(--title "$TAG" --notes-file /tmp/release-notes.md)
           case "$TAG" in
             *-*) RELEASE_FLAGS+=(--prerelease) ;;

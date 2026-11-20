@@ -15,7 +15,9 @@
  *
  * Run: node test/check-release-notes.mjs
  */
-import { readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildNotes, cleanHeadings, extractSection } from '../.github/scripts/release-notes.mjs'
@@ -107,6 +109,31 @@ for (const { type, section: name } of config['changelog-sections'] ?? []) {
 const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8')
 if (!/node \.github\/scripts\/release-notes\.mjs "\$TAG" CHANGELOG\.md \/tmp\/contributors\.txt/.test(ci)) {
   fail('ci.yml publish does not build the release body with .github/scripts/release-notes.mjs')
+}
+
+// --- The footer's docker command names the published image tag. The footer is a
+// quoted heredoc (its Markdown backticks must not run), so a `$TAG` inside it
+// shipped literally. Run the step's footer lines for a sample tag and read them.
+{
+  const lines = ci.split('\n')
+  const start = lines.findIndex((l) => l.includes("cat >> /tmp/release-notes.md <<'EOF'"))
+  const end = lines.findIndex((l, i) => i > start && l.includes('@IMAGE_TAG@') && l.includes('> /tmp/release-notes.md'))
+  if (start === -1 || end === -1) fail('ci.yml publish: release-notes footer heredoc or its image-tag fill not found')
+  else {
+    const dir = mkdtempSync(join(tmpdir(), 'release-notes-'))
+    const out = join(dir, 'notes.md')
+    const script = lines.slice(start, end + 1).map((l) => l.replace(/^ {10}/, '')).join('\n').replaceAll('/tmp/release-notes.md', out)
+    try {
+      for (const [tag, image] of [['v1.2.3', '1.2.3'], ['v2.0.0-beta.1', '2.0.0-beta.1']]) {
+        execFileSync('bash', ['-ec', `: > "${out}"\n${script}`], { env: { ...process.env, TAG: tag } })
+        const notes = readFileSync(out, 'utf8')
+        if (!notes.includes(`ghcr.io/docubook/editor:${image}\n`)) fail(`release footer for ${tag}: docker command is not ghcr.io/docubook/editor:${image}`)
+        if (/\$TAG|@IMAGE_TAG@/.test(notes)) fail(`release footer for ${tag}: an unexpanded tag placeholder shipped`)
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
 }
 
 if (failures.length) {
