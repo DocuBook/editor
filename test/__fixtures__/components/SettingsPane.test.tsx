@@ -93,7 +93,7 @@ describe('SettingsPane — one page per menu', () => {
     expect(heading()!.id).toBe('git-identity')
     expect(section('git-remotes')).not.toBeNull()
     // No other page is present.
-    expect(document.getElementById('general-themes')).toBeNull()
+    expect(document.getElementById('general-appearance')).toBeNull()
     expect(document.getElementById('ai-provider')).toBeNull()
   })
 
@@ -170,10 +170,10 @@ describe('SettingsPane — one page per menu', () => {
     await render()
     expect(heading()!.id).toBe('git-identity')
 
-    act(() => useSettings.setState({ section: 'general-themes' }))
+    act(() => useSettings.setState({ section: 'general-appearance' }))
     await settle()
 
-    expect(heading()!.id).toBe('general-themes')
+    expect(heading()!.id).toBe('general-appearance')
     expect(document.getElementById('git-identity')).toBeNull()
   })
 
@@ -226,7 +226,7 @@ describe('SettingsPane — one page per menu', () => {
   /** Every sidebar row resolves to a real, visible anchor: the first section of a
    *  page is its heading, the rest are sections. The id is never duplicated. */
   it('exposes every section as a real anchor', async () => {
-    for (const id of ['general-themes', 'git-identity', 'ai-provider', 'ai-web-tools'] as const) {
+    for (const id of ['general-appearance', 'git-identity', 'ai-provider', 'ai-web-tools'] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -241,19 +241,19 @@ describe('SettingsPane — one page per menu', () => {
   })
 
   /** General is the FIRST page: opening Settings with no explicit section lands
-   *  on it (the store's default), so its Themes section is the one rendered. */
+   *  on it (the store's default), so its Appearance section is the one rendered. */
   it('renders the General page for the default section', async () => {
-    useSettings.setState({ open: true, section: 'general-themes' })
+    useSettings.setState({ open: true, section: 'general-appearance' })
     await render()
 
-    expect(heading()!.id).toBe('general-themes')
+    expect(heading()!.id).toBe('general-appearance')
     expect(document.getElementById('git-identity')).toBeNull()
   })
 
   /** The page heading IS the page's menu name, so the pane and the sidebar row
    *  that opened it always read the same. */
   it('titles each page with its menu name', async () => {
-    for (const [id, title] of [['general-themes', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI'], ['ai-web-tools', 'AI']] as const) {
+    for (const [id, title] of [['general-appearance', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI'], ['ai-web-tools', 'AI']] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -265,7 +265,7 @@ describe('SettingsPane — one page per menu', () => {
   /** The FIRST section of a page anchors to the page heading itself: the sidebar
    *  row for it scrolls to the heading, and no section body repeats the id. */
   it('anchors the first section to the page heading', async () => {
-    for (const [id, title] of [['general-themes', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI']] as const) {
+    for (const [id, title] of [['general-appearance', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI']] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -285,11 +285,11 @@ describe('SettingsPane — one page per menu', () => {
     await render()
 
     expect(section('general-account')).not.toBeNull()
-    // It lives on the SAME page as Themes (whose anchor is the page heading).
-    expect(heading()!.id).toBe('general-themes')
+    // It lives on the SAME page as Appearance (whose anchor is the page heading).
+    expect(heading()!.id).toBe('general-appearance')
   })
 
-  /** The section at the TOP of a page (Themes on General, Provider on AI) is the
+  /** The section at the TOP of a page (Appearance on General, Provider on AI) is the
    *  page heading itself, so there is no top border to draw; the section below it
    *  keeps the divider. */
   it('has no top border above the page heading but one below it', async () => {
@@ -300,7 +300,7 @@ describe('SettingsPane — one page per menu', () => {
     expect(section('ai-web-tools')!.className).toContain('border-t')
 
     if (root) act(() => root!.unmount())
-    useSettings.setState({ open: true, section: 'general-themes' })
+    useSettings.setState({ open: true, section: 'general-appearance' })
     await render()
     expect(heading()!.className).not.toContain('border-t')
     expect(section('general-account')!.className).toContain('border-t')

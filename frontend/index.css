@@ -531,21 +531,36 @@ body .mobile-sidebar-drawer-body > aside {
    body size and below the one before it.
 
    Phones get a tighter scale: at 48px a short title broke over three lines of
-   a 343px column, and the top three steps took most of the first screen. */
-#root .bn-editor {
-    --heading-1: 2.25em;
-    --heading-2: 1.75em;
-    --heading-3: 1.375em;
-    --heading-4: 1.125em;
-    --heading-5: 1em;
+   a 343px column, and the top three steps took most of the first screen.
+
+   The defaults live on :root so Settings → Appearance can show them; a size set
+   there (`--user-font-*`, px, every viewport) replaces the default. */
+:root {
+    --heading-1-default: 2.25em;
+    --heading-2-default: 1.75em;
+    --heading-3-default: 1.375em;
+    --heading-4-default: 1.125em;
+    --heading-5-default: 1em;
 }
 @media (max-width: 639px) {
-    #root .bn-editor {
-        --heading-1: 1.75em;
-        --heading-2: 1.375em;
-        --heading-3: 1.1875em;
-        --heading-4: 1.0625em;
+    :root {
+        --heading-1-default: 1.75em;
+        --heading-2-default: 1.375em;
+        --heading-3-default: 1.1875em;
+        --heading-4-default: 1.0625em;
     }
+}
+#root .bn-editor {
+    --heading-1: var(--user-font-heading-1, var(--heading-1-default));
+    --heading-2: var(--user-font-heading-2, var(--heading-2-default));
+    --heading-3: var(--user-font-heading-3, var(--heading-3-default));
+    --heading-4: var(--user-font-heading-4, var(--heading-4-default));
+    --heading-5: var(--user-font-heading-5, var(--heading-5-default));
+}
+/* Body text. `1em` is what BlockNote's `font-size: inherit` already gives; the
+   #root selector outranks that rule, which loads later. */
+#root .bn-editor p {
+    font-size: var(--user-font-paragraph, 1em);
 }
 /* Level 1 is the default prop, which BlockNote leaves out of the DOM: there is
    no `data-level="1"`, so it is the bare heading rule, as upstream has it. */

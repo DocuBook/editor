@@ -4,7 +4,7 @@ import { create } from 'zustand'
  *  the sidebar tree (which selects one) and the editor-container pane (which
  *  renders every section with a matching `id`), so a nav click can scroll the
  *  pane to its section without prop-drilling a callback through both surfaces. */
-export type SettingsSectionId = 'general-themes' | 'general-account' | 'git-identity' | 'git-remotes' | 'git-credentials' | 'ai-provider' | 'ai-web-tools'
+export type SettingsSectionId = 'general-appearance' | 'general-account' | 'git-identity' | 'git-remotes' | 'git-credentials' | 'ai-provider' | 'ai-web-tools'
 
 /** The top-level MENU a section belongs to. A menu owns one PAGE in the sidebar
  *  and expands to that page's section rows. */
@@ -35,7 +35,7 @@ export function groupOf(id: SettingsSectionId): SettingsGroupId {
  *  one of its section anchors): the page opens at its first section. General is
  *  FIRST: opening Settings (no explicit section) lands here. */
 export const PAGE_FIRST_SECTION: Record<SettingsPageId, SettingsSectionId> = {
-  general: 'general-themes',
+  general: 'general-appearance',
   git: 'git-identity',
   ai: 'ai-provider',
 }
@@ -64,7 +64,7 @@ interface SettingsState {
  *  and so both sidebar instances (desktop + mobile drawer) share one source. */
 export const useSettings = create<SettingsState>()((set) => ({
   open: false,
-  section: 'general-themes',
+  section: 'general-appearance',
   navNonce: 0,
   openSettings: (section) => set(state => ({ open: true, section: section ?? state.section, navNonce: state.navNonce + 1 })),
   closeSettings: () => set({ open: false }),

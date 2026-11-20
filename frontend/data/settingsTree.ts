@@ -36,7 +36,7 @@ export const SETTINGS_GROUPS: NavGroup[] = [
     Icon: SlidersHorizontal,
     page: 'general',
     items: [
-      { id: 'general-themes', label: 'Themes' },
+      { id: 'general-appearance', label: 'Appearance' },
       { id: 'general-account', label: 'Account', dockerOnly: true },
     ],
   },
