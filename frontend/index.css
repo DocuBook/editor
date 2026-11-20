@@ -758,7 +758,8 @@ body .appearance-segmented-label {
     color: var(--color-foreground-secondary);
     font-size: 13px;
 }
-body .appearance-segmented-label[data-active] {
+body .appearance-segmented-label[data-active],
+body .appearance-segmented-label:not([data-disabled]):hover {
     color: var(--color-foreground);
 }
 body .web-search-picker-input:focus {

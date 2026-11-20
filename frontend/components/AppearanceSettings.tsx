@@ -73,7 +73,9 @@ function FontSizes() {
 function FontSizeRow({ id, label, value, onCommit }: { id: FontLevel; label: string; value: number | undefined; onCommit: (px: number | undefined) => void }) {
   const inputId = `font-size-${id}`
   const [draft, setDraft] = useState<string | number>(value ?? '')
+  /* oxlint-disable react/set-state-in-effect -- rewrites the draft after a commit or reset */
   useEffect(() => { setDraft(value ?? '') }, [value])
+  /* oxlint-enable react/set-state-in-effect */
   const commit = () => {
     const number = typeof draft === 'number' ? draft : draft.trim() === '' ? NaN : Number(draft)
     const px = Number.isFinite(number) ? Math.min(MAX_FONT_PX, Math.max(MIN_FONT_PX, number)) : undefined
