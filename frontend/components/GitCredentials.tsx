@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { KeyRound, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { invoke, isTauri } from '../lib/ipc'
-import SettingsSection from './settings/SettingsSection'
+import { SettingsCard } from './settings/SettingsSection'
 
 interface StoredCredential { host: string; username: string }
 interface CredentialList { encryption: boolean; credentials: StoredCredential[]; error: string }
@@ -16,9 +16,9 @@ const btnPrimary = 'px-3 py-1.5 rounded-md bg-accent text-on-accent border-none 
  *  browser — the list only names hosts and usernames. */
 export default function GitCredentials() {
   return (
-    <SettingsSection id="git-credentials" title="Credentials">
+    <SettingsCard title="Credentials">
       {isTauri ? <DesktopGuidance /> : <TokenStore />}
-    </SettingsSection>
+    </SettingsCard>
   )
 }
 

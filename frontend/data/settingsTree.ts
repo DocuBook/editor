@@ -1,4 +1,4 @@
-import { SlidersHorizontal, GitBranch, Sparkles } from 'lucide-react'
+import { SlidersHorizontal, Sparkles } from 'lucide-react'
 import type { SettingsSectionId, SettingsGroupId, SettingsPageId } from '../stores/settings'
 
 /** One leaf: a section that anchors into its page. Selecting it opens the page
@@ -19,7 +19,7 @@ export interface NavGroup {
   id: SettingsGroupId
   label: string
   Icon: typeof SlidersHorizontal
-  /** The page the menu's sections render on (General, Git, AI). */
+  /** The page the menu's sections render on (General, AI). */
   page: SettingsPageId
   /** The menu's sections, in the order they render down the page. */
   items: NavItem[]
@@ -37,18 +37,8 @@ export const SETTINGS_GROUPS: NavGroup[] = [
     page: 'general',
     items: [
       { id: 'general-appearance', label: 'Appearance' },
+      { id: 'general-git', label: 'Git' },
       { id: 'general-account', label: 'Account', dockerOnly: true },
-    ],
-  },
-  {
-    id: 'git',
-    label: 'Git',
-    Icon: GitBranch,
-    page: 'git',
-    items: [
-      { id: 'git-identity', label: 'Identity' },
-      { id: 'git-remotes', label: 'Remotes' },
-      { id: 'git-credentials', label: 'Credentials' },
     ],
   },
   {

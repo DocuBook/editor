@@ -23,6 +23,18 @@ export const FORM_DIVIDER_CLASS = SECTION_CLASS
 /** The card treatment for the FIRST card inside a section. */
 export const FORM_DIVIDER_FIRST_CLASS = SECTION_FIRST_CLASS
 
+/** One titled card inside a section (e.g. Identity / Remotes / Credentials in
+ *  the Git section): a divider above unless `first`, and an `h4` under the
+ *  section's `h3`, the same treatment as the provider forms on the AI page. */
+export function SettingsCard({ title, first, children }: { title: string; first?: boolean; children?: ReactNode }) {
+  return (
+    <div className={first ? FORM_DIVIDER_FIRST_CLASS : FORM_DIVIDER_CLASS}>
+      <h4 className="text-sm font-semibold text-foreground mb-3">{title}</h4>
+      {children}
+    </div>
+  )
+}
+
 /** One section inside its menu's page. The sidebar row links to the section's
  *  `id`, so the pane can scroll straight to it; every section carries the same
  *  divider + spacing treatment, so the rhythm is identical no matter which menu

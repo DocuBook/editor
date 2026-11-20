@@ -91,16 +91,30 @@ describe('SettingsPane — one page per menu', () => {
   /** The pane shows the selected section's PAGE; a section on another page
    *  renders that page instead. */
   it('renders the page that owns the selected section', async () => {
-    useSettings.setState({ open: true, section: 'git-identity' })
+    useSettings.setState({ open: true, section: 'general-git' })
     await render()
 
-    // The Git page: Identity's anchor rides the page heading, Remotes keeps its
-    // own section id. Both sidebar rows resolve to real targets.
-    expect(heading()!.id).toBe('git-identity')
-    expect(section('git-remotes')).not.toBeNull()
+    // Git lives on the General page: Appearance's anchor rides the page heading,
+    // Git keeps its own section id.
+    expect(heading()!.id).toBe('general-appearance')
+    expect(section('general-git')).not.toBeNull()
     // No other page is present.
-    expect(document.getElementById('general-appearance')).toBeNull()
     expect(document.getElementById('ai-provider')).toBeNull()
+  })
+
+  /** Git is ONE section: Identity, Remotes and Credentials are titled cards in
+   *  it, not sidebar anchors. (Remotes appears once the vault is a repository;
+   *  this harness returns no git data, i.e. the loading state.) */
+  it('renders Git as one General section with its cards inside', async () => {
+    useSettings.setState({ open: true, section: 'general-git' })
+    await render()
+
+    const git = section('general-git')!
+    expect(git.querySelector('h3')!.textContent).toBe('Git')
+    const cards = Array.from(git.querySelectorAll('h4')).map(node => node.textContent)
+    expect(cards).toEqual(['Identity', 'Credentials'])
+    expect(git.querySelectorAll('[data-settings-section]')).toHaveLength(0)
+    for (const old of ['git-identity', 'git-remotes', 'git-credentials']) expect(document.getElementById(old)).toBeNull()
   })
 
   /** The AI page's Provider section holds all three provider forms as content
@@ -118,7 +132,7 @@ describe('SettingsPane — one page per menu', () => {
     expect(provider.querySelectorAll('[data-testid^="provider-form-"]')).toHaveLength(3)
     // No nested per-provider anchors.
     expect(provider.querySelectorAll('[data-settings-section]')).toHaveLength(0)
-    expect(document.getElementById('git-identity')).toBeNull()
+    expect(document.getElementById('general-git')).toBeNull()
   })
 
   /** The three forms are separated by their own headings and dividers, so the
@@ -159,28 +173,28 @@ describe('SettingsPane — one page per menu', () => {
   /** Switching between two sections of the SAME page swaps no page — only the
    *  scroll target changes; both sections stay mounted. */
   it('keeps the page while moving between its sections', async () => {
-    useSettings.setState({ open: true, section: 'git-identity' })
+    useSettings.setState({ open: true, section: 'general-appearance' })
     await render()
 
-    act(() => useSettings.setState({ section: 'git-remotes' }))
+    act(() => useSettings.setState({ section: 'general-git' }))
     await settle()
 
-    // Identity (the heading anchor) and Remotes stay on the ONE Git page.
-    expect(heading()!.id).toBe('git-identity')
-    expect(section('git-remotes')).not.toBeNull()
+    // Appearance (the heading anchor) and Git stay on the ONE General page.
+    expect(heading()!.id).toBe('general-appearance')
+    expect(section('general-git')).not.toBeNull()
   })
 
   /** Moving to a section of ANOTHER page swaps the page. */
   it('swaps the page when the section belongs to another page', async () => {
-    useSettings.setState({ open: true, section: 'git-identity' })
+    useSettings.setState({ open: true, section: 'general-git' })
     await render()
-    expect(heading()!.id).toBe('git-identity')
+    expect(heading()!.id).toBe('general-appearance')
 
-    act(() => useSettings.setState({ section: 'general-appearance' }))
+    act(() => useSettings.setState({ section: 'ai-web-tools' }))
     await settle()
 
-    expect(heading()!.id).toBe('general-appearance')
-    expect(document.getElementById('git-identity')).toBeNull()
+    expect(heading()!.id).toBe('ai-provider')
+    expect(document.getElementById('general-git')).toBeNull()
   })
 
   /** Every provider form is mounted on the AI page, but only the SELECTED
@@ -232,7 +246,7 @@ describe('SettingsPane — one page per menu', () => {
   /** Every sidebar row resolves to a real, visible anchor: the first section of a
    *  page is its heading, the rest are sections. The id is never duplicated. */
   it('exposes every section as a real anchor', async () => {
-    for (const id of ['general-appearance', 'git-identity', 'ai-provider', 'ai-web-tools'] as const) {
+    for (const id of ['general-appearance', 'general-git', 'ai-provider', 'ai-web-tools'] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -253,13 +267,14 @@ describe('SettingsPane — one page per menu', () => {
     await render()
 
     expect(heading()!.id).toBe('general-appearance')
-    expect(document.getElementById('git-identity')).toBeNull()
+    expect(section('general-git')).not.toBeNull()
+    expect(document.getElementById('ai-provider')).toBeNull()
   })
 
   /** The page heading IS the page's menu name, so the pane and the sidebar row
    *  that opened it always read the same. */
   it('titles each page with its menu name', async () => {
-    for (const [id, title] of [['general-appearance', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI'], ['ai-web-tools', 'AI']] as const) {
+    for (const [id, title] of [['general-appearance', 'General'], ['general-git', 'General'], ['ai-provider', 'AI'], ['ai-web-tools', 'AI']] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
@@ -271,7 +286,7 @@ describe('SettingsPane — one page per menu', () => {
   /** The FIRST section of a page anchors to the page heading itself: the sidebar
    *  row for it scrolls to the heading, and no section body repeats the id. */
   it('anchors the first section to the page heading', async () => {
-    for (const [id, title] of [['general-appearance', 'General'], ['git-identity', 'Git'], ['ai-provider', 'AI']] as const) {
+    for (const [id, title] of [['general-appearance', 'General'], ['ai-provider', 'AI']] as const) {
       if (root) act(() => root!.unmount())
       useSettings.setState({ open: true, section: id })
       await render()
