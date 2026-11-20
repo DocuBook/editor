@@ -184,7 +184,11 @@ state in `.release-please-manifest.json`). Nobody bumps a manifest or edits
 
 1. **PRs merge to `master`** (squash). PR CI covers the full artifact matrix.
 2. **`release-please` opens or updates one release PR**, titled
-   `chore(release): vX.Y.Z — DocuBook`. The PR bumps the five manifests and
+   `chore(release): vX.Y.Z — <subject>`. The subject is the release's most
+   prominent changelog entry, written by the workflow
+   (`.github/scripts/release-title.mjs`) after every release-please run. Keep
+   `pull-request-title-pattern` ending in `${version}`: release-please reads the
+   version back out of the merged title to tag the release. The PR bumps the five manifests and
    prepends a `## vX.Y.Z — YYYY-MM-DD` section to `CHANGELOG.md`, grouping
    entries by commit type.
 

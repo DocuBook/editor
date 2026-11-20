@@ -54,6 +54,8 @@ jobs:
         run: node test/check-release-tag.mjs
       - name: Release notes guard (body is the tag's changelog, no icons, bullets credit authors)
         run: node test/check-release-notes.mjs
+      - name: Release title guard (subject from the changelog, version still parses for tagging)
+        run: node test/check-release-title.mjs
       - name: Frontend tests
         run: npm test
       # Engine-compat guard on what ships: the source lint above (compat/compat)
