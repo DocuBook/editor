@@ -69,14 +69,13 @@ export default function SettingsPane() {
   const firstSectionId = PAGE_FIRST_SECTION[page]
   /** True when the first section IS the title (always, in the shipped tree). The
    *  section below it then keeps its divider (the title replaced the section that
-   *  would otherwise sit on top of it); GitSettings reads this the same way. */
+   *  would otherwise sit on top of it). */
   const titleIsFirstSection = SETTINGS_GROUPS.find(group => group.id === activeGroup)?.items[0]?.id === firstSectionId
 
   /** The page title IS its menu name, so the pane and the sidebar row that opened
    *  it always read the same. One heading per page. */
   const pageTitle: Record<SettingsPageId, string> = {
     general: 'General',
-    git: 'Git',
     ai: 'AI',
   }
 
@@ -85,7 +84,8 @@ export default function SettingsPane() {
    *  page and scrolls to that section's id. Sections own their own spacing and
    *  divider (SettingsSection), so the page adds none of its own. */
   const pages: Record<SettingsPageId, React.ReactNode> = {
-    /** General is the first page: Appearance (theme + font sizes), plus Account on Docker only (the
+    /** General is the first page: Appearance (theme + font sizes), Git
+     *  (identity, remotes, credentials), plus Account on Docker only (the
      *  desktop app has no account or runtime config, so the section is absent
      *  there — matching the sidebar, which hides that row on desktop). */
     general: (
@@ -93,13 +93,10 @@ export default function SettingsPane() {
         {/* No id: the page title above already IS this section's anchor, and a
             duplicate id would make the first sidebar row a dead link twice over. */}
         <SettingsSection title="Appearance" first><AppearanceSettings /></SettingsSection>
+        <SettingsSection id="general-git" title="Git"><GitSettings /></SettingsSection>
         {!isTauri && <SettingsSection id="general-account" title="Account"><SystemSettings /></SettingsSection>}
       </>
     ),
-    /** Git identity + remotes are the two sections on the ONE Git page; each
-     *  carries its own id (rendered inside GitSettings) so both rows have a real
-     *  target. */
-    git: <GitSettings titleIsFirstSection={titleIsFirstSection} />,
     /** The AI page has TWO sections: Provider (all three provider forms, ONE per
      *  provider, each pinned to its provider) and Web Tools. The sidebar lists
      *  these two rows; the forms inside Provider are content, not anchors. */

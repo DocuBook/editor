@@ -377,11 +377,11 @@ describe('SidebarContextMenu in the Sidebar', () => {
     expect(document.querySelector('[data-testid="settings-nav"]')).toBeNull()
     expect(document.body.textContent).toContain('active')
 
-    act(() => useSettings.getState().openSettings('git-identity'))
+    act(() => useSettings.getState().openSettings('general-git'))
     await flush()
 
     expect(document.querySelector('[data-testid="settings-nav"]')).not.toBeNull()
-    expect(document.querySelector('[data-testid="settings-nav-section-git-identity"]')).not.toBeNull()
+    expect(document.querySelector('[data-testid="settings-nav-section-general-git"]')).not.toBeNull()
     // The vault tree row is gone — no `active` file row under the search bar.
     expect(Array.from(document.querySelectorAll<HTMLElement>('span.truncate')).some(n => n.textContent === 'active')).toBe(false)
   })
@@ -411,7 +411,7 @@ describe('SidebarContextMenu in the Sidebar', () => {
   it('swaps the vault switcher for a one-click Back to App while Settings is open', async () => {
     renderSidebar()
     await flush()
-    act(() => useSettings.getState().openSettings('git-identity'))
+    act(() => useSettings.getState().openSettings('general-git'))
     await flush()
     expect(document.querySelector('[aria-label="Switch vault"]')).toBeNull()
     const back = Array.from(document.querySelectorAll('button')).find(button => button.textContent === 'Back to App')!
@@ -429,7 +429,7 @@ describe('SidebarContextMenu in the Sidebar', () => {
     act(() => (document.querySelector('[data-plus-btn]') as HTMLElement).click())
     expect(document.querySelector('[data-plus-popup]')).not.toBeNull()
 
-    act(() => useSettings.getState().openSettings('git-identity'))
+    act(() => useSettings.getState().openSettings('general-git'))
     await flush()
     expect(document.querySelector('[data-plus-popup]')).toBeNull()
 
@@ -447,7 +447,7 @@ describe('SidebarContextMenu in the Sidebar', () => {
     act(() => (document.querySelector('[aria-label="Switch vault"]') as HTMLElement).click())
     expect(document.querySelector('[data-vault-menu]')).not.toBeNull()
 
-    act(() => useSettings.getState().openSettings('git-identity'))
+    act(() => useSettings.getState().openSettings('general-git'))
     await flush()
     expect(document.querySelector('[data-vault-menu]')).toBeNull()
 

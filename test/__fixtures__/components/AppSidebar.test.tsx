@@ -198,7 +198,7 @@ describe('responsive sidebar', () => {
     act(() => toggle.click())
     expect(document.getElementById('mobile-sidebar')).not.toBeNull()
 
-    act(() => useSettings.getState().openSettings('git-identity'))
+    act(() => useSettings.getState().openSettings('general-git'))
 
     expect(document.querySelector('[data-testid="settings"]')).not.toBeNull()
     expect(document.querySelector('[data-testid="drawer"]')?.getAttribute('data-opened')).toBe('true')

@@ -3,7 +3,7 @@ import { invoke } from '../lib/ipc'
 import { toast } from 'sonner'
 import { Plus, X, GitBranch, RefreshCw } from 'lucide-react'
 import { pollGitStatus } from '../stores/gitStatus'
-import SettingsSection from './settings/SettingsSection'
+import { SettingsCard } from './settings/SettingsSection'
 import GitCredentials from './GitCredentials'
 
 interface GitRemote { name: string; url: string }
@@ -24,7 +24,7 @@ interface InitResult { created: boolean; branch: string }
 interface RemoteProbe { reachable: boolean; empty: boolean; defaultBranch: string; branches: number; error: string }
 
 /** Git settings page content: identity + remotes + credentials. */
-export default function GitSettings({ titleIsFirstSection = true }: { titleIsFirstSection?: boolean }) {
+export default function GitSettings() {
   const [data, setData] = useState<GitSettingsData | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -125,24 +125,15 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
     cancelRemoveRef.current?.focus()
   }
 
-  /** Both anchors render in EVERY branch below (loading, no-vault, not-a-repo,
-   *  full form): the sidebar tree links to these ids, so an id that only exists
-   *  once git is fully set up would make two of its rows dead exactly when a
-   *  user most needs them (setting git up). Identity is always the FIRST section
-   *  on the page, so it passes `first` to drop its top divider (the page title
-   *  sits directly above it). Its id lives on the page title (the pane owns that
-   *  anchor), so Remotes keeps ITS divider unless the title is some other section. */
+  /** Identity is the first card of the Git section, so it drops its divider:
+   *  the section heading sits directly above it. */
   const identitySection = (body: React.ReactNode) => (
-    <SettingsSection title="Identity" first>{body}</SettingsSection>
-  )
-  const remotesAnchor = () => (
-    <SettingsSection id="git-remotes" first={!titleIsFirstSection} />
+    <SettingsCard title="Identity" first>{body}</SettingsCard>
   )
 
   if (!data) return (
     <div className="text-xs">
       {identitySection(<div className="text-muted py-2">Loading git settings…</div>)}
-      {remotesAnchor()}
       <GitCredentials />
     </div>
   )
@@ -157,7 +148,6 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
       {identitySection(<div className="text-muted leading-relaxed">
         No vault is open — open or create a vault first, then return here to set up git (identity, remotes, publishing).
       </div>)}
-      {remotesAnchor()}
       <GitCredentials />
     </div>
   )
@@ -180,7 +170,6 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
       </div>
       {err && <div className="text-[11px] text-danger">{err}</div>}
       </div>)}
-      {remotesAnchor()}
       <GitCredentials />
     </div>
   )
@@ -234,7 +223,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
       )}
 
       {/* Remotes */}
-      <SettingsSection id="git-remotes" title="Remotes">
+      <SettingsCard title="Remotes">
         {data.remotes.length === 0
           ? <div className="text-muted mb-2">No remotes — add one to push.</div>
           : data.remotes.map(r => (
@@ -271,7 +260,7 @@ export default function GitSettings({ titleIsFirstSection = true }: { titleIsFir
           <span className="font-mono">branch.&lt;branch&gt;.pushRemote</span>, <span className="font-mono">remote.pushDefault</span>, then <span className="font-mono">origin</span>.
           Fetch, Rebase, and Merge live in the Changes panel, where the remote to sync with can be picked.
         </div>
-      </SettingsSection>
+      </SettingsCard>
 
       <GitCredentials />
       {err && <div className="text-[11px] text-danger mt-2">{err}</div>}

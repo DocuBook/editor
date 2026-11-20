@@ -46,8 +46,15 @@ describe('SettingsNav — structure', () => {
     render()
 
     expect(group('general')!.getAttribute('aria-expanded')).toBe('true')
-    expect(group('git')!.getAttribute('aria-expanded')).toBe('false')
     expect(group('ai')!.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  /** Git is a section of General, not a menu of its own. */
+  it('has no Git menu; Git is a General section', () => {
+    render()
+
+    expect(group('git')).toBeNull()
+    expect(anchor('general-git')!.textContent).toContain('Git')
   })
 
   it('expands the menu that owns the selected section', () => {
@@ -65,16 +72,13 @@ describe('SettingsNav — structure', () => {
     // the others, so each iteration re-expands the owner before reading.
     const ids = [
       'general-appearance',
+      'general-git',
       'general-account',
-      'git-identity',
-      'git-remotes',
-      'git-credentials',
       'ai-provider',
       'ai-web-tools',
     ]
     const owners: Record<string, string> = {
-      'general-appearance': 'general', 'general-account': 'general',
-      'git-identity': 'git', 'git-remotes': 'git', 'git-credentials': 'git',
+      'general-appearance': 'general', 'general-git': 'general', 'general-account': 'general',
       'ai-provider': 'ai', 'ai-web-tools': 'ai',
     }
     let open = 'general'
@@ -107,11 +111,11 @@ describe('SettingsNav — structure', () => {
   })
 
   it('marks the active section as current', () => {
-    useSettings.setState({ section: 'git-remotes' })
+    useSettings.setState({ section: 'general-git' })
     render()
 
-    expect(anchor('git-remotes')!.getAttribute('aria-current')).toBe('true')
-    expect(anchor('git-identity')!.getAttribute('aria-current')).toBeNull()
+    expect(anchor('general-git')!.getAttribute('aria-current')).toBe('true')
+    expect(anchor('general-appearance')!.getAttribute('aria-current')).toBeNull()
   })
 })
 
@@ -133,14 +137,13 @@ describe('SettingsNav — collapse/expand', () => {
   it('collapses every other menu when one is expanded', () => {
     render()
 
-    act(() => group('git')!.click())
+    act(() => group('ai')!.click())
 
-    expect(group('git')!.getAttribute('aria-expanded')).toBe('true')
-    expect(anchor('git-identity')).not.toBeNull()
+    expect(group('ai')!.getAttribute('aria-expanded')).toBe('true')
+    expect(anchor('ai-provider')).not.toBeNull()
     expect(group('general')!.getAttribute('aria-expanded')).toBe('false')
     expect(anchor('general-appearance')).toBeNull()
-    expect(group('ai')!.getAttribute('aria-expanded')).toBe('false')
-    expect(anchor('ai-provider')).toBeNull()
+    expect(anchor('general-git')).toBeNull()
   })
 
   it('collapses the AI menu to hide all of its sections', () => {
@@ -159,16 +162,17 @@ describe('SettingsNav — a row opens its page and expands', () => {
   /** One click on a menu row opens its page (its first section) AND expands it,
    *  collapsing every other menu. */
   it('opens a menu page while expanding its section list', () => {
+    useSettings.setState({ section: 'ai-web-tools' })
     render()
     expect(useSettings.getState().open).toBe(false)
 
-    act(() => group('git')!.click())
+    act(() => group('general')!.click())
 
     expect(useSettings.getState().open).toBe(true)
-    expect(useSettings.getState().section).toBe('git-identity')
+    expect(useSettings.getState().section).toBe('general-appearance')
     // Opening a menu expands it and collapses the others.
-    expect(group('git')!.getAttribute('aria-expanded')).toBe('true')
-    expect(group('general')!.getAttribute('aria-expanded')).toBe('false')
+    expect(group('general')!.getAttribute('aria-expanded')).toBe('true')
+    expect(group('ai')!.getAttribute('aria-expanded')).toBe('false')
   })
 
   /** The AI menu opens its page at its FIRST section (the Provider forms). */
@@ -183,10 +187,10 @@ describe('SettingsNav — a row opens its page and expands', () => {
 
   /** The menu owning the open page reads as active. */
   it('marks the menu that owns the active section', () => {
-    useSettings.setState({ section: 'git-remotes' })
+    useSettings.setState({ section: 'general-git' })
     render()
 
-    expect(group('git')!.getAttribute('aria-current')).toBe('true')
+    expect(group('general')!.getAttribute('aria-current')).toBe('true')
     expect(group('ai')!.getAttribute('aria-current')).toBeNull()
   })
 

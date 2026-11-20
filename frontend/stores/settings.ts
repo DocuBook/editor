@@ -4,22 +4,21 @@ import { create } from 'zustand'
  *  the sidebar tree (which selects one) and the editor-container pane (which
  *  renders every section with a matching `id`), so a nav click can scroll the
  *  pane to its section without prop-drilling a callback through both surfaces. */
-export type SettingsSectionId = 'general-appearance' | 'general-account' | 'git-identity' | 'git-remotes' | 'git-credentials' | 'ai-provider' | 'ai-web-tools'
+export type SettingsSectionId = 'general-appearance' | 'general-git' | 'general-account' | 'ai-provider' | 'ai-web-tools'
 
 /** The top-level MENU a section belongs to. A menu owns one PAGE in the sidebar
  *  and expands to that page's section rows. */
-export type SettingsGroupId = 'general' | 'git' | 'ai'
+export type SettingsGroupId = 'general' | 'ai'
 
-/** The PAGE a section lives on: General, Git, or AI. Every section of a menu's
+/** The PAGE a section lives on: General or AI. Every section of a menu's
  *  page is an anchored `#id` target inside it, so the AI page holds both the
  *  Provider and Web Tools sections and the pane scrolls between them. */
-export type SettingsPageId = 'general' | 'git' | 'ai'
+export type SettingsPageId = 'general' | 'ai'
 
 /** Which page a section lives on. The nav click opens this page and the pane
  *  scrolls to the section's `#id` inside it. */
 export function pageOf(id: SettingsSectionId): SettingsPageId {
   if (id.startsWith('general-')) return 'general'
-  if (id.startsWith('git-')) return 'git'
   return 'ai'
 }
 
@@ -27,7 +26,6 @@ export function pageOf(id: SettingsSectionId): SettingsPageId {
  *  page row (so the sidebar can mark the owning menu active). */
 export function groupOf(id: SettingsSectionId): SettingsGroupId {
   if (id.startsWith('general-')) return 'general'
-  if (id.startsWith('git-')) return 'git'
   return 'ai'
 }
 
@@ -36,7 +34,6 @@ export function groupOf(id: SettingsSectionId): SettingsGroupId {
  *  FIRST: opening Settings (no explicit section) lands here. */
 export const PAGE_FIRST_SECTION: Record<SettingsPageId, SettingsSectionId> = {
   general: 'general-appearance',
-  git: 'git-identity',
   ai: 'ai-provider',
 }
 
