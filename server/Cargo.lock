@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-core"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "ammonia",
  "bytes",
@@ -448,7 +448,7 @@ dependencies = [
 
 [[package]]
 name = "docubook-server"
-version = "0.8.1"
+version = "0.9.0"
 dependencies = [
  "aes-gcm",
  "ammonia",
