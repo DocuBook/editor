@@ -85,14 +85,14 @@ export default function SettingsPane() {
    *  page and scrolls to that section's id. Sections own their own spacing and
    *  divider (SettingsSection), so the page adds none of its own. */
   const pages: Record<SettingsPageId, React.ReactNode> = {
-    /** General is the first page: themes, plus Account on Docker only (the
+    /** General is the first page: Appearance (theme + font sizes), plus Account on Docker only (the
      *  desktop app has no account or runtime config, so the section is absent
      *  there — matching the sidebar, which hides that row on desktop). */
     general: (
       <>
         {/* No id: the page title above already IS this section's anchor, and a
             duplicate id would make the first sidebar row a dead link twice over. */}
-        <SettingsSection title="Themes" first><AppearanceSettings /></SettingsSection>
+        <SettingsSection title="Appearance" first><AppearanceSettings /></SettingsSection>
         {!isTauri && <SettingsSection id="general-account" title="Account"><SystemSettings /></SettingsSection>}
       </>
     ),

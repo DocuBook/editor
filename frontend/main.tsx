@@ -24,6 +24,7 @@ import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import { installGlobalErrorHandlers } from './utils/logger'
 import './stores/theme' // applies <html data-theme> before first paint
+import './stores/typography' // applies font-size overrides before first paint
 import { installIteratorFilterPolyfill } from './utils/iteratorPolyfill'
 installIteratorFilterPolyfill()
 // WKWebView macOS 12 can't construct CSSStyleSheet (Safari 16.4+) — mermaid

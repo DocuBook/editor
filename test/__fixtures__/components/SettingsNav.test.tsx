@@ -30,7 +30,7 @@ const anchor = (id: string) => document.querySelector<HTMLAnchorElement>(`[data-
 
 beforeEach(() => {
   document.body.innerHTML = '<div id="root"></div>'
-  useSettings.setState({ open: false, section: 'general-themes' })
+  useSettings.setState({ open: false, section: 'general-appearance' })
 })
 
 afterEach(() => {
@@ -64,7 +64,7 @@ describe('SettingsNav — structure', () => {
     // Expand each menu in turn to reach its leaves: opening one menu collapses
     // the others, so each iteration re-expands the owner before reading.
     const ids = [
-      'general-themes',
+      'general-appearance',
       'general-account',
       'git-identity',
       'git-remotes',
@@ -73,7 +73,7 @@ describe('SettingsNav — structure', () => {
       'ai-web-tools',
     ]
     const owners: Record<string, string> = {
-      'general-themes': 'general', 'general-account': 'general',
+      'general-appearance': 'general', 'general-account': 'general',
       'git-identity': 'git', 'git-remotes': 'git', 'git-credentials': 'git',
       'ai-provider': 'ai', 'ai-web-tools': 'ai',
     }
@@ -118,14 +118,14 @@ describe('SettingsNav — structure', () => {
 describe('SettingsNav — collapse/expand', () => {
   it('hides a menu’s anchors when collapsed and restores them when expanded', () => {
     render()
-    expect(anchor('general-themes')).not.toBeNull()
+    expect(anchor('general-appearance')).not.toBeNull()
 
     act(() => group('general')!.click())
     expect(group('general')!.getAttribute('aria-expanded')).toBe('false')
-    expect(anchor('general-themes')).toBeNull()
+    expect(anchor('general-appearance')).toBeNull()
 
     act(() => group('general')!.click())
-    expect(anchor('general-themes')).not.toBeNull()
+    expect(anchor('general-appearance')).not.toBeNull()
   })
 
   /** Opening a menu collapses every other one: the sidebar never shows two
@@ -138,7 +138,7 @@ describe('SettingsNav — collapse/expand', () => {
     expect(group('git')!.getAttribute('aria-expanded')).toBe('true')
     expect(anchor('git-identity')).not.toBeNull()
     expect(group('general')!.getAttribute('aria-expanded')).toBe('false')
-    expect(anchor('general-themes')).toBeNull()
+    expect(anchor('general-appearance')).toBeNull()
     expect(group('ai')!.getAttribute('aria-expanded')).toBe('false')
     expect(anchor('ai-provider')).toBeNull()
   })
@@ -215,7 +215,7 @@ describe('SettingsNav — anchors drive the store', () => {
   it('keeps the anchor navigation in-app instead of a native fragment jump', () => {
     render()
     const event = new MouseEvent('click', { bubbles: true, cancelable: true })
-    act(() => { anchor('general-themes')!.dispatchEvent(event) })
+    act(() => { anchor('general-appearance')!.dispatchEvent(event) })
 
     // preventDefault was called, so the href never becomes a real navigation.
     expect(event.defaultPrevented).toBe(true)

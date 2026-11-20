@@ -89,7 +89,7 @@ async function renderSidebar(onOpenSearch = vi.fn()) {
 
 beforeEach(() => {
   vaultState.isOpen = true
-  useSettings.setState({ open: false, section: 'general-themes' })
+  useSettings.setState({ open: false, section: 'general-appearance' })
   document.body.innerHTML = '<div id="root"></div>'
   ipc.invoke.mockClear()
 })

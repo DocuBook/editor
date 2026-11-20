@@ -7,7 +7,9 @@
  *     element: upstream resets that to `font-size: inherit` from a later sheet
  *     of equal specificity, which silently voided the old `h1 { font-size }`.
  *  2. On desktop and on phones (< 640px) each level is smaller than the one
- *     above it and never smaller than body text. */
+ *     above it and never smaller than body text. The scale is the `:root`
+ *     `--heading-N-default` set; the editor uses a Settings override
+ *     (`--user-font-heading-N`) before it. */
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -32,14 +34,14 @@ const rulesFor = (selector: string) => {
 const LEVELS = [1, 2, 3, 4, 5]
 const PHONE = '@media (max-width: 639px) {'
 
-/** `--heading-N` values in em from one rule body, merged over `base`. */
+/** `--heading-N-default` values in em from one rule body, merged over `base`. */
 const scaleOf = (body: string, base: Record<number, number> = {}) => {
   const scale = { ...base }
-  for (const [, level, value] of body.matchAll(/--heading-(\d): ([\d.]+)em/g)) scale[Number(level)] = Number(value)
+  for (const [, level, value] of body.matchAll(/--heading-(\d)-default: ([\d.]+)em/g)) scale[Number(level)] = Number(value)
   return scale
 }
 
-const scaleRules = rulesFor('#root .bn-editor').filter(rule => rule.body.includes('--heading-'))
+const scaleRules = rulesFor(':root').filter(rule => rule.body.includes('--heading-1-default') || rule.body.includes('--heading-2-default'))
 const desktopRule = scaleRules.find(rule => !css.slice(0, rule.index + 1).trimEnd().endsWith(PHONE))
 const phoneRule = scaleRules.find(rule => css.slice(0, rule.index + 1).trimEnd().endsWith(PHONE))
 
@@ -52,6 +54,14 @@ describe('editor heading scale stylesheet', () => {
     for (const level of LEVELS) {
       for (const rule of rulesFor(`.ProseMirror h${level}`)) expect(rule.body).not.toMatch(/font-size|margin/)
     }
+  })
+
+  it('uses a Settings override before the CSS default', () => {
+    const editor = rulesFor('#root .bn-editor').map(rule => rule.body).join(' ')
+    for (const level of LEVELS) expect(editor).toContain(`--heading-${level}: var(--user-font-heading-${level}, var(--heading-${level}-default))`)
+    // Math/diagram placeholders (also a <p>) keep BlockNote's own size.
+    expect(rulesFor('#root .bn-editor p:not(.bn-preview-placeholder-text)')[0]?.body).toContain('font-size: var(--user-font-paragraph, 1em)')
+    expect(rulesFor('#root .bn-editor p')).toEqual([])
   })
 
   it.each([['desktop'], ['phone']])('steps down from h1 to h5 without going under body size on %s', (name) => {
