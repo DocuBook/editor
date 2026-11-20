@@ -8,7 +8,7 @@
 
   "always-update": true,
 
-  "pull-request-title-pattern": "chore(release): v${version} — DocuBook",
+  "pull-request-title-pattern": "chore(release): v${version}",
 
   "bump-minor-pre-major": true,
 

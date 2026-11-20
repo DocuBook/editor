@@ -3,7 +3,10 @@
 # Flow (matches CONTRIBUTING.md "Release workflow"):
 #   1. Conventional commits land on master (squash-merge, one subject per PR).
 #   2. This workflow opens/updates one release PR:
-#        chore(release): vX.Y.Z — DocuBook
+#        chore(release): vX.Y.Z — <subject>
+#      release-please titles it `chore(release): vX.Y.Z`; `sync-lockfiles` then
+#      appends a subject built from the release's changelog entries
+#      (.github/scripts/release-title.mjs).
 #      The PR bumps the five manifests and prepends a ## vX.Y.Z — YYYY-MM-DD
 #      section to CHANGELOG.md.
 #   3. Merging that PR tags vX.Y.Z, which triggers ci.yml `publish` (DMGs) and
@@ -74,22 +77,23 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-      pull-requests: read
+      pull-requests: write # retitle the release PR (last step)
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Resolve the release PR branch
         id: pr
         run: |
-          branch=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
-            --label "autorelease: pending" --limit 1 --json headRefName \
-            --jq '.[0].headRefName')
+          read -r number branch < <(gh pr list --repo "$GITHUB_REPOSITORY" --state open \
+            --label "autorelease: pending" --limit 1 --json number,headRefName \
+            --jq '.[0] | "\(.number) \(.headRefName)"')
           if [ -z "$branch" ] || [ "$branch" = "null" ]; then
             echo "No open release PR — nothing to sync."
             echo "branch=" >> "$GITHUB_OUTPUT"
           else
-            echo "Release PR branch: $branch"
+            echo "Release PR #$number branch: $branch"
             echo "branch=$branch" >> "$GITHUB_OUTPUT"
+            echo "number=$number" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout the release PR branch
@@ -251,3 +255,19 @@ jobs:
           fi
         env:
           BRANCH: ${{ steps.pr.outputs.branch }}
+
+      # release-please (re)writes the title as `chore(release): vX.Y.Z` on every
+      # run; give it a subject from the release's own changelog entries. The
+      # squash-merge commit takes this title. The configured title pattern must
+      # end with `${version}` so release-please can still read the version back
+      # when the PR merges (test/check-release-title.mjs).
+      - name: Retitle the release PR
+        if: steps.pr.outputs.branch != ''
+        run: |
+          version=$(node -p "require('./package.json').version")
+          title=$(gh pr view "$NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq .body \
+            | node .github/scripts/release-title.mjs "$version")
+          echo "Release PR #$NUMBER title: $title"
+          gh pr edit "$NUMBER" --repo "$GITHUB_REPOSITORY" --title "$title"
+        env:
+          NUMBER: ${{ steps.pr.outputs.number }}
