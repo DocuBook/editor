@@ -12,6 +12,9 @@ import { runSuite, PORTS } from './lib.mjs'
 const ADMIN = { email: 'e2e@test.dev', password: 'Password1!' }
 const SETUP_TOKEN = 'web-smoke-setup-token'
 const click = (name) => `button:has-text("${name}")`
+/** The login form itself. Body text is no signal: Settings → General → Git
+ *  says "Anyone who can sign in here…", so /Sign in/ matched a logged-in page. */
+const LOGIN_FORM = 'form:has(input[type="email"]) button:has-text("Sign in")'
 /** The post-auth shell: setup done and a vault prompt is showing. */
 const MAIN_UI = 'Open Folder|Open a vault|Open project'
 const mainUiOutput = (text) => new RegExp(MAIN_UI, 'i').test(text)
@@ -89,18 +92,18 @@ await runSuite('web-smoke', {
   await page.locator('[aria-label="Open settings"]').click()
   await page.waitForSelector(click('Log out'), { timeout: 4000 })
   await page.locator(click('Log out')).click()
-  await page.waitForSelector('text=Sign in', { timeout: 8000 })
+  await page.waitForSelector(LOGIN_FORM, { timeout: 8000 })
   const loginVisible = await page.locator('body').innerText()
-  ok('logout: login page shown', /Sign in/i.test(loginVisible), loginVisible.slice(0, 60))
+  ok('logout: login page shown', await page.locator(LOGIN_FORM).isVisible(), loginVisible.slice(0, 60))
 
   await page.fill('input[type="email"]', ADMIN.email)
   await page.fill('input[placeholder="Password"]', ADMIN.password)
-  await page.waitForSelector(click('Sign in'), { timeout: 5000 })
-  await page.locator(click('Sign in')).click()
+  await page.waitForSelector(LOGIN_FORM, { timeout: 5000 })
+  await page.locator(LOGIN_FORM).click()
   // Argon2id login can take >1s — wait for the main UI, not a fixed timeout.
   await page.waitForSelector('[aria-label="Open settings"]', { timeout: 10000 })
   const afterLogin = await page.locator('body').innerText()
-  ok('login: main UI visible', !/Sign in/i.test(afterLogin) && await page.locator('[aria-label="Open settings"]').isVisible(), afterLogin.slice(0, 80))
+  ok('login: main UI visible', await page.locator(LOGIN_FORM).count() === 0 && await page.locator('[aria-label="Open settings"]').isVisible(), afterLogin.slice(0, 80))
 
   // ── Restart: admin config AND session must persist (sessions.json on /data) ──
   await restart()
@@ -115,5 +118,5 @@ await runSuite('web-smoke', {
   await page.waitForFunction(() => !document.querySelector('input[type="email"]') && !Array.from(document.querySelectorAll('button')).some(button => button.textContent?.includes('Create admin account')), { timeout: 10000 })
   await page.waitForSelector('[aria-label="Open settings"]', { timeout: 10000 })
   const afterReload = await page.locator('body').innerText()
-  ok('restart: session persists — still logged in (no login page)', !/Sign in/i.test(afterReload), afterReload.slice(0, 80))
+  ok('restart: session persists — still logged in (no login page)', await page.locator(LOGIN_FORM).count() === 0, afterReload.slice(0, 80))
 })
