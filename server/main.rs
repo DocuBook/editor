@@ -232,6 +232,8 @@ fn main() {
  *  integration-testable via tower::ServiceExt::oneshot. */
 fn build_router(state: AppState, www_dir: PathBuf) -> Router {
     let index = www_dir.join("index.html");
+    let command_body_limit =
+        axum::extract::DefaultBodyLimit::max((httpm::MAX_FILE_BYTES + 1024 * 1024) as usize);
     Router::new()
         .route("/api/health", get(httpm::health_route))
         .route("/api/file", get(httpm::file_route))
@@ -240,9 +242,13 @@ fn build_router(state: AppState, www_dir: PathBuf) -> Router {
         .route("/api/logout", post(auth_routes::logout))
         .route("/api/setup_admin", post(auth_routes::setup_admin))
         .route(
-                    "/api/{cmd}",
-                    post(handlers::api).layer(axum::extract::DefaultBodyLimit::max((httpm::MAX_FILE_BYTES + 1024 * 1024) as usize)),
-                )
+            "/api/{cmd}",
+            post(handlers::api).layer(command_body_limit),
+        )
+        .route(
+            "/api/resolve_mentions",
+            post(handlers::resolve_mentions).layer(command_body_limit),
+        )
         .layer(PropagateRequestIdLayer::new(REQUEST_ID_HEADER.clone()))
         .layer(
             TraceLayer::new_for_http()

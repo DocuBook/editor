@@ -677,6 +677,94 @@ mod api_tests {
         assert!(!body.contains("api-secret"));
     }
 
+    #[tokio::test]
+    async fn resolve_mentions_preserves_wrapped_and_flat_requests() {
+        let (app, data_dir) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "Password1!"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let vault = data_dir.join("vaults/mentions");
+        std::fs::create_dir_all(vault.join("docs")).unwrap();
+        std::fs::write(vault.join("docs/a.md"), "alpha").unwrap();
+        std::fs::write(vault.join("docs/b.md"), "beta").unwrap();
+        let (status, _, body) = post_with(
+            &app,
+            "/api/open_vault",
+            json!({"path": vault.to_string_lossy()}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+
+        let request = json!({
+            "mentions": [{"token": "docs", "kind": "folder"}],
+            "excludePath": "docs/a.md",
+            "options": {"max_files": 1, "max_depth": null}
+        });
+        for payload in [json!({"request": request}), request] {
+            let (status, _, body) =
+                post_with(&app, "/api/resolve_mentions", payload, Some(&cookie)).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            let bundle = result_json(&body);
+            assert_eq!(bundle["totals"]["files"], 1);
+            assert_eq!(bundle["files"][0]["path"], "docs/b.md");
+            assert_eq!(bundle["files"][0]["content"], "beta");
+        }
+
+        let mut mentions = vec![json!({"token": "docs/a.md", "kind": "file"}); 128];
+        mentions.push(json!({"token": "docs/b.md", "kind": "file"}));
+        let (status, _, body) = post_with(
+            &app,
+            "/api/resolve_mentions",
+            json!({"request": {"mentions": mentions}}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let bundle = result_json(&body);
+        assert_eq!(bundle["files"].as_array().unwrap().len(), 1);
+        assert_eq!(bundle["files"][0]["path"], "docs/a.md");
+        assert_eq!(
+            bundle["skipped"][0],
+            json!({"path": "docs/b.md", "reason": "budget"})
+        );
+
+        let (status, _, body) =
+            post_with(&app, "/api/resolve_mentions", json!({}), Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(result_json(&body)["files"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn resolve_mentions_rejects_invalid_fields() {
+        let (app, _) = router();
+        let (_, headers, _) = post(
+            &app,
+            "/api/setup_admin",
+            json!({"email": "a@b.c", "password": "Password1!"}),
+        )
+        .await;
+        let cookie = session_cookie(&headers);
+        let invalid = [
+            json!({"request": null}),
+            json!({"request": {"mentions": null}, "mentions": []}),
+            json!({"mentions": {}}),
+            json!({"mentions": [{"token": "note.md", "kind": "other"}]}),
+            json!({"excludePath": 1}),
+            json!({"options": {"max_files": -1}}),
+        ];
+        for payload in invalid {
+            let (status, _, body) =
+                post_with(&app, "/api/resolve_mentions", payload, Some(&cookie)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+            assert!(body.contains("Invalid mention request"), "{body}");
+        }
+    }
+
     /// End-to-end versioned write over HTTP: the guard must reject a stale
     /// baseline and never touch the file, then accept a write that matches
     /// what is on disk. This is the web-build half of the offline/conflict

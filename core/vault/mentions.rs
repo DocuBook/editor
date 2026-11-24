@@ -6,6 +6,8 @@ pub const MENTION_MAX_FILES: usize = 32;
 pub const MENTION_MAX_FILE_CHARS: usize = 24_000;
 pub const MENTION_MAX_TOTAL_CHARS: usize = 120_000;
 pub const MENTION_MAX_DEPTH: usize = 8;
+const MENTION_MAX_TOKENS: usize = 128;
+const MENTION_MAX_TOKEN_BYTES: usize = 4096;
 /** Cap on reported skip reasons. A folder mention walks every file, so an asset
  *  folder can otherwise return thousands of entries the UI never shows. */
 pub const MENTION_MAX_SKIPPED: usize = 64;
@@ -51,7 +53,17 @@ pub fn resolve(vault: &super::Vault, request: ResolveRequest) -> Bundle {
     let max_total_chars = options.max_total_chars.unwrap_or(MENTION_MAX_TOTAL_CHARS).min(MENTION_MAX_TOTAL_CHARS);
     let max_depth = options.max_depth.unwrap_or(MENTION_MAX_DEPTH).min(MENTION_MAX_DEPTH);
     let mut paths: Vec<(String, String)> = Vec::new();
-    for mention in request.mentions {
+    for (index, mut mention) in request.mentions.into_iter().enumerate() {
+        let over_count = index >= MENTION_MAX_TOKENS;
+        if over_count && bundle.skipped.len() == MENTION_MAX_SKIPPED {
+            break;
+        }
+        // Cap vault lookups and keep the reported token within the same byte budget.
+        if over_count || mention.token.len() > MENTION_MAX_TOKEN_BYTES {
+            mention.token.truncate(mention.token.floor_char_boundary(MENTION_MAX_TOKEN_BYTES));
+            skip(&mut bundle, mention.token, SkipReason::Budget);
+            continue;
+        }
         if mention.token.starts_with('/') || mention.token.split('/').any(|part| part == "..") {
             skip(&mut bundle, mention.token, SkipReason::TraversalRejected); continue;
         }
@@ -147,6 +159,28 @@ mod tests {
         for i in 0..(MENTION_MAX_SKIPPED + 20) { std::fs::write(root.join("docs").join(format!("img{i}.png")), "x").unwrap(); }
         let bundle = resolve(&vault, request(vec![folder("docs")], None));
         assert!(bundle.skipped.len() <= MENTION_MAX_SKIPPED, "skipped must stay bounded");
+    }
+    #[test]
+    fn resolves_mentions_within_the_request_budget() {
+        let (_root, vault) = vault();
+        let long_token = format!("{}é", "a".repeat(MENTION_MAX_TOKEN_BYTES - 1));
+        let mut mentions = vec![file(&long_token)];
+        mentions.extend(vec![file("docs/a.md"); MENTION_MAX_TOKENS - 1]);
+        mentions.extend(vec![file("docs/nested/b.md"); MENTION_MAX_SKIPPED]);
+
+        let bundle = resolve(&vault, request(mentions, None));
+        assert_eq!(bundle.files.len(), 1);
+        assert_eq!(bundle.files[0].path, "docs/a.md");
+        assert_eq!(bundle.skipped.len(), MENTION_MAX_SKIPPED);
+        assert_eq!(
+            bundle.skipped[0].path,
+            "a".repeat(MENTION_MAX_TOKEN_BYTES - 1)
+        );
+        assert_eq!(bundle.skipped[1].path, "docs/nested/b.md");
+        assert!(bundle
+            .skipped
+            .iter()
+            .all(|item| matches!(item.reason, SkipReason::Budget)));
     }
     #[test] fn includes_the_head_of_a_note_larger_than_the_read_limit() {
         // Regression: a note past the bounded read (~480 KB) was skipped whole as
