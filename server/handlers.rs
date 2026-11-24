@@ -130,7 +130,7 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         "close_vault" => sync(state, cmd, args),
         "list_tree" => sb(state, cmd, args).await,
         "resolve_mentions" => {
-            let request = serde_json::from_value(args.get("request").cloned().unwrap_or(args))
+            let request = validate_mention_request(args.get("request").unwrap_or(&args))
                 .map_err(|e| format!("Invalid mention request: {e}"))?;
             // Clone the shared handle, not the vault (Vault is Send but not Sync),
             // so the blocking task reuses the open vault instead of rebuilding it.
@@ -251,6 +251,79 @@ pub(crate) async fn dispatch(state: &AppState, cmd: &str, args: Value) -> Result
         }
         _ => Err(format!("Unknown command: {cmd}")),
     }
+}
+
+fn validate_mention_request(
+    input: &Value,
+) -> Result<vault::mentions::ResolveRequest, &'static str> {
+    use vault::mentions::{Mention, MentionKind, Options, ResolveRequest};
+
+    // Each token can trigger a vault lookup or folder walk. Bound the work
+    // independently of the resolver's output limits.
+    const MAX_MENTIONS: usize = 128;
+    const MAX_PATH_BYTES: usize = 4096;
+
+    let input = input.as_object().ok_or("expected an object")?;
+    let path = |value: &Value| {
+        value
+            .as_str()
+            .filter(|path| path.len() <= MAX_PATH_BYTES)
+            .map(str::to_owned)
+    };
+
+    let mut mentions = Vec::new();
+    if let Some(values) = input.get("mentions") {
+        let values = values.as_array().ok_or("mentions must be an array")?;
+        if values.len() > MAX_MENTIONS {
+            return Err("mentions must contain at most 128 items");
+        }
+        mentions.reserve(values.len());
+        for value in values {
+            let token = value
+                .get("token")
+                .and_then(path)
+                .ok_or("each mention token must be a string of at most 4096 bytes")?;
+            let kind = match value.get("kind").and_then(Value::as_str) {
+                Some("file") => MentionKind::File,
+                Some("folder") => MentionKind::Folder,
+                _ => return Err("each mention kind must be file or folder"),
+            };
+            mentions.push(Mention { token, kind });
+        }
+    }
+
+    let exclude_path = match input.get("excludePath") {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            Some(path(value).ok_or("excludePath must be a string of at most 4096 bytes")?)
+        }
+    };
+    let options = match input.get("options") {
+        None | Some(Value::Null) => None,
+        Some(value) => {
+            let options = value.as_object().ok_or("options must be an object")?;
+            let limit = |name| match options.get(name) {
+                None | Some(Value::Null) => Ok(None),
+                Some(value) => value
+                    .as_u64()
+                    .and_then(|value| usize::try_from(value).ok())
+                    .map(Some)
+                    .ok_or("option limits must be nonnegative integers in range"),
+            };
+            Some(Options {
+                max_files: limit("max_files")?,
+                max_file_chars: limit("max_file_chars")?,
+                max_total_chars: limit("max_total_chars")?,
+                max_depth: limit("max_depth")?,
+            })
+        }
+    };
+
+    Ok(ResolveRequest {
+        mentions,
+        exclude_path,
+        options,
+    })
 }
 
 fn restore_key(data_dir: &std::path::Path, provider: &str, key: Option<&str>) {
