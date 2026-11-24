@@ -76,7 +76,10 @@ const WEB_ONLY = new Set([
 ]);
 
 /** Answered by a dedicated route instead of the catch-all POST /api/{cmd}. */
-const DEDICATED_ROUTES = new Map([["ask_ai", "POST /api/ask_ai (SSE stream)"]]);
+const DEDICATED_ROUTES = new Map([
+  ["ask_ai", "POST /api/ask_ai (SSE stream)"],
+  ["resolve_mentions", "POST /api/resolve_mentions (typed JSON request)"],
+]);
 
 const failures = [];
 const dashed = (cmd) => "allow-" + cmd.replace(/_/g, "-");

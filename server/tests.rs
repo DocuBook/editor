@@ -715,6 +715,24 @@ mod api_tests {
             assert_eq!(bundle["files"][0]["content"], "beta");
         }
 
+        let mut mentions = vec![json!({"token": "docs/a.md", "kind": "file"}); 128];
+        mentions.push(json!({"token": "docs/b.md", "kind": "file"}));
+        let (status, _, body) = post_with(
+            &app,
+            "/api/resolve_mentions",
+            json!({"request": {"mentions": mentions}}),
+            Some(&cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        let bundle = result_json(&body);
+        assert_eq!(bundle["files"].as_array().unwrap().len(), 1);
+        assert_eq!(bundle["files"][0]["path"], "docs/a.md");
+        assert_eq!(
+            bundle["skipped"][0],
+            json!({"path": "docs/b.md", "reason": "budget"})
+        );
+
         let (status, _, body) =
             post_with(&app, "/api/resolve_mentions", json!({}), Some(&cookie)).await;
         assert_eq!(status, StatusCode::OK, "{body}");
@@ -722,7 +740,7 @@ mod api_tests {
     }
 
     #[tokio::test]
-    async fn resolve_mentions_rejects_invalid_fields_and_enforces_limits() {
+    async fn resolve_mentions_rejects_invalid_fields() {
         let (app, _) = router();
         let (_, headers, _) = post(
             &app,
@@ -731,22 +749,11 @@ mod api_tests {
         )
         .await;
         let cookie = session_cookie(&headers);
-        let mention = json!({"token": "note.md", "kind": "file"});
-        let (status, _, body) = post_with(
-            &app,
-            "/api/resolve_mentions",
-            json!({"mentions": vec![mention.clone(); 128]}),
-            Some(&cookie),
-        )
-        .await;
-        assert_eq!(status, StatusCode::OK, "{body}");
-
         let invalid = [
             json!({"request": null}),
+            json!({"request": {"mentions": null}, "mentions": []}),
             json!({"mentions": {}}),
             json!({"mentions": [{"token": "note.md", "kind": "other"}]}),
-            json!({"mentions": [{"token": "a".repeat(4097), "kind": "file"}]}),
-            json!({"mentions": vec![mention; 129]}),
             json!({"excludePath": 1}),
             json!({"options": {"max_files": -1}}),
         ];
