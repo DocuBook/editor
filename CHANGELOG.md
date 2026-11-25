@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.2 — 2026-11-24
+
+
+### Security
+
+* **server:** validate mention resolution requests ([#506](https://github.com/DocuBook/editor/issues/506)) ([784348b](https://github.com/DocuBook/editor/commit/784348b8c28edce4673a393f3f7bc5bde4a271ff))
+
 ## v0.9.1 — 2026-11-24
 
 
