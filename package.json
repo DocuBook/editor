@@ -36,7 +36,7 @@
     "@tiptap/core": "^3.33.0",
     "@tiptap/pm": "^3.33.0",
     "katex": "^0.19.0",
-    "lucide-react": "^1.63.0",
+    "lucide-react": "^1.80.0",
     "mdast-util-from-markdown": "2.1.0",
     "mdast-util-gfm-table": "2.0.0",
     "micromark": "4.0.3",
